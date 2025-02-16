@@ -154,7 +154,7 @@ func (i *Input) OutputPacketsChan() <-chan OutputPacket {
 	return i.OutputChan
 }
 
-func (i *Input) GetStream(streamIndex int) *astiav.Stream {
+func (i *Input) GetStream(_ context.Context, streamIndex int) *astiav.Stream {
 	for _, stream := range i.FormatContext.Streams() {
 		if stream.Index() == streamIndex {
 			return stream

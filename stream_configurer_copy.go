@@ -14,7 +14,7 @@ type StreamConfigurerCopy struct {
 var _ StreamConfigurer = (*StreamConfigurerCopy)(nil)
 
 type GetStreamer interface {
-	GetStream(streamIndex int) *astiav.Stream
+	GetStream(ctx context.Context, streamIndex int) *astiav.Stream
 }
 
 func NewStreamConfigurerCopy(
@@ -30,7 +30,7 @@ func (sc *StreamConfigurerCopy) StreamConfigure(
 	stream *astiav.Stream,
 	pkt *astiav.Packet,
 ) error {
-	sampleStream := sc.GetStreamer.GetStream(pkt.StreamIndex())
+	sampleStream := sc.GetStreamer.GetStream(ctx, pkt.StreamIndex())
 
 	if err := sampleStream.CodecParameters().Copy(stream.CodecParameters()); err != nil {
 		return fmt.Errorf("unable to copy the codec parameters of stream #%d: %w", pkt.StreamIndex(), err)
