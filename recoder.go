@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
@@ -16,6 +17,7 @@ import (
 
 type InputPacket struct {
 	*astiav.Packet
+	*astiav.Stream
 }
 
 type OutputPacket struct {
@@ -27,17 +29,25 @@ func (o *OutputPacket) UnrefAndFree() {
 	o.Packet.Free()
 }
 
+type StreamConfigurer interface {
+	StreamConfigure(ctx context.Context, stream *astiav.Stream, pkt *astiav.Packet) error
+}
+
 type Recoder struct {
-	locker         sync.Mutex
-	decoderFactory DecoderFactory
-	encoderFactory EncoderFactory
-	decoders       map[int]*Decoder
-	encoders       map[int]*Encoder
-	frame          *astiav.Frame
-	closer         astikit.Closer
-	isClosed       bool
-	inputChan      chan InputPacket
-	outputChan     chan OutputPacket
+	locker           sync.Mutex
+	decoderFactory   DecoderFactory
+	encoderFactory   EncoderFactory
+	decoders         map[int]*Decoder
+	encoders         map[int]*Encoder
+	frame            *astiav.Frame
+	closer           astikit.Closer
+	isClosed         bool
+	inputChan        chan InputPacket
+	outputChan       chan OutputPacket
+	streamConfigurer StreamConfigurer
+
+	formatContext *astiav.FormatContext
+	outputStreams map[int]*astiav.Stream
 }
 
 var _ ProcessingNode = (*Recoder)(nil)
@@ -46,21 +56,26 @@ func NewRecoder(
 	ctx context.Context,
 	decoderFactory DecoderFactory,
 	encoderFactory EncoderFactory,
+	streamConfigurer StreamConfigurer,
 ) (*Recoder, error) {
 	r := &Recoder{
-		frame:          astiav.AllocFrame(),
-		inputChan:      make(chan InputPacket, 100),
-		outputChan:     make(chan OutputPacket, 1),
-		decoderFactory: decoderFactory,
-		encoderFactory: encoderFactory,
-		decoders:       map[int]*Decoder{},
-		encoders:       map[int]*Encoder{},
+		frame:            astiav.AllocFrame(),
+		inputChan:        make(chan InputPacket, 100),
+		outputChan:       make(chan OutputPacket, 1),
+		decoderFactory:   decoderFactory,
+		encoderFactory:   encoderFactory,
+		decoders:         map[int]*Decoder{},
+		encoders:         map[int]*Encoder{},
+		streamConfigurer: streamConfigurer,
+		formatContext:    astiav.AllocFormatContext(),
+		outputStreams:    make(map[int]*astiav.Stream),
 	}
 	r.closer.Add(r.frame.Free)
 	r.closer.Add(func() {
 		close(r.outputChan)
 		r.isClosed = true
 	})
+	r.closer.Add(r.formatContext.Free)
 	observability.Go(ctx, func() {
 		err := r.readerLoop(ctx)
 		if err != nil {
@@ -117,6 +132,31 @@ func (r *Recoder) SendPacket(
 		r.closer.AddWithError(decoder.Close)
 		r.decoders[input.StreamIndex()] = decoder
 	}
+
+	outputStream := r.outputStreams[input.Packet.StreamIndex()]
+	if outputStream == nil {
+		logger.Debugf(ctx, "new output stream")
+
+		outputStream := r.formatContext.NewStream(encoder.codec)
+		if outputStream == nil {
+			return fmt.Errorf("unable to initialize an output stream")
+		}
+		err := r.streamConfigurer.StreamConfigure(ctx, outputStream, input.Packet)
+		if err != nil {
+			return fmt.Errorf("unable to configure the output stream: %w", err)
+		}
+		logger.Tracef(
+			ctx,
+			"resulting output stream: %s: %s: %s: %s: %s",
+			outputStream.CodecParameters().MediaType(),
+			outputStream.CodecParameters().CodecID(),
+			outputStream.TimeBase(),
+			spew.Sdump(outputStream),
+			spew.Sdump(outputStream.CodecParameters()),
+		)
+		r.outputStreams[input.Packet.StreamIndex()] = outputStream
+	}
+	assert(ctx, outputStream != nil)
 
 	// TODO: investigate: Do we really need this? And why?
 	//input.Packet.RescaleTs(inputStream.TimeBase(), decoder.CodecContext().TimeBase())
@@ -179,4 +219,10 @@ func (r *Recoder) SendPacket(
 
 func (c *Recoder) OutputPacketsChan() <-chan OutputPacket {
 	return c.outputChan
+}
+
+func (c *Recoder) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+	return c.outputStreams[streamIndex]
 }

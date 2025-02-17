@@ -4,17 +4,20 @@ import (
 	"context"
 	"io"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 )
 
 type ProcessingNode interface {
 	io.Closer
+	GetOutputStream(ctx context.Context, streamIndex int) *astiav.Stream
 	SendPacketChan() chan<- InputPacket
 	OutputPacketsChan() <-chan OutputPacket
 }
 
 type Pipeline struct {
+	CommonsProcessing
 	ProcessingNode
 	PushTo []*Pipeline
 }
@@ -46,12 +49,34 @@ func (p *Pipeline) Serve(ctx context.Context) (_err error) {
 			if !ok {
 				return io.EOF
 			}
+			p.BytesCountWrote.Add(uint64(pkt.Size()))
+			stream := p.ProcessingNode.GetOutputStream(ctx, pkt.Packet.StreamIndex())
+			switch stream.CodecParameters().MediaType() {
+			case astiav.MediaTypeVideo:
+				p.FramesWrote.Video.Add(1)
+			case astiav.MediaTypeAudio:
+				p.FramesWrote.Audio.Add(1)
+			default:
+				p.FramesWrote.Other.Add(1)
+			}
 
 			for _, pushTo := range p.PushTo {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case pushTo.SendPacketChan() <- InputPacket{Packet: ClonePacketAsReferenced(pkt.Packet)}:
+				case pushTo.SendPacketChan() <- InputPacket{
+					Packet: ClonePacketAsReferenced(pkt.Packet),
+					Stream: stream,
+				}:
+					pushTo.BytesCountRead.Add(uint64(pkt.Size()))
+					switch stream.CodecParameters().MediaType() {
+					case astiav.MediaTypeVideo:
+						pushTo.FramesRead.Video.Add(1)
+					case astiav.MediaTypeAudio:
+						pushTo.FramesRead.Audio.Add(1)
+					default:
+						pushTo.FramesRead.Other.Add(1)
+					}
 				default:
 					logger.Errorf(ctx, "unable to push to %T: the queue is full", pushTo.ProcessingNode)
 				}

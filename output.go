@@ -19,6 +19,7 @@ import (
 )
 
 const unwrapTLSViaProxy = false
+const pendingPacketsLimit = 1000
 
 type OutputConfig struct {
 	CustomOptions DictionaryItems
@@ -30,11 +31,11 @@ type OutputStream struct {
 }
 
 type Output struct {
-	ID               OutputID
-	Streams          map[int]*OutputStream
-	StreamConfigurer StreamConfigurer
-	Locker           xsync.Mutex
-	inputChan        chan InputPacket
+	ID             OutputID
+	Streams        map[int]*OutputStream
+	Locker         xsync.Mutex
+	inputChan      chan InputPacket
+	pendingPackets []*astiav.Packet
 	*astikit.Closer
 	*astiav.FormatContext
 	*astiav.Dictionary
@@ -53,17 +54,12 @@ func formatFromScheme(scheme string) string {
 	}
 }
 
-type StreamConfigurer interface {
-	StreamConfigure(ctx context.Context, stream *astiav.Stream, pkt *astiav.Packet) error
-}
-
 var nextOutputID atomic.Uint64
 
 func NewOutputFromURL(
 	ctx context.Context,
 	urlString string,
 	streamKey string,
-	streamConfigurer StreamConfigurer,
 	cfg OutputConfig,
 ) (*Output, error) {
 	if urlString == "" {
@@ -101,11 +97,10 @@ func NewOutputFromURL(
 	}
 
 	o := &Output{
-		ID:               OutputID(nextOutputID.Add(1)),
-		Streams:          make(map[int]*OutputStream),
-		StreamConfigurer: streamConfigurer,
-		Closer:           astikit.NewCloser(),
-		inputChan:        make(chan InputPacket, 100),
+		ID:        OutputID(nextOutputID.Add(1)),
+		Streams:   make(map[int]*OutputStream),
+		Closer:    astikit.NewCloser(),
+		inputChan: make(chan InputPacket, 600),
 	}
 
 	if needUnwrapTLSFor != "" && unwrapTLSViaProxy {
@@ -246,22 +241,19 @@ func (o *Output) writePacket(
 			Stream:  o.FormatContext.NewStream(nil),
 			LastDTS: math.MinInt64,
 		}
-		if outputStream.Stream == nil {
-			return fmt.Errorf("unable to initialize an output stream")
-		}
-		err := o.StreamConfigurer.StreamConfigure(ctx, outputStream.Stream, pkt.Packet)
-		if err != nil {
-			return fmt.Errorf("unable to configure the output stream: %w", err)
+		if err := CopyStreamParameters(ctx, outputStream.Stream, pkt.Stream); err != nil {
+			return fmt.Errorf("unable to copy stream parameters: %w", err)
 		}
 		logger.Tracef(
 			ctx,
-			"resulting output stream: %s: %s: %s: %s: %s",
+			"new output stream: %s: %s: %s: %s: %s",
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
 			outputStream.TimeBase(),
 			spew.Sdump(outputStream),
 			spew.Sdump(outputStream.CodecParameters()),
 		)
+
 		o.Streams[pkt.StreamIndex()] = outputStream
 		if len(o.Streams) < 2 {
 			// TODO: delete me; an ugly hack to make sure we have both video and audio track before sending a header
@@ -270,9 +262,6 @@ func (o *Output) writePacket(
 		if err := o.FormatContext.WriteHeader(nil); err != nil {
 			return fmt.Errorf("unable to write the header: %w", err)
 		}
-	}
-	if len(o.Streams) < 2 {
-		return nil
 	}
 	assert(ctx, outputStream != nil)
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
@@ -293,7 +282,6 @@ func (o *Output) writePacket(
 	}
 
 	packet.SetStreamIndex(outputStream.Index())
-	dts := packet.Dts()
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(
 			ctx,
@@ -306,16 +294,40 @@ func (o *Output) writePacket(
 		)
 	}
 
+	if len(o.Streams) < 2 {
+		if len(o.pendingPackets) >= pendingPacketsLimit {
+			return fmt.Errorf("exceeded the limit of pending packets: %d", len(o.pendingPackets))
+		}
+		o.pendingPackets = append(o.pendingPackets, ClonePacketAsReferenced(packet))
+		return nil
+	}
+	for _, packet := range o.pendingPackets {
+		if err := o.doWritePacket(ctx, packet, outputStream); err != nil {
+			return err
+		}
+	}
+	o.pendingPackets = o.pendingPackets[:0]
+	if err := o.doWritePacket(ctx, packet, outputStream); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (o *Output) doWritePacket(
+	ctx context.Context,
+	packet *astiav.Packet,
+	outputStream *OutputStream,
+) (_err error) {
 	err := o.FormatContext.WriteInterleavedFrame(packet)
 	if err != nil {
 		return fmt.Errorf("unable to write the frame: %w", err)
 	}
-	outputStream.LastDTS = dts
+	outputStream.LastDTS = packet.Dts()
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(
 			ctx,
 			"wrote a packet (dts: %d): %s: %s",
-			dts,
+			packet.Dts(),
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
 		)
@@ -325,4 +337,8 @@ func (o *Output) writePacket(
 
 func (o *Output) OutputPacketsChan() <-chan OutputPacket {
 	return noOutputPacketsChan
+}
+
+func (o *Output) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+	return nil
 }

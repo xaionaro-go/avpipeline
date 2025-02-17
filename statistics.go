@@ -6,49 +6,46 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type RecoderFramesStatistics = types.EncoderFramesStatistics
-type RecoderStatistics = types.EncoderStatistics
+type ProcessingFramesStatistics = types.ProcessingFramesStatistics
+type ProcessingStatistics = types.ProcessingStatistics
 
-type CommonsRecoderFramesStatistics struct {
-	Unparsed         atomic.Uint64
-	VideoUnprocessed atomic.Uint64
-	AudioUnprocessed atomic.Uint64
-	VideoProcessed   atomic.Uint64
-	AudioProcessed   atomic.Uint64
+type CommonsProcessingFramesStatistics struct {
+	Unknown atomic.Uint64
+	Other   atomic.Uint64
+	Video   atomic.Uint64
+	Audio   atomic.Uint64
 }
 
-type CommonsRecoderStatistics struct {
+type CommonsProcessingStatistics struct {
 	BytesCountRead  atomic.Uint64
 	BytesCountWrote atomic.Uint64
-	FramesRead      CommonsRecoderFramesStatistics
-	FramesWrote     CommonsRecoderFramesStatistics
+	FramesRead      CommonsProcessingFramesStatistics
+	FramesWrote     CommonsProcessingFramesStatistics
 }
 
-func (stats *CommonsRecoderStatistics) Convert() RecoderStatistics {
-	return RecoderStatistics{
+func (stats *CommonsProcessingStatistics) Convert() ProcessingStatistics {
+	return ProcessingStatistics{
 		BytesCountRead:  stats.BytesCountRead.Load(),
 		BytesCountWrote: stats.BytesCountWrote.Load(),
-		FramesRead: RecoderFramesStatistics{
-			Unparsed:         stats.FramesRead.Unparsed.Load(),
-			VideoUnprocessed: stats.FramesRead.VideoUnprocessed.Load(),
-			AudioUnprocessed: stats.FramesRead.AudioUnprocessed.Load(),
-			VideoProcessed:   stats.FramesRead.VideoProcessed.Load(),
-			AudioProcessed:   stats.FramesRead.AudioProcessed.Load(),
+		FramesRead: ProcessingFramesStatistics{
+			Unknown: stats.FramesRead.Unknown.Load(),
+			Other:   stats.FramesRead.Other.Load(),
+			Video:   stats.FramesRead.Video.Load(),
+			Audio:   stats.FramesRead.Audio.Load(),
 		},
-		FramesWrote: RecoderFramesStatistics{
-			Unparsed:         stats.FramesWrote.Unparsed.Load(),
-			VideoUnprocessed: stats.FramesWrote.VideoUnprocessed.Load(),
-			AudioUnprocessed: stats.FramesWrote.AudioUnprocessed.Load(),
-			VideoProcessed:   stats.FramesWrote.VideoProcessed.Load(),
-			AudioProcessed:   stats.FramesWrote.AudioProcessed.Load(),
+		FramesWrote: ProcessingFramesStatistics{
+			Unknown: stats.FramesWrote.Unknown.Load(),
+			Other:   stats.FramesWrote.Other.Load(),
+			Video:   stats.FramesWrote.Video.Load(),
+			Audio:   stats.FramesWrote.Audio.Load(),
 		},
 	}
 }
 
-type CommonsRecoder struct {
-	CommonsRecoderStatistics
+type CommonsProcessing struct {
+	CommonsProcessingStatistics
 }
 
-func (e *CommonsRecoder) GetStats() *RecoderStatistics {
-	return ptr(e.CommonsRecoderStatistics.Convert())
+func (e *CommonsProcessing) GetStats() *ProcessingStatistics {
+	return ptr(e.CommonsProcessingStatistics.Convert())
 }

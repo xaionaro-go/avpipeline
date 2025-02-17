@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
@@ -12,6 +16,7 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/observability"
 )
 
 func main() {
@@ -21,6 +26,7 @@ func main() {
 
 	loggerLevel := logger.LevelWarning
 	pflag.Var(&loggerLevel, "log-level", "Log level")
+	netPprofAddr := pflag.String("net-pprof-listen-addr", "", "an address to listen for incoming net/pprof connections")
 	pflag.Parse()
 	if len(pflag.Args()) != 2 {
 		pflag.Usage()
@@ -29,10 +35,15 @@ func main() {
 
 	l := logrus.Default().WithLevel(loggerLevel)
 	ctx := logger.CtxWithLogger(context.Background(), l)
+	ctx, cancelFn := context.WithCancel(ctx)
 	logger.Default = func() logger.Logger {
 		return l
 	}
 	defer belt.Flush(ctx)
+
+	if *netPprofAddr != "" {
+		observability.Go(ctx, func() { l.Error(http.ListenAndServe(*netPprofAddr, nil)) })
+	}
 
 	fromURL := pflag.Arg(0)
 	toURL := pflag.Arg(1)
@@ -62,7 +73,6 @@ func main() {
 	output, err := avpipeline.NewOutputFromURL(
 		ctx,
 		toURL, "",
-		avpipeline.NewStreamConfigurerCopy(input),
 		avpipeline.OutputConfig{},
 	)
 	if err != nil {
@@ -71,8 +81,32 @@ func main() {
 
 	pipeline := avpipeline.NewPipelineNode(input)
 	pipeline.PushTo = append(pipeline.PushTo, avpipeline.NewPipelineNode(output))
-	err = pipeline.Serve(ctx)
-	if err != nil {
-		l.Fatal(err)
+	observability.Go(ctx, func() {
+		defer cancelFn()
+		err := pipeline.Serve(ctx)
+		if err != nil {
+			l.Fatal(err)
+		}
+	})
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			inputStats := pipeline.GetStats()
+			inputStatsJSON, err := json.Marshal(inputStats)
+			if err != nil {
+				l.Fatal(err)
+			}
+			outputStats := pipeline.PushTo[0].GetStats()
+			outputStatsJSON, err := json.Marshal(outputStats)
+			if err != nil {
+				l.Fatal(err)
+			}
+			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)
+		}
 	}
 }

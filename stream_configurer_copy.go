@@ -8,20 +8,20 @@ import (
 )
 
 type StreamConfigurerCopy struct {
-	GetStreamer GetStreamer
+	GetOutputStreamer GetOutputStreamer
 }
 
 var _ StreamConfigurer = (*StreamConfigurerCopy)(nil)
 
-type GetStreamer interface {
-	GetStream(ctx context.Context, streamIndex int) *astiav.Stream
+type GetOutputStreamer interface {
+	GetOutputStream(ctx context.Context, streamIndex int) *astiav.Stream
 }
 
 func NewStreamConfigurerCopy(
-	getStreamer GetStreamer,
+	getOutputStreamer GetOutputStreamer,
 ) *StreamConfigurerCopy {
 	return &StreamConfigurerCopy{
-		GetStreamer: getStreamer,
+		GetOutputStreamer: getOutputStreamer,
 	}
 }
 
@@ -30,18 +30,27 @@ func (sc *StreamConfigurerCopy) StreamConfigure(
 	stream *astiav.Stream,
 	pkt *astiav.Packet,
 ) error {
-	sampleStream := sc.GetStreamer.GetStream(ctx, pkt.StreamIndex())
+	return CopyStreamParameters(
+		ctx,
+		stream,
+		sc.GetOutputStreamer.GetOutputStream(ctx, pkt.StreamIndex()),
+	)
+}
 
-	if err := sampleStream.CodecParameters().Copy(stream.CodecParameters()); err != nil {
-		return fmt.Errorf("unable to copy the codec parameters of stream #%d: %w", pkt.StreamIndex(), err)
+func CopyStreamParameters(
+	ctx context.Context,
+	dst, src *astiav.Stream,
+) error {
+	if err := src.CodecParameters().Copy(dst.CodecParameters()); err != nil {
+		return fmt.Errorf("unable to copy the codec parameters of stream: %w", err)
 	}
-	stream.SetDiscard(sampleStream.Discard())
-	stream.SetAvgFrameRate(sampleStream.AvgFrameRate())
-	stream.SetRFrameRate(sampleStream.RFrameRate())
-	stream.SetSampleAspectRatio(sampleStream.SampleAspectRatio())
-	stream.SetTimeBase(sampleStream.TimeBase())
-	stream.SetStartTime(sampleStream.StartTime())
-	stream.SetEventFlags(sampleStream.EventFlags())
-	stream.SetPTSWrapBits(sampleStream.PTSWrapBits())
+	dst.SetDiscard(src.Discard())
+	dst.SetAvgFrameRate(src.AvgFrameRate())
+	dst.SetRFrameRate(src.RFrameRate())
+	dst.SetSampleAspectRatio(src.SampleAspectRatio())
+	dst.SetTimeBase(src.TimeBase())
+	dst.SetStartTime(src.StartTime())
+	dst.SetEventFlags(src.EventFlags())
+	dst.SetPTSWrapBits(src.PTSWrapBits())
 	return nil
 }

@@ -23,6 +23,7 @@ type FilterThrottle struct {
 	isClosed                    bool
 	inputChan                   chan InputPacket
 	outputChan                  chan OutputPacket
+	seenInputStreams            map[int]*astiav.Stream
 }
 
 var _ Filter = (*FilterThrottle)(nil)
@@ -42,6 +43,7 @@ func NewFilterThrottle(
 		BitrateAveragingPeriod: bitrateAveragingPeriod,
 		inputChan:              make(chan InputPacket, 100),
 		outputChan:             make(chan OutputPacket, 1),
+		seenInputStreams:       make(map[int]*astiav.Stream),
 	}
 
 	observability.Go(ctx, func() {
@@ -81,9 +83,28 @@ func (f *FilterThrottle) SendPacketChan() chan<- InputPacket {
 func (f *FilterThrottle) SendPacket(
 	ctx context.Context,
 	input InputPacket,
-) error {
+) (_err error) {
 	f.locker.Lock()
 	defer f.locker.Unlock()
+	f.seenInputStreams[input.Stream.Index()] = input.Stream
+
+	mediaType := input.Stream.CodecParameters().MediaType()
+	switch mediaType {
+	case astiav.MediaTypeVideo:
+		return f.sendPacketVideo(ctx, input)
+	case astiav.MediaTypeAudio:
+		return f.sendPacketAudio(ctx, input)
+	default:
+		logger.Tracef(ctx, "an uninteresting packet of type %s", mediaType)
+		// we don't care about everything else
+		return nil
+	}
+}
+
+func (f *FilterThrottle) sendPacketVideo(
+	ctx context.Context,
+	input InputPacket,
+) error {
 	if f.isClosed {
 		return io.ErrClosedPipe
 	}
@@ -91,7 +112,7 @@ func (f *FilterThrottle) SendPacket(
 	if f.AverageBitRate == 0 {
 		f.videoAveragerBufferConsumed = 0
 		f.outputChan <- OutputPacket{
-			Packet: ClonePacketAsWritable(input.Packet),
+			Packet: ClonePacketAsReferenced(input.Packet),
 		}
 		return nil
 	}
@@ -128,11 +149,33 @@ func (f *FilterThrottle) SendPacket(
 	f.skippedVideoFrame = false
 	f.videoAveragerBufferConsumed = consumedWithPacket
 	f.outputChan <- OutputPacket{
-		Packet: ClonePacketAsWritable(input.Packet),
+		Packet: ClonePacketAsReferenced(input.Packet),
+	}
+	return nil
+}
+
+func (f *FilterThrottle) sendPacketAudio(
+	ctx context.Context,
+	input InputPacket,
+) (_err error) {
+	logger.Tracef(
+		ctx,
+		"an audio packet (pos:%d, pts:%d, dts:%d, dur:%d)",
+		input.Packet.Pos(), input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration(),
+	)
+	defer func() { logger.Tracef(ctx, "an audio packet: %v", _err) }()
+	f.outputChan <- OutputPacket{
+		Packet: ClonePacketAsReferenced(input.Packet),
 	}
 	return nil
 }
 
 func (f *FilterThrottle) OutputPacketsChan() <-chan OutputPacket {
 	return f.outputChan
+}
+
+func (f *FilterThrottle) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+	f.locker.Lock()
+	defer f.locker.Unlock()
+	return f.seenInputStreams[streamIndex]
 }
