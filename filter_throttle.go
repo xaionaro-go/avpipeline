@@ -58,10 +58,10 @@ func NewFilterThrottle(
 func (f *FilterThrottle) readerLoop(
 	ctx context.Context,
 ) error {
-	return readerLoop(ctx, f.inputChan, f)
+	return ReaderLoop(ctx, f.inputChan, f)
 }
 
-type sendPacketer interface {
+type SendPacketer interface {
 	SendPacket(
 		ctx context.Context,
 		input InputPacket,

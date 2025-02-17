@@ -88,7 +88,7 @@ func NewRecoder(
 func (r *Recoder) readerLoop(
 	ctx context.Context,
 ) error {
-	return readerLoop(ctx, r.inputChan, r)
+	return ReaderLoop(ctx, r.inputChan, r)
 }
 
 func (r *Recoder) SendPacketChan() chan<- InputPacket {

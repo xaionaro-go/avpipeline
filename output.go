@@ -201,7 +201,7 @@ func (o *Output) finalize(
 func (o *Output) readerLoop(
 	ctx context.Context,
 ) error {
-	return readerLoop(ctx, o.inputChan, o)
+	return ReaderLoop(ctx, o.inputChan, o)
 }
 
 func (o *Output) SendPacketChan() chan<- InputPacket {

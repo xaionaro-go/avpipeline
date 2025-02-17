@@ -8,10 +8,10 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 )
 
-func readerLoop(
+func ReaderLoop(
 	ctx context.Context,
 	inputChan <-chan InputPacket,
-	sendPacketer sendPacketer,
+	sendPacketer SendPacketer,
 ) (_err error) {
 	logger.Debugf(ctx, "readerLoop")
 	defer func() { logger.Debugf(ctx, "/readerLoop: %v", _err) }()
