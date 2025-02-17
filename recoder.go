@@ -22,7 +22,7 @@ type Recoder struct {
 	decoders         map[int]*Decoder
 	encoders         map[int]*Encoder
 	frame            *astiav.Frame
-	closer           astikit.Closer
+	closer           *astikit.Closer
 	isClosed         bool
 	inputChan        chan InputPacket
 	outputChan       chan OutputPacket
@@ -51,6 +51,7 @@ func NewRecoder(
 		streamConfigurer: streamConfigurer,
 		formatContext:    astiav.AllocFormatContext(),
 		outputStreams:    make(map[int]*astiav.Stream),
+		closer:           astikit.NewCloser(),
 	}
 	r.closer.Add(r.frame.Free)
 	r.closer.Add(func() {

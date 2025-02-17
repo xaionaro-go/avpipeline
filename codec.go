@@ -14,7 +14,7 @@ type Codec struct {
 	codecContext          *astiav.CodecContext
 	hardwareDeviceContext *astiav.HardwareDeviceContext
 	hardwarePixelFormat   astiav.PixelFormat
-	closer                astikit.Closer
+	closer                *astikit.Closer
 }
 
 func (c *Codec) Codec() *astiav.Codec {
@@ -47,7 +47,9 @@ func newCodec(
 	options *astiav.Dictionary,
 	flags int,
 ) (_ret *Codec, _err error) {
-	c := &Codec{}
+	c := &Codec{
+		closer: astikit.NewCloser(),
+	}
 	defer func() {
 		if _err != nil {
 			_ = c.Close()

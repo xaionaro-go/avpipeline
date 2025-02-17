@@ -41,7 +41,7 @@ type FrameReader struct {
 	decoderFactory DecoderFactory
 	decoders       map[int]*Decoder
 	frame          *astiav.Frame
-	closer         astikit.Closer
+	closer         *astikit.Closer
 	isClosed       bool
 	inputChan      chan InputPacket
 	frameSender    FrameSender
@@ -63,6 +63,7 @@ func NewFrameReader(
 		decoders:       map[int]*Decoder{},
 		formatContext:  astiav.AllocFormatContext(),
 		frameSender:    frameSender,
+		closer:         astikit.NewCloser(),
 	}
 	r.closer.Add(r.frame.Free)
 	r.closer.Add(r.formatContext.Free)
