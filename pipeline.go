@@ -69,32 +69,32 @@ func (p *Pipeline) Serve(
 		})
 	}
 
+	sendErr := func(err error) {
+		logger.Debugf(ctx, "sendErr(%v)", err)
+		if errCh == nil {
+			return
+		}
+		select {
+		case errCh <- ErrPipeline{
+			Node: p,
+			Err:  err,
+		}:
+		default:
+			logger.Errorf(ctx, "error queue is full, cannot send error: %v", err)
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			if errCh != nil {
-				errCh <- ErrPipeline{
-					Node: p,
-					Err:  ctx.Err(),
-				}
-			}
+			sendErr(ctx.Err())
 			return
 		case err := <-p.ProcessingNode.ErrorChan():
-			if errCh != nil {
-				errCh <- ErrPipeline{
-					Node: p,
-					Err:  err,
-				}
-			}
+			sendErr(err)
 			return
 		case pkt, ok := <-p.ProcessingNode.OutputPacketsChan():
 			if !ok {
-				if errCh != nil {
-					errCh <- ErrPipeline{
-						Node: p,
-						Err:  io.EOF,
-					}
-				}
+				sendErr(io.EOF)
 				return
 			}
 			p.BytesCountWrote.Add(uint64(pkt.Size()))
@@ -116,12 +116,7 @@ func (p *Pipeline) Serve(
 			for _, pushTo := range p.PushTo {
 				select {
 				case <-ctx.Done():
-					if errCh != nil {
-						errCh <- ErrPipeline{
-							Node: p,
-							Err:  ctx.Err(),
-						}
-					}
+					sendErr(ctx.Err())
 					return
 				case pushTo.SendPacketChan() <- InputPacket{
 					Packet:        ClonePacketAsReferenced(pkt.Packet),
