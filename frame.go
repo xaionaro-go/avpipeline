@@ -55,7 +55,3 @@ func toDuration(ts int64, timeBase float64) time.Duration {
 	seconds := float64(ts) * float64(timeBase)
 	return time.Duration(float64(time.Second) * seconds)
 }
-
-type FrameReader interface {
-	ReadFrame(frame *Frame) error
-}

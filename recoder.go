@@ -15,24 +15,6 @@ import (
 	"github.com/xaionaro-go/observability"
 )
 
-type InputPacket struct {
-	*astiav.Packet
-	*astiav.Stream
-}
-
-type OutputPacket struct {
-	*astiav.Packet
-}
-
-func (o *OutputPacket) UnrefAndFree() {
-	o.Packet.Unref()
-	o.Packet.Free()
-}
-
-type StreamConfigurer interface {
-	StreamConfigure(ctx context.Context, stream *astiav.Stream, pkt *astiav.Packet) error
-}
-
 type Recoder struct {
 	locker           sync.Mutex
 	decoderFactory   DecoderFactory
