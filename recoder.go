@@ -104,6 +104,7 @@ func (r *Recoder) SendPacket(
 		r.closer.AddWithError(encoder.Close)
 		r.encoders[input.StreamIndex()] = encoder
 	}
+	assert(ctx, encoder != nil)
 
 	decoder := r.decoders[input.StreamIndex()]
 	if decoder == nil {
@@ -115,6 +116,7 @@ func (r *Recoder) SendPacket(
 		r.closer.AddWithError(decoder.Close)
 		r.decoders[input.StreamIndex()] = decoder
 	}
+	assert(ctx, decoder != nil)
 
 	outputStream := r.outputStreams[input.Packet.StreamIndex()]
 	if outputStream == nil {

@@ -112,6 +112,7 @@ func (r *FrameReader) SendPacket(
 		r.closer.AddWithError(decoder.Close)
 		r.decoders[input.StreamIndex()] = decoder
 	}
+	assert(ctx, decoder != nil)
 
 	// TODO: investigate: Do we really need this? And why?
 	//input.Packet.RescaleTs(inputStream.TimeBase(), decoder.CodecContext().TimeBase())
