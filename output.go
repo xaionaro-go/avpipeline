@@ -35,6 +35,7 @@ type Output struct {
 	Streams        map[int]*OutputStream
 	Locker         xsync.Mutex
 	inputChan      chan InputPacket
+	errorChan      chan error
 	pendingPackets []*astiav.Packet
 	*astikit.Closer
 	*astiav.FormatContext
@@ -101,6 +102,7 @@ func NewOutputFromURL(
 		Streams:   make(map[int]*OutputStream),
 		Closer:    astikit.NewCloser(),
 		inputChan: make(chan InputPacket, 600),
+		errorChan: make(chan error, 2),
 	}
 
 	if needUnwrapTLSFor != "" && unwrapTLSViaProxy {
@@ -180,14 +182,9 @@ func NewOutputFromURL(
 	observability.Go(ctx, func() {
 		defer func() {
 			err := o.finalize(ctx)
-			if err != nil {
-				errmon.ObserveErrorCtx(ctx, err)
-			}
-		}()
-		err := o.readerLoop(ctx)
-		if err != nil {
 			errmon.ObserveErrorCtx(ctx, err)
-		}
+		}()
+		o.errorChan <- o.readerLoop(ctx)
 	})
 	return o, nil
 }
@@ -337,6 +334,10 @@ func (o *Output) doWritePacket(
 
 func (o *Output) OutputPacketsChan() <-chan OutputPacket {
 	return noOutputPacketsChan
+}
+
+func (o *Output) ErrorChan() <-chan error {
+	return o.errorChan
 }
 
 func (o *Output) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {

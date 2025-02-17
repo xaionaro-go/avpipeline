@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 )
@@ -23,6 +22,7 @@ type FilterThrottle struct {
 	isClosed                    bool
 	inputChan                   chan InputPacket
 	outputChan                  chan OutputPacket
+	errorChan                   chan error
 	lastSeenFormat              *astiav.FormatContext
 }
 
@@ -43,13 +43,11 @@ func NewFilterThrottle(
 		BitrateAveragingPeriod: bitrateAveragingPeriod,
 		inputChan:              make(chan InputPacket, 100),
 		outputChan:             make(chan OutputPacket, 1),
+		errorChan:              make(chan error, 1),
 	}
 
 	observability.Go(ctx, func() {
-		err := f.readerLoop(ctx)
-		if err != nil {
-			errmon.ObserveErrorCtx(ctx, err)
-		}
+		f.errorChan <- f.readerLoop(ctx)
 	})
 	return f, nil
 }
@@ -171,6 +169,10 @@ func (f *FilterThrottle) sendPacketAudio(
 
 func (f *FilterThrottle) OutputPacketsChan() <-chan OutputPacket {
 	return f.outputChan
+}
+
+func (f *FilterThrottle) ErrorChan() <-chan error {
+	return f.errorChan
 }
 
 func (f *FilterThrottle) GetOutputFormatContext(_ context.Context) *astiav.FormatContext {

@@ -79,14 +79,12 @@ func main() {
 		l.Fatal(err)
 	}
 
+	errCh := make(chan avpipeline.ErrPipeline, 1)
 	pipeline := avpipeline.NewPipelineNode(input)
 	pipeline.PushTo = append(pipeline.PushTo, avpipeline.NewPipelineNode(output))
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		err := pipeline.Serve(ctx)
-		if err != nil {
-			l.Fatal(err)
-		}
+		pipeline.Serve(ctx, errCh)
 	})
 
 	t := time.NewTicker(time.Second)
@@ -94,6 +92,10 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
+			l.Infof("finished")
+			return
+		case err := <-errCh:
+			l.Fatal(err)
 			return
 		case <-t.C:
 			inputStats := pipeline.GetStats()

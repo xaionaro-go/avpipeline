@@ -2,6 +2,7 @@ package avpipeline
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/asticode/go-astiav"
@@ -14,6 +15,7 @@ type ProcessingNode interface {
 	GetOutputFormatContext(ctx context.Context) *astiav.FormatContext
 	SendPacketChan() chan<- InputPacket
 	OutputPacketsChan() <-chan OutputPacket
+	ErrorChan() <-chan error
 }
 
 type Pipeline struct {
@@ -37,26 +39,63 @@ func getOutputStream(fmtCtx *astiav.FormatContext, streamIndex int) *astiav.Stre
 	return nil
 }
 
-func (p *Pipeline) Serve(ctx context.Context) (_err error) {
+type ErrPipeline struct {
+	Node *Pipeline
+	Err  error
+}
+
+func (e ErrPipeline) Error() string {
+	return fmt.Sprintf("received an error on %T: %v", e.Node, e.Err)
+}
+
+func (e ErrPipeline) Unwrap() error {
+	return e.Err
+}
+
+func (p *Pipeline) Serve(
+	ctx context.Context,
+	errCh chan<- ErrPipeline,
+) {
 	logger.Tracef(ctx, "Serve[%T]", p.ProcessingNode)
-	defer func() { logger.Tracef(ctx, "/Serve[%T]: %v", p.ProcessingNode, _err) }()
+	defer func() { logger.Tracef(ctx, "/Serve[%T]", p.ProcessingNode) }()
 
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 
 	for _, pushTo := range p.PushTo {
+		pushTo := pushTo
 		observability.Go(ctx, func() {
-			pushTo.Serve(ctx)
+			pushTo.Serve(ctx, errCh)
 		})
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if errCh != nil {
+				errCh <- ErrPipeline{
+					Node: p,
+					Err:  ctx.Err(),
+				}
+			}
+			return
+		case err := <-p.ProcessingNode.ErrorChan():
+			if errCh != nil {
+				errCh <- ErrPipeline{
+					Node: p,
+					Err:  err,
+				}
+			}
+			return
 		case pkt, ok := <-p.ProcessingNode.OutputPacketsChan():
 			if !ok {
-				return io.EOF
+				if errCh != nil {
+					errCh <- ErrPipeline{
+						Node: p,
+						Err:  io.EOF,
+					}
+				}
+				return
 			}
 			p.BytesCountWrote.Add(uint64(pkt.Size()))
 
@@ -77,7 +116,13 @@ func (p *Pipeline) Serve(ctx context.Context) (_err error) {
 			for _, pushTo := range p.PushTo {
 				select {
 				case <-ctx.Done():
-					return ctx.Err()
+					if errCh != nil {
+						errCh <- ErrPipeline{
+							Node: p,
+							Err:  ctx.Err(),
+						}
+					}
+					return
 				case pushTo.SendPacketChan() <- InputPacket{
 					Packet:        ClonePacketAsReferenced(pkt.Packet),
 					Stream:        stream,

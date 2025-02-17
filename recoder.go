@@ -10,7 +10,6 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 )
@@ -26,6 +25,7 @@ type Recoder struct {
 	isClosed         bool
 	inputChan        chan InputPacket
 	outputChan       chan OutputPacket
+	errorChan        chan error
 	streamConfigurer StreamConfigurer
 
 	outputFormatContext *astiav.FormatContext
@@ -44,6 +44,7 @@ func NewRecoder(
 		frame:               astiav.AllocFrame(),
 		inputChan:           make(chan InputPacket, 100),
 		outputChan:          make(chan OutputPacket, 1),
+		errorChan:           make(chan error, 1),
 		decoderFactory:      decoderFactory,
 		encoderFactory:      encoderFactory,
 		decoders:            map[int]*Decoder{},
@@ -60,10 +61,7 @@ func NewRecoder(
 	})
 	r.closer.Add(r.outputFormatContext.Free)
 	observability.Go(ctx, func() {
-		err := r.readerLoop(ctx)
-		if err != nil {
-			errmon.ObserveErrorCtx(ctx, err)
-		}
+		r.errorChan <- r.readerLoop(ctx)
 	})
 	return r, nil
 }
@@ -204,6 +202,10 @@ func (r *Recoder) SendPacket(
 
 func (c *Recoder) OutputPacketsChan() <-chan OutputPacket {
 	return c.outputChan
+}
+
+func (c *Recoder) ErrorChan() <-chan error {
+	return c.errorChan
 }
 
 func (c *Recoder) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {

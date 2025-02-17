@@ -9,7 +9,6 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 )
@@ -45,6 +44,7 @@ type FrameReader struct {
 	closer         *astikit.Closer
 	isClosed       bool
 	inputChan      chan InputPacket
+	errorChan      chan error
 	frameSender    FrameSender
 
 	formatContext *astiav.FormatContext
@@ -60,6 +60,7 @@ func NewFrameReader(
 	r := &FrameReader{
 		frame:          astiav.AllocFrame(),
 		inputChan:      make(chan InputPacket, 100),
+		errorChan:      make(chan error, 1),
 		decoderFactory: decoderFactory,
 		decoders:       map[int]*Decoder{},
 		formatContext:  astiav.AllocFormatContext(),
@@ -69,10 +70,7 @@ func NewFrameReader(
 	r.closer.Add(r.frame.Free)
 	r.closer.Add(r.formatContext.Free)
 	observability.Go(ctx, func() {
-		err := r.readerLoop(ctx)
-		if err != nil {
-			errmon.ObserveErrorCtx(ctx, err)
-		}
+		r.errorChan <- r.readerLoop(ctx)
 	})
 	return r, nil
 }
@@ -164,6 +162,10 @@ func (r *FrameReader) SendPacket(
 
 func (c *FrameReader) OutputPacketsChan() <-chan OutputPacket {
 	return nil
+}
+
+func (c *FrameReader) ErrorChan() <-chan error {
+	return c.errorChan
 }
 
 func (c *FrameReader) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {

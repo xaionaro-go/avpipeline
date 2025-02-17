@@ -9,7 +9,6 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 )
@@ -19,8 +18,9 @@ type InputConfig struct {
 }
 
 type Input struct {
-	ID         InputID
-	OutputChan chan OutputPacket
+	ID             InputID
+	OutputChan     chan OutputPacket
+	ErrorChanValue chan error
 	*astikit.Closer
 	*astiav.FormatContext
 	*astiav.Dictionary
@@ -41,9 +41,10 @@ func NewInputFromURL(
 	}
 
 	input := &Input{
-		ID:         InputID(nextInputID.Add(1)),
-		Closer:     astikit.NewCloser(),
-		OutputChan: make(chan OutputPacket, 1),
+		ID:             InputID(nextInputID.Add(1)),
+		Closer:         astikit.NewCloser(),
+		OutputChan:     make(chan OutputPacket, 1),
+		ErrorChanValue: make(chan error, 1),
 	}
 
 	input.FormatContext = astiav.AllocFormatContext()
@@ -77,10 +78,7 @@ func NewInputFromURL(
 
 	observability.Go(ctx, func() {
 		defer input.Close()
-		err := input.readLoop(ctx)
-		if err != nil && !errors.Is(err, io.EOF) {
-			errmon.ObserveErrorCtx(ctx, err)
-		}
+		input.ErrorChanValue <- input.readLoop(ctx)
 	})
 	return input, nil
 }
@@ -151,6 +149,10 @@ func (i *Input) SendPacket(
 
 func (i *Input) OutputPacketsChan() <-chan OutputPacket {
 	return i.OutputChan
+}
+
+func (i *Input) ErrorChan() <-chan error {
+	return i.ErrorChanValue
 }
 
 func (i *Input) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
