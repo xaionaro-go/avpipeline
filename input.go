@@ -118,7 +118,6 @@ func (i *Input) readLoop(
 			packet.Free()
 			return fmt.Errorf("unable to read a packet: %w", err)
 		}
-
 	}
 }
 
@@ -154,11 +153,6 @@ func (i *Input) OutputPacketsChan() <-chan OutputPacket {
 	return i.OutputChan
 }
 
-func (i *Input) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
-	for _, stream := range i.FormatContext.Streams() {
-		if stream.Index() == streamIndex {
-			return stream
-		}
-	}
-	return nil
+func (i *Input) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
+	return i.FormatContext
 }

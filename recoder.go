@@ -28,8 +28,8 @@ type Recoder struct {
 	outputChan       chan OutputPacket
 	streamConfigurer StreamConfigurer
 
-	formatContext *astiav.FormatContext
-	outputStreams map[int]*astiav.Stream
+	outputFormatContext *astiav.FormatContext
+	outputStreams       map[int]*astiav.Stream
 }
 
 var _ ProcessingNode = (*Recoder)(nil)
@@ -41,24 +41,24 @@ func NewRecoder(
 	streamConfigurer StreamConfigurer,
 ) (*Recoder, error) {
 	r := &Recoder{
-		frame:            astiav.AllocFrame(),
-		inputChan:        make(chan InputPacket, 100),
-		outputChan:       make(chan OutputPacket, 1),
-		decoderFactory:   decoderFactory,
-		encoderFactory:   encoderFactory,
-		decoders:         map[int]*Decoder{},
-		encoders:         map[int]*Encoder{},
-		streamConfigurer: streamConfigurer,
-		formatContext:    astiav.AllocFormatContext(),
-		outputStreams:    make(map[int]*astiav.Stream),
-		closer:           astikit.NewCloser(),
+		frame:               astiav.AllocFrame(),
+		inputChan:           make(chan InputPacket, 100),
+		outputChan:          make(chan OutputPacket, 1),
+		decoderFactory:      decoderFactory,
+		encoderFactory:      encoderFactory,
+		decoders:            map[int]*Decoder{},
+		encoders:            map[int]*Encoder{},
+		streamConfigurer:    streamConfigurer,
+		outputFormatContext: astiav.AllocFormatContext(),
+		outputStreams:       make(map[int]*astiav.Stream),
+		closer:              astikit.NewCloser(),
 	}
 	r.closer.Add(r.frame.Free)
 	r.closer.Add(func() {
 		close(r.outputChan)
 		r.isClosed = true
 	})
-	r.closer.Add(r.formatContext.Free)
+	r.closer.Add(r.outputFormatContext.Free)
 	observability.Go(ctx, func() {
 		err := r.readerLoop(ctx)
 		if err != nil {
@@ -122,7 +122,7 @@ func (r *Recoder) SendPacket(
 	if outputStream == nil {
 		logger.Debugf(ctx, "new output stream")
 
-		outputStream := r.formatContext.NewStream(encoder.codec)
+		outputStream := r.outputFormatContext.NewStream(encoder.codec)
 		if outputStream == nil {
 			return fmt.Errorf("unable to initialize an output stream")
 		}
@@ -206,8 +206,8 @@ func (c *Recoder) OutputPacketsChan() <-chan OutputPacket {
 	return c.outputChan
 }
 
-func (c *Recoder) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+func (c *Recoder) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
 	c.locker.Lock()
 	defer c.locker.Unlock()
-	return c.outputStreams[streamIndex]
+	return c.outputFormatContext
 }

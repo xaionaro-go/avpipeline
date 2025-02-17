@@ -23,7 +23,7 @@ type FilterThrottle struct {
 	isClosed                    bool
 	inputChan                   chan InputPacket
 	outputChan                  chan OutputPacket
-	seenInputStreams            map[int]*astiav.Stream
+	lastSeenFormat              *astiav.FormatContext
 }
 
 var _ Filter = (*FilterThrottle)(nil)
@@ -43,7 +43,6 @@ func NewFilterThrottle(
 		BitrateAveragingPeriod: bitrateAveragingPeriod,
 		inputChan:              make(chan InputPacket, 100),
 		outputChan:             make(chan OutputPacket, 1),
-		seenInputStreams:       make(map[int]*astiav.Stream),
 	}
 
 	observability.Go(ctx, func() {
@@ -86,7 +85,7 @@ func (f *FilterThrottle) SendPacket(
 ) (_err error) {
 	f.locker.Lock()
 	defer f.locker.Unlock()
-	f.seenInputStreams[input.Stream.Index()] = input.Stream
+	f.lastSeenFormat = input.FormatContext
 
 	mediaType := input.Stream.CodecParameters().MediaType()
 	switch mediaType {
@@ -174,8 +173,8 @@ func (f *FilterThrottle) OutputPacketsChan() <-chan OutputPacket {
 	return f.outputChan
 }
 
-func (f *FilterThrottle) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+func (f *FilterThrottle) GetOutputFormatContext(_ context.Context) *astiav.FormatContext {
 	f.locker.Lock()
 	defer f.locker.Unlock()
-	return f.seenInputStreams[streamIndex]
+	return f.lastSeenFormat
 }

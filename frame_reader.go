@@ -17,6 +17,7 @@ import (
 type InputPacket struct {
 	*astiav.Packet
 	*astiav.Stream
+	*astiav.FormatContext
 }
 
 type OutputPacket struct {
@@ -128,9 +129,8 @@ func (r *FrameReader) SendPacket(
 	frameBuf := r.frame
 	sendFrame := &Frame{
 		Frame:       frameBuf,
-		InputStream: input.Stream,
+		InputPacket: &input,
 		Decoder:     decoder,
-		Packet:      input.Packet,
 	}
 	for {
 		shouldContinue, err := func() (bool, error) {
@@ -166,6 +166,6 @@ func (c *FrameReader) OutputPacketsChan() <-chan OutputPacket {
 	return nil
 }
 
-func (c *FrameReader) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
+func (c *FrameReader) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
 	return nil
 }

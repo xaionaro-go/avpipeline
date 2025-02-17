@@ -339,6 +339,6 @@ func (o *Output) OutputPacketsChan() <-chan OutputPacket {
 	return noOutputPacketsChan
 }
 
-func (o *Output) GetOutputStream(_ context.Context, streamIndex int) *astiav.Stream {
-	return nil
+func (o *Output) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
+	return o.FormatContext
 }

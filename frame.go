@@ -9,19 +9,17 @@ import (
 
 type Frame struct {
 	*astiav.Frame
-	InputStream        *astiav.Stream
-	InputFormatContext *astiav.FormatContext
-	Decoder            *Decoder
-	Packet             *astiav.Packet
-	RAMFrame           *astiav.Frame
+	*InputPacket
+	Decoder  *Decoder
+	RAMFrame *astiav.Frame
 }
 
 func (f *Frame) MaxPosition() time.Duration {
-	return toDuration(f.InputFormatContext.Duration(), 1/float64(astiav.TimeBase))
+	return toDuration(f.InputPacket.FormatContext.Duration(), 1/float64(astiav.TimeBase))
 }
 
 func (f *Frame) Position() time.Duration {
-	return toDuration(f.Pts(), f.InputStream.TimeBase().Float64())
+	return toDuration(f.Pts(), f.InputPacket.Stream.TimeBase().Float64())
 }
 
 func (f *Frame) PositionInBytes() int64 {
@@ -29,7 +27,7 @@ func (f *Frame) PositionInBytes() int64 {
 }
 
 func (f *Frame) FrameDuration() time.Duration {
-	return toDuration(f.Packet.Duration(), f.InputStream.TimeBase().Float64())
+	return toDuration(f.Packet.Duration(), f.InputPacket.Stream.TimeBase().Float64())
 }
 
 func (f *Frame) TransferFromHardwareToRAM() error {

@@ -11,7 +11,7 @@ import (
 
 type ProcessingNode interface {
 	io.Closer
-	GetOutputStream(ctx context.Context, streamIndex int) *astiav.Stream
+	GetOutputFormatContext(ctx context.Context) *astiav.FormatContext
 	SendPacketChan() chan<- InputPacket
 	OutputPacketsChan() <-chan OutputPacket
 }
@@ -26,6 +26,15 @@ func NewPipelineNode(processingNode ProcessingNode) *Pipeline {
 	return &Pipeline{
 		ProcessingNode: processingNode,
 	}
+}
+
+func getOutputStream(fmtCtx *astiav.FormatContext, streamIndex int) *astiav.Stream {
+	for _, stream := range fmtCtx.Streams() {
+		if stream.Index() == streamIndex {
+			return stream
+		}
+	}
+	return nil
 }
 
 func (p *Pipeline) Serve(ctx context.Context) (_err error) {
@@ -50,7 +59,12 @@ func (p *Pipeline) Serve(ctx context.Context) (_err error) {
 				return io.EOF
 			}
 			p.BytesCountWrote.Add(uint64(pkt.Size()))
-			stream := p.ProcessingNode.GetOutputStream(ctx, pkt.Packet.StreamIndex())
+
+			fmtCtx := p.ProcessingNode.GetOutputFormatContext(ctx)
+			stream := getOutputStream(
+				fmtCtx,
+				pkt.Packet.StreamIndex(),
+			)
 			switch stream.CodecParameters().MediaType() {
 			case astiav.MediaTypeVideo:
 				p.FramesWrote.Video.Add(1)
@@ -65,8 +79,9 @@ func (p *Pipeline) Serve(ctx context.Context) (_err error) {
 				case <-ctx.Done():
 					return ctx.Err()
 				case pushTo.SendPacketChan() <- InputPacket{
-					Packet: ClonePacketAsReferenced(pkt.Packet),
-					Stream: stream,
+					Packet:        ClonePacketAsReferenced(pkt.Packet),
+					Stream:        stream,
+					FormatContext: fmtCtx,
 				}:
 					pushTo.BytesCountRead.Add(uint64(pkt.Size()))
 					switch stream.CodecParameters().MediaType() {
