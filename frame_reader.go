@@ -104,7 +104,7 @@ func (r *FrameReader) SendPacket(
 	decoder := r.decoders[input.StreamIndex()]
 	if decoder == nil {
 		var err error
-		decoder, err = r.decoderFactory.NewDecoder(ctx, input.Packet)
+		decoder, err = r.decoderFactory.NewDecoder(ctx, input)
 		if err != nil {
 			return fmt.Errorf("cannot initialize a decoder for stream %d: %w", input.StreamIndex(), err)
 		}

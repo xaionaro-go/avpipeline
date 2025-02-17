@@ -36,5 +36,5 @@ func NewDecoder(
 }
 
 type DecoderFactory interface {
-	NewDecoder(ctx context.Context, pkt *astiav.Packet) (*Decoder, error)
+	NewDecoder(ctx context.Context, pkt InputPacket) (*Decoder, error)
 }

@@ -36,5 +36,5 @@ func NewEncoder(
 }
 
 type EncoderFactory interface {
-	NewEncoder(ctx context.Context, pkt *astiav.Packet) (*Encoder, error)
+	NewEncoder(ctx context.Context, pkt InputPacket) (*Encoder, error)
 }

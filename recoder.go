@@ -96,7 +96,7 @@ func (r *Recoder) SendPacket(
 	encoder := r.encoders[input.StreamIndex()]
 	if encoder == nil {
 		var err error
-		encoder, err = r.encoderFactory.NewEncoder(ctx, input.Packet)
+		encoder, err = r.encoderFactory.NewEncoder(ctx, input)
 		if err != nil {
 			return fmt.Errorf("cannot initialize an encoder for stream %d: %w", input.StreamIndex(), err)
 		}
@@ -107,7 +107,7 @@ func (r *Recoder) SendPacket(
 	decoder := r.decoders[input.StreamIndex()]
 	if decoder == nil {
 		var err error
-		decoder, err = r.decoderFactory.NewDecoder(ctx, input.Packet)
+		decoder, err = r.decoderFactory.NewDecoder(ctx, input)
 		if err != nil {
 			return fmt.Errorf("cannot initialize a decoder for stream %d: %w", input.StreamIndex(), err)
 		}
