@@ -20,6 +20,7 @@ type CommonsProcessingStatistics struct {
 	BytesCountRead  atomic.Uint64
 	BytesCountWrote atomic.Uint64
 	FramesRead      CommonsProcessingFramesStatistics
+	FramesMissed    CommonsProcessingFramesStatistics
 	FramesWrote     CommonsProcessingFramesStatistics
 }
 

@@ -3,10 +3,13 @@ package avpipeline
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/unsafetools"
 )
 
 type Codec struct {
@@ -44,6 +47,7 @@ func newCodec(
 	isEncoder bool, // otherwise: decoder
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
+	timeBase astiav.Rational,
 	options *astiav.Dictionary,
 	flags int,
 ) (_ret *Codec, _err error) {
@@ -59,17 +63,26 @@ func newCodec(
 	if isEncoder {
 		if codecName != "" {
 			c.codec = astiav.FindEncoderByName(string(codecName))
+			if c.codec != nil {
+				codecParameters.SetCodecID(c.codec.ID())
+			}
 		} else {
 			c.codec = astiav.FindEncoder(codecParameters.CodecID())
 		}
 	} else {
 		if codecName != "" {
 			c.codec = astiav.FindDecoderByName(string(codecName))
+			if c.codec != nil {
+				codecParameters.SetCodecID(c.codec.ID())
+			}
 		} else {
 			c.codec = astiav.FindDecoder(codecParameters.CodecID())
 		}
 	}
 	if c.codec == nil {
+		if codecParameters == nil {
+			return nil, fmt.Errorf("unable to find a codec using name '%s'", codecName)
+		}
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
 
@@ -101,9 +114,14 @@ func newCodec(
 		return nil, fmt.Errorf("codecParameters.ToCodecContext(...) returned error: %w", err)
 	}
 
-	if codecParameters.MediaType() == astiav.MediaTypeVideo {
+	switch codecParameters.MediaType() {
+	case astiav.MediaTypeVideo:
 		if frameRate := codecParameters.FrameRate(); frameRate.Num() != 0 {
 			c.codecContext.SetFramerate(frameRate)
+		}
+	case astiav.MediaTypeAudio:
+		if sampleRate := codecParameters.SampleRate(); sampleRate != 0 {
+			c.codecContext.SetSampleRate(sampleRate)
 		}
 	}
 
@@ -131,6 +149,13 @@ func newCodec(
 			return astiav.PixelFormatNone
 		})
 	}
+
+	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
+		logger.Tracef(ctx, "codec_parameters: %s", spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(codecParameters), "c").Elem().Elem().Interface()))
+	}
+
+	logger.Debugf(ctx, "time_base == %f", timeBase)
+	c.codecContext.SetTimeBase(timeBase)
 
 	if err := c.codecContext.Open(c.codec, options); err != nil {
 		return nil, fmt.Errorf("unable to open codec context: %w", err)

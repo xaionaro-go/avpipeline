@@ -19,13 +19,17 @@ func NewDecoder(
 	options *astiav.Dictionary,
 	flags int,
 ) (_ret *Decoder, _err error) {
+	_codecParameters := astiav.AllocCodecParameters()
+	defer _codecParameters.Free()
+	codecParameters.Copy(_codecParameters)
 	c, err := newCodec(
 		ctx,
 		codecName,
-		codecParameters,
+		_codecParameters,
 		false,
 		hardwareDeviceType,
 		hardwareDeviceName,
+		astiav.NewRational(0, 0),
 		options,
 		flags,
 	)
@@ -33,8 +37,4 @@ func NewDecoder(
 		return nil, err
 	}
 	return &Decoder{c}, nil
-}
-
-type DecoderFactory interface {
-	NewDecoder(ctx context.Context, pkt InputPacket) (*Decoder, error)
 }

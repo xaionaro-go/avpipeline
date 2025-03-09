@@ -2,13 +2,31 @@ package avpipeline
 
 import (
 	"context"
+	"fmt"
+	"io"
 
 	"github.com/asticode/go-astiav"
 )
 
-type Encoder struct {
-	*Codec
+const (
+	CodecNameCopy = "copy"
+)
+
+type Encoder interface {
+	fmt.Stringer
+	io.Closer
+	Codec() *astiav.Codec
+	CodecContext() *astiav.CodecContext
+	HardwareDeviceContext() *astiav.HardwareDeviceContext
+	HardwarePixelFormat() astiav.PixelFormat
 }
+
+type EncoderFullBackend = Codec
+type EncoderFull struct {
+	*EncoderFullBackend
+}
+
+var _ Encoder = (*EncoderFull)(nil)
 
 func NewEncoder(
 	ctx context.Context,
@@ -16,9 +34,13 @@ func NewEncoder(
 	codecParameters *astiav.CodecParameters,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
+	timeBase astiav.Rational,
 	options *astiav.Dictionary,
 	flags int,
-) (_ret *Encoder, _err error) {
+) (_ret Encoder, _err error) {
+	if codecName == CodecNameCopy {
+		return EncoderCopy{}, nil
+	}
 	c, err := newCodec(
 		ctx,
 		codecName,
@@ -26,15 +48,16 @@ func NewEncoder(
 		true,
 		hardwareDeviceType,
 		hardwareDeviceName,
+		timeBase,
 		options,
 		flags,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Encoder{Codec: c}, nil
+	return &EncoderFull{EncoderFullBackend: c}, nil
 }
 
-type EncoderFactory interface {
-	NewEncoder(ctx context.Context, pkt InputPacket) (*Encoder, error)
+func (e *EncoderFull) String() string {
+	return "Encoder"
 }

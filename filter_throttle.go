@@ -58,13 +58,6 @@ func (f *FilterThrottle) readerLoop(
 	return ReaderLoop(ctx, f.inputChan, f)
 }
 
-type SendPacketer interface {
-	SendPacket(
-		ctx context.Context,
-		input InputPacket,
-	) error
-}
-
 func (f *FilterThrottle) Close() error {
 	f.locker.Lock()
 	defer f.locker.Unlock()
@@ -179,4 +172,8 @@ func (f *FilterThrottle) GetOutputFormatContext(_ context.Context) *astiav.Forma
 	f.locker.Lock()
 	defer f.locker.Unlock()
 	return f.lastSeenFormat
+}
+
+func (f *FilterThrottle) String() string {
+	return "FilterThrottle"
 }

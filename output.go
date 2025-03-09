@@ -2,6 +2,7 @@ package avpipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -11,7 +12,6 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
@@ -32,11 +32,15 @@ type OutputStream struct {
 
 type Output struct {
 	ID             OutputID
+	URL            string
 	Streams        map[int]*OutputStream
 	Locker         xsync.Mutex
 	inputChan      chan InputPacket
+	outputChan     chan OutputPacket
 	errorChan      chan error
 	pendingPackets []*astiav.Packet
+	ioContext      *astiav.IOContext
+	proxy          *proxy.TCPProxy
 	*astikit.Closer
 	*astiav.FormatContext
 	*astiav.Dictionary
@@ -62,7 +66,7 @@ func NewOutputFromURL(
 	urlString string,
 	streamKey string,
 	cfg OutputConfig,
-) (*Output, error) {
+) (_ *Output, _err error) {
 	if urlString == "" {
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
@@ -98,11 +102,13 @@ func NewOutputFromURL(
 	}
 
 	o := &Output{
-		ID:        OutputID(nextOutputID.Add(1)),
-		Streams:   make(map[int]*OutputStream),
-		Closer:    astikit.NewCloser(),
-		inputChan: make(chan InputPacket, 600),
-		errorChan: make(chan error, 2),
+		ID:         OutputID(nextOutputID.Add(1)),
+		URL:        url.String(),
+		Streams:    make(map[int]*OutputStream),
+		Closer:     astikit.NewCloser(),
+		inputChan:  make(chan InputPacket, 600),
+		outputChan: make(chan OutputPacket),
+		errorChan:  make(chan error, 2),
 	}
 
 	if needUnwrapTLSFor != "" && unwrapTLSViaProxy {
@@ -113,12 +119,7 @@ func NewOutputFromURL(
 		if err != nil {
 			return nil, fmt.Errorf("unable to make a TLS-proxy: %w", err)
 		}
-		o.Closer.Add(func() {
-			err := proxy.Close()
-			if err != nil {
-				logger.Errorf(ctx, "unable to close the TLS-proxy: %v", err)
-			}
-		})
+		o.proxy = proxy
 		url.Scheme = needUnwrapTLSFor
 		url.Host = proxyAddr.String()
 	}
@@ -127,7 +128,7 @@ func NewOutputFromURL(
 
 	if len(cfg.CustomOptions) > 0 {
 		o.Dictionary = astiav.NewDictionary()
-		o.Closer.Add(o.Dictionary.Free)
+		setFinalizerFree(ctx, o.Dictionary)
 
 		for _, opt := range cfg.CustomOptions {
 			if opt.Key == "f" {
@@ -153,7 +154,13 @@ func NewOutputFromURL(
 		return nil, fmt.Errorf("unable to allocate the output format context")
 	}
 	o.FormatContext = formatContext
-	o.Closer.Add(o.FormatContext.Free)
+	setFinalizerFree(ctx, o.FormatContext)
+
+	defer func() {
+		if _err == nil {
+			o.startReaderLoop(ctx)
+		}
+	}()
 
 	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
 		// if output is not a file then nothing else to do
@@ -170,34 +177,50 @@ func NewOutputFromURL(
 	if err != nil {
 		return nil, fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
 	}
-
-	o.Closer.Add(func() {
-		err := ioContext.Close()
-		if err != nil {
-			logger.Errorf(ctx, "unable to close the IO context (URL: %s): %v", url, err)
-		}
-	})
+	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
 
-	observability.Go(ctx, func() {
-		defer func() {
-			err := o.finalize(ctx)
-			errmon.ObserveErrorCtx(ctx, err)
-		}()
-		o.errorChan <- o.readerLoop(ctx)
-	})
 	return o, nil
 }
 
 func (o *Output) finalize(
 	_ context.Context,
 ) error {
-	return o.FormatContext.WriteTrailer()
+	var result []error
+	if err := o.FormatContext.WriteTrailer(); err != nil {
+		result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
+	}
+	if o.ioContext != nil {
+		if err := o.ioContext.Close(); err != nil {
+			result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
+		}
+	}
+	if o.proxy != nil {
+		if err := o.proxy.Close(); err != nil {
+			result = append(result, fmt.Errorf("unable to close the TLS-proxy: %v", err))
+		}
+	}
+	close(o.outputChan)
+	return errors.Join(result...)
 }
 
-func (o *Output) readerLoop(
+func (o *Output) startReaderLoop(
 	ctx context.Context,
-) error {
+) {
+	startReaderLoop(ctx, o)
+}
+
+func (o *Output) addToCloser(callback func()) {
+	o.Closer.Add(callback)
+}
+
+func (o *Output) outChanError() chan<- error {
+	return o.errorChan
+}
+
+func (o *Output) readLoop(
+	ctx context.Context,
+) (_err error) {
 	return ReaderLoop(ctx, o.inputChan, o)
 }
 
@@ -205,14 +228,18 @@ func (o *Output) SendPacketChan() chan<- InputPacket {
 	return o.inputChan
 }
 
-var noOutputPacketsChan chan OutputPacket
-
 func (o *Output) SendPacket(
 	ctx context.Context,
-	input InputPacket,
-) error {
+	pkt InputPacket,
+) (_err error) {
+	logger.Tracef(ctx,
+		"SendPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
+		pkt.Packet, pkt.Packet.Pos(), pkt.Packet.Pts(), pkt.Packet.Dts(), pkt.Packet.Duration(),
+	)
+	defer func() { logger.Tracef(ctx, "/SendPacket (pkt: %p): %v", pkt.Packet, _err) }()
+
 	return xsync.DoR1(ctx, &o.Locker, func() error {
-		return o.writePacket(ctx, input)
+		return o.writePacket(ctx, pkt)
 	})
 }
 
@@ -220,12 +247,6 @@ func (o *Output) writePacket(
 	ctx context.Context,
 	pkt InputPacket,
 ) (_err error) {
-	logger.Tracef(ctx,
-		"writePacket (pos:%d, pts:%d, dts:%d, dur:%d)",
-		pkt.Packet.Pos(), pkt.Packet.Pts(), pkt.Packet.Dts(), pkt.Packet.Duration(),
-	)
-	defer func() { logger.Tracef(ctx, "/writePacket: %v", _err) }()
-
 	packet := pkt.Packet
 	if packet == nil {
 		return fmt.Errorf("packet == nil")
@@ -333,7 +354,7 @@ func (o *Output) doWritePacket(
 }
 
 func (o *Output) OutputPacketsChan() <-chan OutputPacket {
-	return noOutputPacketsChan
+	return o.outputChan
 }
 
 func (o *Output) ErrorChan() <-chan error {
@@ -342,4 +363,8 @@ func (o *Output) ErrorChan() <-chan error {
 
 func (o *Output) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
 	return o.FormatContext
+}
+
+func (o *Output) String() string {
+	return fmt.Sprintf("Output(%s)", o.URL)
 }

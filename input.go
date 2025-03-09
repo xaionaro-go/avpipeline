@@ -19,6 +19,7 @@ type InputConfig struct {
 
 type Input struct {
 	ID             InputID
+	URL            string
 	OutputChan     chan OutputPacket
 	ErrorChanValue chan error
 	*astikit.Closer
@@ -42,9 +43,10 @@ func NewInputFromURL(
 
 	input := &Input{
 		ID:             InputID(nextInputID.Add(1)),
+		URL:            url,
 		Closer:         astikit.NewCloser(),
 		OutputChan:     make(chan OutputPacket, 1),
-		ErrorChanValue: make(chan error, 1),
+		ErrorChanValue: make(chan error, 2),
 	}
 
 	input.FormatContext = astiav.AllocFormatContext()
@@ -52,11 +54,11 @@ func NewInputFromURL(
 		// TODO: is there a way to extract the actual error code or something?
 		return nil, fmt.Errorf("unable to allocate a format context")
 	}
-	input.Closer.Add(input.FormatContext.Free)
+	setFinalizerFree(ctx, input.FormatContext)
 
 	if len(cfg.CustomOptions) > 0 {
 		input.Dictionary = astiav.NewDictionary()
-		input.Closer.Add(input.Dictionary.Free)
+		setFinalizerFree(ctx, input.Dictionary)
 
 		for _, opt := range cfg.CustomOptions {
 			if opt.Key == "f" {
@@ -76,11 +78,27 @@ func NewInputFromURL(
 		return nil, fmt.Errorf("unable to get stream info: %w", err)
 	}
 
-	observability.Go(ctx, func() {
-		defer input.Close()
-		input.ErrorChanValue <- input.readLoop(ctx)
-	})
+	startReaderLoop(ctx, input)
 	return input, nil
+}
+
+func (i *Input) addToCloser(callback func()) {
+	i.Closer.Add(callback)
+}
+
+func (i *Input) outChanError() chan<- error {
+	return i.ErrorChanValue
+}
+
+func (i *Input) finalize(ctx context.Context) error {
+	observability.Go(ctx, func() {
+		err := i.Close()
+		if err != nil {
+			logger.Errorf(ctx, "unable to close input %s: %w", i, err)
+		}
+	})
+	close(i.OutputChan)
+	return nil
 }
 
 func (i *Input) readLoop(
@@ -102,7 +120,8 @@ func (i *Input) readLoop(
 		case nil:
 			logger.Tracef(
 				ctx,
-				"received a frame (pos:%d, pts:%d, dts:%d, dur:%d), data: 0x %X",
+				"received a packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d), data: 0x %X",
+				packet.StreamIndex(),
 				packet.Pos(), packet.Pts(), packet.Dts(), packet.Duration(),
 				packet.Data(),
 			)
@@ -143,8 +162,8 @@ func (i *Input) SendPacketChan() chan<- InputPacket {
 func (i *Input) SendPacket(
 	ctx context.Context,
 	input InputPacket,
-) (_haveDecoded bool, _haveEncoded bool, _err error) {
-	return false, false, fmt.Errorf("cannot send packets to an Input")
+) (_err error) {
+	return fmt.Errorf("cannot send packets to an Input")
 }
 
 func (i *Input) OutputPacketsChan() <-chan OutputPacket {
@@ -157,4 +176,8 @@ func (i *Input) ErrorChan() <-chan error {
 
 func (i *Input) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
 	return i.FormatContext
+}
+
+func (i *Input) String() string {
+	return fmt.Sprintf("Input(%s)", i.URL)
 }

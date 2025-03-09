@@ -44,6 +44,13 @@ func CopyStreamParameters(
 	if err := src.CodecParameters().Copy(dst.CodecParameters()); err != nil {
 		return fmt.Errorf("unable to copy the codec parameters of stream: %w", err)
 	}
+	copyNonCodecStreamParameters(dst, src)
+	return nil
+}
+
+func copyNonCodecStreamParameters(
+	dst, src *astiav.Stream,
+) {
 	dst.SetDiscard(src.Discard())
 	dst.SetAvgFrameRate(src.AvgFrameRate())
 	dst.SetRFrameRate(src.RFrameRate())
@@ -52,5 +59,4 @@ func CopyStreamParameters(
 	dst.SetStartTime(src.StartTime())
 	dst.SetEventFlags(src.EventFlags())
 	dst.SetPTSWrapBits(src.PTSWrapBits())
-	return nil
 }

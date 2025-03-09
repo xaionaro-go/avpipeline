@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
+	"github.com/facebookincubator/go-belt/pkg/runtime"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
@@ -22,17 +25,23 @@ import (
 func main() {
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "syntax: %s <URL-from> <URL-to>\n", os.Args[0])
+		pflag.PrintDefaults()
 	}
 
 	loggerLevel := logger.LevelWarning
 	pflag.Var(&loggerLevel, "log-level", "Log level")
 	netPprofAddr := pflag.String("net-pprof-listen-addr", "", "an address to listen for incoming net/pprof connections")
+	videoCodec := pflag.String("vcodec", "copy", "")
+	hwDeviceName := pflag.String("hwdevice", "", "")
+	frameDrop := pflag.Bool("framedrop", false, "")
+
 	pflag.Parse()
 	if len(pflag.Args()) != 2 {
 		pflag.Usage()
 		os.Exit(1)
 	}
 
+	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
 	l := logrus.Default().WithLevel(loggerLevel)
 	ctx := logger.CtxWithLogger(context.Background(), l)
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -68,6 +77,7 @@ func main() {
 	if err != nil {
 		l.Fatal(err)
 	}
+	defer input.Close()
 
 	l.Debugf("opening '%s' as the output...", toURL)
 	output, err := avpipeline.NewOutputFromURL(
@@ -78,13 +88,39 @@ func main() {
 	if err != nil {
 		l.Fatal(err)
 	}
+	defer output.Close()
 
-	errCh := make(chan avpipeline.ErrPipeline, 1)
-	pipeline := avpipeline.NewPipelineNode(input)
-	pipeline.PushTo = append(pipeline.PushTo, avpipeline.NewPipelineNode(output))
+	errCh := make(chan avpipeline.ErrPipeline, 10)
+	inputNode := avpipeline.NewPipelineNode(input)
+	finalNode := inputNode
+	if *videoCodec != "copy" {
+		hwDeviceName := avpipeline.HardwareDeviceName(*hwDeviceName)
+		encoderFactory := avpipeline.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
+		recoder, err := avpipeline.NewRecoder(
+			ctx,
+			avpipeline.NewNaiveDecoderFactory(0, hwDeviceName),
+			encoderFactory,
+			nil,
+		)
+		if err != nil {
+			l.Fatal(err)
+		}
+		defer recoder.Close()
+		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
+		recodingNode := avpipeline.NewPipelineNode(recoder)
+		inputNode.PushTo = append(inputNode.PushTo, recodingNode)
+		finalNode = recodingNode
+	}
+	finalNode.PushTo = append(finalNode.PushTo, avpipeline.NewPipelineNode(output))
+
+	pipeline := inputNode
+	l.Debugf("resulting pipeline: %s", pipeline.String())
+
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		pipeline.Serve(ctx, errCh)
+		pipeline.Serve(ctx, avpipeline.PipelineServeConfig{
+			FrameDrop: *frameDrop,
+		}, errCh)
 	})
 
 	t := time.NewTicker(time.Second)
@@ -94,16 +130,27 @@ func main() {
 		case <-ctx.Done():
 			l.Infof("finished")
 			return
-		case err := <-errCh:
-			l.Fatal(err)
-			return
+		case err, ok := <-errCh:
+			if !ok {
+				return
+			}
+			if errors.Is(err.Err, context.Canceled) {
+				continue
+			}
+			if errors.Is(err.Err, io.EOF) {
+				continue
+			}
+			if err.Err != nil {
+				l.Fatal(err)
+				return
+			}
 		case <-t.C:
-			inputStats := pipeline.GetStats()
+			inputStats := inputNode.GetStats()
 			inputStatsJSON, err := json.Marshal(inputStats)
 			if err != nil {
 				l.Fatal(err)
 			}
-			outputStats := pipeline.PushTo[0].GetStats()
+			outputStats := finalNode.PushTo[0].GetStats()
 			outputStatsJSON, err := json.Marshal(outputStats)
 			if err != nil {
 				l.Fatal(err)

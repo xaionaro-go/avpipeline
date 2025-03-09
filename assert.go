@@ -9,10 +9,11 @@ import (
 func assert(
 	ctx context.Context,
 	mustBeTrue bool,
+	extraArgs ...any,
 ) {
 	if mustBeTrue {
 		return
 	}
 
-	logger.Panicf(ctx, "assertion failed")
+	logger.Panic(ctx, "assertion failed", extraArgs)
 }

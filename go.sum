@@ -46,8 +46,8 @@ github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f h1:mMrVrYtH
 github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f/go.mod h1:aszOZHoPPSgKwdbJUgonps3MSODqctkNhwQDDwlw0Eg=
 github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c h1:2CIIxTRox9auImHyfbfrqSyrvPaWrw5w2Yw5TkOioZw=
 github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c/go.mod h1:vRcA12NWsR0IrS75eqnPBs5aVfCYmJy4bR+6DbJpBCg=
-github.com/xaionaro-go/observability v0.0.0-20250111142240-5d72f17a6d12 h1:iy02dGEbIbn8yb/pO/gPpyl2QSk6CPiLl8/JisKsrWg=
-github.com/xaionaro-go/observability v0.0.0-20250111142240-5d72f17a6d12/go.mod h1:j5y9LVYd0v8sJa9Ks7ZyuwFxAUpaNFHBNKBkiYipxPM=
+github.com/xaionaro-go/observability v0.0.0-20250309200059-047fad8d76e4 h1:IhTCWOXWLz7Y45tjm/s6Kcd+jAqV8hbpOYl7IglgEIc=
+github.com/xaionaro-go/observability v0.0.0-20250309200059-047fad8d76e4/go.mod h1:j5y9LVYd0v8sJa9Ks7ZyuwFxAUpaNFHBNKBkiYipxPM=
 github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638 h1:w7Dt6Mpj36S2cWm0PkT2+D4kxrQbfCwjXZs1HqiILpE=
 github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638/go.mod h1:hOkJBFoMsnCDoZgpSPTHYbnevPgtpD16d9Xga91U+Eo=
 github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2 h1:QHpTWfyfmz65cE0MtFXe9fScdi+X0VIYR2wgolSYEUk=
@@ -57,6 +57,8 @@ github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 h1:1Kqw9dv2Ln
 github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1/go.mod h1:UwmTXX+EpoEYHuy0rSys1Rp5PW+eVTgZSjgMVLJENKg=
 github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e h1:FV+/FVPYOncsNNqtlMvqRDrsQznArX0lO0PkFifixDs=
 github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e/go.mod h1:ERewyGVM0zYnWA9nxdHPIC3xc9Yrf5CgAnBITuP3FRE=
+github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c h1://sE/WLpO7wpcVsp1FfTNAG9JmL60KfXiogNVKYivTA=
+github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c/go.mod h1:MGRT1+2m2adVRc4aAn0RVGysjsSRKN9VCyBJLHvQd4k=
 github.com/xaionaro-go/xsync v0.0.0-20250113213958-aedf9c8786f5 h1:l18KTPxJCTppjRNVRtE5PcKCqFBSzVPcwAw2x0vxAdo=
 github.com/xaionaro-go/xsync v0.0.0-20250113213958-aedf9c8786f5/go.mod h1:FCpywNAl4a4hgzE8j7Z+TpdhBQi5WHxnI35jOrFpoQw=
 golang.org/x/crypto v0.32.0 h1:euUpcYgM8WcP71gNpTqQCn6rC2t6ULUPiOzfWaXVVfc=
