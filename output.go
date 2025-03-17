@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -199,10 +200,19 @@ func (o *Output) finalize(
 	logger.Debugf(ctx, "finalize")
 	defer func() { logger.Debugf(ctx, "/finalize: %v", _err) }()
 
-	return xsync.DoR1(ctx, &o.Locker, func() error {
+	return xsync.DoR1(ctx, &o.Locker, func() (_err error) {
 		var result []error
 		if len(o.FormatContext.Streams()) != 0 {
-			if err := o.FormatContext.WriteTrailer(); err != nil {
+			err := func() error {
+				defer func() {
+					r := recover()
+					if r != nil {
+						_err = fmt.Errorf("got panic: %v:\n%s\n", r, debug.Stack())
+					}
+				}()
+				return o.FormatContext.WriteTrailer()
+			}()
+			if err != nil {
 				result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
 			}
 		}

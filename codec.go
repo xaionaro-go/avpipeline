@@ -160,7 +160,7 @@ func newCodec(
 		logger.Tracef(ctx, "codec_parameters: %s", spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(codecParameters), "c").Elem().Elem().Interface()))
 	}
 
-	logger.Debugf(ctx, "time_base == %f", timeBase)
+	logger.Debugf(ctx, "time_base == %v", timeBase)
 	c.codecContext.SetTimeBase(timeBase)
 
 	if err := c.codecContext.Open(c.codec, options); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
@@ -13,12 +14,16 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 )
 
+const (
+	enableStreamCodecParametersUpdates = false
+)
+
 type Recoder struct {
 	locker           sync.Mutex
 	decoderFactory   DecoderFactory
 	encoderFactory   EncoderFactory
 	decoders         map[int]*Decoder
-	encoders         map[int]Encoder
+	encoders         map[int]*encoderInRecoder
 	frame            *astiav.Frame
 	closeOnce        sync.Once
 	closer           *astikit.Closer
@@ -48,7 +53,7 @@ func NewRecoder(
 		decoderFactory:      decoderFactory,
 		encoderFactory:      encoderFactory,
 		decoders:            map[int]*Decoder{},
-		encoders:            map[int]Encoder{},
+		encoders:            map[int]*encoderInRecoder{},
 		streamConfigurer:    streamConfigurer,
 		outputFormatContext: astiav.AllocFormatContext(),
 		outputStreams:       make(map[int]*astiav.Stream),
@@ -208,6 +213,11 @@ func (r *Recoder) configureOutputStream(
 	return nil
 }
 
+type encoderInRecoder struct {
+	Encoder
+	LastInitTS time.Time
+}
+
 func (r *Recoder) SendPacket(
 	ctx context.Context,
 	input InputPacket,
@@ -223,16 +233,16 @@ func (r *Recoder) SendPacket(
 	encoder := r.encoders[input.StreamIndex()]
 	logger.Tracef(ctx, "encoder == %v", encoder)
 	if encoder == nil {
-		var err error
-		encoder, err = r.encoderFactory.NewEncoder(ctx, input)
+		encoderInstance, err := r.encoderFactory.NewEncoder(ctx, input)
 		if err != nil {
 			return fmt.Errorf("cannot initialize an encoder for stream %d: %w", input.StreamIndex(), err)
 		}
+		encoder = &encoderInRecoder{Encoder: encoderInstance}
 		r.encoders[input.StreamIndex()] = encoder
 	}
 	assert(ctx, encoder != nil)
 
-	if encoder == (EncoderCopy{}) {
+	if encoder.Encoder == (EncoderCopy{}) {
 		outputStream, err := r.lazyInitOutputStreamCopy(ctx, input)
 		if err != nil {
 			return fmt.Errorf("unable to initialize the output stream (copy): %w", err)
@@ -261,11 +271,21 @@ func (r *Recoder) SendPacket(
 	if err != nil {
 		return fmt.Errorf("unable to initialize the output stream: %w", err)
 	}
+	if enableStreamCodecParametersUpdates {
+		if getInitTSer, ok := encoder.Encoder.(interface{ GetInitTS() time.Time }); ok {
+			initTS := getInitTSer.GetInitTS()
+			if encoder.LastInitTS.Before(initTS) {
+				logger.Debugf(ctx, "updating the codec parameters")
+				encoder.ToCodecParameters(outputStream.CodecParameters())
+				encoder.LastInitTS = initTS
+			}
+		}
+	}
 
 	// TODO: investigate: Do we really need this? And why?
 	//input.Packet.RescaleTs(inputStream.TimeBase(), decoder.CodecContext().TimeBase())
 
-	if err := decoder.CodecContext().SendPacket(input.Packet); err != nil {
+	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
 		logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
 		if errors.Is(err, astiav.ErrEagain) {
 			return nil
@@ -306,7 +326,7 @@ func (r *Recoder) SendPacket(
 
 	for {
 		packet := PacketPool.Get()
-		err := encoder.CodecContext().ReceivePacket(packet)
+		err := encoder.ReceivePacket(ctx, packet)
 		if err != nil {
 			isEOF := errors.Is(err, astiav.ErrEof)
 			isEAgain := errors.Is(err, astiav.ErrEagain)

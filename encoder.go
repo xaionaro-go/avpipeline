@@ -2,8 +2,11 @@ package avpipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"runtime"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
@@ -23,48 +26,132 @@ type Encoder interface {
 	HardwareDeviceContext() *astiav.HardwareDeviceContext
 	HardwarePixelFormat() astiav.PixelFormat
 	SendFrame(context.Context, *astiav.Frame) error
+	ReceivePacket(context.Context, *astiav.Packet) error
 	SetQuality(context.Context, Quality) error
 }
 
 type EncoderFullBackend = Codec
 type EncoderFull struct {
 	*EncoderFullBackend
+	Params EncoderParams
+	InitTS time.Time
 }
 
 var _ Encoder = (*EncoderFull)(nil)
 
+type EncoderParams struct {
+	CodecName          string
+	CodecParameters    *astiav.CodecParameters
+	HardwareDeviceType astiav.HardwareDeviceType
+	HardwareDeviceName HardwareDeviceName
+	TimeBase           astiav.Rational
+	Options            *astiav.Dictionary
+	Flags              int
+}
+
 func NewEncoder(
 	ctx context.Context,
-	codecName string,
-	codecParameters *astiav.CodecParameters,
-	hardwareDeviceType astiav.HardwareDeviceType,
-	hardwareDeviceName HardwareDeviceName,
-	timeBase astiav.Rational,
-	options *astiav.Dictionary,
-	flags int,
+	params EncoderParams,
 ) (_ret Encoder, _err error) {
-	if codecName == CodecNameCopy {
+	if params.CodecName == CodecNameCopy {
 		return EncoderCopy{}, nil
+	}
+	e, err := newEncoder(ctx, params, nil)
+	if err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+func newEncoder(
+	ctx context.Context,
+	params EncoderParams,
+	overrideQuality Quality,
+) (_ret *EncoderFull, _err error) {
+	if params.CodecParameters != nil {
+		cp := astiav.AllocCodecParameters()
+		params.CodecParameters.Copy(cp)
+		params.CodecParameters = cp
+		runtime.SetFinalizer(params.CodecParameters, func(cp *astiav.CodecParameters) {
+			cp.Free()
+		})
+	}
+	if params.Options != nil {
+		opts := astiav.NewDictionary()
+		opts.Unpack(params.Options.Pack())
+		params.Options = opts
+		runtime.SetFinalizer(params.Options, func(opts *astiav.Dictionary) {
+			opts.Free()
+		})
+	}
+	if overrideQuality != nil {
+		if params.CodecParameters == nil {
+			params.CodecParameters = astiav.AllocCodecParameters()
+		}
+		err := overrideQuality.Apply(params.CodecParameters)
+		if err != nil {
+			return nil, fmt.Errorf("unable to apply quality override %#+v: %w", overrideQuality, err)
+		}
 	}
 	c, err := newCodec(
 		ctx,
-		codecName,
-		codecParameters,
+		params.CodecName,
+		params.CodecParameters,
 		true,
-		hardwareDeviceType,
-		hardwareDeviceName,
-		timeBase,
-		options,
-		flags,
+		params.HardwareDeviceType,
+		params.HardwareDeviceName,
+		params.TimeBase,
+		params.Options,
+		params.Flags,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &EncoderFull{EncoderFullBackend: c}, nil
+	return &EncoderFull{
+		EncoderFullBackend: c,
+		Params:             params,
+		InitTS:             time.Now(),
+	}, nil
 }
 
 func (e *EncoderFull) String() string {
 	return fmt.Sprintf("Encoder(%s)", e.codec.Name())
+}
+
+func (e *EncoderFull) GetInitTS() time.Time {
+	return e.InitTS
+}
+
+func (e *EncoderFull) SendFrame(
+	ctx context.Context,
+	f *astiav.Frame,
+) error {
+	return xsync.DoR1(ctx, &e.locker, func() error {
+		return e.sendFrameNoLock(ctx, f)
+	})
+}
+
+func (e *EncoderFull) sendFrameNoLock(
+	ctx context.Context,
+	f *astiav.Frame,
+) error {
+	return e.CodecContext().SendFrame(f)
+}
+
+func (e *EncoderFull) ReceivePacket(
+	ctx context.Context,
+	p *astiav.Packet,
+) error {
+	return xsync.DoR1(ctx, &e.locker, func() error {
+		return e.receivePacketNoLock(ctx, p)
+	})
+}
+
+func (e *EncoderFull) receivePacketNoLock(
+	ctx context.Context,
+	p *astiav.Packet,
+) (_err error) {
+	return e.CodecContext().ReceivePacket(p)
 }
 
 func (e *EncoderFull) SetQuality(
@@ -89,15 +176,40 @@ func (e *EncoderFull) setQualityNoLock(
 	case "mediacodec":
 		return e.setQualityMediacodec(ctx, q)
 	default:
-		return fmt.Errorf("dynamically changing the quality is not implemented, yet", e.codec.Name())
+		return e.setQualityGeneric(ctx, q)
 	}
 }
 
-func (e *EncoderFull) SendFrame(
+func (e *EncoderFull) Close() error {
+	ctx := context.Background()
+	return e.CloseContext(ctx)
+}
+
+func (e *EncoderFull) CloseContext(ctx context.Context) error {
+	return xsync.DoA1R1(ctx, &e.locker, e.closeNoLock, ctx)
+}
+
+func (e *EncoderFull) closeNoLock(ctx context.Context) error {
+	var result []error
+	if err := e.EncoderFullBackend.Close(); err != nil {
+		result = append(result, fmt.Errorf("unable to close the old encoder: %w", err))
+	}
+	e.Params.Options = nil
+	e.Params.CodecParameters = nil
+	return errors.Join(result...)
+}
+
+func (e *EncoderFull) setQualityGeneric(
 	ctx context.Context,
-	f *astiav.Frame,
-) error {
-	return xsync.DoR1(ctx, &e.locker, func() error {
-		return e.CodecContext().SendFrame(f)
-	})
+	q Quality,
+) (_err error) {
+	newEncoder, err := newEncoder(ctx, e.Params, q)
+	if err != nil {
+		return fmt.Errorf("unable to initialize new encoder for quality %#+v", q, err)
+	}
+	if err := e.closeNoLock(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
+	}
+	*e = *newEncoder
+	return nil
 }

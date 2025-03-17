@@ -3,10 +3,13 @@ package quality
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/asticode/go-astiav"
 )
 
 type Quality interface {
 	typeName() string
+	Apply(*astiav.CodecParameters) error
 }
 
 type valueSetter interface {

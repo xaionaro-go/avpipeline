@@ -2,7 +2,7 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.24.1
 
-replace github.com/asticode/go-astiav v0.35.1 => github.com/xaionaro-go/astiav v0.0.0-20250317012930-39df462db826
+replace github.com/asticode/go-astiav v0.35.1 => github.com/xaionaro-go/astiav v0.0.0-20250317204545-eb97dfe4ade0
 
 require (
 	github.com/asticode/go-astiav v0.35.1

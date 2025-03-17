@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"sync"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xcontext"
@@ -77,7 +77,13 @@ func (p *Pipeline) Serve(
 	}
 
 	defer func() { logger.Debugf(ctx, "Serve[%T]: finished processing", p.ProcessingNode) }()
-	defer func() { errmon.ObserveRecoverCtx(ctx, recover()) }()
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		logger.Errorf(ctx, "got panic: %v:\n%s\n", r, debug.Stack())
+	}()
 
 	procNodeEndCtx := ctx
 	for {

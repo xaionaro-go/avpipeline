@@ -40,6 +40,15 @@ func NewDecoder(
 	return &Decoder{c}, nil
 }
 
+func (d *Decoder) SendPacket(
+	ctx context.Context,
+	p *astiav.Packet,
+) error {
+	return xsync.DoR1(ctx, &d.locker, func() error {
+		return d.CodecContext().SendPacket(p)
+	})
+}
+
 func (d *Decoder) ReceiveFrame(
 	ctx context.Context,
 	f *astiav.Frame,

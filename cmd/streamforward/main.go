@@ -19,6 +19,7 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -34,6 +35,7 @@ func main() {
 	videoCodec := pflag.String("vcodec", "copy", "")
 	hwDeviceName := pflag.String("hwdevice", "", "")
 	frameDrop := pflag.Bool("framedrop", false, "")
+	alternateBitrate := pflag.IntSlice("silly-stuff-alternate-bitrate", nil, "")
 
 	pflag.Parse()
 	if len(pflag.Args()) != 2 {
@@ -93,9 +95,10 @@ func main() {
 	errCh := make(chan avpipeline.ErrPipeline, 10)
 	inputNode := avpipeline.NewPipelineNode(input)
 	finalNode := inputNode
+	var encoderFactory *avpipeline.NaiveEncoderFactory
 	if *videoCodec != "copy" {
 		hwDeviceName := avpipeline.HardwareDeviceName(*hwDeviceName)
-		encoderFactory := avpipeline.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
+		encoderFactory = avpipeline.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
 		recoder, err := avpipeline.NewRecoder(
 			ctx,
 			avpipeline.NewNaiveDecoderFactory(0, hwDeviceName),
@@ -125,8 +128,10 @@ func main() {
 		}, errCh)
 	})
 
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
+	bitrateIdx := 0
+	statusTicker := time.NewTicker(time.Second)
+	defer statusTicker.Stop()
+	codecTicker := time.NewTimer(3 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
@@ -146,7 +151,7 @@ func main() {
 				l.Fatal(err)
 				return
 			}
-		case <-t.C:
+		case <-statusTicker.C:
 			inputStats := inputNode.GetStats()
 			inputStatsJSON, err := json.Marshal(inputStats)
 			if err != nil {
@@ -158,6 +163,30 @@ func main() {
 				l.Fatal(err)
 			}
 			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)
+		case <-codecTicker.C:
+			if encoderFactory == nil {
+				logger.Debugf(ctx, "encoderFactory == nil")
+				continue
+			}
+			if len(*alternateBitrate) == 0 {
+				logger.Debugf(ctx, "len(*alternateBitrate) == 0")
+				continue
+			}
+			nextBitrate := (*alternateBitrate)[bitrateIdx]
+			bitrateIdx++
+			if bitrateIdx >= len(*alternateBitrate) {
+				bitrateIdx = bitrateIdx % len(*alternateBitrate)
+			}
+			encoderFactory.Locker.Do(ctx, func() {
+				for _, encoder := range encoderFactory.VideoEncoders {
+					err := encoder.SetQuality(ctx, quality.ConstantBitrate(nextBitrate))
+					if err != nil {
+						logger.Errorf(ctx, "SetQuality errored: %v", err)
+						continue
+					}
+				}
+			})
+			fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
 		}
 	}
 }

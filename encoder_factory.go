@@ -71,12 +71,24 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 		}
 	}()
 
+	var params *EncoderParams
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
-		return NewEncoder(ctx, f.VideoCodec, codecParameters, f.HardwareDeviceType, f.HardwareDeviceName, pkt.TimeBase(), nil, 0)
+		params = &EncoderParams{
+			CodecName:          f.VideoCodec,
+			CodecParameters:    codecParameters,
+			HardwareDeviceType: f.HardwareDeviceType,
+			HardwareDeviceName: f.HardwareDeviceName,
+			TimeBase:           pkt.TimeBase(),
+		}
 	case astiav.MediaTypeAudio:
-		return NewEncoder(ctx, f.AudioCodec, codecParameters, 0, "", pkt.TimeBase(), nil, 0)
+		params = &EncoderParams{
+			CodecName:       f.AudioCodec,
+			CodecParameters: codecParameters,
+			TimeBase:        pkt.TimeBase(),
+		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
 	}
+	return NewEncoder(ctx, *params)
 }
