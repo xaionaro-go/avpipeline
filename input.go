@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -22,7 +23,8 @@ type Input struct {
 	URL            string
 	OutputChan     chan OutputPacket
 	ErrorChanValue chan error
-	*astikit.Closer
+	closeOnce      sync.Once
+	closer         *astikit.Closer
 	*astiav.FormatContext
 	*astiav.Dictionary
 }
@@ -44,7 +46,7 @@ func NewInputFromURL(
 	input := &Input{
 		ID:             InputID(nextInputID.Add(1)),
 		URL:            url,
-		Closer:         astikit.NewCloser(),
+		closer:         astikit.NewCloser(),
 		OutputChan:     make(chan OutputPacket, 1),
 		ErrorChanValue: make(chan error, 2),
 	}
@@ -72,7 +74,7 @@ func NewInputFromURL(
 	if err := input.FormatContext.OpenInput(url, nil, input.Dictionary); err != nil {
 		return nil, fmt.Errorf("unable to open input by URL '%s': %w", url, err)
 	}
-	input.Closer.Add(input.FormatContext.CloseInput)
+	input.closer.Add(input.FormatContext.CloseInput)
 
 	if err := input.FormatContext.FindStreamInfo(nil); err != nil {
 		return nil, fmt.Errorf("unable to get stream info: %w", err)
@@ -83,11 +85,19 @@ func NewInputFromURL(
 }
 
 func (i *Input) addToCloser(callback func()) {
-	i.Closer.Add(callback)
+	i.closer.Add(callback)
 }
 
 func (i *Input) outChanError() chan<- error {
 	return i.ErrorChanValue
+}
+
+func (i *Input) Close() error {
+	var err error
+	i.closeOnce.Do(func() {
+		err = i.closer.Close()
+	})
+	return err
 }
 
 func (i *Input) finalize(ctx context.Context) error {

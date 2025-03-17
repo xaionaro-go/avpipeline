@@ -47,8 +47,8 @@ For example:
 
 	// connect: input -> recoder -> output
 
-	inputNode.PushTo = append(inputNode.PushTo, recodingNode)
-	recodingNode.PushTo = append(recodingNode.PushTo, outputNode)
+	inputNode.PushTo.Add(recodingNode)
+	recodingNode.PushTo.Add(outputNode)
 
 	// run
 

@@ -2,13 +2,10 @@ package avpipeline
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type InputPacket struct {
-	*astiav.Packet
-	*astiav.Stream
-	*astiav.FormatContext
-}
+type InputPacket = types.InputPacket
 
 type OutputPacket struct {
 	*astiav.Packet

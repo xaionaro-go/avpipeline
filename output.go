@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -41,6 +42,7 @@ type Output struct {
 	pendingPackets []*astiav.Packet
 	ioContext      *astiav.IOContext
 	proxy          *proxy.TCPProxy
+	closeOnce      sync.Once
 	*astikit.Closer
 	*astiav.FormatContext
 	*astiav.Dictionary
@@ -183,25 +185,40 @@ func NewOutputFromURL(
 	return o, nil
 }
 
+func (o *Output) Close() error {
+	var err error
+	o.closeOnce.Do(func() {
+		err = o.Closer.Close()
+	})
+	return err
+}
+
 func (o *Output) finalize(
-	_ context.Context,
-) error {
-	var result []error
-	if err := o.FormatContext.WriteTrailer(); err != nil {
-		result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
-	}
-	if o.ioContext != nil {
-		if err := o.ioContext.Close(); err != nil {
-			result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "finalize")
+	defer func() { logger.Debugf(ctx, "/finalize: %v", _err) }()
+
+	return xsync.DoR1(ctx, &o.Locker, func() error {
+		var result []error
+		if len(o.FormatContext.Streams()) != 0 {
+			if err := o.FormatContext.WriteTrailer(); err != nil {
+				result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
+			}
 		}
-	}
-	if o.proxy != nil {
-		if err := o.proxy.Close(); err != nil {
-			result = append(result, fmt.Errorf("unable to close the TLS-proxy: %v", err))
+		if o.ioContext != nil {
+			if err := o.ioContext.Close(); err != nil {
+				result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
+			}
 		}
-	}
-	close(o.outputChan)
-	return errors.Join(result...)
+		if o.proxy != nil {
+			if err := o.proxy.Close(); err != nil {
+				result = append(result, fmt.Errorf("unable to close the TLS-proxy: %v", err))
+			}
+		}
+		close(o.outputChan)
+		return errors.Join(result...)
+	})
 }
 
 func (o *Output) startReaderLoop(

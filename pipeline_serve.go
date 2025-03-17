@@ -128,24 +128,30 @@ func (p *Pipeline) Serve(
 					Stream:        stream,
 					FormatContext: fmtCtx,
 				}
-				pushChan := pushTo.SendPacketChan()
-				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", pushTo.ProcessingNode, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
+				if pushTo.Condition != nil && !pushTo.Condition.Match(ctx, pushPkt) {
+					logger.Tracef(ctx, "condition %s was not met", pushTo.Condition)
+					continue
+				}
+
+				dst := pushTo.Pipeline
+				pushChan := dst.SendPacketChan()
+				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", dst.ProcessingNode, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
 
 				if serveConfig.FrameDrop {
 					select {
 					case pushChan <- pushPkt:
 					default:
-						logger.Errorf(ctx, "unable to push to %s: the queue is full", pushTo.ProcessingNode)
-						incrementCounters(&pushTo.FramesMissed, mediaType)
+						logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.ProcessingNode)
+						incrementCounters(&dst.FramesMissed, mediaType)
 						PacketPool.Put(pushPkt.Packet)
 						continue
 					}
 				} else {
 					pushChan <- pushPkt
 				}
-				pushTo.BytesCountRead.Add(uint64(pkt.Size()))
-				incrementCounters(&pushTo.FramesRead, mediaType)
-				logger.Tracef(ctx, "pushed to %s packet %p with stream index %d via chan %p", pushTo.ProcessingNode, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
+				dst.BytesCountRead.Add(uint64(pkt.Size()))
+				incrementCounters(&dst.FramesRead, mediaType)
+				logger.Tracef(ctx, "pushed to %s packet %p with stream index %d via chan %p", dst.ProcessingNode, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
 			}
 
 			PacketPool.Put(pkt.Packet)

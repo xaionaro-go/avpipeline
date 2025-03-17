@@ -108,13 +108,15 @@ func main() {
 		defer recoder.Close()
 		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
 		recodingNode := avpipeline.NewPipelineNode(recoder)
-		inputNode.PushTo = append(inputNode.PushTo, recodingNode)
+		inputNode.PushTo.Add(recodingNode)
 		finalNode = recodingNode
 	}
-	finalNode.PushTo = append(finalNode.PushTo, avpipeline.NewPipelineNode(output))
+	finalNode.PushTo.Add(avpipeline.NewPipelineNode(output))
+	assert(ctx, len(finalNode.PushTo) == 1, len(finalNode.PushTo))
 
 	pipeline := inputNode
 	l.Debugf("resulting pipeline: %s", pipeline.String())
+	l.Debugf("resulting pipeline (for graphviz):\n%s\n", pipeline.DotString(false))
 
 	observability.Go(ctx, func() {
 		defer cancelFn()

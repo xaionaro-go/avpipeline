@@ -90,9 +90,9 @@ func TestRecoderNoFailure(t *testing.T) {
 			defer recoder.Close()
 			l.Debugf("initialized a recoder to %s (hwdev:%s)...", "libx264", "")
 			recodingNode := avpipeline.NewPipelineNode(recoder)
-			inputNode.PushTo = append(inputNode.PushTo, recodingNode)
+			inputNode.PushTo.Add(recodingNode)
 			finalNode = recodingNode
-			finalNode.PushTo = append(finalNode.PushTo, avpipeline.NewPipelineNode(output))
+			finalNode.PushTo.Add(avpipeline.NewPipelineNode(output))
 
 			pipeline := inputNode
 			l.Debugf("resulting pipeline: %s", pipeline.String())

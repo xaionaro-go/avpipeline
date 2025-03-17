@@ -20,6 +20,7 @@ type Recoder struct {
 	decoders         map[int]*Decoder
 	encoders         map[int]Encoder
 	frame            *astiav.Frame
+	closeOnce        sync.Once
 	closer           *astikit.Closer
 	isClosed         bool
 	inputChan        chan InputPacket
@@ -98,7 +99,11 @@ func (r *Recoder) SendPacketChan() chan<- InputPacket {
 }
 
 func (r *Recoder) Close() error {
-	return r.closer.Close()
+	var err error
+	r.closeOnce.Do(func() {
+		err = r.closer.Close()
+	})
+	return err
 }
 
 func (r *Recoder) lazyInitOutputStreamCopy(
