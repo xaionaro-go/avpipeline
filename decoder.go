@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/xsync"
 )
 
 type Decoder struct {
@@ -37,4 +38,13 @@ func NewDecoder(
 		return nil, err
 	}
 	return &Decoder{c}, nil
+}
+
+func (d *Decoder) ReceiveFrame(
+	ctx context.Context,
+	f *astiav.Frame,
+) error {
+	return xsync.DoR1(ctx, &d.locker, func() error {
+		return d.CodecContext().ReceiveFrame(f)
+	})
 }

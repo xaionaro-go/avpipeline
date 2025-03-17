@@ -10,6 +10,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/unsafetools"
+	"github.com/xaionaro-go/xsync"
 )
 
 type Codec struct {
@@ -18,6 +19,7 @@ type Codec struct {
 	hardwareDeviceContext *astiav.HardwareDeviceContext
 	hardwarePixelFormat   astiav.PixelFormat
 	closer                *astikit.Closer
+	locker                xsync.RWMutex
 }
 
 func (c *Codec) Codec() *astiav.Codec {
@@ -38,6 +40,10 @@ func (c *Codec) HardwarePixelFormat() astiav.PixelFormat {
 
 func (c *Codec) Close() error {
 	return c.closer.Close()
+}
+
+func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
+	return c.codecContext.ToCodecParameters(cp)
 }
 
 func newCodec(

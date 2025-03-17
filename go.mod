@@ -1,15 +1,16 @@
 module github.com/xaionaro-go/avpipeline
 
-go 1.22.2
+go 1.24.1
 
-replace github.com/asticode/go-astiav v0.33.1 => github.com/xaionaro-go/astiav v0.0.0-20250317012930-39df462db826
+replace github.com/asticode/go-astiav v0.35.1 => github.com/xaionaro-go/astiav v0.0.0-20250317012930-39df462db826
 
 require (
-	github.com/asticode/go-astiav v0.33.1
+	github.com/asticode/go-astiav v0.35.1
 	github.com/asticode/go-astikit v0.52.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250201205440-80b5034808e3
 	github.com/spf13/pflag v1.0.6
+	github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
 	github.com/xaionaro-go/observability v0.0.0-20250309200059-047fad8d76e4
 	github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638

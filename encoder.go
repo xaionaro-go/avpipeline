@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/xsync"
 )
 
 const (
@@ -17,8 +19,11 @@ type Encoder interface {
 	io.Closer
 	Codec() *astiav.Codec
 	CodecContext() *astiav.CodecContext
+	ToCodecParameters(cp *astiav.CodecParameters) error
 	HardwareDeviceContext() *astiav.HardwareDeviceContext
 	HardwarePixelFormat() astiav.PixelFormat
+	SendFrame(context.Context, *astiav.Frame) error
+	SetQuality(context.Context, Quality) error
 }
 
 type EncoderFullBackend = Codec
@@ -59,5 +64,40 @@ func NewEncoder(
 }
 
 func (e *EncoderFull) String() string {
-	return "Encoder"
+	return fmt.Sprintf("Encoder(%s)", e.codec.Name())
+}
+
+func (e *EncoderFull) SetQuality(
+	ctx context.Context,
+	q Quality,
+) (_err error) {
+	logger.Tracef(ctx, "SetQuality(ctx, %#+v)", q)
+	return xsync.DoA2R1(ctx, &e.locker, e.setQualityNoLock, ctx, q)
+}
+
+func (e *EncoderFull) setQualityNoLock(
+	ctx context.Context,
+	q Quality,
+) (_err error) {
+	codecName := e.codec.Name()
+	defer func() {
+		if _err != nil {
+			_err = fmt.Errorf("%s: %w", codecName, _err)
+		}
+	}()
+	switch codecName {
+	case "mediacodec":
+		return e.setQualityMediacodec(ctx, q)
+	default:
+		return fmt.Errorf("dynamically changing the quality is not implemented, yet", e.codec.Name())
+	}
+}
+
+func (e *EncoderFull) SendFrame(
+	ctx context.Context,
+	f *astiav.Frame,
+) error {
+	return xsync.DoR1(ctx, &e.locker, func() error {
+		return e.CodecContext().SendFrame(f)
+	})
 }

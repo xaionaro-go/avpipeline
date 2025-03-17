@@ -165,7 +165,7 @@ func (r *Recoder) lazyInitOutputStream(
 	if outputStream == nil {
 		return nil, fmt.Errorf("unable to initialize an output stream")
 	}
-	if err := encoder.CodecContext().ToCodecParameters(outputStream.CodecParameters()); err != nil {
+	if err := encoder.ToCodecParameters(outputStream.CodecParameters()); err != nil {
 		return nil, fmt.Errorf("unable to copy codec parameters from the encoder to the output stream: %w", err)
 	}
 
@@ -276,7 +276,7 @@ func (r *Recoder) SendPacket(
 	frame := r.frame
 	for {
 		shouldContinue, err := func() (bool, error) {
-			err := decoder.CodecContext().ReceiveFrame(frame)
+			err := decoder.ReceiveFrame(ctx, frame)
 			if err != nil {
 				isEOF := errors.Is(err, astiav.ErrEof)
 				isEAgain := errors.Is(err, astiav.ErrEagain)
@@ -288,7 +288,7 @@ func (r *Recoder) SendPacket(
 			}
 			defer frame.Unref()
 
-			err = encoder.CodecContext().SendFrame(frame)
+			err = encoder.SendFrame(ctx, frame)
 			if err != nil {
 				logger.Debugf(ctx, "encoder.CodecContext().SendFrame(): %v", err)
 				return false, fmt.Errorf("unable to send the frame to the encoder: %w", err)
