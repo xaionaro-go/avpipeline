@@ -177,3 +177,9 @@ func (f *FilterThrottle) GetOutputFormatContext(_ context.Context) *astiav.Forma
 func (f *FilterThrottle) String() string {
 	return "FilterThrottle"
 }
+
+func (f *FilterThrottle) LockDo(fn func()) {
+	f.locker.Lock()
+	defer f.locker.Unlock()
+	fn()
+}
