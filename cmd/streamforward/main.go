@@ -19,8 +19,12 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/codec"
+	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/secret"
 )
 
 func main() {
@@ -75,55 +79,54 @@ func main() {
 	})
 
 	l.Debugf("opening '%s' as the input...", fromURL)
-	input, err := avpipeline.NewInputFromURL(ctx, fromURL, "", avpipeline.InputConfig{})
+	input, err := processor.NewInputFromURL(ctx, fromURL, secret.New(""), kernel.InputConfig{})
 	if err != nil {
 		l.Fatal(err)
 	}
-	defer input.Close()
+	defer input.Close(ctx)
 
 	l.Debugf("opening '%s' as the output...", toURL)
-	output, err := avpipeline.NewOutputFromURL(
+	output, err := processor.NewOutputFromURL(
 		ctx,
-		toURL, "",
-		avpipeline.OutputConfig{},
+		toURL, secret.New(""),
+		kernel.OutputConfig{},
 	)
 	if err != nil {
 		l.Fatal(err)
 	}
-	defer output.Close()
+	defer output.Close(ctx)
 
-	errCh := make(chan avpipeline.ErrPipeline, 10)
-	inputNode := avpipeline.NewPipelineNode(input)
+	errCh := make(chan avpipeline.ErrNode, 10)
+	inputNode := avpipeline.NewNode(input)
 	finalNode := inputNode
-	var encoderFactory *avpipeline.NaiveEncoderFactory
+	var encoderFactory *codec.NaiveEncoderFactory
 	if *videoCodec != "copy" {
-		hwDeviceName := avpipeline.HardwareDeviceName(*hwDeviceName)
-		encoderFactory = avpipeline.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
-		recoder, err := avpipeline.NewRecoder(
+		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
+		encoderFactory = codec.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
+		recoder, err := processor.NewRecoder(
 			ctx,
-			avpipeline.NewNaiveDecoderFactory(0, hwDeviceName),
+			codec.NewNaiveDecoderFactory(0, hwDeviceName),
 			encoderFactory,
 			nil,
 		)
 		if err != nil {
 			l.Fatal(err)
 		}
-		defer recoder.Close()
+		defer recoder.Close(ctx)
 		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-		recodingNode := avpipeline.NewPipelineNode(recoder)
+		recodingNode := avpipeline.NewNode(recoder)
 		inputNode.PushTo.Add(recodingNode)
 		finalNode = recodingNode
 	}
-	finalNode.PushTo.Add(avpipeline.NewPipelineNode(output))
+	finalNode.PushTo.Add(avpipeline.NewNode(output))
 	assert(ctx, len(finalNode.PushTo) == 1, len(finalNode.PushTo))
 
-	pipeline := inputNode
-	l.Debugf("resulting pipeline: %s", pipeline.String())
-	l.Debugf("resulting pipeline (for graphviz):\n%s\n", pipeline.DotString(false))
+	l.Debugf("resulting pipeline: %s", inputNode.String())
+	l.Debugf("resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		pipeline.Serve(ctx, avpipeline.PipelineServeConfig{
+		avpipeline.ServeRecursively(ctx, inputNode, avpipeline.ServeConfig{
 			FrameDrop: *frameDrop,
 		}, errCh)
 	})

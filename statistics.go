@@ -9,22 +9,14 @@ import (
 type ProcessingFramesStatistics = types.ProcessingFramesStatistics
 type ProcessingStatistics = types.ProcessingStatistics
 
-type CommonsProcessingFramesStatistics struct {
+type FramesStatistics struct {
 	Unknown atomic.Uint64
 	Other   atomic.Uint64
 	Video   atomic.Uint64
 	Audio   atomic.Uint64
 }
 
-type CommonsProcessingStatistics struct {
-	BytesCountRead  atomic.Uint64
-	BytesCountWrote atomic.Uint64
-	FramesRead      CommonsProcessingFramesStatistics
-	FramesMissed    CommonsProcessingFramesStatistics
-	FramesWrote     CommonsProcessingFramesStatistics
-}
-
-func (stats *CommonsProcessingStatistics) Convert() ProcessingStatistics {
+func (stats *NodeStatistics) Convert() ProcessingStatistics {
 	return ProcessingStatistics{
 		BytesCountRead:  stats.BytesCountRead.Load(),
 		BytesCountWrote: stats.BytesCountWrote.Load(),
@@ -43,10 +35,14 @@ func (stats *CommonsProcessingStatistics) Convert() ProcessingStatistics {
 	}
 }
 
-type CommonsProcessing struct {
-	CommonsProcessingStatistics
+type NodeStatistics struct {
+	BytesCountRead  atomic.Uint64
+	BytesCountWrote atomic.Uint64
+	FramesRead      FramesStatistics
+	FramesMissed    FramesStatistics
+	FramesWrote     FramesStatistics
 }
 
-func (e *CommonsProcessing) GetStats() *ProcessingStatistics {
-	return ptr(e.CommonsProcessingStatistics.Convert())
+func (e *NodeStatistics) GetStats() *ProcessingStatistics {
+	return ptr(e.Convert())
 }

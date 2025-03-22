@@ -1,4 +1,4 @@
-package avpipeline
+package kernel
 
 import (
 	"context"

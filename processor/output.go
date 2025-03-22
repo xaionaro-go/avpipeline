@@ -1,0 +1,30 @@
+package processor
+
+import (
+	"context"
+
+	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/secret"
+)
+
+func NewOutputFromURL(
+	ctx context.Context,
+	urlString string,
+	streamKey secret.String,
+	cfg kernel.OutputConfig,
+	processorOpts ...Option,
+) (Abstract, error) {
+	k, err := kernel.NewOutputFromURL(ctx, urlString, streamKey, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewFromKernel(
+		ctx,
+		k,
+		append([]Option{
+			OptionQueueSizeInput(600),
+			OptionQueueSizeOutput(0),
+			OptionQueueSizeError(2),
+		}, processorOpts...)...,
+	), nil
+}

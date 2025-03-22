@@ -10,16 +10,16 @@ For example:
 
 	// open the input
 
-	input, err := avpipeline.NewInputFromURL(ctx, fromURL, "", avpipeline.InputConfig{})
+	input, err := processor.NewInputFromURL(ctx, fromURL, "", avpipeline.InputConfig{})
 	if err != nil {
 		l.Fatal(err)
 	}
 	defer input.Close()
-	inputNode := avpipeline.NewPipelineNode(input)
+	inputNode := avpipeline.NewNode(input)
 
 	// open the output
 
-	output, err := avpipeline.NewOutputFromURL(
+	output, err := processor.NewOutputFromURL(
 		ctx,
 		toURL, "",
 		avpipeline.OutputConfig{},
@@ -28,14 +28,14 @@ For example:
 		l.Fatal(err)
 	}
 	defer output.Close()
-	outputNode := avpipeline.NewPipelineNode(output)
+	outputNode := avpipeline.NewNode(output)
 
 	// initialize a recorder to H264
 
-	encoderFactory := avpipeline.NewNaiveEncoderFactory("libx264", "copy", 0, "")
-	recoder, err := avpipeline.NewRecoder(
+	encoderFactory := codec.NewNaiveEncoderFactory("libx264", "copy", 0, "")
+	recoder, err := processor.NewRecoder(
 		ctx,
-		avpipeline.NewNaiveDecoderFactory(0, ""),
+		codec.NewNaiveDecoderFactory(0, ""),
 		encoderFactory,
 		nil,
 	)
@@ -43,7 +43,7 @@ For example:
 		l.Fatal(err)
 	}
 	defer recoder.Close()
-	recodingNode := avpipeline.NewPipelineNode(recoder)
+	recodingNode := avpipeline.NewNode(recoder)
 
 	// connect: input -> recoder -> output
 
