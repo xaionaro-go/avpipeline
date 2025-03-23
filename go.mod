@@ -9,6 +9,7 @@ require (
 	github.com/asticode/go-astikit v0.52.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250201205440-80b5034808e3
+	github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f
 	github.com/spf13/pflag v1.0.6
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
@@ -25,7 +26,6 @@ require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
 	github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 // indirect
 	github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7 // indirect
-	github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f // indirect
 	github.com/go-ng/xsort v0.0.0-20220617174223-1d146907bccc // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/go-tls v0.0.0-20200109070953-6f75fb441850 // indirect
