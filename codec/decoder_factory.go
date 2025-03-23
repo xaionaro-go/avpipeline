@@ -10,7 +10,7 @@ import (
 type DecoderFactory interface {
 	fmt.Stringer
 
-	NewDecoder(ctx context.Context, pkt InputPacket) (*Decoder, error)
+	NewDecoder(ctx context.Context, stream *astiav.Stream) (*Decoder, error)
 }
 
 type NaiveDecoderFactory struct {
@@ -32,9 +32,9 @@ func NewNaiveDecoderFactory(
 
 func (f *NaiveDecoderFactory) NewDecoder(
 	ctx context.Context,
-	pkt InputPacket,
+	stream *astiav.Stream,
 ) (*Decoder, error) {
-	codecParameters := pkt.CodecParameters()
+	codecParameters := stream.CodecParameters()
 	if codecParameters.MediaType() != astiav.MediaTypeVideo {
 		return NewDecoder(
 			ctx,

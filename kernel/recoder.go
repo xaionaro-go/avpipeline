@@ -79,91 +79,84 @@ func (r *Recoder) Close(ctx context.Context) error {
 	return nil
 }
 
-func (r *Recoder) lazyInitOutputStreamCopy(
+func (r *Recoder) initOutputStreamCopy(
 	ctx context.Context,
-	input types.InputPacket,
-) (_ *astiav.Stream, _err error) {
-	logger.Tracef(ctx, "lazyInitOutputStreamCopy: streamIndex: %d", input.Packet.StreamIndex())
+	inputStream *astiav.Stream,
+) (_err error) {
+	logger.Tracef(ctx, "lazyInitOutputStreamCopy: streamIndex: %d", inputStream.Index())
 	defer func() {
 		if _err == nil {
-			assert(ctx, r.outputStreams[input.Packet.StreamIndex()] != nil)
+			assert(ctx, r.outputStreams[inputStream.Index()] != nil)
 		}
-		logger.Tracef(ctx, "/lazyInitOutputStreamCopy: streamIndex: %d: %v", input.Packet.StreamIndex(), _err)
+		logger.Tracef(ctx, "/lazyInitOutputStreamCopy: streamIndex: %d: %v", inputStream.Index(), _err)
 	}()
-	outputStream := r.outputStreams[input.Packet.StreamIndex()]
-	if outputStream != nil {
-		return outputStream, nil
-	}
-	logger.Debugf(ctx, "new output (copy) stream (stream index: %d)", input.Packet.StreamIndex())
+	logger.Debugf(ctx, "new output (copy) stream (stream index: %d)", inputStream.Index())
 
-	codecParams := input.Stream.CodecParameters()
+	codecParams := inputStream.CodecParameters()
 	codec := astiav.FindDecoder(codecParams.CodecID())
+	var outputStream *astiav.Stream
 	r.outputFormatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
 		outputStream = r.outputFormatContext.NewStream(codec)
 	})
 	if outputStream == nil {
-		return nil, fmt.Errorf("unable to initialize an (copy) output stream")
+		return fmt.Errorf("unable to initialize an (copy) output stream")
 	}
 	err := codecParams.Copy(outputStream.CodecParameters())
 	if err != nil {
-		return nil, fmt.Errorf("unable to copy codec parameters: %w", err)
+		return fmt.Errorf("unable to copy codec parameters: %w", err)
 	}
 
-	err = r.configureOutputStream(ctx, outputStream, input)
+	err = r.configureOutputStream(ctx, outputStream, inputStream)
 	if err != nil {
-		return nil, fmt.Errorf("unable to configure the stream: %w", err)
+		return fmt.Errorf("unable to configure the stream: %w", err)
 	}
 
-	return outputStream, nil
+	return nil
 }
 
-func (r *Recoder) lazyInitOutputStream(
+func (r *Recoder) initOutputStream(
 	ctx context.Context,
-	input types.InputPacket,
+	inputStream *astiav.Stream,
 	encoder codec.Encoder,
-) (_ *astiav.Stream, _err error) {
-	logger.Tracef(ctx, "lazyInitOutputStream: streamIndex: %d", input.Packet.StreamIndex())
+) (_err error) {
+	logger.Tracef(ctx, "lazyInitOutputStream: streamIndex: %d", inputStream.Index())
 	defer func() {
 		if _err == nil {
-			assert(ctx, r.outputStreams[input.Packet.StreamIndex()] != nil)
+			assert(ctx, r.outputStreams[inputStream.Index()] != nil)
 		}
-		logger.Tracef(ctx, "/lazyInitOutputStream: streamIndex: %d: %v", input.Packet.StreamIndex(), _err)
+		logger.Tracef(ctx, "/lazyInitOutputStream: streamIndex: %d: %v", inputStream.Index(), _err)
 	}()
 
-	outputStream := r.outputStreams[input.Packet.StreamIndex()]
-	if outputStream != nil {
-		return outputStream, nil
-	}
-	logger.Debugf(ctx, "new output stream (stream index: %d)", input.Packet.StreamIndex())
+	logger.Debugf(ctx, "new output stream (stream index: %d)", inputStream.Index())
 
+	var outputStream *astiav.Stream
 	r.outputFormatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
 		outputStream = r.outputFormatContext.NewStream(encoder.Codec())
 	})
 	if outputStream == nil {
-		return nil, fmt.Errorf("unable to initialize an output stream")
+		return fmt.Errorf("unable to initialize an output stream")
 	}
 	if err := encoder.ToCodecParameters(outputStream.CodecParameters()); err != nil {
-		return nil, fmt.Errorf("unable to copy codec parameters from the encoder to the output stream: %w", err)
+		return fmt.Errorf("unable to copy codec parameters from the encoder to the output stream: %w", err)
 	}
 
-	err := r.configureOutputStream(ctx, outputStream, input)
+	err := r.configureOutputStream(ctx, outputStream, inputStream)
 	if err != nil {
-		return nil, fmt.Errorf("unable to configure the stream: %w", err)
+		return fmt.Errorf("unable to configure the stream: %w", err)
 	}
 
-	return outputStream, nil
+	return nil
 }
 
 func (r *Recoder) configureOutputStream(
 	ctx context.Context,
 	outputStream *astiav.Stream,
-	input types.InputPacket,
+	inputStream *astiav.Stream,
 ) error {
-	inputStreamIndex := input.Packet.StreamIndex()
-	outputStream.SetIndex(inputStreamIndex)
-	stream.CopyNonCodecParameters(outputStream, input.Stream)
+	outputStream.SetIndex(inputStream.Index())
+	stream.CopyNonCodecParameters(outputStream, inputStream)
 	if r.streamConfigurer != nil {
-		err := r.streamConfigurer.StreamConfigure(ctx, outputStream, input.Packet)
+		err := r.streamConfigurer.StreamConfigure(ctx, outputStream, inputStream)
 		if err != nil {
 			return fmt.Errorf("unable to configure the output stream: %w", err)
 		}
@@ -171,7 +164,7 @@ func (r *Recoder) configureOutputStream(
 	logger.Tracef(
 		ctx,
 		"resulting output stream for input stream %d: %d: %s: %s: %s: %s: %s",
-		inputStreamIndex,
+		inputStream.Index(),
 		outputStream.Index(),
 		outputStream.CodecParameters().MediaType(),
 		outputStream.CodecParameters().CodecID(),
@@ -179,7 +172,7 @@ func (r *Recoder) configureOutputStream(
 		spew.Sdump(outputStream),
 		spew.Sdump(outputStream.CodecParameters()),
 	)
-	r.outputStreams[inputStreamIndex] = outputStream
+	r.outputStreams[inputStream.Index()] = outputStream
 	assert(ctx, outputStream != nil)
 
 	return nil
@@ -192,6 +185,55 @@ func (r *Recoder) Generate(ctx context.Context, outputCh chan<- types.OutputPack
 type encoderInRecoder struct {
 	codec.Encoder
 	LastInitTS time.Time
+}
+
+func (r *Recoder) updateOutputs(
+	ctx context.Context,
+	inputFmt *astiav.FormatContext,
+) (_err error) {
+	logger.Debugf(ctx, "updateEncoders()")
+	defer func() { logger.Debugf(ctx, "/updateEncoders(): %v", _err) }()
+	for _, inputStream := range inputFmt.Streams() {
+		inputStreamIndex := inputStream.Index()
+		if _, ok := r.encoders[inputStreamIndex]; ok {
+			logger.Tracef(ctx, "stream #%d already exists, not initializing", inputStreamIndex)
+			continue
+		}
+
+		err := r.initEncoderFor(ctx, inputStream)
+		if err != nil {
+			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
+		}
+
+		encoder := r.encoders[inputStreamIndex]
+		if encoder.Encoder == (codec.EncoderCopy{}) {
+			err = r.initOutputStreamCopy(ctx, inputStream)
+		} else {
+			err = r.initOutputStream(ctx, inputStream, encoder)
+		}
+		if err != nil {
+			return fmt.Errorf("unable to init an output stream for encoder %s for input stream #%d: %w", encoder, inputStreamIndex, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *Recoder) initEncoderFor(
+	ctx context.Context,
+	inputStream *astiav.Stream,
+) (_err error) {
+	logger.Debugf(ctx, "initEncoderFor(ctx, stream[%d])", inputStream.Index())
+	defer func() { logger.Debugf(ctx, "/initEncoderFor(ctx, stream[%d]): %v", inputStream.Index(), _err) }()
+
+	encoderInstance, err := r.encoderFactory.NewEncoder(ctx, inputStream)
+	if err != nil {
+		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", inputStream.Index(), err)
+	}
+
+	encoder := &encoderInRecoder{Encoder: encoderInstance}
+	r.encoders[inputStream.Index()] = encoder
+	return nil
 }
 
 func (r *Recoder) SendInput(
@@ -208,20 +250,17 @@ func (r *Recoder) SendInput(
 	encoder := r.encoders[input.StreamIndex()]
 	logger.Tracef(ctx, "encoder == %v", encoder)
 	if encoder == nil {
-		encoderInstance, err := r.encoderFactory.NewEncoder(ctx, input)
+		err := r.updateOutputs(ctx, input.FormatContext)
 		if err != nil {
-			return fmt.Errorf("cannot initialize an encoder for stream %d: %w", input.StreamIndex(), err)
+			return fmt.Errorf("unable to update outputs: %w", err)
 		}
-		encoder = &encoderInRecoder{Encoder: encoderInstance}
-		r.encoders[input.StreamIndex()] = encoder
+		encoder = r.encoders[input.StreamIndex()]
 	}
 	assert(ctx, encoder != nil)
 
 	if encoder.Encoder == (codec.EncoderCopy{}) {
-		outputStream, err := r.lazyInitOutputStreamCopy(ctx, input)
-		if err != nil {
-			return fmt.Errorf("unable to initialize the output stream (copy): %w", err)
-		}
+		outputStream := r.outputStreams[input.Packet.StreamIndex()]
+		assert(ctx, outputStream != nil)
 		pkt := packet.CloneAsReferenced(input.Packet)
 		pkt.SetStreamIndex(outputStream.Index())
 		outputCh <- types.BuildOutputPacket(
@@ -235,7 +274,7 @@ func (r *Recoder) SendInput(
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder == nil {
 		var err error
-		decoder, err = r.decoderFactory.NewDecoder(ctx, input)
+		decoder, err = r.decoderFactory.NewDecoder(ctx, input.Stream)
 		if err != nil {
 			return fmt.Errorf("cannot initialize a decoder for stream %d: %w", input.StreamIndex(), err)
 		}
@@ -243,10 +282,8 @@ func (r *Recoder) SendInput(
 	}
 	assert(ctx, decoder != nil)
 
-	outputStream, err := r.lazyInitOutputStream(ctx, input, encoder)
-	if err != nil {
-		return fmt.Errorf("unable to initialize the output stream: %w", err)
-	}
+	outputStream := r.outputStreams[input.Packet.StreamIndex()]
+	assert(ctx, outputStream != nil)
 	if enableStreamCodecParametersUpdates {
 		if getInitTSer, ok := encoder.Encoder.(interface{ GetInitTS() time.Time }); ok {
 			initTS := getInitTSer.GetInitTS()

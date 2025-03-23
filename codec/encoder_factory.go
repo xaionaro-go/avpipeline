@@ -10,7 +10,7 @@ import (
 
 type EncoderFactory interface {
 	fmt.Stringer
-	NewEncoder(ctx context.Context, pkt InputPacket) (Encoder, error)
+	NewEncoder(ctx context.Context, stream *astiav.Stream) (Encoder, error)
 }
 
 type NaiveEncoderFactory struct {
@@ -45,16 +45,16 @@ func (f *NaiveEncoderFactory) String() string {
 
 func (f *NaiveEncoderFactory) NewEncoder(
 	ctx context.Context,
-	pkt InputPacket,
+	stream *astiav.Stream,
 ) (_ret Encoder, _err error) {
-	return xsync.DoA2R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderNoLock, ctx, pkt)
+	return xsync.DoA2R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderNoLock, ctx, stream)
 }
 
 func (f *NaiveEncoderFactory) newEncoderNoLock(
 	ctx context.Context,
-	pkt InputPacket,
+	stream *astiav.Stream,
 ) (_ret Encoder, _err error) {
-	codecParametersOrig := pkt.CodecParameters()
+	codecParametersOrig := stream.CodecParameters()
 	codecParameters := astiav.AllocCodecParameters()
 	defer codecParameters.Free()
 	codecParametersOrig.Copy(codecParameters)
@@ -79,13 +79,13 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 			CodecParameters:    codecParameters,
 			HardwareDeviceType: f.HardwareDeviceType,
 			HardwareDeviceName: f.HardwareDeviceName,
-			TimeBase:           pkt.TimeBase(),
+			TimeBase:           stream.TimeBase(),
 		}
 	case astiav.MediaTypeAudio:
 		params = &EncoderParams{
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParameters,
-			TimeBase:        pkt.TimeBase(),
+			TimeBase:        stream.TimeBase(),
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")

@@ -8,32 +8,22 @@ import (
 	"github.com/xaionaro-go/avpipeline/stream"
 )
 
-type StreamConfigurerCopy struct {
-	GetOutputStreamer GetOutputStreamer
-}
+type StreamConfigurerCopy struct{}
 
 var _ StreamConfigurer = (*StreamConfigurerCopy)(nil)
 
-type GetOutputStreamer interface {
-	GetOutputStream(ctx context.Context, streamIndex int) *astiav.Stream
-}
-
-func NewStreamConfigurerCopy(
-	getOutputStreamer GetOutputStreamer,
-) *StreamConfigurerCopy {
-	return &StreamConfigurerCopy{
-		GetOutputStreamer: getOutputStreamer,
-	}
+func NewStreamConfigurerCopy() StreamConfigurerCopy {
+	return StreamConfigurerCopy{}
 }
 
 func (sc *StreamConfigurerCopy) StreamConfigure(
 	ctx context.Context,
-	s *astiav.Stream,
-	pkt *astiav.Packet,
+	outputStream *astiav.Stream,
+	inputStream *astiav.Stream,
 ) error {
 	return stream.CopyParameters(
 		ctx,
-		s,
-		sc.GetOutputStreamer.GetOutputStream(ctx, pkt.StreamIndex()),
+		outputStream,
+		inputStream,
 	)
 }

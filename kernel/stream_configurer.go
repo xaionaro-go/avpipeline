@@ -7,5 +7,9 @@ import (
 )
 
 type StreamConfigurer interface {
-	StreamConfigure(ctx context.Context, stream *astiav.Stream, pkt *astiav.Packet) error
+	StreamConfigure(
+		ctx context.Context,
+		outputStream *astiav.Stream,
+		inputStream *astiav.Stream,
+	) error
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/stream"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -219,6 +218,66 @@ func (o *Output) Generate(ctx context.Context, outputCh chan<- types.OutputPacke
 	return nil
 }
 
+func (o *Output) updateOutputFormat(
+	ctx context.Context,
+	inputFmt *astiav.FormatContext,
+) (_err error) {
+	logger.Debugf(ctx, "updateOutputFormat")
+	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
+	for _, inputStream := range inputFmt.Streams() {
+		inputStreamIndex := inputStream.Index()
+		if _, ok := o.Streams[inputStreamIndex]; ok {
+			logger.Tracef(ctx, "stream #%d already exists, not initializing", inputStreamIndex)
+			continue
+		}
+
+		err := o.initOutputStreamFor(ctx, inputStream)
+		if err != nil {
+			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
+		}
+	}
+
+	var err error
+	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
+		err = o.FormatContext.WriteHeader(nil)
+	})
+	if err != nil {
+		return fmt.Errorf("unable to write the header: %w", err)
+	}
+	return nil
+}
+
+func (o *Output) initOutputStreamFor(
+	ctx context.Context,
+	inputStream *astiav.Stream,
+) (_err error) {
+	logger.Tracef(ctx, "initOutputStreamFor(ctx, stream[%d])", inputStream.Index())
+	defer func() { logger.Tracef(ctx, "/initOutputStreamFor(ctx, stream[%d]) %v", inputStream.Index(), _err) }()
+
+	var outputStream *OutputStream
+	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
+		outputStream = &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
+	})
+	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
+		return fmt.Errorf("unable to copy stream parameters: %w", err)
+	}
+	logger.Tracef(
+		ctx,
+		"new output stream: %s: %s: %s: %s: %s",
+		outputStream.CodecParameters().MediaType(),
+		outputStream.CodecParameters().CodecID(),
+		outputStream.TimeBase(),
+		spew.Sdump(outputStream),
+		spew.Sdump(outputStream.CodecParameters()),
+	)
+
+	o.Streams[inputStream.Index()] = outputStream
+	return nil
+}
+
 func (o *Output) SendInput(
 	ctx context.Context,
 	inputPkt types.InputPacket,
@@ -237,38 +296,11 @@ func (o *Output) SendInput(
 
 	outputStream := o.Streams[inputPkt.StreamIndex()]
 	if outputStream == nil {
-		logger.Debugf(ctx, "new output stream")
-		o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
-			outputStream = &OutputStream{
-				Stream:  o.FormatContext.NewStream(nil),
-				LastDTS: math.MinInt64,
-			}
-		})
-		if err := stream.CopyParameters(ctx, outputStream.Stream, inputPkt.Stream); err != nil {
-			return fmt.Errorf("unable to copy stream parameters: %w", err)
+		logger.Debugf(ctx, "new output stream (#%d)", inputPkt.StreamIndex())
+		if err := o.updateOutputFormat(ctx, inputPkt.FormatContext); err != nil {
+			return fmt.Errorf("unable to update the output format: %w", err)
 		}
-		logger.Tracef(
-			ctx,
-			"new output stream: %s: %s: %s: %s: %s",
-			outputStream.CodecParameters().MediaType(),
-			outputStream.CodecParameters().CodecID(),
-			outputStream.TimeBase(),
-			spew.Sdump(outputStream),
-			spew.Sdump(outputStream.CodecParameters()),
-		)
-
-		o.Streams[inputPkt.StreamIndex()] = outputStream
-		if len(o.Streams) < 2 {
-			// TODO: delete me; an ugly hack to make sure we have both video and audio track before sending a header
-			return nil
-		}
-		var err error
-		o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
-			err = o.FormatContext.WriteHeader(nil)
-		})
-		if err != nil {
-			return fmt.Errorf("unable to write the header: %w", err)
-		}
+		outputStream = o.Streams[inputPkt.StreamIndex()]
 	}
 	assert(ctx, outputStream != nil)
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
@@ -301,13 +333,6 @@ func (o *Output) SendInput(
 		)
 	}
 
-	if len(o.Streams) < 2 {
-		if len(o.pendingPackets) >= pendingPacketsLimit {
-			return fmt.Errorf("exceeded the limit of pending packets: %d", len(o.pendingPackets))
-		}
-		o.pendingPackets = append(o.pendingPackets, packet.CloneAsReferenced(pkt))
-		return nil
-	}
 	for idx, packet := range o.pendingPackets {
 		if err := o.doWritePacket(ctx, packet, outputStream); err != nil {
 			o.pendingPackets = o.pendingPackets[idx:]
