@@ -133,7 +133,6 @@ func main() {
 		)
 	default:
 		sw = kernel.NewSwitch(recoders...)
-		sw.KeepUntil = condition.IsKeyFrame(true)
 		recodingNode = avpipeline.NewNodeFromKernel(
 			ctx,
 			sw,

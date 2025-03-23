@@ -204,15 +204,6 @@ func (e *EncoderFull) setQualityNoLock(
 	return nil
 }
 
-func (e *EncoderFull) canChangeQualityInstantly() bool {
-	codecName := e.codec.Name()
-	switch codecName {
-	case "mediacodec":
-		return true
-	}
-	return false
-}
-
 func (e *EncoderFull) setQualityNow(
 	ctx context.Context,
 	q Quality,

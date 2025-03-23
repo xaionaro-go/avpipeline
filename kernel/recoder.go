@@ -351,6 +351,8 @@ func (r *Recoder) SendInput(
 			return fmt.Errorf("unable receive the packet from the encoder: %w", err)
 		}
 
+		pkt.SetDts(input.Dts())
+		pkt.SetPts(input.Pts())
 		pkt.SetStreamIndex(outputStream.Index())
 		outputCh <- types.BuildOutputPacket(
 			pkt,

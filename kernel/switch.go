@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/condition"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
-	"github.com/xaionaro-go/typing"
-	"github.com/xaionaro-go/xsync"
 )
 
 type Switch[T Abstract] struct {
@@ -19,11 +19,10 @@ type Switch[T Abstract] struct {
 
 	Kernels []T
 
-	KernelIndex     uint
-	NextKernelIndex typing.Optional[uint]
+	KernelIndex     atomic.Uint32
+	NextKernelIndex atomic.Int32
 
-	KeepUntil condition.Condition
-	Locker    xsync.RWMutex
+	KeepUntil *condition.Condition
 }
 
 var _ Abstract = (*Switch[Abstract])(nil)
@@ -31,18 +30,30 @@ var _ Abstract = (*Switch[Abstract])(nil)
 func NewSwitch[T Abstract](
 	kernels ...T,
 ) *Switch[T] {
-	return &Switch[T]{
+	sw := &Switch[T]{
 		closeChan: newCloseChan(),
 		Kernels:   kernels,
 	}
+	sw.NextKernelIndex.Store(-1)
+	return sw
+}
+
+func (sw *Switch[T]) GetKeepUntil() condition.Condition {
+	ptr := xatomic.LoadPointer(&sw.KeepUntil)
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func (sw *Switch[T]) SetKeepUntil(cond condition.Condition) {
+	xatomic.StorePointer(&sw.KeepUntil, ptr(cond))
 }
 
 func (sw *Switch[T]) GetKernelIndex(
 	ctx context.Context,
 ) uint {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &sw.Locker, func() uint {
-		return sw.KernelIndex
-	})
+	return uint(sw.KernelIndex.Load())
 }
 
 func (sw *Switch[T]) SetKernelIndex(
@@ -52,13 +63,11 @@ func (sw *Switch[T]) SetKernelIndex(
 	if idx >= uint(len(sw.Kernels)) {
 		return fmt.Errorf("requested processor #%d, while I have only %d processor", idx+1, len(sw.Kernels))
 	}
-	sw.Locker.Do(ctx, func() {
-		if sw.KeepUntil == nil {
-			sw.KernelIndex = idx
-			return
-		}
-		sw.NextKernelIndex.Set(idx)
-	})
+	if sw.GetKeepUntil() == nil {
+		sw.KernelIndex.Store(uint32(idx))
+		return nil
+	}
+	sw.NextKernelIndex.Store(int32(idx))
 	return nil
 }
 
@@ -111,18 +120,18 @@ func (sw *Switch[T]) SendInput(
 	input types.InputPacket,
 	outputCh chan<- types.OutputPacket,
 ) error {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &sw.Locker, func() error {
-		if !sw.NextKernelIndex.IsSet() {
-			return sw.Kernels[sw.KernelIndex].SendInput(ctx, input, outputCh)
-		}
+	nextKernelIndex := sw.NextKernelIndex.Load()
+	if nextKernelIndex == -1 {
+		return sw.Kernels[sw.KernelIndex.Load()].SendInput(ctx, input, outputCh)
+	}
 
-		if sw.KeepUntil == nil || sw.KeepUntil.Match(ctx, input) {
-			sw.KernelIndex = sw.NextKernelIndex.Get()
-			sw.NextKernelIndex.Unset()
-		}
+	keepUntil := sw.GetKeepUntil()
+	if keepUntil == nil || keepUntil.Match(ctx, input) {
+		sw.KernelIndex.Store(uint32(nextKernelIndex))
+		sw.NextKernelIndex.Store(-1)
+	}
 
-		return sw.Kernels[sw.KernelIndex].SendInput(ctx, input, outputCh)
-	})
+	return sw.Kernels[sw.KernelIndex.Load()].SendInput(ctx, input, outputCh)
 }
 
 func (sw *Switch[T]) Close(
