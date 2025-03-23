@@ -5,21 +5,20 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
 type Abstract interface {
 	fmt.Stringer
-	Closer
+	types.Closer
 
-	GetOutputFormatContext(ctx context.Context) *astiav.FormatContext
-	SendInputChan() chan<- InputPacket
-	OutputPacketsChan() <-chan OutputPacket
+	SendInputChan() chan<- types.InputPacket
+	OutputPacketsChan() <-chan types.OutputPacket
 	ErrorChan() <-chan error
 }
 
@@ -130,18 +129,18 @@ func (p *FromKernel) finalize(ctx context.Context) error {
 
 func (p *FromKernel) SendOutput(
 	ctx context.Context,
-	outputPacket OutputPacket,
+	outputPacket types.OutputPacket,
 ) {
 	logger.Tracef(ctx, "SendOutput[%T]", p.Kernel)
 	defer func() { logger.Tracef(ctx, "/SendOutput[%T]", p.Kernel) }()
 	p.OutputCh <- outputPacket
 }
 
-func (p *FromKernel) SendInputChan() chan<- InputPacket {
+func (p *FromKernel) SendInputChan() chan<- types.InputPacket {
 	return p.InputCh
 }
 
-func (p *FromKernel) OutputPacketsChan() <-chan OutputPacket {
+func (p *FromKernel) OutputPacketsChan() <-chan types.OutputPacket {
 	return p.OutputCh
 }
 
@@ -151,12 +150,6 @@ func (p *FromKernel) ErrorChan() <-chan error {
 
 func (p *FromKernel) outChanError() chan<- error {
 	return p.ErrorCh
-}
-
-func (p *FromKernel) GetOutputFormatContext(
-	ctx context.Context,
-) *astiav.FormatContext {
-	return p.Kernel.GetOutputFormatContext(ctx)
 }
 
 func (p *FromKernel) String() string {

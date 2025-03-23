@@ -10,11 +10,12 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
 )
 
 type InputConfig struct {
-	CustomOptions DictionaryItems
+	CustomOptions types.DictionaryItems
 }
 
 type Input struct {
@@ -109,7 +110,7 @@ func (i *Input) readIntoPacket(
 
 func (i *Input) Generate(
 	ctx context.Context,
-	outputCh chan<- OutputPacket,
+	outputCh chan<- types.OutputPacket,
 ) (_err error) {
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
@@ -135,9 +136,10 @@ func (i *Input) Generate(
 				packet.Pos(), packet.Pts(), packet.Dts(), packet.Duration(),
 				packet.Data(),
 			)
-			outputCh <- OutputPacket{
-				Packet: packet,
-			}
+			outputCh <- types.BuildOutputPacket(
+				packet,
+				i.FormatContext,
+			)
 		case io.EOF:
 			packet.Free()
 			return nil
@@ -150,14 +152,10 @@ func (i *Input) Generate(
 
 func (i *Input) SendInput(
 	ctx context.Context,
-	input InputPacket,
-	outputCh chan<- OutputPacket,
+	input types.InputPacket,
+	outputCh chan<- types.OutputPacket,
 ) (_err error) {
 	return fmt.Errorf("cannot send packets to an Input")
-}
-
-func (i *Input) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
-	return i.FormatContext
 }
 
 func (i *Input) String() string {

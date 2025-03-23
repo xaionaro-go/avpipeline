@@ -15,6 +15,7 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/stream"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
@@ -25,7 +26,7 @@ const unwrapTLSViaProxy = false
 const pendingPacketsLimit = 1000
 
 type OutputConfig struct {
-	CustomOptions DictionaryItems
+	CustomOptions types.DictionaryItems
 }
 
 type OutputStream struct {
@@ -214,14 +215,14 @@ func (o *Output) Close(
 	return errors.Join(result...)
 }
 
-func (o *Output) Generate(ctx context.Context, outputCh chan<- OutputPacket) error {
+func (o *Output) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
 	return nil
 }
 
 func (o *Output) SendInput(
 	ctx context.Context,
-	inputPkt InputPacket,
-	outputCh chan<- OutputPacket,
+	inputPkt types.InputPacket,
+	outputCh chan<- types.OutputPacket,
 ) (_err error) {
 	logger.Tracef(ctx,
 		"SendInput (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
@@ -344,12 +345,6 @@ func (o *Output) doWritePacket(
 		)
 	}
 	return nil
-}
-
-func (o *Output) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &o.formatContextLocker, func() *astiav.FormatContext {
-		return o.FormatContext
-	})
 }
 
 func (o *Output) String() string {

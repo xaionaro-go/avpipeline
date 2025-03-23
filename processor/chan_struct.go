@@ -1,8 +1,12 @@
 package processor
 
+import (
+	"github.com/xaionaro-go/avpipeline/types"
+)
+
 type ChanStruct struct {
-	InputCh  chan InputPacket
-	OutputCh chan OutputPacket
+	InputCh  chan types.InputPacket
+	OutputCh chan types.OutputPacket
 	ErrorCh  chan error
 }
 
@@ -12,8 +16,8 @@ func NewChanStruct(
 	errorQueueSize uint,
 ) *ChanStruct {
 	return &ChanStruct{
-		InputCh:  make(chan InputPacket, inputQueueSize),
-		OutputCh: make(chan OutputPacket, outputQueueSize),
+		InputCh:  make(chan types.InputPacket, inputQueueSize),
+		OutputCh: make(chan types.OutputPacket, outputQueueSize),
 		ErrorCh:  make(chan error, errorQueueSize),
 	}
 }

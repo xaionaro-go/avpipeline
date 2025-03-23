@@ -1,20 +1,17 @@
 package kernel
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Abstract interface {
 	SendInputer
 	fmt.Stringer
-	Closer
+	types.Closer
 	CloseChaner
 	Generator
-
-	GetOutputFormatContext(ctx context.Context) *astiav.FormatContext
 }
 
 type CloseChaner interface {

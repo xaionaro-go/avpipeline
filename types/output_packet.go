@@ -5,10 +5,22 @@ import (
 )
 
 type OutputPacket struct {
-	*astiav.Packet
+	PacketCommons
 }
 
 func (o *OutputPacket) UnrefAndFree() {
-	o.Packet.Unref()
-	o.Packet.Free()
+	o.PacketCommons.Packet.Unref()
+	o.PacketCommons.Packet.Free()
+}
+
+func BuildOutputPacket(
+	pkt *astiav.Packet,
+	fmt *astiav.FormatContext,
+) OutputPacket {
+	return OutputPacket{
+		PacketCommons: PacketCommons{
+			Packet:        pkt,
+			FormatContext: fmt,
+		},
+	}
 }

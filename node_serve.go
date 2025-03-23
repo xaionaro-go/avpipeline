@@ -10,6 +10,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -101,7 +102,7 @@ func (n *Node) Serve(
 			n.BytesCountWrote.Add(uint64(pkt.Size()))
 			logger.Tracef(ctx, "pulled from %s a packet with stream index %d", n.Processor, pkt.Packet.StreamIndex())
 
-			fmtCtx := n.Processor.GetOutputFormatContext(ctx)
+			fmtCtx := pkt.FormatContext
 			streamIndex := pkt.Packet.StreamIndex()
 			assert(ctx, fmtCtx != nil, streamIndex, "fmtCtx != nil", n.String())
 			logger.Tracef(ctx, "Serve[%s]: getOutputStream", n.Processor)
@@ -116,11 +117,11 @@ func (n *Node) Serve(
 			incrementCounters(&n.FramesWrote, mediaType)
 
 			for _, pushTo := range n.PushTo {
-				pushPkt := InputPacket{
-					Packet:        packet.CloneAsReferenced(pkt.Packet),
-					Stream:        stream,
-					FormatContext: fmtCtx,
-				}
+				pushPkt := types.BuildInputPacket(
+					packet.CloneAsReferenced(pkt.Packet),
+					fmtCtx,
+					stream,
+				)
 				if pushTo.Condition != nil && !pushTo.Condition.Match(ctx, pushPkt) {
 					logger.Tracef(ctx, "condition %s was not met", pushTo.Condition)
 					continue

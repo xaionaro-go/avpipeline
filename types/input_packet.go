@@ -5,7 +5,20 @@ import (
 )
 
 type InputPacket struct {
-	*astiav.Packet
+	PacketCommons
 	*astiav.Stream
-	*astiav.FormatContext
+}
+
+func BuildInputPacket(
+	pkt *astiav.Packet,
+	fmt *astiav.FormatContext,
+	s *astiav.Stream,
+) InputPacket {
+	return InputPacket{
+		PacketCommons: PacketCommons{
+			Packet:        pkt,
+			FormatContext: fmt,
+		},
+		Stream: s,
+	}
 }

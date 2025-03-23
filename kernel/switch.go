@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -31,7 +31,7 @@ func NewProcessorsSwitch(
 	}
 }
 
-func (sw *Switch) GetProcessorIndex(
+func (sw *Switch) GetKernelIndex(
 	ctx context.Context,
 ) uint {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &sw.Locker, func() uint {
@@ -39,7 +39,7 @@ func (sw *Switch) GetProcessorIndex(
 	})
 }
 
-func (sw *Switch) SetProcessorIndex(
+func (sw *Switch) SetKernelIndex(
 	ctx context.Context,
 	idx uint,
 ) error {
@@ -52,36 +52,34 @@ func (sw *Switch) SetProcessorIndex(
 	return nil
 }
 
+func (sw *Switch) GetKernel(ctx context.Context) Abstract {
+	return sw.Kernels[sw.GetKernelIndex(ctx)]
+}
+
 func (sw *Switch) String() string {
 	var result []string
 	for idx, node := range sw.Kernels {
 		var str string
-		if uint(idx) == sw.GetProcessorIndex(context.Background()) {
+		if uint(idx) == sw.GetKernelIndex(context.Background()) {
 			str = fmt.Sprintf(" *%s* ", node.String())
 		} else {
 			str = node.String()
 		}
 		result = append(result, str)
 	}
-	return fmt.Sprintf("ProcessorsSwitch(%s)", strings.Join(result, "|"))
+	return fmt.Sprintf("Switch(%s)", strings.Join(result, "|"))
 }
 
-func (sw *Switch) Generate(ctx context.Context, outputCh chan<- OutputPacket) error {
-	return nil
+func (sw *Switch) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
+	return fmt.Errorf("Switch does not support Generate, yet")
 }
 
 func (sw *Switch) SendInput(
 	ctx context.Context,
-	input InputPacket,
-	outputCh chan<- OutputPacket,
+	input types.InputPacket,
+	outputCh chan<- types.OutputPacket,
 ) error {
-	return fmt.Errorf("not implemented, yet")
-}
-
-func (sw *Switch) GetOutputFormatContext(
-	ctx context.Context,
-) *astiav.FormatContext {
-	panic("not implemented, yet")
+	return sw.GetKernel(ctx).SendInput(ctx, input, outputCh)
 }
 
 func (sw *Switch) Close(

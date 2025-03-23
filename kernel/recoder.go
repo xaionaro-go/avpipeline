@@ -15,6 +15,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/stream"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -80,7 +81,7 @@ func (r *Recoder) Close(ctx context.Context) error {
 
 func (r *Recoder) lazyInitOutputStreamCopy(
 	ctx context.Context,
-	input InputPacket,
+	input types.InputPacket,
 ) (_ *astiav.Stream, _err error) {
 	logger.Tracef(ctx, "lazyInitOutputStreamCopy: streamIndex: %d", input.Packet.StreamIndex())
 	defer func() {
@@ -118,7 +119,7 @@ func (r *Recoder) lazyInitOutputStreamCopy(
 
 func (r *Recoder) lazyInitOutputStream(
 	ctx context.Context,
-	input InputPacket,
+	input types.InputPacket,
 	encoder codec.Encoder,
 ) (_ *astiav.Stream, _err error) {
 	logger.Tracef(ctx, "lazyInitOutputStream: streamIndex: %d", input.Packet.StreamIndex())
@@ -156,7 +157,7 @@ func (r *Recoder) lazyInitOutputStream(
 func (r *Recoder) configureOutputStream(
 	ctx context.Context,
 	outputStream *astiav.Stream,
-	input InputPacket,
+	input types.InputPacket,
 ) error {
 	inputStreamIndex := input.Packet.StreamIndex()
 	outputStream.SetIndex(inputStreamIndex)
@@ -184,7 +185,7 @@ func (r *Recoder) configureOutputStream(
 	return nil
 }
 
-func (r *Recoder) Generate(ctx context.Context, outputCh chan<- OutputPacket) error {
+func (r *Recoder) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
 	return nil
 }
 
@@ -195,8 +196,8 @@ type encoderInRecoder struct {
 
 func (r *Recoder) SendInput(
 	ctx context.Context,
-	input InputPacket,
-	outputCh chan<- OutputPacket,
+	input types.InputPacket,
+	outputCh chan<- types.OutputPacket,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInput")
 	defer func() { logger.Tracef(ctx, "/SendInput: %v", _err) }()
@@ -223,9 +224,10 @@ func (r *Recoder) SendInput(
 		}
 		pkt := packet.CloneAsReferenced(input.Packet)
 		pkt.SetStreamIndex(outputStream.Index())
-		outputCh <- OutputPacket{
-			Packet: pkt,
-		}
+		outputCh <- types.BuildOutputPacket(
+			pkt,
+			r.outputFormatContext,
+		)
 		return nil
 	}
 
@@ -313,17 +315,12 @@ func (r *Recoder) SendInput(
 		}
 
 		pkt.SetStreamIndex(outputStream.Index())
-		outputCh <- OutputPacket{
-			Packet: pkt,
-		}
+		outputCh <- types.BuildOutputPacket(
+			pkt,
+			r.outputFormatContext,
+		)
 	}
 	return nil
-}
-
-func (r *Recoder) GetOutputFormatContext(ctx context.Context) *astiav.FormatContext {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &r.outputFormatContextLocker, func() *astiav.FormatContext {
-		return r.outputFormatContext
-	})
 }
 
 func (r *Recoder) String() string {

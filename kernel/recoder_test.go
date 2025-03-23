@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -73,7 +74,7 @@ func TestRecoderNoFailure(t *testing.T) {
 				ctx,
 				toURL, secret.New(""),
 				kernel.OutputConfig{
-					CustomOptions: kernel.DictionaryItems{{
+					CustomOptions: types.DictionaryItems{{
 						Key:   "f",
 						Value: "null",
 					}},

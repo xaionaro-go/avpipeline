@@ -7,6 +7,7 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Kernel interface {
@@ -16,9 +17,9 @@ type Kernel interface {
 
 func ReaderLoop(
 	ctx context.Context,
-	inputChan <-chan InputPacket,
+	inputChan <-chan types.InputPacket,
 	kernel Kernel,
-	outputCh chan<- OutputPacket,
+	outputCh chan<- types.OutputPacket,
 ) (_err error) {
 	logger.Debugf(ctx, "ReaderLoop[%s]: chan %p", kernel, inputChan)
 	defer func() { logger.Debugf(ctx, "/ReaderLoop[%s]: chan %p: %v", kernel, inputChan, _err) }()
