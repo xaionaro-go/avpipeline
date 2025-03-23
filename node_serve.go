@@ -16,12 +16,12 @@ import (
 )
 
 type ErrNode struct {
-	Node *Node
+	Node AbstractNode
 	Err  error
 }
 
 func (e ErrNode) Error() string {
-	return fmt.Sprintf("received an error on %s: %v", e.Node.Processor, e.Err)
+	return fmt.Sprintf("received an error on %s: %v", e.Node.GetProcessor(), e.Err)
 }
 
 func (e ErrNode) Unwrap() error {
@@ -42,7 +42,7 @@ func incrementCounters(
 	}
 }
 
-func (n *Node) Serve(
+func (n *Node[T]) Serve(
 	ctx context.Context,
 	serveConfig ServeConfig,
 	errCh chan<- ErrNode,
@@ -130,28 +130,29 @@ func (n *Node) Serve(
 				}
 
 				dst := pushTo.Node
-				if dst.InputCondition != nil && !dst.InputCondition.Match(ctx, pushPkt) {
-					logger.Tracef(ctx, "input condition %s was not met", dst.InputCondition)
+				if dst.GetInputCondition() != nil && !dst.GetInputCondition().Match(ctx, pushPkt) {
+					logger.Tracef(ctx, "input condition %s was not met", dst.GetInputCondition())
 					continue
 				}
+				dstStats := dst.GetStatistics()
 
-				pushChan := dst.Processor.SendInputChan()
-				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", dst.Processor, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
+				pushChan := dst.GetProcessor().SendInputChan()
+				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", dst.GetProcessor(), pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
 				if serveConfig.FrameDrop {
 					select {
 					case pushChan <- pushPkt:
 					default:
-						logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.Processor)
-						incrementCounters(&dst.FramesMissed, mediaType)
+						logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
+						incrementCounters(&dstStats.FramesMissed, mediaType)
 						packet.Pool.Put(pushPkt.Packet)
 						continue
 					}
 				} else {
 					pushChan <- pushPkt
 				}
-				dst.BytesCountRead.Add(uint64(pkt.Size()))
-				incrementCounters(&dst.FramesRead, mediaType)
-				logger.Tracef(ctx, "pushed to %s packet %p with stream index %d via chan %p", dst.Processor, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
+				dstStats.BytesCountRead.Add(uint64(pkt.Size()))
+				incrementCounters(&dstStats.FramesRead, mediaType)
+				logger.Tracef(ctx, "pushed to %s packet %p with stream index %d via chan %p", dst.GetProcessor(), pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
 			}
 
 			packet.Pool.Put(pkt.Packet)

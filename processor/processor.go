@@ -13,28 +13,28 @@ import (
 	"github.com/xaionaro-go/observability"
 )
 
-type FromKernel struct {
+type FromKernel[T kernel.Abstract] struct {
 	*ChanStruct
-	Kernel kernel.Abstract
+	Kernel T
 
 	closeOnce sync.Once
 	closer    *astikit.Closer
 }
 
-var _ Abstract = (*FromKernel)(nil)
+var _ Abstract = (*FromKernel[kernel.Abstract])(nil)
 
-func NewFromKernel(
+func NewFromKernel[T kernel.Abstract](
 	ctx context.Context,
-	kernel kernel.Abstract,
+	kernel T,
 	opts ...Option,
-) *FromKernel {
+) *FromKernel[T] {
 	opts = append([]Option{
 		OptionQueueSizeInput(1),
 		OptionQueueSizeOutput(1),
 		OptionQueueSizeError(1),
 	}, opts...)
 	cfg := Options(opts).config()
-	p := &FromKernel{
+	p := &FromKernel[T]{
 		ChanStruct: NewChanStruct(cfg.InputQueue, cfg.OutputQueue, cfg.ErrorQueue),
 		Kernel:     kernel,
 		closer:     astikit.NewCloser(),
@@ -43,7 +43,7 @@ func NewFromKernel(
 	return p
 }
 
-func (p *FromKernel) startProcessing(ctx context.Context) {
+func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	logger.Tracef(ctx, "startProcessing[%s]", p)
 	defer func() { logger.Tracef(ctx, "/startProcessing[%s]", p) }()
 
@@ -98,7 +98,7 @@ func (p *FromKernel) startProcessing(ctx context.Context) {
 	})
 }
 
-func (p *FromKernel) Close(ctx context.Context) error {
+func (p *FromKernel[T]) Close(ctx context.Context) error {
 	var err error
 	p.closeOnce.Do(func() {
 		err = p.closer.Close()
@@ -106,11 +106,11 @@ func (p *FromKernel) Close(ctx context.Context) error {
 	return err
 }
 
-func (p *FromKernel) addToCloser(callback func()) {
+func (p *FromKernel[T]) addToCloser(callback func()) {
 	p.closer.Add(callback)
 }
 
-func (p *FromKernel) finalize(ctx context.Context) error {
+func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	logger.Debugf(ctx, "closing %T", p.Kernel)
 	defer func() {
 		close(p.OutputCh)
@@ -118,7 +118,7 @@ func (p *FromKernel) finalize(ctx context.Context) error {
 	return p.Kernel.Close(ctx)
 }
 
-func (p *FromKernel) SendOutput(
+func (p *FromKernel[T]) SendOutput(
 	ctx context.Context,
 	outputPacket types.OutputPacket,
 ) {
@@ -127,22 +127,22 @@ func (p *FromKernel) SendOutput(
 	p.OutputCh <- outputPacket
 }
 
-func (p *FromKernel) SendInputChan() chan<- types.InputPacket {
+func (p *FromKernel[T]) SendInputChan() chan<- types.InputPacket {
 	return p.InputCh
 }
 
-func (p *FromKernel) OutputPacketsChan() <-chan types.OutputPacket {
+func (p *FromKernel[T]) OutputPacketsChan() <-chan types.OutputPacket {
 	return p.OutputCh
 }
 
-func (p *FromKernel) ErrorChan() <-chan error {
+func (p *FromKernel[T]) ErrorChan() <-chan error {
 	return p.ErrorCh
 }
 
-func (p *FromKernel) outChanError() chan<- error {
+func (p *FromKernel[T]) outChanError() chan<- error {
 	return p.ErrorCh
 }
 
-func (p *FromKernel) String() string {
+func (p *FromKernel[T]) String() string {
 	return p.Kernel.String()
 }

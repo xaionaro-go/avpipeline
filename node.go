@@ -12,24 +12,40 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-type Node struct {
-	NodeStatistics
-	Processor      processor.Abstract
+type AbstractNode interface {
+	fmt.Stringer
+	DotString(bool) string
+	GetStatistics() *NodeStatistics
+	GetProcessor() processor.Abstract
+	GetPushTos() PushTos
+	AddPushTo(dst AbstractNode, conds ...condition.Condition)
+	SetPushTos(PushTos)
+	GetInputCondition() condition.Condition
+	SetInputCondition(condition.Condition)
+	Serve(context.Context, ServeConfig, chan<- ErrNode)
+}
+
+type Node[T processor.Abstract] struct {
+	*NodeStatistics
+	Processor      T
 	PushTo         PushTos
 	InputCondition condition.Condition
 }
 
-func NewNode(processor processor.Abstract) *Node {
-	return &Node{
-		Processor: processor,
+var _ AbstractNode = (*Node[processor.Abstract])(nil)
+
+func NewNode[T processor.Abstract](processor T) *Node[T] {
+	return &Node[T]{
+		NodeStatistics: &NodeStatistics{},
+		Processor:      processor,
 	}
 }
 
-func NewNodeFromKernel(
+func NewNodeFromKernel[T kernel.Abstract](
 	ctx context.Context,
-	kernel kernel.Abstract,
+	kernel T,
 	opts ...processor.Option,
-) *Node {
+) *Node[*processor.FromKernel[T]] {
 	return NewNode(
 		processor.NewFromKernel(
 			ctx,
@@ -39,14 +55,42 @@ func NewNodeFromKernel(
 	)
 }
 
-func (n *Node) String() string {
+func (n *Node[T]) GetStatistics() *NodeStatistics {
+	return n.NodeStatistics
+}
+
+func (n *Node[T]) GetProcessor() processor.Abstract {
+	return n.Processor
+}
+
+func (n *Node[T]) GetPushTos() PushTos {
+	return n.PushTo
+}
+
+func (n *Node[T]) AddPushTo(dst AbstractNode, conds ...condition.Condition) {
+	n.PushTo.Add(dst, conds...)
+}
+
+func (n *Node[T]) SetPushTos(s PushTos) {
+	n.PushTo = s
+}
+
+func (n *Node[T]) GetInputCondition() condition.Condition {
+	return n.InputCondition
+}
+
+func (n *Node[T]) SetInputCondition(cond condition.Condition) {
+	n.InputCondition = cond
+}
+
+func (n *Node[T]) String() string {
 	if n == nil {
 		return "<nil>"
 	}
 
 	var pushToStrs []string
 	for _, pushTo := range n.PushTo {
-		pushToStrs = append(pushToStrs, pushTo.Processor.String())
+		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 	}
 
 	switch len(pushToStrs) {
@@ -59,7 +103,7 @@ func (n *Node) String() string {
 	}
 }
 
-func (n *Node) DotString(withStats bool) string {
+func (n *Node[T]) DotString(withStats bool) string {
 	if withStats {
 		panic("not implemented, yet")
 	}
@@ -71,7 +115,7 @@ func (n *Node) DotString(withStats bool) string {
 	return result.String()
 }
 
-func (n *Node) dotBlockContentStringWriteTo(
+func (n *Node[T]) dotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
@@ -92,16 +136,22 @@ func (n *Node) dotBlockContentStringWriteTo(
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
 	for _, pushTo := range n.PushTo {
-		pushTo.Node.dotBlockContentStringWriteTo(w, alreadyPrinted)
+		writer, ok := pushTo.Node.(interface {
+			dotBlockContentStringWriteTo(io.Writer, map[processor.Abstract]struct{})
+		})
+		if !ok {
+			continue
+		}
+		writer.dotBlockContentStringWriteTo(w, alreadyPrinted)
 		if pushTo.Condition == nil {
-			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", n.Processor, pushTo.Processor)
+			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", n.Processor, pushTo.Node.GetProcessor())
 			continue
 		}
 		fmt.Fprintf(
 			w,
 			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
 			n.Processor,
-			pushTo.Processor,
+			pushTo.Node.GetProcessor(),
 			sanitizeString(n.Processor.String()),
 		)
 	}

@@ -101,9 +101,10 @@ func main() {
 
 	errCh := make(chan avpipeline.ErrNode, 10)
 	inputNode := avpipeline.NewNode(input)
-	finalNode := inputNode
+	var finalNode avpipeline.AbstractNode
+	finalNode = inputNode
 	var encoderFactories []*codec.NaiveEncoderFactory
-	var recoders []*kernel.Recoder
+	var recoders []*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
 		encoderFactory := codec.NewNaiveEncoderFactory(vcodec, "copy", 0, hwDeviceName)
@@ -121,8 +122,8 @@ func main() {
 		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodecs, hwDeviceName)
 		recoders = append(recoders, recoder)
 	}
-	var recodingNode *avpipeline.Node
-	var sw *kernel.Switch[*kernel.Recoder]
+	var recodingNode avpipeline.AbstractNode
+	var sw *kernel.Switch[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]
 	switch len(recoders) {
 	case 0:
 	case 1:
@@ -150,60 +151,62 @@ func main() {
 		recoderIdx := uint(0)
 		bitrateIdx := 0
 		pastSwitchPts := time.Duration(0)
-		recodingNode.InputCondition = condition.Function(func(ctx context.Context, pkt types.InputPacket) bool {
-			pts := avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
-			logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.TimeBase())
-			if pts-pastSwitchPts < time.Second {
-				return true
-			}
-			pastSwitchPts = pts
-			if bitrateIdx >= len(*alternateBitrate) {
-				if len(*alternateBitrate) > 0 {
-					bitrateIdx = bitrateIdx % len(*alternateBitrate)
+		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
+			recodingNode.SetInputCondition(condition.Function(func(ctx context.Context, pkt types.InputPacket) bool {
+				pts := avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
+				logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.TimeBase())
+				if pts-pastSwitchPts < time.Second {
+					return true
 				}
-
-				// switch recoder
-
-				recoderIdx++
-				if recoderIdx >= uint(len(encoderFactories)) {
-					recoderIdx = 0
-				}
-				if sw != nil {
-					err := sw.SetKernelIndex(ctx, recoderIdx)
-					assert(ctx, err == nil)
-				}
-				logger.Debugf(ctx, "switch encoder to #%d", recoderIdx)
-			}
-
-			if len(*alternateBitrate) == 0 {
-				logger.Debugf(ctx, "len(*alternateBitrate) == 0")
-				return true
-			}
-
-			// switch bitrate
-
-			nextBitrate := (*alternateBitrate)[bitrateIdx]
-			bitrateIdx++
-			encoderFactory := encoderFactories[recoderIdx]
-			encoderFactory.Locker.Do(ctx, func() {
-				for _, encoder := range encoderFactory.VideoEncoders {
-					err := encoder.SetQuality(
-						ctx,
-						quality.ConstantBitrate(nextBitrate),
-						nil,
-					)
-					if err != nil {
-						logger.Errorf(ctx, "SetQuality errored: %v", err)
-						continue
+				pastSwitchPts = pts
+				if bitrateIdx >= len(*alternateBitrate) {
+					if len(*alternateBitrate) > 0 {
+						bitrateIdx = bitrateIdx % len(*alternateBitrate)
 					}
+
+					// switch recoder
+
+					recoderIdx++
+					if recoderIdx >= uint(len(encoderFactories)) {
+						recoderIdx = 0
+					}
+					if sw != nil {
+						err := sw.SetKernelIndex(ctx, recoderIdx)
+						assert(ctx, err == nil)
+					}
+					logger.Debugf(ctx, "switch encoder to #%d", recoderIdx)
 				}
-			})
-			fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
-			return true
-		})
+
+				if len(*alternateBitrate) == 0 {
+					logger.Debugf(ctx, "len(*alternateBitrate) == 0")
+					return true
+				}
+
+				// switch bitrate
+
+				nextBitrate := (*alternateBitrate)[bitrateIdx]
+				bitrateIdx++
+				encoderFactory := encoderFactories[recoderIdx]
+				encoderFactory.Locker.Do(ctx, func() {
+					for _, encoder := range encoderFactory.VideoEncoders {
+						err := encoder.SetQuality(
+							ctx,
+							quality.ConstantBitrate(nextBitrate),
+							nil,
+						)
+						if err != nil {
+							logger.Errorf(ctx, "SetQuality errored: %v", err)
+							continue
+						}
+					}
+				})
+				fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
+				return true
+			}))
+		}
 	}
-	finalNode.PushTo.Add(avpipeline.NewNode(output))
-	assert(ctx, len(finalNode.PushTo) == 1, len(finalNode.PushTo))
+	finalNode.AddPushTo(avpipeline.NewNode(output))
+	assert(ctx, len(finalNode.GetPushTos()) == 1, len(finalNode.GetPushTos()))
 
 	l.Debugf("resulting pipeline: %s", inputNode.String())
 	l.Debugf("resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
@@ -242,7 +245,7 @@ func main() {
 			if err != nil {
 				l.Fatal(err)
 			}
-			outputStats := finalNode.PushTo[0].GetStats()
+			outputStats := finalNode.GetPushTos()[0].Node.GetStatistics()
 			outputStatsJSON, err := json.Marshal(outputStats)
 			if err != nil {
 				l.Fatal(err)

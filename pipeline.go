@@ -9,9 +9,9 @@ import (
 	"github.com/xaionaro-go/xcontext"
 )
 
-func ServeRecursively(
+func ServeRecursively[T AbstractNode](
 	ctx context.Context,
-	p *Node,
+	p T,
 	serveConfig ServeConfig,
 	errCh chan<- ErrNode,
 ) {
@@ -20,7 +20,7 @@ func ServeRecursively(
 
 	childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
 	var wg sync.WaitGroup
-	for _, pushTo := range p.PushTo {
+	for _, pushTo := range p.GetPushTos() {
 		pushTo := pushTo
 		wg.Add(1)
 		observability.Go(ctx, func() {

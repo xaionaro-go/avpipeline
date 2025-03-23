@@ -5,13 +5,13 @@ import (
 )
 
 type PushTo struct {
-	*Node
+	Node      AbstractNode
 	Condition condition.Condition
 }
 
 type PushTos []PushTo
 
-func (s *PushTos) Add(p *Node, conds ...condition.Condition) *PushTos {
+func (s *PushTos) Add(dst AbstractNode, conds ...condition.Condition) *PushTos {
 	var cond condition.Condition
 	switch len(conds) {
 	case 0:
@@ -22,7 +22,7 @@ func (s *PushTos) Add(p *Node, conds ...condition.Condition) *PushTos {
 		cond = condition.And(conds)
 	}
 	*s = append(*s, PushTo{
-		Node:      p,
+		Node:      dst,
 		Condition: cond,
 	})
 	return s

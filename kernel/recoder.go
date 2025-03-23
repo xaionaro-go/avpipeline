@@ -23,11 +23,12 @@ const (
 	enableStreamCodecParametersUpdates = false
 )
 
-type Recoder struct {
+type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*closeChan
 
-	decoderFactory   codec.DecoderFactory
-	encoderFactory   codec.EncoderFactory
+	DecoderFactory DF
+	EncoderFactory EF
+
 	decoders         map[int]*codec.Decoder
 	encoders         map[int]*encoderInRecoder
 	frame            *astiav.Frame
@@ -40,18 +41,18 @@ type Recoder struct {
 	outputStreams             map[int]*astiav.Stream
 }
 
-var _ Abstract = (*Recoder)(nil)
+var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
-func NewRecoder(
+func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
-	decoderFactory codec.DecoderFactory,
-	encoderFactory codec.EncoderFactory,
+	decoderFactory DF,
+	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
-) (*Recoder, error) {
-	r := &Recoder{
+) (*Recoder[DF, EF], error) {
+	r := &Recoder[DF, EF]{
 		frame:               astiav.AllocFrame(),
-		decoderFactory:      decoderFactory,
-		encoderFactory:      encoderFactory,
+		DecoderFactory:      decoderFactory,
+		EncoderFactory:      encoderFactory,
 		decoders:            map[int]*codec.Decoder{},
 		encoders:            map[int]*encoderInRecoder{},
 		streamConfigurer:    streamConfigurer,
@@ -64,7 +65,7 @@ func NewRecoder(
 	setFinalizerFree(ctx, r.outputFormatContext)
 	return r, nil
 }
-func (r *Recoder) Close(ctx context.Context) error {
+func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
 	r.closeChan.Close()
 	for key, decoder := range r.decoders {
 		err := decoder.Close(ctx)
@@ -79,7 +80,7 @@ func (r *Recoder) Close(ctx context.Context) error {
 	return nil
 }
 
-func (r *Recoder) initOutputStreamCopy(
+func (r *Recoder[DF, EF]) initOutputStreamCopy(
 	ctx context.Context,
 	inputStream *astiav.Stream,
 ) (_err error) {
@@ -114,7 +115,7 @@ func (r *Recoder) initOutputStreamCopy(
 	return nil
 }
 
-func (r *Recoder) initOutputStream(
+func (r *Recoder[DF, EF]) initOutputStream(
 	ctx context.Context,
 	inputStream *astiav.Stream,
 	encoder codec.Encoder,
@@ -148,7 +149,7 @@ func (r *Recoder) initOutputStream(
 	return nil
 }
 
-func (r *Recoder) configureOutputStream(
+func (r *Recoder[DF, EF]) configureOutputStream(
 	ctx context.Context,
 	outputStream *astiav.Stream,
 	inputStream *astiav.Stream,
@@ -178,7 +179,7 @@ func (r *Recoder) configureOutputStream(
 	return nil
 }
 
-func (r *Recoder) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
+func (r *Recoder[DF, EF]) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
 	return nil
 }
 
@@ -187,7 +188,7 @@ type encoderInRecoder struct {
 	LastInitTS time.Time
 }
 
-func (r *Recoder) updateOutputs(
+func (r *Recoder[DF, EF]) updateOutputs(
 	ctx context.Context,
 	inputFmt *astiav.FormatContext,
 ) (_err error) {
@@ -219,14 +220,14 @@ func (r *Recoder) updateOutputs(
 	return nil
 }
 
-func (r *Recoder) initEncoderFor(
+func (r *Recoder[DF, EF]) initEncoderFor(
 	ctx context.Context,
 	inputStream *astiav.Stream,
 ) (_err error) {
 	logger.Debugf(ctx, "initEncoderFor(ctx, stream[%d])", inputStream.Index())
 	defer func() { logger.Debugf(ctx, "/initEncoderFor(ctx, stream[%d]): %v", inputStream.Index(), _err) }()
 
-	encoderInstance, err := r.encoderFactory.NewEncoder(ctx, inputStream)
+	encoderInstance, err := r.EncoderFactory.NewEncoder(ctx, inputStream)
 	if err != nil {
 		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", inputStream.Index(), err)
 	}
@@ -236,7 +237,7 @@ func (r *Recoder) initEncoderFor(
 	return nil
 }
 
-func (r *Recoder) SendInput(
+func (r *Recoder[DF, EF]) SendInput(
 	ctx context.Context,
 	input types.InputPacket,
 	outputCh chan<- types.OutputPacket,
@@ -274,7 +275,7 @@ func (r *Recoder) SendInput(
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder == nil {
 		var err error
-		decoder, err = r.decoderFactory.NewDecoder(ctx, input.Stream)
+		decoder, err = r.DecoderFactory.NewDecoder(ctx, input.Stream)
 		if err != nil {
 			return fmt.Errorf("cannot initialize a decoder for stream %d: %w", input.StreamIndex(), err)
 		}
@@ -362,6 +363,6 @@ func (r *Recoder) SendInput(
 	return nil
 }
 
-func (r *Recoder) String() string {
-	return fmt.Sprintf("Recoder(%s->%s)", r.decoderFactory, r.encoderFactory)
+func (r *Recoder[DF, EF]) String() string {
+	return fmt.Sprintf("Recoder(%s->%s)", r.DecoderFactory, r.EncoderFactory)
 }
