@@ -7,14 +7,16 @@ import (
 	"strings"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
 type Node struct {
 	NodeStatistics
-	Processor processor.Abstract
-	PushTo    PushTos
+	Processor      processor.Abstract
+	PushTo         PushTos
+	InputCondition condition.Condition
 }
 
 func NewNode(processor processor.Abstract) *Node {
@@ -73,12 +75,19 @@ func (n *Node) dotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
+	sanitizeString := func(s string) string {
+		s = strings.ReplaceAll(s, `"`, ``)
+		s = strings.ReplaceAll(s, "\n", `\n`)
+		s = strings.ReplaceAll(s, "\t", ``)
+		return s
+	}
+
 	if _, ok := alreadyPrinted[n.Processor]; !ok {
 		fmt.Fprintf(
 			w,
 			"\tnode_%p [label="+`"%s"`+"]\n",
 			n.Processor,
-			strings.ReplaceAll(n.Processor.String(), `"`, ``),
+			sanitizeString(n.Processor.String()),
 		)
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
@@ -93,7 +102,7 @@ func (n *Node) dotBlockContentStringWriteTo(
 			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
 			n.Processor,
 			pushTo.Processor,
-			strings.ReplaceAll(pushTo.Condition.String(), `"`, ``),
+			sanitizeString(n.Processor.String()),
 		)
 	}
 }

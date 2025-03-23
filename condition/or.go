@@ -12,6 +12,11 @@ type Or []Condition
 
 var _ Condition = (Or)(nil)
 
+func (s *Or) Add(item Condition) *Or {
+	*s = append(*s, item)
+	return s
+}
+
 func (s Or) String() string {
 	var result []string
 	for _, cond := range s {

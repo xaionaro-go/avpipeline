@@ -19,10 +19,13 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
+	"github.com/xaionaro-go/avpipeline/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -36,7 +39,7 @@ func main() {
 	loggerLevel := logger.LevelWarning
 	pflag.Var(&loggerLevel, "log-level", "Log level")
 	netPprofAddr := pflag.String("net-pprof-listen-addr", "", "an address to listen for incoming net/pprof connections")
-	videoCodec := pflag.String("vcodec", "copy", "")
+	videoCodecs := pflag.StringSlice("vcodec", nil, "")
 	hwDeviceName := pflag.String("hwdevice", "", "")
 	frameDrop := pflag.Bool("framedrop", false, "")
 	alternateBitrate := pflag.IntSlice("silly-stuff-alternate-bitrate", nil, "")
@@ -99,11 +102,13 @@ func main() {
 	errCh := make(chan avpipeline.ErrNode, 10)
 	inputNode := avpipeline.NewNode(input)
 	finalNode := inputNode
-	var encoderFactory *codec.NaiveEncoderFactory
-	if *videoCodec != "copy" {
+	var encoderFactories []*codec.NaiveEncoderFactory
+	var recoders []*kernel.Recoder
+	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
-		encoderFactory = codec.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDeviceName)
-		recoder, err := processor.NewRecoder(
+		encoderFactory := codec.NewNaiveEncoderFactory(vcodec, "copy", 0, hwDeviceName)
+		encoderFactories = append(encoderFactories, encoderFactory)
+		recoder, err := kernel.NewRecoder(
 			ctx,
 			codec.NewNaiveDecoderFactory(0, hwDeviceName),
 			encoderFactory,
@@ -113,10 +118,86 @@ func main() {
 			l.Fatal(err)
 		}
 		defer recoder.Close(ctx)
-		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-		recodingNode := avpipeline.NewNode(recoder)
+		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodecs, hwDeviceName)
+		recoders = append(recoders, recoder)
+	}
+	var recodingNode *avpipeline.Node
+	var sw *kernel.Switch[*kernel.Recoder]
+	switch len(recoders) {
+	case 0:
+	case 1:
+		recodingNode = avpipeline.NewNodeFromKernel(
+			ctx,
+			recoders[0],
+			processor.DefaultOptionsRecoder()...,
+		)
+	default:
+		sw = kernel.NewSwitch(recoders...)
+		sw.KeepUntil = condition.IsKeyFrame(true)
+		recodingNode = avpipeline.NewNodeFromKernel(
+			ctx,
+			sw,
+			processor.DefaultOptionsRecoder()...,
+		)
+	}
+	if recodingNode != nil {
 		inputNode.PushTo.Add(recodingNode)
 		finalNode = recodingNode
+
+		recoderIdx := uint(0)
+		bitrateIdx := 0
+		pastSwitchPts := time.Duration(0)
+		recodingNode.InputCondition = condition.Function(func(ctx context.Context, pkt types.InputPacket) bool {
+			pts := avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
+			logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.TimeBase())
+			if pts-pastSwitchPts < time.Second {
+				return true
+			}
+			pastSwitchPts = pts
+			if bitrateIdx >= len(*alternateBitrate) {
+				if len(*alternateBitrate) > 0 {
+					bitrateIdx = bitrateIdx % len(*alternateBitrate)
+				}
+
+				// switch recoder
+
+				recoderIdx++
+				if recoderIdx >= uint(len(encoderFactories)) {
+					recoderIdx = 0
+				}
+				if sw != nil {
+					err := sw.SetKernelIndex(ctx, recoderIdx)
+					assert(ctx, err == nil)
+				}
+				logger.Debugf(ctx, "switch encoder to #%d", recoderIdx)
+			}
+
+			if len(*alternateBitrate) == 0 {
+				logger.Debugf(ctx, "len(*alternateBitrate) == 0")
+				return true
+			}
+
+			// switch bitrate
+
+			nextBitrate := (*alternateBitrate)[bitrateIdx]
+			bitrateIdx++
+			encoderFactory := encoderFactories[recoderIdx]
+			encoderFactory.Locker.Do(ctx, func() {
+				for _, encoder := range encoderFactory.VideoEncoders {
+					err := encoder.SetQuality(
+						ctx,
+						quality.ConstantBitrate(nextBitrate),
+						nil,
+					)
+					if err != nil {
+						logger.Errorf(ctx, "SetQuality errored: %v", err)
+						continue
+					}
+				}
+			})
+			fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
+			return true
+		})
 	}
 	finalNode.PushTo.Add(avpipeline.NewNode(output))
 	assert(ctx, len(finalNode.PushTo) == 1, len(finalNode.PushTo))
@@ -131,10 +212,8 @@ func main() {
 		}, errCh)
 	})
 
-	bitrateIdx := 0
 	statusTicker := time.NewTicker(time.Second)
 	defer statusTicker.Stop()
-	codecTicker := time.NewTimer(3 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
@@ -166,30 +245,6 @@ func main() {
 				l.Fatal(err)
 			}
 			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)
-		case <-codecTicker.C:
-			if encoderFactory == nil {
-				logger.Debugf(ctx, "encoderFactory == nil")
-				continue
-			}
-			if len(*alternateBitrate) == 0 {
-				logger.Debugf(ctx, "len(*alternateBitrate) == 0")
-				continue
-			}
-			nextBitrate := (*alternateBitrate)[bitrateIdx]
-			bitrateIdx++
-			if bitrateIdx >= len(*alternateBitrate) {
-				bitrateIdx = bitrateIdx % len(*alternateBitrate)
-			}
-			encoderFactory.Locker.Do(ctx, func() {
-				for _, encoder := range encoderFactory.VideoEncoders {
-					err := encoder.SetQuality(ctx, quality.ConstantBitrate(nextBitrate))
-					if err != nil {
-						logger.Errorf(ctx, "SetQuality errored: %v", err)
-						continue
-					}
-				}
-			})
-			fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
 		}
 	}
 }

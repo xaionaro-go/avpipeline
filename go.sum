@@ -36,8 +36,8 @@ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/xaionaro-go/astiav v0.0.0-20250317204545-eb97dfe4ade0 h1:11DTvbv74kh+twNUzfNYzqmGcZnaryBat13nPXRBbI8=
-github.com/xaionaro-go/astiav v0.0.0-20250317204545-eb97dfe4ade0/go.mod h1:K7D8UC6GeQt85FUxk2KVwYxHnotrxuEnp5evkkudc2s=
+github.com/xaionaro-go/astiav v0.0.0-20250323164157-9924a3697350 h1:OJ1RQPbZ9yUvGneM9tzrvIJnNC5T/ljcjTdMkjN2Iqo=
+github.com/xaionaro-go/astiav v0.0.0-20250323164157-9924a3697350/go.mod h1:K7D8UC6GeQt85FUxk2KVwYxHnotrxuEnp5evkkudc2s=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc h1:w3w0JxQUDWSdrGYdd7SjQ+UukQq5dfE1H9Cq7JgEbD4=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc/go.mod h1:IZ3ZQcDrwrIKV4jmSdUW3PZH9ALcxNKhzmrcIt4jNUY=
 github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d h1:9DyH0lboWWzKUwiqGmp9sTZ3bSPhgJHiiWgV+hqY9Uo=
@@ -57,6 +57,8 @@ github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2/go.mod h1:XKoHG
 github.com/xaionaro-go/spinlock v0.0.0-20190309154744-55278e21e817/go.mod h1:Nb/15eS0BMty6TMuWgRQM8WCDIUlyPZagcpchHT6c9Y=
 github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 h1:1Kqw9dv2LnznIhJoMt3dNzc/ctSj6VHjyGh4YZHjpE4=
 github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1/go.mod h1:UwmTXX+EpoEYHuy0rSys1Rp5PW+eVTgZSjgMVLJENKg=
+github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba h1:wuSIPuGbTeFkv/KSllbIZ511LFam95Y2xpKOq2As6oU=
+github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba/go.mod h1:6wJwFezlmN6Lk38K3eNzGUZ4MmHHzgTAIepvldyiprY=
 github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e h1:FV+/FVPYOncsNNqtlMvqRDrsQznArX0lO0PkFifixDs=
 github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e/go.mod h1:ERewyGVM0zYnWA9nxdHPIC3xc9Yrf5CgAnBITuP3FRE=
 github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c h1://sE/WLpO7wpcVsp1FfTNAG9JmL60KfXiogNVKYivTA=

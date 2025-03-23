@@ -13,15 +13,6 @@ import (
 	"github.com/xaionaro-go/observability"
 )
 
-type Abstract interface {
-	fmt.Stringer
-	types.Closer
-
-	SendInputChan() chan<- types.InputPacket
-	OutputPacketsChan() <-chan types.OutputPacket
-	ErrorChan() <-chan error
-}
-
 type FromKernel struct {
 	*ChanStruct
 	Kernel kernel.Abstract

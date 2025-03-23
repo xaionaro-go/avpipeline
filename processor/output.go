@@ -7,6 +7,14 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
+var DefaultOptionsOutput = func() []Option {
+	return []Option{
+		OptionQueueSizeInput(600),
+		OptionQueueSizeOutput(0),
+		OptionQueueSizeError(2),
+	}
+}
+
 func NewOutputFromURL(
 	ctx context.Context,
 	urlString string,
@@ -21,10 +29,6 @@ func NewOutputFromURL(
 	return NewFromKernel(
 		ctx,
 		k,
-		append([]Option{
-			OptionQueueSizeInput(600),
-			OptionQueueSizeOutput(0),
-			OptionQueueSizeError(2),
-		}, processorOpts...)...,
+		append(DefaultOptionsOutput(), processorOpts...)...,
 	), nil
 }

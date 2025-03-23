@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
@@ -46,11 +47,12 @@ func (n *Node) Serve(
 	serveConfig ServeConfig,
 	errCh chan<- ErrNode,
 ) {
-	logger.Tracef(ctx, "Serve[%s]", n.Processor)
-	defer func() { logger.Tracef(ctx, "/Serve[%s]", n.Processor) }()
+	ctx = belt.WithField(ctx, "processor", n.Processor.String())
+	logger.Tracef(ctx, "Serve")
+	defer func() { logger.Tracef(ctx, "/Serve") }()
 
 	sendErr := func(err error) {
-		logger.Debugf(ctx, "Serve[%s]: sendErr(%v)", n.Processor, err)
+		logger.Debugf(ctx, "Serve: sendErr(%v)", err)
 		if errCh == nil {
 			return
 		}
@@ -64,7 +66,7 @@ func (n *Node) Serve(
 		}
 	}
 
-	defer func() { logger.Debugf(ctx, "Serve[%s]: finished processing", n.Processor) }()
+	defer func() { logger.Debugf(ctx, "finished processing") }()
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -77,8 +79,8 @@ func (n *Node) Serve(
 	for {
 		select {
 		case <-procNodeEndCtx.Done():
-			logger.Debugf(ctx, "Serve[%s]: initiating closing", n.Processor)
-			defer func() { logger.Debugf(ctx, "Serve[%s]: /closed", n.Processor) }()
+			logger.Debugf(ctx, "initiating closing")
+			defer func() { logger.Debugf(ctx, "/closed") }()
 			var wg sync.WaitGroup
 			defer wg.Wait()
 			wg.Add(1)
@@ -105,13 +107,13 @@ func (n *Node) Serve(
 			fmtCtx := pkt.FormatContext
 			streamIndex := pkt.Packet.StreamIndex()
 			assert(ctx, fmtCtx != nil, streamIndex, "fmtCtx != nil", n.String())
-			logger.Tracef(ctx, "Serve[%s]: getOutputStream", n.Processor)
+			logger.Tracef(ctx, "getOutputStream")
 			stream := getOutputStream(
 				ctx,
 				fmtCtx,
 				streamIndex,
 			)
-			logger.Tracef(ctx, "Serve[%s]: /getOutputStream: %p", n.Processor, stream)
+			logger.Tracef(ctx, "/getOutputStream: %p", stream)
 			assert(ctx, stream != nil, streamIndex, "stream != nil", n.String())
 			mediaType := stream.CodecParameters().MediaType()
 			incrementCounters(&n.FramesWrote, mediaType)
@@ -123,14 +125,18 @@ func (n *Node) Serve(
 					stream,
 				)
 				if pushTo.Condition != nil && !pushTo.Condition.Match(ctx, pushPkt) {
-					logger.Tracef(ctx, "condition %s was not met", pushTo.Condition)
+					logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
 					continue
 				}
 
 				dst := pushTo.Node
+				if dst.InputCondition != nil && !dst.InputCondition.Match(ctx, pushPkt) {
+					logger.Tracef(ctx, "input condition %s was not met", dst.InputCondition)
+					continue
+				}
+
 				pushChan := dst.Processor.SendInputChan()
 				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", dst.Processor, pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
-
 				if serveConfig.FrameDrop {
 					select {
 					case pushChan <- pushPkt:

@@ -9,6 +9,10 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/condition"
+	"github.com/xaionaro-go/avpipeline/quality"
+	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -26,7 +30,7 @@ type Encoder interface {
 	HardwarePixelFormat() astiav.PixelFormat
 	SendFrame(context.Context, *astiav.Frame) error
 	ReceivePacket(context.Context, *astiav.Packet) error
-	SetQuality(context.Context, Quality) error
+	SetQuality(context.Context, Quality, condition.Condition) error
 }
 
 type EncoderFullBackend = Codec
@@ -34,6 +38,12 @@ type EncoderFull struct {
 	*EncoderFullBackend
 	Params EncoderParams
 	InitTS time.Time
+	Next   typing.Optional[SwitchEncoderParams]
+}
+
+type SwitchEncoderParams struct {
+	When    condition.Condition
+	Quality quality.Quality
 }
 
 var _ Encoder = (*EncoderFull)(nil)
@@ -147,24 +157,68 @@ func (e *EncoderFull) ReceivePacket(
 }
 
 func (e *EncoderFull) receivePacketNoLock(
-	_ context.Context,
+	ctx context.Context,
 	p *astiav.Packet,
-) (_err error) {
-	return e.CodecContext().ReceivePacket(p)
+) (err error) {
+	err = e.CodecContext().ReceivePacket(p)
+	if !e.Next.IsSet() {
+		return
+	}
+
+	next := e.Next.Get()
+	if next.When == nil || next.When.Match(ctx, types.BuildInputPacket(p, nil, nil)) {
+		e.Next.Unset()
+		q := next.Quality
+		qErr := e.setQualityNow(ctx, q)
+		if qErr != nil {
+			logger.Errorf(ctx, "unable to set quality to %v: %v", q, qErr)
+		}
+	}
+
+	return err
 }
 
 func (e *EncoderFull) SetQuality(
 	ctx context.Context,
 	q Quality,
+	when condition.Condition,
 ) (_err error) {
-	logger.Tracef(ctx, "SetQuality(ctx, %#+v)", q)
-	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setQualityNoLock, ctx, q)
+	logger.Debugf(ctx, "SetQuality(ctx, %#+v)", q)
+	defer func() { logger.Tracef(ctx, "/SetQuality(ctx, %#+v): %v", q, _err) }()
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setQualityNoLock, ctx, q, when)
 }
 
 func (e *EncoderFull) setQualityNoLock(
 	ctx context.Context,
 	q Quality,
+	when condition.Condition,
 ) (_err error) {
+	if when == nil {
+		return e.setQualityNow(ctx, q)
+	}
+	logger.Tracef(ctx, "setQualityNoLock(): will set the new quality when condition '%s' is satisfied", when)
+	e.Next.Set(SwitchEncoderParams{
+		When:    when,
+		Quality: q,
+	})
+	return nil
+}
+
+func (e *EncoderFull) canChangeQualityInstantly() bool {
+	codecName := e.codec.Name()
+	switch codecName {
+	case "mediacodec":
+		return true
+	}
+	return false
+}
+
+func (e *EncoderFull) setQualityNow(
+	ctx context.Context,
+	q Quality,
+) (_err error) {
+	logger.Debugf(ctx, "setQualityNow(ctx, %#+v)", q)
+	defer func() { logger.Debugf(ctx, "/setQualityNow(ctx, %#+v): %v", q, _err) }()
 	codecName := e.codec.Name()
 	defer func() {
 		if _err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/condition"
 )
 
 type EncoderCopy struct{}
@@ -47,6 +48,6 @@ func (EncoderCopy) ReceivePacket(context.Context, *astiav.Packet) error {
 	return fmt.Errorf("'copy' needs to be processed manually")
 }
 
-func (EncoderCopy) SetQuality(context.Context, Quality) error {
+func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) error {
 	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
 }

@@ -12,6 +12,11 @@ type And []Condition
 
 var _ Condition = (And)(nil)
 
+func (s *And) Add(item Condition) *And {
+	*s = append(*s, item)
+	return s
+}
+
 func (s And) String() string {
 	var result []string
 	for _, cond := range s {

@@ -7,6 +7,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 )
 
+var DefaultOptionsRecoder = func() []Option {
+	return []Option{
+		OptionQueueSizeInput(600),
+		OptionQueueSizeOutput(0),
+		OptionQueueSizeError(2),
+	}
+}
+
 func NewRecoder(
 	ctx context.Context,
 	decoderFactory codec.DecoderFactory,
@@ -26,10 +34,6 @@ func NewRecoder(
 	return NewFromKernel(
 		ctx,
 		k,
-		append([]Option{
-			OptionQueueSizeInput(600),
-			OptionQueueSizeOutput(0),
-			OptionQueueSizeError(2),
-		}, processorOpts...)...,
+		append(DefaultOptionsRecoder(), processorOpts...)...,
 	), nil
 }

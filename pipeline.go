@@ -15,8 +15,8 @@ func ServeRecursively(
 	serveConfig ServeConfig,
 	errCh chan<- ErrNode,
 ) {
-	logger.Tracef(ctx, "ServeRecursively[%T]", p.Processor)
-	defer func() { logger.Tracef(ctx, "/ServeRecursively[%T]", p.Processor) }()
+	logger.Tracef(ctx, "ServeRecursively[%s]", p)
+	defer func() { logger.Tracef(ctx, "/ServeRecursively[%s]", p) }()
 
 	childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
 	var wg sync.WaitGroup

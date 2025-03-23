@@ -5,33 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/xaionaro-go/avpipeline/condition"
 	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
-type Switch struct {
+type Switch[T Abstract] struct {
 	*closeChan
 
-	Kernels []Abstract
+	Kernels []T
 
-	KernelIndex uint
+	KernelIndex     uint
+	NextKernelIndex typing.Optional[uint]
 
-	Locker xsync.RWMutex
+	KeepUntil condition.Condition
+	Locker    xsync.RWMutex
 }
 
-var _ Abstract = (*Switch)(nil)
+var _ Abstract = (*Switch[Abstract])(nil)
 
-func NewProcessorsSwitch(
-	processors ...Abstract,
-) *Switch {
-	return &Switch{
+func NewSwitch[T Abstract](
+	kernels ...T,
+) *Switch[T] {
+	return &Switch[T]{
 		closeChan: newCloseChan(),
-		Kernels:   processors,
+		Kernels:   kernels,
 	}
 }
 
-func (sw *Switch) GetKernelIndex(
+func (sw *Switch[T]) GetKernelIndex(
 	ctx context.Context,
 ) uint {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &sw.Locker, func() uint {
@@ -39,7 +45,7 @@ func (sw *Switch) GetKernelIndex(
 	})
 }
 
-func (sw *Switch) SetKernelIndex(
+func (sw *Switch[T]) SetKernelIndex(
 	ctx context.Context,
 	idx uint,
 ) error {
@@ -47,42 +53,79 @@ func (sw *Switch) SetKernelIndex(
 		return fmt.Errorf("requested processor #%d, while I have only %d processor", idx+1, len(sw.Kernels))
 	}
 	sw.Locker.Do(ctx, func() {
-		sw.KernelIndex = idx
+		if sw.KeepUntil == nil {
+			sw.KernelIndex = idx
+			return
+		}
+		sw.NextKernelIndex.Set(idx)
 	})
 	return nil
 }
 
-func (sw *Switch) GetKernel(ctx context.Context) Abstract {
+func (sw *Switch[T]) GetKernel(ctx context.Context) Abstract {
 	return sw.Kernels[sw.GetKernelIndex(ctx)]
 }
 
-func (sw *Switch) String() string {
+func (sw *Switch[T]) String() string {
 	var result []string
 	for idx, node := range sw.Kernels {
 		var str string
 		if uint(idx) == sw.GetKernelIndex(context.Background()) {
-			str = fmt.Sprintf(" *%s* ", node.String())
+			str = fmt.Sprintf("->%s", node.String())
 		} else {
 			str = node.String()
 		}
 		result = append(result, str)
 	}
-	return fmt.Sprintf("Switch(%s)", strings.Join(result, "|"))
+	return fmt.Sprintf("Switch(\n\t%s,\n)", strings.Join(result, ",\n\t"))
 }
 
-func (sw *Switch) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
-	return fmt.Errorf("Switch does not support Generate, yet")
+func (sw *Switch[T]) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
+	errCh := make(chan error, len(sw.Kernels))
+
+	var wg sync.WaitGroup
+	for _, kernel := range sw.Kernels {
+		wg.Add(1)
+		observability.Go(ctx, func() {
+			defer wg.Done()
+			errCh <- kernel.Generate(ctx, outputCh)
+		})
+	}
+	observability.Go(ctx, func() {
+		wg.Wait()
+		close(errCh)
+	})
+
+	var result []error
+	for err := range errCh {
+		if err == nil {
+			continue
+		}
+		result = append(result, err)
+	}
+	return errors.Join(result...)
 }
 
-func (sw *Switch) SendInput(
+func (sw *Switch[T]) SendInput(
 	ctx context.Context,
 	input types.InputPacket,
 	outputCh chan<- types.OutputPacket,
 ) error {
-	return sw.GetKernel(ctx).SendInput(ctx, input, outputCh)
+	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &sw.Locker, func() error {
+		if !sw.NextKernelIndex.IsSet() {
+			return sw.Kernels[sw.KernelIndex].SendInput(ctx, input, outputCh)
+		}
+
+		if sw.KeepUntil == nil || sw.KeepUntil.Match(ctx, input) {
+			sw.KernelIndex = sw.NextKernelIndex.Get()
+			sw.NextKernelIndex.Unset()
+		}
+
+		return sw.Kernels[sw.KernelIndex].SendInput(ctx, input, outputCh)
+	})
 }
 
-func (sw *Switch) Close(
+func (sw *Switch[T]) Close(
 	ctx context.Context,
 ) error {
 	sw.closeChan.Close()
