@@ -30,6 +30,7 @@ type Encoder interface {
 	HardwarePixelFormat() astiav.PixelFormat
 	SendFrame(context.Context, *astiav.Frame) error
 	ReceivePacket(context.Context, *astiav.Packet) error
+	GetQuality(ctx context.Context) Quality
 	SetQuality(context.Context, Quality, condition.Condition) error
 }
 
@@ -176,6 +177,18 @@ func (e *EncoderFull) receivePacketNoLock(
 	}
 
 	return err
+}
+
+func (e *EncoderFull) GetQuality(
+	ctx context.Context,
+) Quality {
+	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() Quality {
+		bitRate := e.codecContext.BitRate()
+		if bitRate != 0 {
+			return quality.ConstantBitrate(e.codecContext.BitRate())
+		}
+		return nil
+	})
 }
 
 func (e *EncoderFull) SetQuality(

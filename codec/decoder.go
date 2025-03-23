@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -60,5 +61,17 @@ func (d *Decoder) ReceiveFrame(
 ) error {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() error {
 		return d.CodecContext().ReceiveFrame(f)
+	})
+}
+
+func (d *Decoder) GetQuality(
+	ctx context.Context,
+) Quality {
+	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() Quality {
+		bitRate := d.codecContext.BitRate()
+		if bitRate != 0 {
+			return quality.ConstantBitrate(d.codecContext.BitRate())
+		}
+		return nil
 	})
 }

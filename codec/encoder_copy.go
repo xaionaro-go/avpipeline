@@ -48,6 +48,12 @@ func (EncoderCopy) ReceivePacket(context.Context, *astiav.Packet) error {
 	return fmt.Errorf("'copy' needs to be processed manually")
 }
 
+func (EncoderCopy) GetQuality(
+	ctx context.Context,
+) Quality {
+	return nil
+}
+
 func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) error {
 	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
 }

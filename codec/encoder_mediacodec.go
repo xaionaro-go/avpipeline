@@ -43,5 +43,11 @@ func (e *EncoderFull) FFAMediaFormatSetInt32(
 	fmt := avmediacodec.WrapAVCodecContext(
 		astiavmediacodec.CFromAVCodecContext(e.codecContext),
 	)
-	return fmt.PrivData().Codec().Format().SetInt32(key, value)
+	err := fmt.PrivData().Codec().Format().SetInt32(key, value)
+	if err != nil {
+		return err
+	}
+
+	e.codecContext.SetBitRate(int64(value))
+	return nil
 }
