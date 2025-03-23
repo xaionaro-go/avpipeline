@@ -133,6 +133,10 @@ func main() {
 		)
 	default:
 		sw = kernel.NewSwitch(recoders...)
+		sw.SetVerifySwitchOutput(condition.And{
+			condition.MediaType(astiav.MediaTypeVideo),
+			condition.IsKeyFrame(true),
+		})
 		recodingNode = avpipeline.NewNodeFromKernel(
 			ctx,
 			sw,

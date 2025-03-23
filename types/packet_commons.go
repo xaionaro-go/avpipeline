@@ -12,6 +12,10 @@ type PacketCommons struct {
 	*astiav.FormatContext
 }
 
+func (pkt *PacketCommons) Stream() *astiav.Stream {
+	return pkt.FormatContext.Streams()[pkt.Packet.StreamIndex()]
+}
+
 func (pkt *PacketCommons) PtsAsDuration() time.Duration {
 	return avconv.Duration(pkt.Pts(), pkt.TimeBase())
 }
