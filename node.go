@@ -130,7 +130,7 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 		fmt.Fprintf(
 			w,
 			"\tnode_%p [label="+`"%s"`+"]\n",
-			n.Processor,
+			any(n.Processor),
 			sanitizeString(n.Processor.String()),
 		)
 		alreadyPrinted[n.Processor] = struct{}{}
@@ -144,13 +144,13 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 		}
 		writer.dotBlockContentStringWriteTo(w, alreadyPrinted)
 		if pushTo.Condition == nil {
-			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", n.Processor, pushTo.Node.GetProcessor())
+			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
 			continue
 		}
 		fmt.Fprintf(
 			w,
 			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
-			n.Processor,
+			any(n.Processor),
 			pushTo.Node.GetProcessor(),
 			sanitizeString(n.Processor.String()),
 		)
