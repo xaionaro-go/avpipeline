@@ -89,8 +89,8 @@ func TestRecoderNoFailure(t *testing.T) {
 			inputNode := avpipeline.NewNodeFromKernel(
 				ctx,
 				input,
-				processor.OptionQueueSizeInput(1),
-				processor.OptionQueueSizeOutput(1),
+				processor.OptionQueueSizeInputPacket(1),
+				processor.OptionQueueSizeOutputPacket(1),
 				processor.OptionQueueSizeError(2),
 			)
 			var finalNode avpipeline.AbstractNode
@@ -110,17 +110,17 @@ func TestRecoderNoFailure(t *testing.T) {
 			recodingNode := avpipeline.NewNodeFromKernel(
 				ctx,
 				recoder,
-				processor.OptionQueueSizeInput(100),
-				processor.OptionQueueSizeOutput(1),
+				processor.OptionQueueSizeInputPacket(100),
+				processor.OptionQueueSizeOutputPacket(1),
 				processor.OptionQueueSizeError(2),
 			)
-			inputNode.PushTo.Add(recodingNode)
+			inputNode.PushPacketsTo.Add(recodingNode)
 			finalNode = recodingNode
-			finalNode.AddPushTo(avpipeline.NewNodeFromKernel(
+			finalNode.AddPushPacketsTo(avpipeline.NewNodeFromKernel(
 				ctx,
 				output,
-				processor.OptionQueueSizeInput(600),
-				processor.OptionQueueSizeOutput(0),
+				processor.OptionQueueSizeInputPacket(600),
+				processor.OptionQueueSizeOutputPacket(0),
 				processor.OptionQueueSizeError(2),
 			))
 

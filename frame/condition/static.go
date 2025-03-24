@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/frame"
 )
 
 type Static bool
@@ -15,6 +15,6 @@ func (v Static) String() string {
 	return fmt.Sprintf("%t", v)
 }
 
-func (v Static) Match(context.Context, types.InputPacket) bool {
+func (v Static) Match(context.Context, frame.Input) bool {
 	return (bool)(v)
 }

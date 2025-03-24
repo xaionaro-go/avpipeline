@@ -10,7 +10,11 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/frame"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
@@ -96,66 +100,131 @@ func (n *Node[T]) Serve(
 			if err != nil {
 				sendErr(err)
 			}
-		case pkt, ok := <-n.Processor.OutputPacketsChan():
+		case pkt, ok := <-n.Processor.OutputPacketChan():
 			if !ok {
 				sendErr(io.EOF)
 				return
 			}
-			n.BytesCountWrote.Add(uint64(pkt.Size()))
 			logger.Tracef(ctx, "pulled from %s a packet with stream index %d", n.Processor, pkt.Packet.StreamIndex())
-
-			fmtCtx := pkt.FormatContext
-			streamIndex := pkt.Packet.StreamIndex()
-			assert(ctx, fmtCtx != nil, streamIndex, "fmtCtx != nil", n.String())
-			logger.Tracef(ctx, "getOutputStream")
-			stream := getOutputStream(
-				ctx,
-				fmtCtx,
-				streamIndex,
+			pushFurther(
+				ctx, n, pkt, n.PushPacketsTo, serveConfig,
+				func(
+					pkt packet.Output,
+					stream *astiav.Stream,
+				) packet.Input {
+					return packet.BuildInput(
+						packet.CloneAsReferenced(pkt.Packet),
+						stream,
+						pkt.FormatContext,
+					)
+				},
+				func(n AbstractNode) packetcondition.Condition { return n.GetInputPacketCondition() },
+				func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
+				func(p packet.Input) { packet.Pool.Put(p.Packet) },
+				func(p packet.Output) { packet.Pool.Put(p.Packet) },
 			)
-			logger.Tracef(ctx, "/getOutputStream: %p", stream)
-			assert(ctx, stream != nil, streamIndex, "stream != nil", n.String())
-			mediaType := stream.CodecParameters().MediaType()
-			incrementCounters(&n.FramesWrote, mediaType)
-
-			for _, pushTo := range n.PushTo {
-				pushPkt := types.BuildInputPacket(
-					packet.CloneAsReferenced(pkt.Packet),
-					fmtCtx,
-					stream,
-				)
-				if pushTo.Condition != nil && !pushTo.Condition.Match(ctx, pushPkt) {
-					logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
-					continue
-				}
-
-				dst := pushTo.Node
-				if dst.GetInputCondition() != nil && !dst.GetInputCondition().Match(ctx, pushPkt) {
-					logger.Tracef(ctx, "input condition %s was not met", dst.GetInputCondition())
-					continue
-				}
-				dstStats := dst.GetStatistics()
-
-				pushChan := dst.GetProcessor().SendInputChan()
-				logger.Tracef(ctx, "pushing to %s packet %p with stream index %d via chan %p", dst.GetProcessor(), pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
-				if serveConfig.FrameDrop {
-					select {
-					case pushChan <- pushPkt:
-					default:
-						logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
-						incrementCounters(&dstStats.FramesMissed, mediaType)
-						packet.Pool.Put(pushPkt.Packet)
-						continue
-					}
-				} else {
-					pushChan <- pushPkt
-				}
-				dstStats.BytesCountRead.Add(uint64(pkt.Size()))
-				incrementCounters(&dstStats.FramesRead, mediaType)
-				logger.Tracef(ctx, "pushed to %s packet %p with stream index %d via chan %p", dst.GetProcessor(), pkt.Packet, pkt.Packet.StreamIndex(), pushChan)
+		case f, ok := <-n.Processor.OutputFrameChan():
+			if !ok {
+				sendErr(io.EOF)
+				return
 			}
-
-			packet.Pool.Put(pkt.Packet)
+			pushFurther(
+				ctx, n, f, n.PushFramesTo, serveConfig,
+				func(
+					f frame.Output,
+					stream *astiav.Stream,
+				) frame.Input {
+					return frame.BuildInput(
+						frame.CloneAsReferenced(f.Frame),
+						f.DTS,
+						f.FormatContext,
+						stream,
+					)
+				},
+				func(n AbstractNode) framecondition.Condition { return n.GetInputFrameCondition() },
+				func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
+				func(f frame.Input) { frame.Pool.Put(f.Frame) },
+				func(f frame.Output) { frame.Pool.Put(f.Frame) },
+			)
 		}
+	}
+}
+
+type outputObject interface {
+	frame.Output | packet.Output
+}
+
+type outputObjectPtr[T outputObject] interface {
+	*T
+
+	GetSize() int
+	GetStreamIndex() int
+	GetStream() *astiav.Stream
+	GetFormatContext() *astiav.FormatContext
+}
+
+type inputObject interface {
+	frame.Input | packet.Input
+}
+
+func pushFurther[T processor.Abstract, O outputObject, I inputObject, C types.Condition[I], OP outputObjectPtr[O]](
+	ctx context.Context,
+	n *Node[T],
+	outputObj O,
+	pushTos []PushTo[I, C],
+	serveConfig ServeConfig,
+	buildInput func(O, *astiav.Stream) I,
+	getInputCondition func(AbstractNode) C,
+	getPushChan func(processor.Abstract) chan<- I,
+	poolPutInput func(I),
+	poolPutOutput func(O),
+) {
+	defer poolPutOutput(outputObj)
+	outputObjPtr := OP(ptr(outputObj))
+
+	objSize := uint64(outputObjPtr.GetSize())
+	n.BytesCountWrote.Add(objSize)
+
+	fmtCtx := outputObjPtr.GetFormatContext()
+	streamIndex := outputObjPtr.GetStreamIndex()
+	assert(ctx, fmtCtx != nil, streamIndex, "fmtCtx != nil", n.String())
+	stream := outputObjPtr.GetStream()
+	assert(ctx, stream != nil, streamIndex, "stream != nil", n.String())
+	mediaType := stream.CodecParameters().MediaType()
+	incrementCounters(&n.FramesWrote, mediaType)
+
+	for _, pushTo := range pushTos {
+		inputObj := buildInput(outputObj, stream)
+		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, inputObj) {
+			logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
+			continue
+		}
+
+		dst := pushTo.Node
+
+		inputCond := getInputCondition(dst)
+		if any(inputCond) != nil && !inputCond.Match(ctx, inputObj) {
+			logger.Tracef(ctx, "input condition %s was not met", inputCond)
+			continue
+		}
+		dstStats := dst.GetStatistics()
+
+		pushChan := getPushChan(dst.GetProcessor())
+		logger.Tracef(ctx, "pushing to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+		if serveConfig.FrameDrop {
+			select {
+			case pushChan <- inputObj:
+			default:
+				logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
+				incrementCounters(&dstStats.FramesMissed, mediaType)
+				poolPutInput(inputObj)
+				continue
+			}
+		} else {
+			pushChan <- inputObj
+		}
+		dstStats.BytesCountRead.Add(objSize)
+		incrementCounters(&dstStats.FramesRead, mediaType)
+		logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 	}
 }

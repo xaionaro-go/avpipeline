@@ -9,6 +9,8 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/avconv"
+	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
@@ -110,7 +112,8 @@ func (i *Input) readIntoPacket(
 
 func (i *Input) Generate(
 	ctx context.Context,
-	outputCh chan<- types.OutputPacket,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
@@ -125,37 +128,49 @@ func (i *Input) Generate(
 		default:
 		}
 
-		packet := packet.Pool.Get()
-		err := i.readIntoPacket(ctx, packet)
+		pkt := packet.Pool.Get()
+		err := i.readIntoPacket(ctx, pkt)
 		switch err {
 		case nil:
 			logger.Tracef(
 				ctx,
 				"received a packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d), data: 0x %X",
-				packet.StreamIndex(),
-				packet.Pos(), packet.Pts(), packet.Dts(), packet.Duration(),
-				packet.Data(),
+				pkt.StreamIndex(),
+				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
+				pkt.Data(),
 			)
-			outputCh <- types.BuildOutputPacket(
-				packet,
+
+			outputPacketsCh <- packet.BuildOutput(
+				pkt,
+				avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
 				i.FormatContext,
 			)
 		case io.EOF:
-			packet.Free()
+			pkt.Free()
 			return nil
 		default:
-			packet.Free()
+			pkt.Free()
 			return fmt.Errorf("unable to read a packet: %w", err)
 		}
 	}
 }
 
-func (i *Input) SendInput(
+func (i *Input) SendInputPacket(
 	ctx context.Context,
-	input types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	return fmt.Errorf("cannot send packets to an Input")
+}
+
+func (i *Input) SendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
+	return fmt.Errorf("cannot send frames to an Input")
 }
 
 func (i *Input) String() string {

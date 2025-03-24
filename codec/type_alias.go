@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/avpipeline/types"
 )
@@ -10,5 +11,5 @@ type HardwareDeviceType = types.HardwareDeviceType
 type HardwareDeviceName = types.HardwareDeviceName
 type DictionaryItem = types.DictionaryItem
 type DictionaryItems = types.DictionaryItems
-type InputPacket = types.InputPacket
+type InputPacket = packet.Input
 type Quality = quality.Quality

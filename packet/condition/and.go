@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packet"
 )
 
 type And []Condition
@@ -27,7 +27,7 @@ func (s And) String() string {
 
 func (s And) Match(
 	ctx context.Context,
-	pkt types.InputPacket,
+	pkt packet.Input,
 ) bool {
 	for _, item := range s {
 		if !item.Match(ctx, pkt) {

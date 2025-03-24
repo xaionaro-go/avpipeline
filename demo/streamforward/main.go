@@ -21,11 +21,11 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
-	"github.com/xaionaro-go/avpipeline/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -145,16 +145,16 @@ func main() {
 		)
 	}
 	if recodingNode != nil {
-		inputNode.PushTo.Add(recodingNode)
+		inputNode.PushPacketsTo.Add(recodingNode)
 		finalNode = recodingNode
 
 		recoderIdx := uint(0)
 		bitrateIdx := 0
 		pastSwitchPts := time.Duration(0)
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
-			recodingNode.SetInputCondition(condition.Function(func(ctx context.Context, pkt types.InputPacket) bool {
+			recodingNode.SetInputPacketCondition(condition.Function(func(ctx context.Context, pkt packet.Input) bool {
 				pts := avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
-				logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.TimeBase())
+				logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.Stream.TimeBase())
 				if pts-pastSwitchPts < time.Second {
 					return true
 				}
@@ -205,8 +205,8 @@ func main() {
 			}))
 		}
 	}
-	finalNode.AddPushTo(avpipeline.NewNode(output))
-	assert(ctx, len(finalNode.GetPushTos()) == 1, len(finalNode.GetPushTos()))
+	finalNode.AddPushPacketsTo(avpipeline.NewNode(output))
+	assert(ctx, len(finalNode.GetPushPacketsTos()) == 1, len(finalNode.GetPushPacketsTos()))
 
 	l.Debugf("resulting pipeline: %s", inputNode.String())
 	l.Debugf("resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
@@ -245,7 +245,7 @@ func main() {
 			if err != nil {
 				l.Fatal(err)
 			}
-			outputStats := finalNode.GetPushTos()[0].Node.GetStatistics()
+			outputStats := finalNode.GetPushPacketsTos()[0].Node.GetStatistics()
 			outputStatsJSON, err := json.Marshal(outputStats)
 			if err != nil {
 				l.Fatal(err)

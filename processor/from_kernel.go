@@ -8,8 +8,9 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -29,15 +30,21 @@ func NewFromKernel[T kernel.Abstract](
 	opts ...Option,
 ) *FromKernel[T] {
 	opts = append([]Option{
-		OptionQueueSizeInput(1),
-		OptionQueueSizeOutput(1),
+		OptionQueueSizeInputPacket(1),
+		OptionQueueSizeOutputPacket(1),
+		OptionQueueSizeInputFrame(1),
+		OptionQueueSizeOutputFrame(1),
 		OptionQueueSizeError(1),
 	}, opts...)
 	cfg := Options(opts).config()
 	p := &FromKernel[T]{
-		ChanStruct: NewChanStruct(cfg.InputQueue, cfg.OutputQueue, cfg.ErrorQueue),
-		Kernel:     kernel,
-		closer:     astikit.NewCloser(),
+		ChanStruct: NewChanStruct(
+			cfg.InputPacketQueue, cfg.OutputPacketQueue,
+			cfg.InputFrameQueue, cfg.OutputFrameQueue,
+			cfg.ErrorQueue,
+		),
+		Kernel: kernel,
+		closer: astikit.NewCloser(),
 	}
 	p.startProcessing(ctx)
 	return p
@@ -70,7 +77,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		swg.Add(1)
 		observability.Go(ctx, func() {
 			defer swg.Done()
-			err := p.Kernel.Generate(ctx, p.OutputCh)
+			err := p.Kernel.Generate(ctx, p.OutputPacketCh, p.OutputFrameCh)
 			logger.Tracef(ctx, "p.Kernel.Generate: %v", err)
 			if err != nil {
 				p.ErrorCh <- fmt.Errorf(
@@ -81,7 +88,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		})
 
 		logger.Tracef(ctx, "ReaderLoop[%s]", p)
-		err := ReaderLoop(ctx, p.InputCh, p.Kernel, p.OutputCh)
+		err := ReaderLoop(ctx, p.InputPacketCh, p.InputFrameCh, p.Kernel, p.OutputPacketCh, p.OutputFrameCh)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
 		if err != nil {
 			errCh <- err
@@ -113,26 +120,34 @@ func (p *FromKernel[T]) addToCloser(callback func()) {
 func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	logger.Debugf(ctx, "closing %T", p.Kernel)
 	defer func() {
-		close(p.OutputCh)
+		close(p.OutputPacketCh)
 	}()
 	return p.Kernel.Close(ctx)
 }
 
 func (p *FromKernel[T]) SendOutput(
 	ctx context.Context,
-	outputPacket types.OutputPacket,
+	outputPacket packet.Output,
 ) {
 	logger.Tracef(ctx, "SendOutput[%T]", p.Kernel)
 	defer func() { logger.Tracef(ctx, "/SendOutput[%T]", p.Kernel) }()
-	p.OutputCh <- outputPacket
+	p.OutputPacketCh <- outputPacket
 }
 
-func (p *FromKernel[T]) SendInputChan() chan<- types.InputPacket {
-	return p.InputCh
+func (p *FromKernel[T]) SendInputPacketChan() chan<- packet.Input {
+	return p.InputPacketCh
 }
 
-func (p *FromKernel[T]) OutputPacketsChan() <-chan types.OutputPacket {
-	return p.OutputCh
+func (p *FromKernel[T]) OutputPacketChan() <-chan packet.Output {
+	return p.OutputPacketCh
+}
+
+func (p *FromKernel[T]) SendInputFrameChan() chan<- frame.Input {
+	return p.InputFrameCh
+}
+
+func (p *FromKernel[T]) OutputFrameChan() <-chan frame.Output {
+	return p.OutputFrameCh
 }
 
 func (p *FromKernel[T]) ErrorChan() <-chan error {

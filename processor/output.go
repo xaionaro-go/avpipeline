@@ -9,8 +9,8 @@ import (
 
 var DefaultOptionsOutput = func() []Option {
 	return []Option{
-		OptionQueueSizeInput(600),
-		OptionQueueSizeOutput(0),
+		OptionQueueSizeInputPacket(600),
+		OptionQueueSizeOutputPacket(0),
 		OptionQueueSizeError(2),
 	}
 }

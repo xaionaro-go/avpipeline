@@ -9,9 +9,9 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline/condition"
+	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/quality"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
@@ -167,7 +167,7 @@ func (e *EncoderFull) receivePacketNoLock(
 	}
 
 	next := e.Next.Get()
-	if next.When == nil || next.When.Match(ctx, types.BuildInputPacket(p, nil, nil)) {
+	if next.When == nil || next.When.Match(ctx, packet.BuildInput(p, nil, nil)) {
 		e.Next.Unset()
 		q := next.Quality
 		qErr := e.setQualityNow(ctx, q)

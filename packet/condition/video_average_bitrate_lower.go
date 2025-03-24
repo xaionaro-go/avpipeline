@@ -7,7 +7,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packet"
 )
 
 type VideoAverageBitrateLower struct {
@@ -41,7 +41,7 @@ func NewVideoAverageBitrateLower(
 
 func (f *VideoAverageBitrateLower) Match(
 	ctx context.Context,
-	input types.InputPacket,
+	input packet.Input,
 ) bool {
 	if f.AverageBitRate == 0 {
 		return true
@@ -61,7 +61,7 @@ func (f *VideoAverageBitrateLower) Match(
 
 func (f *VideoAverageBitrateLower) sendInputVideo(
 	ctx context.Context,
-	input types.InputPacket,
+	input packet.Input,
 ) bool {
 	now := time.Now()
 	prevTS := f.prevEncodeTS

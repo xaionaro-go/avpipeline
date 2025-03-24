@@ -3,23 +3,35 @@ package kernel
 import (
 	"context"
 
+	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Passthrough struct{}
 
 var _ Abstract = (*Passthrough)(nil)
 
-func (Passthrough) SendInput(
+func (Passthrough) SendInputPacket(
 	ctx context.Context,
-	input types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) error {
-	outputCh <- types.BuildOutputPacket(
+	outputPacketsCh <- packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
+		input.Stream,
 		input.FormatContext,
 	)
+	return nil
+}
+
+func (Passthrough) SendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
+	outputFramesCh <- frame.Output(input)
 	return nil
 }
 
@@ -36,8 +48,9 @@ func (Passthrough) CloseChan() <-chan struct{} {
 }
 
 func (Passthrough) Generate(
-	ctx context.Context,
-	outputCh chan<- types.OutputPacket,
+	context.Context,
+	chan<- packet.Output,
+	chan<- frame.Output,
 ) error {
 	return nil
 }

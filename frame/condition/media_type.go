@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/frame"
 )
 
 type MediaType astiav.MediaType
@@ -18,7 +18,7 @@ func (mt MediaType) String() string {
 
 func (mt MediaType) Match(
 	ctx context.Context,
-	pkt types.InputPacket,
+	pkt frame.Input,
 ) bool {
 	return pkt.CodecParameters().MediaType() == astiav.MediaType(mt)
 }

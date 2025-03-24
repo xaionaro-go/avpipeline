@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/condition"
+	"github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
 type EncoderCopy struct{}

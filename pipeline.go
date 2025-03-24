@@ -20,13 +20,30 @@ func ServeRecursively[T AbstractNode](
 
 	childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
 	var wg sync.WaitGroup
-	for _, pushTo := range p.GetPushTos() {
+	dstAlreadyStarted := map[AbstractNode]struct{}{}
+	for _, pushTo := range p.GetPushPacketsTos() {
+		if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
+			continue
+		}
 		pushTo := pushTo
 		wg.Add(1)
 		observability.Go(ctx, func() {
 			defer wg.Done()
 			ServeRecursively(childrenCtx, pushTo.Node, serveConfig, errCh)
 		})
+		dstAlreadyStarted[pushTo.Node] = struct{}{}
+	}
+	for _, pushTo := range p.GetPushFramesTos() {
+		if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
+			continue
+		}
+		pushTo := pushTo
+		wg.Add(1)
+		observability.Go(ctx, func() {
+			defer wg.Done()
+			ServeRecursively(childrenCtx, pushTo.Node, serveConfig, errCh)
+		})
+		dstAlreadyStarted[pushTo.Node] = struct{}{}
 	}
 	defer wg.Wait()
 	defer childrenCancelFn()

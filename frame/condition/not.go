@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/frame"
 )
 
 type Not struct {
@@ -19,7 +19,7 @@ func (n Not) String() string {
 
 func (n Not) Match(
 	ctx context.Context,
-	pkt types.InputPacket,
+	pkt frame.Input,
 ) bool {
 	return !n.Condition.Match(ctx, pkt)
 }

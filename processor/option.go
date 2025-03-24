@@ -1,9 +1,11 @@
 package processor
 
 type config struct {
-	InputQueue  uint
-	OutputQueue uint
-	ErrorQueue  uint
+	InputPacketQueue  uint
+	OutputPacketQueue uint
+	InputFrameQueue   uint
+	OutputFrameQueue  uint
+	ErrorQueue        uint
 }
 
 type Option interface {
@@ -24,16 +26,28 @@ func (s Options) config() config {
 	return cfg
 }
 
-type OptionQueueSizeInput uint
+type OptionQueueSizeInputPacket uint
 
-func (opt OptionQueueSizeInput) apply(cfg *config) {
-	cfg.InputQueue = uint(opt)
+func (opt OptionQueueSizeInputPacket) apply(cfg *config) {
+	cfg.InputPacketQueue = uint(opt)
 }
 
-type OptionQueueSizeOutput uint
+type OptionQueueSizeOutputPacket uint
 
-func (opt OptionQueueSizeOutput) apply(cfg *config) {
-	cfg.OutputQueue = uint(opt)
+func (opt OptionQueueSizeOutputPacket) apply(cfg *config) {
+	cfg.OutputPacketQueue = uint(opt)
+}
+
+type OptionQueueSizeInputFrame uint
+
+func (opt OptionQueueSizeInputFrame) apply(cfg *config) {
+	cfg.InputFrameQueue = uint(opt)
+}
+
+type OptionQueueSizeOutputFrame uint
+
+func (opt OptionQueueSizeOutputFrame) apply(cfg *config) {
+	cfg.OutputFrameQueue = uint(opt)
 }
 
 type OptionQueueSizeError uint

@@ -6,30 +6,41 @@ import (
 	"io"
 	"strings"
 
-	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/condition"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
 type AbstractNode interface {
 	fmt.Stringer
 	DotString(bool) string
+
+	Serve(context.Context, ServeConfig, chan<- ErrNode)
+
+	GetPushPacketsTos() PushPacketsTos
+	AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition)
+	SetPushPacketsTos(PushPacketsTos)
+	GetPushFramesTos() PushFramesTos
+	AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition)
+	SetPushFramesTos(PushFramesTos)
+
 	GetStatistics() *NodeStatistics
 	GetProcessor() processor.Abstract
-	GetPushTos() PushTos
-	AddPushTo(dst AbstractNode, conds ...condition.Condition)
-	SetPushTos(PushTos)
-	GetInputCondition() condition.Condition
-	SetInputCondition(condition.Condition)
-	Serve(context.Context, ServeConfig, chan<- ErrNode)
+
+	GetInputPacketCondition() packetcondition.Condition
+	SetInputPacketCondition(packetcondition.Condition)
+	GetInputFrameCondition() framecondition.Condition
+	SetInputFrameCondition(framecondition.Condition)
 }
 
 type Node[T processor.Abstract] struct {
 	*NodeStatistics
-	Processor      T
-	PushTo         PushTos
-	InputCondition condition.Condition
+	Processor            T
+	PushPacketsTo        PushPacketsTos
+	PushFramesTo         PushFramesTos
+	InputPacketCondition packetcondition.Condition
+	InputFrameCondition  framecondition.Condition
 }
 
 var _ AbstractNode = (*Node[processor.Abstract])(nil)
@@ -63,24 +74,44 @@ func (n *Node[T]) GetProcessor() processor.Abstract {
 	return n.Processor
 }
 
-func (n *Node[T]) GetPushTos() PushTos {
-	return n.PushTo
+func (n *Node[T]) GetPushPacketsTos() PushPacketsTos {
+	return n.PushPacketsTo
 }
 
-func (n *Node[T]) AddPushTo(dst AbstractNode, conds ...condition.Condition) {
-	n.PushTo.Add(dst, conds...)
+func (n *Node[T]) AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition) {
+	n.PushPacketsTo.Add(dst, conds...)
 }
 
-func (n *Node[T]) SetPushTos(s PushTos) {
-	n.PushTo = s
+func (n *Node[T]) SetPushPacketsTos(s PushPacketsTos) {
+	n.PushPacketsTo = s
 }
 
-func (n *Node[T]) GetInputCondition() condition.Condition {
-	return n.InputCondition
+func (n *Node[T]) GetPushFramesTos() PushFramesTos {
+	return n.PushFramesTo
 }
 
-func (n *Node[T]) SetInputCondition(cond condition.Condition) {
-	n.InputCondition = cond
+func (n *Node[T]) AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition) {
+	n.PushFramesTo.Add(dst, conds...)
+}
+
+func (n *Node[T]) SetPushFramesTos(s PushFramesTos) {
+	n.PushFramesTo = s
+}
+
+func (n *Node[T]) GetInputPacketCondition() packetcondition.Condition {
+	return n.InputPacketCondition
+}
+
+func (n *Node[T]) SetInputPacketCondition(cond packetcondition.Condition) {
+	n.InputPacketCondition = cond
+}
+
+func (n *Node[T]) GetInputFrameCondition() framecondition.Condition {
+	return n.InputFrameCondition
+}
+
+func (n *Node[T]) SetInputFrameCondition(cond framecondition.Condition) {
+	n.InputFrameCondition = cond
 }
 
 func (n *Node[T]) String() string {
@@ -89,7 +120,7 @@ func (n *Node[T]) String() string {
 	}
 
 	var pushToStrs []string
-	for _, pushTo := range n.PushTo {
+	for _, pushTo := range n.PushPacketsTo {
 		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 	}
 
@@ -135,7 +166,7 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 		)
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
-	for _, pushTo := range n.PushTo {
+	for _, pushTo := range n.PushPacketsTo {
 		writer, ok := pushTo.Node.(interface {
 			dotBlockContentStringWriteTo(io.Writer, map[processor.Abstract]struct{})
 		})
@@ -155,17 +186,24 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 			sanitizeString(n.Processor.String()),
 		)
 	}
-}
-
-func getOutputStream(
-	_ context.Context,
-	fmtCtx *astiav.FormatContext,
-	streamIndex int,
-) *astiav.Stream {
-	for _, stream := range fmtCtx.Streams() {
-		if stream.Index() == streamIndex {
-			return stream
+	for _, pushTo := range n.PushFramesTo {
+		writer, ok := pushTo.Node.(interface {
+			dotBlockContentStringWriteTo(io.Writer, map[processor.Abstract]struct{})
+		})
+		if !ok {
+			continue
 		}
+		writer.dotBlockContentStringWriteTo(w, alreadyPrinted)
+		if pushTo.Condition == nil {
+			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
+			continue
+		}
+		fmt.Fprintf(
+			w,
+			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
+			any(n.Processor),
+			pushTo.Node.GetProcessor(),
+			sanitizeString(n.Processor.String()),
+		)
 	}
-	return nil
 }

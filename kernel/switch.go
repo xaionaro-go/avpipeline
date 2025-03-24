@@ -10,8 +10,10 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/go-ng/xatomic"
-	"github.com/xaionaro-go/avpipeline/condition"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packet/condition"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -23,8 +25,8 @@ type Switch[T Abstract] struct {
 	KernelIndex     atomic.Uint32
 	NextKernelIndex atomic.Int32
 
-	KeepUnlessCond         *condition.Condition
-	VerifySwitchOutputCond *condition.Condition
+	KeepUnlessPacketCond         *packetcondition.Condition
+	VerifySwitchOutputPacketCond *packetcondition.Condition
 }
 
 var _ Abstract = (*Switch[Abstract])(nil)
@@ -41,7 +43,7 @@ func NewSwitch[T Abstract](
 }
 
 func (sw *Switch[T]) GetKeepUnless() condition.Condition {
-	ptr := xatomic.LoadPointer(&sw.KeepUnlessCond)
+	ptr := xatomic.LoadPointer(&sw.KeepUnlessPacketCond)
 	if ptr == nil {
 		return nil
 	}
@@ -49,11 +51,11 @@ func (sw *Switch[T]) GetKeepUnless() condition.Condition {
 }
 
 func (sw *Switch[T]) SetKeepUnless(cond condition.Condition) {
-	xatomic.StorePointer(&sw.KeepUnlessCond, ptr(cond))
+	xatomic.StorePointer(&sw.KeepUnlessPacketCond, ptr(cond))
 }
 
 func (sw *Switch[T]) GetVerifySwitchOutput() condition.Condition {
-	ptr := xatomic.LoadPointer(&sw.VerifySwitchOutputCond)
+	ptr := xatomic.LoadPointer(&sw.VerifySwitchOutputPacketCond)
 	if ptr == nil {
 		return nil
 	}
@@ -61,7 +63,7 @@ func (sw *Switch[T]) GetVerifySwitchOutput() condition.Condition {
 }
 
 func (sw *Switch[T]) SetVerifySwitchOutput(cond condition.Condition) {
-	xatomic.StorePointer(&sw.VerifySwitchOutputCond, ptr(cond))
+	xatomic.StorePointer(&sw.VerifySwitchOutputPacketCond, ptr(cond))
 }
 
 func (sw *Switch[T]) GetKernelIndex(
@@ -105,7 +107,11 @@ func (sw *Switch[T]) String() string {
 	return fmt.Sprintf("Switch(\n\t%s,\n)", strings.Join(result, ",\n\t"))
 }
 
-func (sw *Switch[T]) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
+func (sw *Switch[T]) Generate(
+	ctx context.Context,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
 	errCh := make(chan error, len(sw.Kernels))
 
 	var wg sync.WaitGroup
@@ -113,7 +119,7 @@ func (sw *Switch[T]) Generate(ctx context.Context, outputCh chan<- types.OutputP
 		wg.Add(1)
 		observability.Go(ctx, func() {
 			defer wg.Done()
-			errCh <- kernel.Generate(ctx, outputCh)
+			errCh <- kernel.Generate(ctx, outputPacketsCh, outputFramesCh)
 		})
 	}
 	observability.Go(ctx, func() {
@@ -131,15 +137,16 @@ func (sw *Switch[T]) Generate(ctx context.Context, outputCh chan<- types.OutputP
 	return errors.Join(result...)
 }
 
-func (sw *Switch[T]) SendInput(
+func (sw *Switch[T]) SendInputPacket(
 	ctx context.Context,
-	input types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) error {
 	kernelIndex := sw.KernelIndex.Load()
 	nextKernelIndex := sw.NextKernelIndex.Load()
 	if nextKernelIndex == -1 {
-		return sw.sendViaCurrentKernel(ctx, kernelIndex, input, outputCh)
+		return sw.sendViaKernel(ctx, kernelIndex, input, outputPacketsCh, outputFramesCh)
 	}
 
 	commitToNextKernel := func() {
@@ -150,21 +157,21 @@ func (sw *Switch[T]) SendInput(
 
 	if uint32(nextKernelIndex) == kernelIndex {
 		commitToNextKernel()
-		return sw.sendViaCurrentKernel(ctx, kernelIndex, input, outputCh)
+		return sw.sendViaKernel(ctx, kernelIndex, input, outputPacketsCh, outputFramesCh)
 	}
 
 	keepUnless := sw.GetKeepUnless()
 	if keepUnless != nil && !keepUnless.Match(ctx, input) {
-		return sw.sendViaCurrentKernel(ctx, kernelIndex, input, outputCh)
+		return sw.sendViaKernel(ctx, kernelIndex, input, outputPacketsCh, outputFramesCh)
 	}
 
 	verifySwitchOutputCond := sw.GetVerifySwitchOutput()
 	if verifySwitchOutputCond == nil {
 		commitToNextKernel()
-		return sw.sendViaCurrentKernel(ctx, kernelIndex, input, outputCh)
+		return sw.sendViaKernel(ctx, kernelIndex, input, outputPacketsCh, outputFramesCh)
 	}
 
-	ok, err := sw.doVerifySwitchOutput(ctx, input, outputCh, nextKernelIndex, verifySwitchOutputCond)
+	ok, err := sw.doVerifySwitchOutput(ctx, input, outputPacketsCh, outputFramesCh, nextKernelIndex, verifySwitchOutputCond)
 	if err != nil {
 		return err
 	}
@@ -173,22 +180,24 @@ func (sw *Switch[T]) SendInput(
 		return nil // we've already sent the data during doVerifySwitchOutput
 	}
 
-	return sw.sendViaCurrentKernel(ctx, kernelIndex, input, outputCh)
+	return sw.sendViaKernel(ctx, kernelIndex, input, outputPacketsCh, outputFramesCh)
 }
 
-func (sw *Switch[T]) sendViaCurrentKernel(
+func (sw *Switch[T]) sendViaKernel(
 	ctx context.Context,
 	kernelIndex uint32,
-	input types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) error {
-	return sw.Kernels[kernelIndex].SendInput(ctx, input, outputCh)
+	return sw.Kernels[kernelIndex].SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 }
 
 func (sw *Switch[T]) doVerifySwitchOutput(
 	ctx context.Context,
-	input types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 	nextKernelIndex int32,
 	verifySwitchOutput condition.Condition,
 ) (_ret bool, _err error) {
@@ -201,37 +210,57 @@ func (sw *Switch[T]) doVerifySwitchOutput(
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 
-	fakeOutputCh := make(chan types.OutputPacket, 2)
+	fakeOutputPacketsCh := make(chan packet.Output, 2)
+	fakeOutputFramesCh := make(chan frame.Output, 2)
 
 	wg.Add(1)
 	observability.Go(ctx, func() {
 		defer wg.Done()
 		defer logger.Tracef(ctx, "the reader loop closed")
 		for {
-			output, ok := <-fakeOutputCh
-			if !ok {
-				return
-			}
-			if _ret {
-				outputCh <- output
-				continue
-			}
-			if !verifySwitchOutput.Match(
-				ctx,
-				types.BuildInputPacket(output.Packet, output.FormatContext, output.Stream()),
-			) {
-				continue
-			}
+			select {
+			case output, ok := <-fakeOutputPacketsCh:
+				if !ok {
+					if fakeOutputFramesCh == nil {
+						return
+					}
+					fakeOutputPacketsCh = nil
+					continue
+				}
+				if _ret {
+					outputPacketsCh <- output
+					continue
+				}
+				if !verifySwitchOutput.Match(
+					ctx,
+					packet.Input(output),
+				) {
+					continue
+				}
 
-			// found a match, feeding all we have left to the output
-			_ret = true
-			logger.Debugf(ctx, "the next kernel passed the verification")
-			outputCh <- output
+				// found a match, feeding all we have left to the output
+				_ret = true
+				logger.Debugf(ctx, "the next kernel passed the verification")
+				outputPacketsCh <- output
+			case output, ok := <-fakeOutputFramesCh:
+				if !ok {
+					if fakeOutputPacketsCh == nil {
+						return
+					}
+					fakeOutputFramesCh = nil
+					continue
+				}
+				if _ret {
+					outputFramesCh <- output
+					continue
+				}
+			}
 		}
 	})
 
-	err := sw.Kernels[nextKernelIndex].SendInput(ctx, input, fakeOutputCh)
-	close(fakeOutputCh)
+	err := sw.Kernels[nextKernelIndex].SendInputPacket(ctx, input, fakeOutputPacketsCh, fakeOutputFramesCh)
+	close(fakeOutputPacketsCh)
+	close(fakeOutputFramesCh)
 	if err != nil {
 		if _ret {
 			return true, fmt.Errorf("got an error from the next kernel: %w", err)
@@ -242,6 +271,15 @@ func (sw *Switch[T]) doVerifySwitchOutput(
 
 	wg.Wait()
 	return
+}
+
+func (sw *Switch[T]) SendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
+	return fmt.Errorf("not implemented, yet")
 }
 
 func (sw *Switch[T]) Close(

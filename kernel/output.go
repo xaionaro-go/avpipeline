@@ -13,6 +13,8 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/stream"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -214,7 +216,11 @@ func (o *Output) Close(
 	return errors.Join(result...)
 }
 
-func (o *Output) Generate(ctx context.Context, outputCh chan<- types.OutputPacket) error {
+func (o *Output) Generate(
+	context.Context,
+	chan<- packet.Output,
+	chan<- frame.Output,
+) error {
 	return nil
 }
 
@@ -278,10 +284,11 @@ func (o *Output) initOutputStreamFor(
 	return nil
 }
 
-func (o *Output) SendInput(
+func (o *Output) SendInputPacket(
 	ctx context.Context,
-	inputPkt types.InputPacket,
-	outputCh chan<- types.OutputPacket,
+	inputPkt packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx,
 		"SendInput (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
@@ -370,6 +377,15 @@ func (o *Output) doWritePacket(
 		)
 	}
 	return nil
+}
+
+func (o *Output) SendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
+	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
 }
 
 func (o *Output) String() string {
