@@ -21,7 +21,7 @@ func NewOutputFromURL(
 	streamKey secret.String,
 	cfg kernel.OutputConfig,
 	processorOpts ...Option,
-) (Abstract, error) {
+) (*FromKernel[*kernel.Output], error) {
 	k, err := kernel.NewOutputFromURL(ctx, urlString, streamKey, cfg)
 	if err != nil {
 		return nil, err

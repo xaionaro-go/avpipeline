@@ -11,6 +11,7 @@ func BuildInput(
 	s *astiav.Stream,
 	fmt *astiav.FormatContext,
 ) Input {
+	pkt.Pos()
 	return Input{
 		Packet:        pkt,
 		Stream:        s,

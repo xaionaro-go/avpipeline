@@ -21,7 +21,7 @@ func NewRecoder(
 	encoderFactory codec.EncoderFactory,
 	streamConfigurer kernel.StreamConfigurer,
 	processorOpts ...Option,
-) (Abstract, error) {
+) (*FromKernel[*kernel.Recoder[codec.DecoderFactory, codec.EncoderFactory]], error) {
 	k, err := kernel.NewRecoder(
 		ctx,
 		decoderFactory,

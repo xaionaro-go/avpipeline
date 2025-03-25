@@ -19,13 +19,10 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
-	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
-	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -148,61 +145,13 @@ func main() {
 		inputNode.PushPacketsTo.Add(recodingNode)
 		finalNode = recodingNode
 
-		recoderIdx := uint(0)
-		bitrateIdx := 0
-		pastSwitchPts := time.Duration(0)
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
-			recodingNode.SetInputPacketCondition(condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-				pts := avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
-				logger.Tracef(ctx, "pts: %v (%v, %v)", pts, pkt.Pts(), pkt.Stream.TimeBase())
-				if pts-pastSwitchPts < time.Second {
-					return true
-				}
-				pastSwitchPts = pts
-				if bitrateIdx >= len(*alternateBitrate) {
-					if len(*alternateBitrate) > 0 {
-						bitrateIdx = bitrateIdx % len(*alternateBitrate)
-					}
-
-					// switch recoder
-
-					recoderIdx++
-					if recoderIdx >= uint(len(encoderFactories)) {
-						recoderIdx = 0
-					}
-					if sw != nil {
-						err := sw.SetKernelIndex(ctx, recoderIdx)
-						assert(ctx, err == nil)
-					}
-					logger.Debugf(ctx, "switch encoder to #%d", recoderIdx)
-				}
-
-				if len(*alternateBitrate) == 0 {
-					logger.Debugf(ctx, "len(*alternateBitrate) == 0")
-					return true
-				}
-
-				// switch bitrate
-
-				nextBitrate := (*alternateBitrate)[bitrateIdx]
-				bitrateIdx++
-				encoderFactory := encoderFactories[recoderIdx]
-				encoderFactory.Locker.Do(ctx, func() {
-					for _, encoder := range encoderFactory.VideoEncoders {
-						err := encoder.SetQuality(
-							ctx,
-							quality.ConstantBitrate(nextBitrate),
-							nil,
-						)
-						if err != nil {
-							logger.Errorf(ctx, "SetQuality errored: %v", err)
-							continue
-						}
-					}
-				})
-				fmt.Printf("changed the video bitrate to %d\n", nextBitrate)
-				return true
-			}))
+			recodingNode.SetInputPacketCondition(
+				condition.Function(sillyAlternationsJustForDemonstration(
+					sw,
+					*alternateBitrate,
+				)),
+			)
 		}
 	}
 	finalNode.AddPushPacketsTo(avpipeline.NewNode(output))

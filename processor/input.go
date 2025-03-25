@@ -21,7 +21,7 @@ func NewInputFromURL(
 	authKey secret.String,
 	cfg kernel.InputConfig,
 	processorOpts ...Option,
-) (Abstract, error) {
+) (*FromKernel[*kernel.Input], error) {
 	k, err := kernel.NewInputFromURL(ctx, url, authKey, cfg)
 	if err != nil {
 		return nil, err

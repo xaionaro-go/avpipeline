@@ -1,13 +1,56 @@
-# About
+package main
 
-[![License: CC0-1.0](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](http://creativecommons.org/publicdomain/zero/1.0/)
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	_ "net/http/pprof"
+	"os"
+	"time"
 
-This package is targeted on unlocking [`libav`](https://en.wikipedia.org/wiki/Libav) capabilities to build dynamic pipelines for processing audio/video.
+	"github.com/facebookincubator/go-belt"
+	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/spf13/pflag"
+	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/codec"
+	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/secret"
+)
 
-For example:
-```go
+func main() {
+
+	// parse the input
+
+	pflag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "syntax: %s <URL-from> <URL-to>\n", os.Args[0])
+		pflag.PrintDefaults()
+	}
+
+	loggerLevel := logger.LevelWarning
+	pflag.Var(&loggerLevel, "log-level", "Log level")
+	videoCodec := pflag.String("vcodec", "copy", "")
+	hwDeviceName := pflag.String("hwdevice", "", "")
+	frameDrop := pflag.Bool("framedrop", false, "")
+
+	pflag.Parse()
+	if len(pflag.Args()) != 2 {
+		pflag.Usage()
+		os.Exit(1)
+	}
+
+	fromURL := pflag.Arg(0)
+	toURL := pflag.Arg(1)
+
+	// init the context
+
+	ctx := withLogger(context.Background(), loggerLevel)
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
+	defer belt.Flush(ctx)
 
 	// input node
 
@@ -31,15 +74,16 @@ For example:
 
 	// recoder node
 
+	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
 	recoder, err := processor.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(0, ""),
-		codec.NewNaiveEncoderFactory("libx264", "copy", 0, ""),
+		codec.NewNaiveDecoderFactory(0, hwDevName),
+		codec.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDevName),
 		nil,
 	)
 	assert(ctx, err == nil, err)
 	defer recoder.Close(ctx)
-	logger.Debugf(ctx, "initialized a recoder to H264...")
+	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
 	recodingNode := avpipeline.NewNode(recoder)
 
 	// route nodes: input -> recoder -> output
@@ -94,4 +138,4 @@ For example:
 			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)
 		}
 	}
-```
+}

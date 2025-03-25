@@ -1,7 +1,10 @@
 package frame
 
 import (
+	"time"
+
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/avconv"
 )
 
 type Input Commons
@@ -34,4 +37,8 @@ func (f *Input) GetStream() *astiav.Stream {
 
 func (f *Input) GetFormatContext() *astiav.FormatContext {
 	return (*Commons)(f).GetFormatContext()
+}
+
+func (f *Input) GetPTSAsDuration() time.Duration {
+	return avconv.Duration(f.Frame.Pts(), f.Stream.TimeBase())
 }
