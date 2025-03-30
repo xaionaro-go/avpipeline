@@ -136,6 +136,8 @@ func (n *Node[T]) Serve(
 				) frame.Input {
 					return frame.BuildInput(
 						frame.CloneAsReferenced(f.Frame),
+						f.Pos,
+						f.Duration,
 						f.DTS,
 						f.FormatContext,
 						stream,

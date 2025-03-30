@@ -121,7 +121,7 @@ func main() {
 			}
 			if errors.Is(err.Err, io.EOF) {
 				continue
-			} 
+			}
 			if err.Err != nil {
 				logger.Fatal(ctx, err)
 				return

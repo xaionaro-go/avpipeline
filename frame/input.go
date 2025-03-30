@@ -4,13 +4,14 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/avconv"
 )
 
 type Input Commons
 
 func BuildInput(
 	frame *astiav.Frame,
+	pos int64,
+	duration int64,
 	dts int64,
 	fmt *astiav.FormatContext,
 	s *astiav.Stream,
@@ -19,6 +20,8 @@ func BuildInput(
 		FormatContext: fmt,
 		Stream:        s,
 		Frame:         frame,
+		Pos:           pos,
+		Duration:      duration,
 		DTS:           dts,
 	}
 }
@@ -39,6 +42,18 @@ func (f *Input) GetFormatContext() *astiav.FormatContext {
 	return (*Commons)(f).GetFormatContext()
 }
 
+func (f *Input) GetDurationAsDuration() time.Duration {
+	return (*Commons)(f).GetDurationAsDuration()
+}
+
+func (f *Input) GetDTSAsDuration() time.Duration {
+	return (*Commons)(f).GetDTSAsDuration()
+}
+
 func (f *Input) GetPTSAsDuration() time.Duration {
-	return avconv.Duration(f.Frame.Pts(), f.Stream.TimeBase())
+	return (*Commons)(f).GetPTSAsDuration()
+}
+
+func (f *Input) GetStreamDurationAsDuration() time.Duration {
+	return (*Commons)(f).GetStreamDurationAsDuration()
 }

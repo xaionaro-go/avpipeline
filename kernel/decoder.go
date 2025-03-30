@@ -104,7 +104,7 @@ func (r *Decoder[DF]) SendInputPacket(
 				}
 				return false, fmt.Errorf("unable to receive a frame from the decoder: %w", err)
 			}
-			outputFramesCh <- frame.BuildOutput(f, input.Packet.Dts(), input.Stream, input.FormatContext)
+			outputFramesCh <- frame.BuildOutput(f, input.Packet.Pos(), input.Packet.Duration(), input.Packet.Dts(), input.Stream, input.FormatContext)
 			return true, nil
 		}()
 		if err != nil {
