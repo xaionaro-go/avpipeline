@@ -36,7 +36,7 @@ func (Passthrough) SendInputFrame(
 }
 
 func (Passthrough) String() string {
-	return "Noop"
+	return "Passthrough"
 }
 
 func (Passthrough) Close(context.Context) error {
