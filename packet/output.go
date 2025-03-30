@@ -23,6 +23,10 @@ func (o *Output) UnrefAndFree() {
 	o.Packet.Free()
 }
 
+func (o *Output) GetMediaType() astiav.MediaType {
+	return (*Commons)(o).GetMediaType()
+}
+
 func (o *Output) GetSize() int {
 	return o.Packet.Size()
 }

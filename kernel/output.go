@@ -41,9 +41,8 @@ type Output struct {
 	StreamKey secret.String
 	Streams   map[int]*OutputStream
 
-	pendingPackets []*astiav.Packet
-	ioContext      *astiav.IOContext
-	proxy          *proxy.TCPProxy
+	ioContext *astiav.IOContext
+	proxy     *proxy.TCPProxy
 
 	formatContextLocker xsync.RWMutex
 
@@ -267,9 +266,11 @@ func (o *Output) initOutputStreamFor(
 			LastDTS: math.MinInt64,
 		}
 	})
+
 	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
 		return fmt.Errorf("unable to copy stream parameters: %w", err)
 	}
+
 	logger.Tracef(
 		ctx,
 		"new output stream: %s: %s: %s: %s: %s",
@@ -284,6 +285,24 @@ func (o *Output) initOutputStreamFor(
 	return nil
 }
 
+func (o *Output) GetOutputStream(
+	ctx context.Context,
+	inputPkt packet.Input,
+) (*OutputStream, error) {
+	outputStream := o.Streams[inputPkt.StreamIndex()]
+	if outputStream != nil {
+		return outputStream, nil
+	}
+
+	logger.Debugf(ctx, "new output stream (#%d)", inputPkt.StreamIndex())
+	if err := o.updateOutputFormat(ctx, inputPkt.FormatContext); err != nil {
+		return nil, fmt.Errorf("unable to update the output format: %w", err)
+	}
+	outputStream = o.Streams[inputPkt.StreamIndex()]
+	assert(ctx, outputStream != nil)
+	return outputStream, nil
+}
+
 func (o *Output) SendInputPacket(
 	ctx context.Context,
 	inputPkt packet.Input,
@@ -291,25 +310,20 @@ func (o *Output) SendInputPacket(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx,
-		"SendInput (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
+		"SendInputPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
 		inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(),
 	)
-	defer func() { logger.Tracef(ctx, "/SendInput (pkt: %p): %v", inputPkt.Packet, _err) }()
+	defer func() { logger.Tracef(ctx, "/SendInputPacket (pkt: %p): %v", inputPkt.Packet, _err) }()
 
 	pkt := inputPkt.Packet
 	if pkt == nil {
 		return fmt.Errorf("packet == nil")
 	}
 
-	outputStream := o.Streams[inputPkt.StreamIndex()]
-	if outputStream == nil {
-		logger.Debugf(ctx, "new output stream (#%d)", inputPkt.StreamIndex())
-		if err := o.updateOutputFormat(ctx, inputPkt.FormatContext); err != nil {
-			return fmt.Errorf("unable to update the output format: %w", err)
-		}
-		outputStream = o.Streams[inputPkt.StreamIndex()]
+	outputStream, err := o.GetOutputStream(ctx, inputPkt)
+	if err != nil {
+		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
-	assert(ctx, outputStream != nil)
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(
 			ctx,
@@ -322,17 +336,17 @@ func (o *Output) SendInputPacket(
 		)
 	}
 
+	pkt.SetStreamIndex(outputStream.Index())
+	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
 	if pkt.Dts() < outputStream.LastDTS {
 		logger.Errorf(ctx, "received a DTS from the past, ignoring the packet: %d < %d", pkt.Dts(), outputStream.LastDTS)
 		return nil
 	}
-
-	pkt.SetStreamIndex(outputStream.Index())
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(
 			ctx,
-			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
-			pkt.Pos(), pkt.Pts(), pkt.Pts(), pkt.Duration(),
+			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
+			pkt.Pos(), pkt.Pts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
@@ -340,13 +354,7 @@ func (o *Output) SendInputPacket(
 		)
 	}
 
-	for idx, packet := range o.pendingPackets {
-		if err := o.doWritePacket(ctx, packet, outputStream); err != nil {
-			o.pendingPackets = o.pendingPackets[idx:]
-			return err
-		}
-	}
-	o.pendingPackets = o.pendingPackets[:0]
+	logger.Tracef(ctx, "sending the current packet")
 	if err := o.doWritePacket(ctx, pkt, outputStream); err != nil {
 		return err
 	}
@@ -359,18 +367,20 @@ func (o *Output) doWritePacket(
 	outputStream *OutputStream,
 ) (_err error) {
 	var err error
+	pts, dts := packet.Pts(), packet.Dts()
 	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
 		err = o.FormatContext.WriteInterleavedFrame(packet)
 	})
 	if err != nil {
 		return fmt.Errorf("unable to write the frame: %w", err)
 	}
-	outputStream.LastDTS = packet.Dts()
+	outputStream.LastDTS = dts
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(
 			ctx,
-			"wrote a packet (dts: %d): %s: %s: %v",
-			packet.Dts(),
+			"wrote a packet (pts: %d; dts: %d): %s: %s: %v",
+			pts,
+			dts,
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
 			err,

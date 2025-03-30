@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -80,23 +79,20 @@ func newEncoder(
 ) (_ret *EncoderFull, _err error) {
 	if params.CodecParameters != nil {
 		cp := astiav.AllocCodecParameters()
+		setFinalizerFree(ctx, cp)
 		params.CodecParameters.Copy(cp)
 		params.CodecParameters = cp
-		runtime.SetFinalizer(params.CodecParameters, func(cp *astiav.CodecParameters) {
-			cp.Free()
-		})
 	}
 	if params.Options != nil {
 		opts := astiav.NewDictionary()
+		setFinalizerFree(ctx, opts)
 		opts.Unpack(params.Options.Pack())
 		params.Options = opts
-		runtime.SetFinalizer(params.Options, func(opts *astiav.Dictionary) {
-			opts.Free()
-		})
 	}
 	if overrideQuality != nil {
 		if params.CodecParameters == nil {
 			params.CodecParameters = astiav.AllocCodecParameters()
+			setFinalizerFree(ctx, params.CodecParameters)
 		}
 		err := overrideQuality.Apply(params.CodecParameters)
 		if err != nil {

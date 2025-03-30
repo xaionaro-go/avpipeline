@@ -110,11 +110,10 @@ func (n *Node[T]) Serve(
 				ctx, n, pkt, n.PushPacketsTo, serveConfig,
 				func(
 					pkt packet.Output,
-					stream *astiav.Stream,
 				) packet.Input {
 					return packet.BuildInput(
 						packet.CloneAsReferenced(pkt.Packet),
-						stream,
+						pkt.Stream,
 						pkt.FormatContext,
 					)
 				},
@@ -132,15 +131,15 @@ func (n *Node[T]) Serve(
 				ctx, n, f, n.PushFramesTo, serveConfig,
 				func(
 					f frame.Output,
-					stream *astiav.Stream,
 				) frame.Input {
 					return frame.BuildInput(
 						frame.CloneAsReferenced(f.Frame),
+						f.CodecContext,
+						f.StreamIndex, f.StreamsCount,
+						f.StreamDuration,
+						f.TimeBase,
 						f.Pos,
 						f.Duration,
-						f.DTS,
-						f.FormatContext,
-						stream,
 					)
 				},
 				func(n AbstractNode) framecondition.Condition { return n.GetInputFrameCondition() },
@@ -161,8 +160,7 @@ type outputObjectPtr[T outputObject] interface {
 
 	GetSize() int
 	GetStreamIndex() int
-	GetStream() *astiav.Stream
-	GetFormatContext() *astiav.FormatContext
+	GetMediaType() astiav.MediaType
 }
 
 type inputObject interface {
@@ -175,7 +173,7 @@ func pushFurther[T processor.Abstract, O outputObject, I inputObject, C types.Co
 	outputObj O,
 	pushTos []PushTo[I, C],
 	serveConfig ServeConfig,
-	buildInput func(O, *astiav.Stream) I,
+	buildInput func(O) I,
 	getInputCondition func(AbstractNode) C,
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
@@ -187,16 +185,11 @@ func pushFurther[T processor.Abstract, O outputObject, I inputObject, C types.Co
 	objSize := uint64(outputObjPtr.GetSize())
 	n.BytesCountWrote.Add(objSize)
 
-	fmtCtx := outputObjPtr.GetFormatContext()
-	streamIndex := outputObjPtr.GetStreamIndex()
-	assert(ctx, fmtCtx != nil, streamIndex, "fmtCtx != nil", n.String())
-	stream := outputObjPtr.GetStream()
-	assert(ctx, stream != nil, streamIndex, "stream != nil", n.String())
-	mediaType := stream.CodecParameters().MediaType()
+	mediaType := outputObjPtr.GetMediaType()
 	incrementCounters(&n.FramesWrote, mediaType)
 
 	for _, pushTo := range pushTos {
-		inputObj := buildInput(outputObj, stream)
+		inputObj := buildInput(outputObj)
 		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, inputObj) {
 			logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
 			continue

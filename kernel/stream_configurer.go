@@ -10,6 +10,6 @@ type StreamConfigurer interface {
 	StreamConfigure(
 		ctx context.Context,
 		outputStream *astiav.Stream,
-		inputStream *astiav.Stream,
+		inputStreamIndex int,
 	) error
 }

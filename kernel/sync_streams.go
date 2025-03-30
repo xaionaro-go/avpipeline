@@ -31,8 +31,7 @@ type SyncStreams struct {
 	*closeChan
 	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
 	ItemQueue        sort.InputPacketOrFrames
-	StreamsPTSs      map[*astiav.Stream]*xsort.OrderedAsc[int64]
-	OldestPTSStream  *astiav.Stream
+	StreamsPTSs      map[int]*xsort.OrderedAsc[int64]
 	MaxPTSDifference uint64
 	StartCondition   condition.Condition[*SyncStreams]
 	Started          bool
@@ -52,7 +51,7 @@ func NewSyncStreams(
 	return &SyncStreams{
 		closeChan:        newCloseChan(),
 		ItemQueue:        make([]types.InputPacketOrFrame, 0, maxBufferSize),
-		StreamsPTSs:      make(map[*astiav.Stream]*xsort.OrderedAsc[int64]),
+		StreamsPTSs:      make(map[int]*xsort.OrderedAsc[int64]),
 		MaxPTSDifference: maxPtsDifference,
 		StartCondition:   startCondition,
 		Started:          false,
@@ -86,11 +85,15 @@ func (s *SyncStreams) SendInputFrame(
 	return xsync.DoA4R1(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
-		types.InputPacketOrFrame{Frame: &frame.Input{
-			Frame:         frame.CloneAsReferenced(input.Frame),
-			Stream:        input.Stream,
-			FormatContext: input.FormatContext,
-		}},
+		types.InputPacketOrFrame{Frame: ptr(frame.BuildInput(
+			frame.CloneAsReferenced(input.Frame),
+			&astiav.CodecContext{},
+			input.StreamIndex, input.StreamsCount,
+			input.StreamDuration,
+			input.TimeBase,
+			input.Pos,
+			input.Duration,
+		))},
 		outputPacketsCh, outputFramesCh,
 	)
 }
@@ -127,15 +130,15 @@ func (s *SyncStreams) pushToQueue(
 	}
 	heap.Push(&s.ItemQueue, item)
 
-	stream := item.GetStream()
-	if _, ok := s.StreamsPTSs[stream]; !ok {
-		s.StreamsPTSs[stream] = &xsort.OrderedAsc[int64]{}
+	streamIndex := item.GetStreamIndex()
+	if _, ok := s.StreamsPTSs[streamIndex]; !ok {
+		s.StreamsPTSs[streamIndex] = &xsort.OrderedAsc[int64]{}
 		s.emptyQueuesCount++
 	}
-	if len(*s.StreamsPTSs[stream]) == 0 {
+	if len(*s.StreamsPTSs[streamIndex]) == 0 {
 		s.emptyQueuesCount--
 	}
-	heap.Push(s.StreamsPTSs[stream], pts)
+	heap.Push(s.StreamsPTSs[streamIndex], pts)
 	if s.emptyQueuesCount != 0 {
 		return
 	}
@@ -205,7 +208,7 @@ func (s *SyncStreams) sendOneItemFromQueue(
 	outputFramesCh chan<- frame.Output,
 ) error {
 	oldestItem := heap.Pop(&s.ItemQueue)
-	streamQueue := s.StreamsPTSs[oldestItem.GetStream()]
+	streamQueue := s.StreamsPTSs[oldestItem.GetStreamIndex()]
 	oldPTS := heap.Pop(streamQueue)
 
 	itemPTS := oldestItem.GetPTS()

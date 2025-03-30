@@ -8,12 +8,22 @@ import (
 )
 
 type Commons struct {
-	*astiav.FormatContext
-	*astiav.Stream
 	*astiav.Frame
-	Pos      int64
-	Duration int64
-	DTS      int64
+	*astiav.CodecContext
+	StreamIndex    int
+	StreamsCount   int
+	StreamDuration int64
+	TimeBase       astiav.Rational
+	Pos            int64
+	Duration       int64
+}
+
+func (f *Commons) GetMediaType() astiav.MediaType {
+	return f.CodecContext.MediaType()
+}
+
+func (f *Commons) GetTimeBase() astiav.Rational {
+	return f.TimeBase
 }
 
 func (f *Commons) GetSize() int {
@@ -21,29 +31,25 @@ func (f *Commons) GetSize() int {
 }
 
 func (f *Commons) GetStreamIndex() int {
-	return f.Stream.Index()
+	return f.StreamIndex
 }
 
-func (f *Commons) GetStream() *astiav.Stream {
-	return f.Stream
-}
-
-func (f *Commons) GetFormatContext() *astiav.FormatContext {
-	return f.FormatContext
+func (f *Commons) GetCodecContext() *astiav.CodecContext {
+	return f.CodecContext
 }
 
 func (f *Commons) GetDurationAsDuration() time.Duration {
-	return avconv.Duration(f.Duration, f.Stream.TimeBase())
+	return avconv.Duration(f.Duration, f.CodecContext.TimeBase())
 }
 
 func (f *Commons) GetDTSAsDuration() time.Duration {
-	return avconv.Duration(f.DTS, f.Stream.TimeBase())
+	return avconv.Duration(f.PktDts(), f.CodecContext.TimeBase())
 }
 
 func (f *Commons) GetPTSAsDuration() time.Duration {
-	return avconv.Duration(f.Frame.Pts(), f.Stream.TimeBase())
+	return avconv.Duration(f.Frame.Pts(), f.CodecContext.TimeBase())
 }
 
 func (f *Commons) GetStreamDurationAsDuration() time.Duration {
-	return avconv.Duration(f.Stream.Duration(), f.Stream.TimeBase())
+	return avconv.Duration(f.StreamDuration, f.CodecContext.TimeBase())
 }

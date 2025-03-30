@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
 type EncoderFactory interface {
 	fmt.Stringer
-	NewEncoder(ctx context.Context, stream *astiav.Stream) (Encoder, error)
+	NewEncoder(ctx context.Context, params *astiav.CodecParameters, timeBase astiav.Rational) (Encoder, error)
 }
 
 type NaiveEncoderFactory struct {
@@ -18,6 +20,7 @@ type NaiveEncoderFactory struct {
 	AudioCodec         string
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
+	Options            *astiav.Dictionary
 	VideoEncoders      []Encoder
 	AudioEncoders      []Encoder
 	Locker             xsync.Mutex
@@ -26,17 +29,29 @@ type NaiveEncoderFactory struct {
 var _ EncoderFactory = (*NaiveEncoderFactory)(nil)
 
 func NewNaiveEncoderFactory(
+	ctx context.Context,
 	videoCodec string,
 	audioCodec string,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
+	customOptions types.DictionaryItems,
 ) *NaiveEncoderFactory {
-	return &NaiveEncoderFactory{
+	f := &NaiveEncoderFactory{
 		VideoCodec:         videoCodec,
 		AudioCodec:         audioCodec,
 		HardwareDeviceType: hardwareDeviceType,
 		HardwareDeviceName: hardwareDeviceName,
 	}
+	if len(customOptions) > 0 {
+		f.Options = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.Options)
+
+		for _, opt := range customOptions {
+			logger.Debugf(ctx, "encoderFactory.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
+			f.Options.Set(opt.Key, opt.Value, 0)
+		}
+	}
+	return f
 }
 
 func (f *NaiveEncoderFactory) String() string {
@@ -45,25 +60,29 @@ func (f *NaiveEncoderFactory) String() string {
 
 func (f *NaiveEncoderFactory) NewEncoder(
 	ctx context.Context,
-	stream *astiav.Stream,
+	params *astiav.CodecParameters,
+	timeBase astiav.Rational,
 ) (_ret Encoder, _err error) {
-	return xsync.DoA2R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderNoLock, ctx, stream)
+	return xsync.DoA3R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderNoLock, ctx, params, timeBase)
 }
 
 func (f *NaiveEncoderFactory) newEncoderNoLock(
 	ctx context.Context,
-	stream *astiav.Stream,
+	codecParamsOrig *astiav.CodecParameters,
+	timeBase astiav.Rational,
 ) (_ret Encoder, _err error) {
-	codecParametersOrig := stream.CodecParameters()
-	codecParameters := astiav.AllocCodecParameters()
-	defer codecParameters.Free()
-	codecParametersOrig.Copy(codecParameters)
+	if timeBase.Num() == 0 {
+		return nil, fmt.Errorf("TimeBase must be set")
+	}
+	codecParams := astiav.AllocCodecParameters()
+	setFinalizerFree(ctx, codecParams)
+	codecParamsOrig.Copy(codecParams)
 
 	defer func() {
 		if _err != nil {
 			return
 		}
-		switch codecParameters.MediaType() {
+		switch codecParams.MediaType() {
 		case astiav.MediaTypeVideo:
 			f.VideoEncoders = append(f.VideoEncoders, _ret)
 		case astiav.MediaTypeAudio:
@@ -71,24 +90,26 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 		}
 	}()
 
-	var params *EncoderParams
-	switch codecParameters.MediaType() {
+	var encParams *EncoderParams
+	switch codecParams.MediaType() {
 	case astiav.MediaTypeVideo:
-		params = &EncoderParams{
+		encParams = &EncoderParams{
 			CodecName:          f.VideoCodec,
-			CodecParameters:    codecParameters,
+			CodecParameters:    codecParams,
 			HardwareDeviceType: f.HardwareDeviceType,
 			HardwareDeviceName: f.HardwareDeviceName,
-			TimeBase:           stream.TimeBase(),
+			TimeBase:           timeBase,
+			Options:            f.Options,
 		}
 	case astiav.MediaTypeAudio:
-		params = &EncoderParams{
+		encParams = &EncoderParams{
 			CodecName:       f.AudioCodec,
-			CodecParameters: codecParameters,
-			TimeBase:        stream.TimeBase(),
+			CodecParameters: codecParams,
+			TimeBase:        timeBase,
+			Options:         f.Options,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
 	}
-	return NewEncoder(ctx, *params)
+	return NewEncoder(ctx, *encParams)
 }

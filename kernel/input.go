@@ -105,8 +105,10 @@ func (i *Input) readIntoPacket(
 		return nil
 	case errors.Is(err, astiav.ErrEof):
 		return io.EOF
+	case errors.Is(err, astiav.ErrEio):
+		return io.EOF
 	default:
-		return fmt.Errorf("unable to read a frame: %w", err)
+		return fmt.Errorf("unable to read a frame: %T:%w", err)
 	}
 }
 

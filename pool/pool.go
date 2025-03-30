@@ -5,6 +5,8 @@ import (
 	"sync"
 )
 
+var ReuseMemory = true
+
 type Pool[T any] struct {
 	sync.Pool
 	ResetFunc func(*T)
@@ -34,6 +36,9 @@ func (p *Pool[T]) Get() *T {
 }
 
 func (p *Pool[T]) Put(item *T) {
+	if !ReuseMemory {
+		return
+	}
 	p.ResetFunc(item)
 	p.Pool.Put(item)
 }

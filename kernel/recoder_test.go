@@ -95,10 +95,10 @@ func TestRecoderNoFailure(t *testing.T) {
 			)
 			var finalNode avpipeline.AbstractNode
 			finalNode = inputNode
-			encoderFactory := codec.NewNaiveEncoderFactory(vcodec, acodec, 0, "")
+			encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, acodec, 0, "", nil)
 			recoder, err := kernel.NewRecoder(
 				ctx,
-				codec.NewNaiveDecoderFactory(0, ""),
+				codec.NewNaiveDecoderFactory(ctx, 0, "", nil),
 				encoderFactory,
 				nil,
 			)

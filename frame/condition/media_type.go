@@ -20,5 +20,5 @@ func (mt MediaType) Match(
 	ctx context.Context,
 	pkt frame.Input,
 ) bool {
-	return pkt.CodecParameters().MediaType() == astiav.MediaType(mt)
+	return pkt.CodecContext.MediaType() == astiav.MediaType(mt)
 }

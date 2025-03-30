@@ -56,29 +56,40 @@ func (d *Decoder[DF]) Generate(
 	return nil
 }
 
-func (r *Decoder[DF]) SendInputPacket(
+func (d *Decoder[DF]) GetStreamDecoder(
+	ctx context.Context,
+	stream *astiav.Stream,
+) (*codec.Decoder, error) {
+	decoder := d.decoders[stream.Index()]
+	logger.Tracef(ctx, "decoder == %v", decoder)
+	if decoder != nil {
+		return decoder, nil
+	}
+	decoder, err := d.DecoderFactory.NewDecoder(ctx, stream)
+	if err != nil {
+		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
+	}
+	assert(ctx, decoder != nil)
+	d.decoders[stream.Index()] = decoder
+	return decoder, nil
+}
+
+func (d *Decoder[DF]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	_ chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInput")
-	defer func() { logger.Tracef(ctx, "/SendInput: %v", _err) }()
-	if r.IsClosed() {
+	logger.Tracef(ctx, "SendInputPacket")
+	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
+	if d.IsClosed() {
 		return io.ErrClosedPipe
 	}
 
-	decoder := r.decoders[input.StreamIndex()]
-	logger.Tracef(ctx, "decoder == %v", decoder)
-	if decoder == nil {
-		var err error
-		decoder, err = r.DecoderFactory.NewDecoder(ctx, input.Stream)
-		if err != nil {
-			return fmt.Errorf("cannot initialize a decoder for stream %d: %w", input.StreamIndex(), err)
-		}
-		r.decoders[input.StreamIndex()] = decoder
+	decoder, err := d.GetStreamDecoder(ctx, input.Stream)
+	if err != nil {
+		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
-	assert(ctx, decoder != nil)
 
 	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
 		logger.Debugf(ctx, "decoder.CodecContext().SendInput(): %v", err)
@@ -88,23 +99,34 @@ func (r *Decoder[DF]) SendInputPacket(
 		return fmt.Errorf("unable to decode the packet: %w", err)
 	}
 
-	// TODO: investigate: Do we really need this? And why?
-	//input.Packet.RescaleTs(inputStream.TimeBase(), decoder.CodecContext().TimeBase())
-
 	for {
 		shouldContinue, err := func() (bool, error) {
 			f := frame.Pool.Get()
 			err := decoder.ReceiveFrame(ctx, f)
 			if err != nil {
+				frame.Pool.Pool.Put(f)
 				isEOF := errors.Is(err, astiav.ErrEof)
 				isEAgain := errors.Is(err, astiav.ErrEagain)
-				logger.Debugf(ctx, "decoder.CodecContext().ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
+				logger.Tracef(ctx, "decoder.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 				if isEOF || isEAgain {
 					return false, nil
 				}
 				return false, fmt.Errorf("unable to receive a frame from the decoder: %w", err)
 			}
-			outputFramesCh <- frame.BuildOutput(f, input.Packet.Pos(), input.Packet.Duration(), input.Packet.Dts(), input.Stream, input.FormatContext)
+			logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame")
+
+			timeBase := input.Stream.TimeBase()
+			if timeBase.Num() == 0 {
+				return false, fmt.Errorf("internal error: TimeBase is not set")
+			}
+			outputFramesCh <- frame.BuildOutput(
+				f,
+				decoder.CodecContext(),
+				input.StreamIndex(), input.FormatContext.NbStreams(),
+				input.Stream.Duration(),
+				timeBase,
+				input.Packet.Pos(), input.Packet.Duration(),
+			)
 			return true, nil
 		}()
 		if err != nil {
@@ -118,7 +140,7 @@ func (r *Decoder[DF]) SendInputPacket(
 	return nil
 }
 
-func (r *Decoder[DF]) SendInputFrame(
+func (d *Decoder[DF]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,

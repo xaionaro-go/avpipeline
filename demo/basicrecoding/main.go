@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -77,8 +78,10 @@ func main() {
 	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
 	recoder, err := processor.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(0, hwDevName),
-		codec.NewNaiveEncoderFactory(*videoCodec, "copy", 0, hwDevName),
+		codec.NewNaiveDecoderFactory(ctx, 0, hwDevName, nil),
+		codec.NewNaiveEncoderFactory(ctx, *videoCodec, "copy", 0, hwDevName, types.DictionaryItems{
+			{Key: "bf", Value: "0"}, // to disable B-frames
+		}),
 		nil,
 	)
 	assert(ctx, err == nil, err)

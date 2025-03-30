@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type DecoderFactory interface {
@@ -16,18 +18,31 @@ type DecoderFactory interface {
 type NaiveDecoderFactory struct {
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
+	Options            *astiav.Dictionary
 }
 
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
 
 func NewNaiveDecoderFactory(
+	ctx context.Context,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
+	customOptions types.DictionaryItems,
 ) *NaiveDecoderFactory {
-	return &NaiveDecoderFactory{
+	f := &NaiveDecoderFactory{
 		HardwareDeviceType: hardwareDeviceType,
 		HardwareDeviceName: hardwareDeviceName,
 	}
+	if len(customOptions) > 0 {
+		f.Options = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.Options)
+
+		for _, opt := range customOptions {
+			logger.Debugf(ctx, "decoderFactory.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
+			f.Options.Set(opt.Key, opt.Value, 0)
+		}
+	}
+	return f
 }
 
 func (f *NaiveDecoderFactory) NewDecoder(
@@ -42,7 +57,7 @@ func (f *NaiveDecoderFactory) NewDecoder(
 			codecParameters,
 			0,
 			"",
-			nil,
+			f.Options,
 			0,
 		)
 	}
@@ -52,7 +67,7 @@ func (f *NaiveDecoderFactory) NewDecoder(
 		codecParameters,
 		f.HardwareDeviceType,
 		f.HardwareDeviceName,
-		nil,
+		f.Options,
 		0,
 	)
 }

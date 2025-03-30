@@ -15,5 +15,10 @@ func Assert(
 		return
 	}
 
+	if len(extraArgs) == 0 {
+		logger.Panic(ctx, "assertion failed")
+		return
+	}
+
 	logger.Panic(ctx, "assertion failed", extraArgs)
 }

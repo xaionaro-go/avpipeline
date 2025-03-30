@@ -18,6 +18,7 @@ const (
 	enableStreamCodecParametersUpdates = false
 )
 
+// See also https://github.com/namndev/FFmpegTutorial/blob/master/learn-ffmpeg-libav-the-hard-way.md
 type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
@@ -32,22 +33,22 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
 ) (*Recoder[DF, EF], error) {
-	encoder := NewEncoder(ctx, encoderFactory, streamConfigurer)
 	r := &Recoder[DF, EF]{
 		closeChan: newCloseChan(),
 		Decoder:   NewDecoder(ctx, decoderFactory),
-		Encoder:   encoder,
+		Encoder:   NewEncoder(ctx, encoderFactory, streamConfigurer),
 	}
 	return r, nil
 }
+
 func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
 	r.closeChan.Close(ctx)
 	r.Decoder.closeChan.Close(ctx)
 	r.Encoder.closeChan.Close(ctx)
-	for key, encoder := range r.encoders {
+	for key, encoder := range r.Encoders {
 		err := encoder.Close(ctx)
 		logger.Debugf(ctx, "encoder closed: %v", err)
-		delete(r.encoders, key)
+		delete(r.Encoders, key)
 	}
 	return nil
 }
@@ -66,8 +67,8 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInput")
-	defer func() { logger.Tracef(ctx, "/SendInput: %v", _err) }()
+	logger.Tracef(ctx, "SendInputPacket")
+	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
 	if r.IsClosed() {
 		return io.ErrClosedPipe
 	}

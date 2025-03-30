@@ -13,6 +13,10 @@ type Commons struct {
 	*astiav.FormatContext
 }
 
+func (pkt *Commons) GetMediaType() astiav.MediaType {
+	return pkt.Stream.CodecParameters().MediaType()
+}
+
 func (pkt *Commons) GetStreamIndex() int {
 	return pkt.Packet.StreamIndex()
 }

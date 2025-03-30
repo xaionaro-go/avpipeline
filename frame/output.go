@@ -10,20 +10,31 @@ type Output Commons
 
 func BuildOutput(
 	f *astiav.Frame,
+	codecCtx *astiav.CodecContext,
+	streamIndex, streamsCount int,
+	streamDuration int64,
+	timeBase astiav.Rational,
 	pos int64,
 	duration int64,
-	dts int64,
-	s *astiav.Stream,
-	fmt *astiav.FormatContext,
 ) Output {
 	return Output{
-		Frame:         f,
-		Stream:        s,
-		FormatContext: fmt,
-		Pos:           pos,
-		Duration:      duration,
-		DTS:           dts,
+		Frame:          f,
+		CodecContext:   codecCtx,
+		StreamIndex:    streamIndex,
+		StreamsCount:   streamsCount,
+		StreamDuration: streamDuration,
+		TimeBase:       timeBase,
+		Pos:            pos,
+		Duration:       duration,
 	}
+}
+
+func (f *Output) GetMediaType() astiav.MediaType {
+	return (*Commons)(f).GetMediaType()
+}
+
+func (f *Output) GetTimeBase() astiav.Rational {
+	return (*Commons)(f).GetTimeBase()
 }
 
 func (f *Output) GetSize() int {
@@ -34,12 +45,8 @@ func (f *Output) GetStreamIndex() int {
 	return (*Commons)(f).GetStreamIndex()
 }
 
-func (f *Output) GetStream() *astiav.Stream {
-	return (*Commons)(f).GetStream()
-}
-
-func (f *Output) GetFormatContext() *astiav.FormatContext {
-	return (*Commons)(f).GetFormatContext()
+func (f *Output) GetCodecContext() *astiav.CodecContext {
+	return (*Commons)(f).GetCodecContext()
 }
 
 func (f *Output) GetDurationAsDuration() time.Duration {
