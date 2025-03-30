@@ -10,6 +10,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250201205440-80b5034808e3
 	github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f
+	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
@@ -24,9 +25,9 @@ require (
 
 require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
+	github.com/go-ng/container v0.0.0-20220615121757-4740bf4bbc52
 	github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 // indirect
 	github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7 // indirect
-	github.com/go-ng/xsort v0.0.0-20220617174223-1d146907bccc // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/go-tls v0.0.0-20200109070953-6f75fb441850 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
@@ -37,7 +38,7 @@ require (
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
 	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )

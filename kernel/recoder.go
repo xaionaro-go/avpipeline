@@ -41,9 +41,9 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	return r, nil
 }
 func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
-	r.closeChan.Close()
-	r.Decoder.closeChan.Close()
-	r.Encoder.closeChan.Close()
+	r.closeChan.Close(ctx)
+	r.Decoder.closeChan.Close(ctx)
+	r.Encoder.closeChan.Close(ctx)
 	for key, encoder := range r.encoders {
 		err := encoder.Close(ctx)
 		logger.Debugf(ctx, "encoder closed: %v", err)

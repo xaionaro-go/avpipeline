@@ -186,7 +186,7 @@ func (o *Output) Close(
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
-	o.closeChan.Close()
+	o.closeChan.Close(ctx)
 
 	var result []error
 	if len(o.FormatContext.Streams()) != 0 {

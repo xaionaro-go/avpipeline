@@ -35,7 +35,7 @@ func NewDecoder[DF codec.DecoderFactory](
 }
 
 func (d *Decoder[DF]) Close(ctx context.Context) error {
-	d.closeChan.Close()
+	d.closeChan.Close(ctx)
 	for key, decoder := range d.decoders {
 		err := decoder.Close(ctx)
 		logger.Debugf(ctx, "decoder closed: %v", err)
@@ -45,7 +45,7 @@ func (d *Decoder[DF]) Close(ctx context.Context) error {
 }
 
 func (d *Decoder[DF]) String() string {
-	return fmt.Sprintf("Decoder(%s->%s)", d.DecoderFactory)
+	return fmt.Sprintf("Decoder(%s)", d.DecoderFactory)
 }
 
 func (d *Decoder[DF]) Generate(

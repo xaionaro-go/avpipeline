@@ -285,7 +285,7 @@ func (sw *Switch[T]) SendInputFrame(
 func (sw *Switch[T]) Close(
 	ctx context.Context,
 ) error {
-	sw.closeChan.Close()
+	sw.closeChan.Close(ctx)
 	var result []error
 	for idx, node := range sw.Kernels {
 		err := node.Close(ctx)

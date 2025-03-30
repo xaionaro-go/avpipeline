@@ -7,13 +7,13 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/kernel"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
 type Kernel interface {
-	kernel.SendInputer
-	kernel.CloseChaner
+	kerneltypes.SendInputer
+	kerneltypes.CloseChaner
 }
 
 func ReaderLoop(

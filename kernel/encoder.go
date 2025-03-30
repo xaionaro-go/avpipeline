@@ -54,7 +54,7 @@ func NewEncoder[EF codec.EncoderFactory](
 }
 
 func (e *Encoder[EF]) Close(ctx context.Context) error {
-	e.closeChan.Close()
+	e.closeChan.Close(ctx)
 	for key, encoder := range e.encoders {
 		err := encoder.Close(ctx)
 		logger.Debugf(ctx, "encoder closed: %v", err)
@@ -212,7 +212,7 @@ func (e *Encoder[EF]) initEncoderFor(
 }
 
 func (e *Encoder[EF]) String() string {
-	return fmt.Sprintf("Encoder(%s->%s)", e.EncoderFactory)
+	return fmt.Sprintf("Encoder(%s)", e.EncoderFactory)
 }
 
 func (e *Encoder[EF]) Generate(

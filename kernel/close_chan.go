@@ -1,7 +1,10 @@
 package kernel
 
 import (
+	"context"
 	"sync"
+
+	"github.com/facebookincubator/go-belt/tool/logger"
 )
 
 type closeChan struct {
@@ -19,7 +22,9 @@ func (c *closeChan) CloseChan() <-chan struct{} {
 	return c.c
 }
 
-func (c *closeChan) Close() {
+func (c *closeChan) Close(ctx context.Context) {
+	logger.Debugf(ctx, "Close")
+	defer func() { logger.Debugf(ctx, "/Close") }()
 	c.closeOnce.Do(func() {
 		close(c.c)
 	})

@@ -91,7 +91,7 @@ func NewInputFromURL(
 func (i *Input) Close(
 	ctx context.Context,
 ) error {
-	i.closeChan.Close()
+	i.closeChan.Close(ctx)
 	return nil
 }
 
@@ -118,7 +118,7 @@ func (i *Input) Generate(
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
 	defer func() {
-		i.closeChan.Close()
+		i.closeChan.Close(ctx)
 	}()
 
 	for {
