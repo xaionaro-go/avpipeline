@@ -119,6 +119,7 @@ func (d *Decoder[DF]) SendInputPacket(
 			if timeBase.Num() == 0 {
 				return false, fmt.Errorf("internal error: TimeBase is not set")
 			}
+			f.SetPictureType(astiav.PictureTypeNone)
 			outputFramesCh <- frame.BuildOutput(
 				f,
 				decoder.CodecContext(),
