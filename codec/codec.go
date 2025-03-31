@@ -195,7 +195,6 @@ func newCodec(
 		if timeBase.Num() == 0 {
 			return nil, fmt.Errorf("TimeBase must be set")
 		}
-		c.codecContext.SetExtraData(nil)
 	} else {
 		c.codecContext.SetExtraData(codecParameters.ExtraData())
 	}

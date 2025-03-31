@@ -45,11 +45,6 @@ func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
 	r.closeChan.Close(ctx)
 	r.Decoder.closeChan.Close(ctx)
 	r.Encoder.closeChan.Close(ctx)
-	for key, encoder := range r.Encoders {
-		err := encoder.Close(ctx)
-		logger.Debugf(ctx, "encoder closed: %v", err)
-		delete(r.Encoders, key)
-	}
 	return nil
 }
 

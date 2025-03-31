@@ -25,7 +25,7 @@ import (
 )
 
 const unwrapTLSViaProxy = false
-const pendingPacketsLimit = 1000
+const pendingPacketsLimit = 10000
 
 type OutputConfig struct {
 	CustomOptions types.DictionaryItems

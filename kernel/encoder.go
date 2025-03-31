@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
@@ -22,23 +23,24 @@ const (
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
-	EncoderFactory EF
-
 	*closeChan
-	Encoders         map[int]*StreamEncoder
-	Locker           xsync.Mutex
-	streamConfigurer StreamConfigurer
-	pendingPackets   []packet.Output
+	EncoderFactory EF
+	Locker         xsync.Mutex
 
+	encoders                  map[int]*streamEncoder
+	outputStreams             map[int]*astiav.Stream
+	outputStreamsEncodedCount map[int]uint
+	StreamConfigurer          StreamConfigurer
+	pendingPackets            []packet.Output
+	activeStreamCount         uint64
 	started                   bool
 	outputFormatContextLocker xsync.RWMutex
 	outputFormatContext       *astiav.FormatContext
-	OutputStreams             map[int]*astiav.Stream
 }
 
 var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
 
-type StreamEncoder struct {
+type streamEncoder struct {
 	codec.Encoder
 	LastInitTS time.Time
 }
@@ -49,12 +51,13 @@ func NewEncoder[EF codec.EncoderFactory](
 	streamConfigurer StreamConfigurer,
 ) *Encoder[EF] {
 	e := &Encoder[EF]{
-		closeChan:           newCloseChan(),
-		EncoderFactory:      encoderFactory,
-		Encoders:            map[int]*StreamEncoder{},
-		streamConfigurer:    streamConfigurer,
-		outputFormatContext: astiav.AllocFormatContext(),
-		OutputStreams:       make(map[int]*astiav.Stream),
+		closeChan:                 newCloseChan(),
+		EncoderFactory:            encoderFactory,
+		encoders:                  map[int]*streamEncoder{},
+		StreamConfigurer:          streamConfigurer,
+		outputFormatContext:       astiav.AllocFormatContext(),
+		outputStreams:             make(map[int]*astiav.Stream),
+		outputStreamsEncodedCount: make(map[int]uint),
 	}
 	setFinalizerFree(ctx, e.outputFormatContext)
 	return e
@@ -62,10 +65,10 @@ func NewEncoder[EF codec.EncoderFactory](
 
 func (e *Encoder[EF]) Close(ctx context.Context) error {
 	e.closeChan.Close(ctx)
-	for key, encoder := range e.Encoders {
+	for key, encoder := range e.encoders {
 		err := encoder.Close(ctx)
 		logger.Debugf(ctx, "encoder closed: %v", err)
-		delete(e.Encoders, key)
+		delete(e.encoders, key)
 	}
 	return nil
 }
@@ -79,7 +82,7 @@ func (e *Encoder[EF]) initOutputStreamCopy(
 	logger.Tracef(ctx, "lazyInitOutputStreamCopy: streamIndex: %d", streamIndex)
 	defer func() {
 		if _err == nil {
-			assert(ctx, e.OutputStreams[streamIndex] != nil)
+			assert(ctx, e.outputStreams[streamIndex] != nil)
 		}
 		logger.Tracef(ctx, "/lazyInitOutputStreamCopy: streamIndex: %d: %v", streamIndex, _err)
 	}()
@@ -114,7 +117,7 @@ func (e *Encoder[EF]) initOutputStream(
 	logger.Tracef(ctx, "lazyInitOutputStream: streamIndex: %d", streamIndex)
 	defer func() {
 		if _err == nil {
-			assert(ctx, e.OutputStreams[streamIndex] != nil)
+			assert(ctx, e.outputStreams[streamIndex] != nil)
 		}
 		logger.Tracef(ctx, "/lazyInitOutputStream: streamIndex: %d: %v", streamIndex, _err)
 	}()
@@ -148,8 +151,8 @@ func (e *Encoder[EF]) configureOutputStream(
 ) error {
 	outputStream.SetIndex(streamIndex)
 	outputStream.SetTimeBase(timeBase)
-	if e.streamConfigurer != nil {
-		err := e.streamConfigurer.StreamConfigure(ctx, outputStream, streamIndex)
+	if e.StreamConfigurer != nil {
+		err := e.StreamConfigurer.StreamConfigure(ctx, outputStream, streamIndex)
 		if err != nil {
 			return fmt.Errorf("unable to configure the output stream: %w", err)
 		}
@@ -165,7 +168,7 @@ func (e *Encoder[EF]) configureOutputStream(
 		spew.Sdump(outputStream),
 		spew.Sdump(outputStream.CodecParameters()),
 	)
-	e.OutputStreams[streamIndex] = outputStream
+	e.outputStreams[streamIndex] = outputStream
 	assert(ctx, outputStream != nil)
 
 	return nil
@@ -179,7 +182,7 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 ) (_err error) {
 	logger.Debugf(ctx, "initEncoderAndOutputFor()")
 	defer func() { logger.Debugf(ctx, "/initEncoderAndOutputFor(): %v", _err) }()
-	if _, ok := e.Encoders[streamIndex]; ok {
+	if _, ok := e.encoders[streamIndex]; ok {
 		logger.Errorf(ctx, "stream #%d already exists, not initializing", streamIndex)
 		return nil
 	}
@@ -189,7 +192,7 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 		return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", streamIndex, err)
 	}
 
-	encoder := e.Encoders[streamIndex]
+	encoder := e.encoders[streamIndex]
 	if encoder.Encoder == (codec.EncoderCopy{}) {
 		err = e.initOutputStreamCopy(ctx, streamIndex, params, timeBase)
 	} else {
@@ -219,8 +222,8 @@ func (e *Encoder[EF]) initEncoderFor(
 		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", streamIndex, err)
 	}
 
-	encoder := &StreamEncoder{Encoder: encoderInstance}
-	e.Encoders[streamIndex] = encoder
+	encoder := &streamEncoder{Encoder: encoderInstance}
+	e.encoders[streamIndex] = encoder
 	return nil
 }
 
@@ -253,7 +256,7 @@ func (e *Encoder[EF]) SendInputPacket(
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
-	return xsync.DoA4R1(ctx, &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
+	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
 func (e *Encoder[EF]) sendInputPacket(
@@ -262,14 +265,14 @@ func (e *Encoder[EF]) sendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	encoder := e.Encoders[input.GetStreamIndex()]
-	logger.Tracef(ctx, "encoder == %v", encoder)
+	encoder := e.encoders[input.GetStreamIndex()]
+	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		err := e.initEncoderAndOutputFor(ctx, input.GetStreamIndex(), input.CodecParameters(), input.GetStream().TimeBase())
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (packet): %w", err)
 		}
-		encoder = e.Encoders[input.GetStreamIndex()]
+		encoder = e.encoders[input.GetStreamIndex()]
 	}
 	assert(ctx, encoder != nil)
 
@@ -277,8 +280,9 @@ func (e *Encoder[EF]) sendInputPacket(
 		return ErrNotCopyEncoder{}
 	}
 
-	outputStream := e.OutputStreams[input.GetStreamIndex()]
+	outputStream := e.outputStreams[input.GetStreamIndex()]
 	assert(ctx, outputStream != nil)
+	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
 	e.send(ctx, input.FormatContext.NbStreams(), pkt, outputStream, outputPacketsCh)
@@ -297,7 +301,7 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA4R1(ctx, &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
+	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
 func (e *Encoder[EF]) sendInputFrame(
@@ -306,8 +310,8 @@ func (e *Encoder[EF]) sendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	encoder := e.Encoders[input.GetStreamIndex()]
-	logger.Tracef(ctx, "encoder == %v", encoder)
+	encoder := e.encoders[input.GetStreamIndex()]
+	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		codecParams := astiav.AllocCodecParameters()
 		setFinalizerFree(ctx, codecParams)
@@ -316,8 +320,8 @@ func (e *Encoder[EF]) sendInputFrame(
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
-		encoder = e.Encoders[input.GetStreamIndex()]
-		if encoderWriteHeader && len(e.Encoders) == input.StreamsCount {
+		encoder = e.encoders[input.GetStreamIndex()]
+		if encoderWriteHeader && len(e.encoders) == input.StreamsCount {
 			logger.Debugf(ctx, "writing the header")
 			err := e.outputFormatContext.WriteHeader(nil)
 			if err != nil {
@@ -331,7 +335,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		return fmt.Errorf("one should not call SendInputFrame for the 'copy' encoder")
 	}
 
-	outputStream := e.OutputStreams[input.GetStreamIndex()]
+	outputStream := e.outputStreams[input.GetStreamIndex()]
 	assert(ctx, outputStream != nil, "outputStream != nil")
 	if enableStreamCodecParametersUpdates {
 		if getInitTSer, ok := encoder.Encoder.(interface{ GetInitTS() time.Time }); ok {
@@ -343,6 +347,8 @@ func (e *Encoder[EF]) sendInputFrame(
 			}
 		}
 	}
+
+	assert(ctx, outputStream.CodecParameters().MediaType() == encoder.CodecContext().MediaType(), outputStream.CodecParameters().MediaType(), encoder.CodecContext().MediaType())
 
 	err := encoder.SendFrame(ctx, input.Frame)
 	if err != nil {
@@ -362,7 +368,7 @@ func (e *Encoder[EF]) sendInputFrame(
 			}
 			return fmt.Errorf("unable receive the packet from the encoder: %w", err)
 		}
-		logger.Tracef(ctx, "encoder.ReceivePacket(): got a packet, resulting size: %d (pts: %d)", pkt.Size(), pkt.Pts())
+		logger.Tracef(ctx, "encoder.ReceivePacket(): got a %s packet, resulting size: %d (pts: %d)", outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
 
 		//pkt.SetPts(input.Pts())
 		//pkt.SetDts(input.PktDts())
@@ -386,6 +392,11 @@ func (e *Encoder[EF]) send(
 	outputStream *astiav.Stream,
 	out chan<- packet.Output,
 ) {
+	if e.outputStreamsEncodedCount[outputStream.Index()] == 0 {
+		e.activeStreamCount++
+	}
+	e.outputStreamsEncodedCount[outputStream.Index()]++
+
 	outPkt := packet.BuildOutput(
 		pkt,
 		outputStream,
@@ -393,22 +404,38 @@ func (e *Encoder[EF]) send(
 	)
 
 	if !e.started {
-		if len(e.Encoders) < streamsCount {
+		// we have to skip non-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
+		// does not see the video track:
+		if outPkt.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 			e.pendingPackets = append(e.pendingPackets, outPkt)
 			if len(e.pendingPackets) > pendingPacketsLimit {
 				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 				e.pendingPackets = e.pendingPackets[1:]
 			}
+		}
+		if e.activeStreamCount < uint64(streamsCount) {
+			logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", e.activeStreamCount, streamsCount, outPkt.CodecParameters().MediaType())
 			return
 		}
 		e.started = true
 
-		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams)", len(e.Encoders), streamsCount)
+		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams); len(pendingPackets): %d; current_packet:%s", len(e.encoders), streamsCount, len(e.pendingPackets), outPkt.CodecParameters().MediaType())
+
 		for _, outPkt := range e.pendingPackets {
-			out <- outPkt
+			e.doSend(belt.WithField(ctx, "reason", "pending_video"), outPkt, out)
 		}
 		e.pendingPackets = e.pendingPackets[:0]
+		return
 	}
 
+	e.doSend(ctx, outPkt, out)
+}
+
+func (e *Encoder[EF]) doSend(
+	ctx context.Context,
+	outPkt packet.Output,
+	out chan<- packet.Output,
+) {
+	logger.Tracef(ctx, "sending out %s", outPkt.CodecParameters().MediaType())
 	out <- outPkt
 }
