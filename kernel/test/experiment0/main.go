@@ -110,10 +110,6 @@ func main() {
 			// Make sure to unreference the packet
 			defer pkt.Unref()
 
-			if pkt.StreamIndex() != 0 {
-				return false
-			}
-
 			// Get stream
 			s, ok := streams[pkt.StreamIndex()]
 			if !ok {

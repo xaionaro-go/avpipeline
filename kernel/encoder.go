@@ -17,13 +17,20 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+const (
+	encoderWriteHeader = true
+)
+
 type Encoder[EF codec.EncoderFactory] struct {
 	EncoderFactory EF
 
 	*closeChan
 	Encoders         map[int]*StreamEncoder
+	Locker           xsync.Mutex
 	streamConfigurer StreamConfigurer
+	pendingPackets   []packet.Output
 
+	started                   bool
 	outputFormatContextLocker xsync.RWMutex
 	outputFormatContext       *astiav.FormatContext
 	OutputStreams             map[int]*astiav.Stream
@@ -246,7 +253,15 @@ func (e *Encoder[EF]) SendInputPacket(
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
+	return xsync.DoA4R1(ctx, &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
+}
 
+func (e *Encoder[EF]) sendInputPacket(
+	ctx context.Context,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) (_err error) {
 	encoder := e.Encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "encoder == %v", encoder)
 	if encoder == nil {
@@ -266,11 +281,12 @@ func (e *Encoder[EF]) SendInputPacket(
 	assert(ctx, outputStream != nil)
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	outputPacketsCh <- packet.BuildOutput(
+	outPkt := packet.BuildOutput(
 		pkt,
 		outputStream,
 		e.outputFormatContext,
 	)
+	e.send(ctx, input.FormatContext.NbStreams(), outPkt, outputPacketsCh)
 	return nil
 }
 
@@ -286,6 +302,15 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
+	return xsync.DoA4R1(ctx, &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
+}
+
+func (e *Encoder[EF]) sendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) (_err error) {
 	encoder := e.Encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "encoder == %v", encoder)
 	if encoder == nil {
@@ -297,7 +322,7 @@ func (e *Encoder[EF]) SendInputFrame(
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
 		encoder = e.Encoders[input.GetStreamIndex()]
-		if len(e.Encoders) == input.StreamsCount {
+		if encoderWriteHeader && len(e.Encoders) == input.StreamsCount {
 			logger.Debugf(ctx, "writing the header")
 			err := e.outputFormatContext.WriteHeader(nil)
 			if err != nil {
@@ -351,12 +376,38 @@ func (e *Encoder[EF]) SendInputFrame(
 			pkt.SetDts(consts.NoPTSValue)
 		}
 		pkt.SetStreamIndex(outputStream.Index())
-		outputPacketsCh <- packet.BuildOutput(
+		outPkt := packet.BuildOutput(
 			pkt,
 			outputStream,
 			e.outputFormatContext,
 		)
+		e.send(ctx, input.StreamsCount, outPkt, outputPacketsCh)
 	}
 
 	return nil
+}
+
+func (e *Encoder[EF]) send(
+	ctx context.Context,
+	streamsCount int,
+	pkt packet.Output,
+	out chan<- packet.Output,
+) {
+	if !e.started {
+		if len(e.Encoders) < streamsCount {
+			e.pendingPackets = append(e.pendingPackets, pkt)
+			if len(e.pendingPackets) > pendingPacketsLimit {
+				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+				e.pendingPackets = e.pendingPackets[1:]
+			}
+			return
+		}
+		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams)", len(e.Encoders), streamsCount)
+		e.started = true
+	}
+	for _, outPkt := range e.pendingPackets {
+		out <- outPkt
+	}
+	e.pendingPackets = e.pendingPackets[:0]
+	out <- pkt
 }

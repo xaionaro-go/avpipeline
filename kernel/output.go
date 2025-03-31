@@ -335,6 +335,9 @@ func (o *Output) SendInputPacket(
 			pkt.Flags(),
 		)
 	}
+	if outputStream.TimeBase().Num() == 0 {
+		return fmt.Errorf("internal error: TimeBase must be set")
+	}
 
 	pkt.SetStreamIndex(outputStream.Index())
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
