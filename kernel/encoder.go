@@ -281,12 +281,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	assert(ctx, outputStream != nil)
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	outPkt := packet.BuildOutput(
-		pkt,
-		outputStream,
-		e.outputFormatContext,
-	)
-	e.send(ctx, input.FormatContext.NbStreams(), outPkt, outputPacketsCh)
+	e.send(ctx, input.FormatContext.NbStreams(), pkt, outputStream, outputPacketsCh)
 	return nil
 }
 
@@ -369,19 +364,16 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 		logger.Tracef(ctx, "encoder.ReceivePacket(): got a packet, resulting size: %d (pts: %d)", pkt.Size(), pkt.Pts())
 
-		pkt.SetPts(input.Pts())
-		pkt.SetDts(input.PktDts())
-		if pkt.Dts() > pkt.Pts() {
+		//pkt.SetPts(input.Pts())
+		//pkt.SetDts(input.PktDts())
+		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
 			logger.Errorf(ctx, "dts (%d) > pts (%d); as a correction setting the DTS value to be the no-PTS magic value", pkt.Dts(), pkt.Pts())
 			pkt.SetDts(consts.NoPTSValue)
 		}
+		pkt.RescaleTs(input.GetTimeBase(), outputStream.TimeBase())
 		pkt.SetStreamIndex(outputStream.Index())
-		outPkt := packet.BuildOutput(
-			pkt,
-			outputStream,
-			e.outputFormatContext,
-		)
-		e.send(ctx, input.StreamsCount, outPkt, outputPacketsCh)
+
+		e.send(ctx, input.StreamsCount, pkt, outputStream, outputPacketsCh)
 	}
 
 	return nil
@@ -390,24 +382,33 @@ func (e *Encoder[EF]) sendInputFrame(
 func (e *Encoder[EF]) send(
 	ctx context.Context,
 	streamsCount int,
-	pkt packet.Output,
+	pkt *astiav.Packet,
+	outputStream *astiav.Stream,
 	out chan<- packet.Output,
 ) {
+	outPkt := packet.BuildOutput(
+		pkt,
+		outputStream,
+		e.outputFormatContext,
+	)
+
 	if !e.started {
 		if len(e.Encoders) < streamsCount {
-			e.pendingPackets = append(e.pendingPackets, pkt)
+			e.pendingPackets = append(e.pendingPackets, outPkt)
 			if len(e.pendingPackets) > pendingPacketsLimit {
 				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 				e.pendingPackets = e.pendingPackets[1:]
 			}
 			return
 		}
-		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams)", len(e.Encoders), streamsCount)
 		e.started = true
+
+		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams)", len(e.Encoders), streamsCount)
+		for _, outPkt := range e.pendingPackets {
+			out <- outPkt
+		}
+		e.pendingPackets = e.pendingPackets[:0]
 	}
-	for _, outPkt := range e.pendingPackets {
-		out <- outPkt
-	}
-	e.pendingPackets = e.pendingPackets[:0]
-	out <- pkt
+
+	out <- outPkt
 }

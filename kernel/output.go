@@ -13,6 +13,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/stream"
@@ -227,7 +228,7 @@ func (o *Output) updateOutputFormat(
 	ctx context.Context,
 	inputFmt *astiav.FormatContext,
 ) (_err error) {
-	logger.Debugf(ctx, "updateOutputFormat")
+	logger.Debugf(ctx, "updateOutputFormat: %d streams", inputFmt.NbStreams())
 	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
 	for _, inputStream := range inputFmt.Streams() {
 		inputStreamIndex := inputStream.Index()
@@ -341,7 +342,7 @@ func (o *Output) SendInputPacket(
 
 	pkt.SetStreamIndex(outputStream.Index())
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
-	if pkt.Dts() < outputStream.LastDTS {
+	if pkt.Dts() != consts.NoPTSValue && pkt.Dts() < outputStream.LastDTS {
 		logger.Errorf(ctx, "received a DTS from the past, ignoring the packet: %d < %d", pkt.Dts(), outputStream.LastDTS)
 		return nil
 	}
