@@ -151,7 +151,7 @@ func (e *Encoder[EF]) configureOutputStream(
 			return fmt.Errorf("unable to configure the output stream: %w", err)
 		}
 	}
-	logger.Tracef(
+	logger.Debugf(
 		ctx,
 		"resulting output stream for input stream %d: %d: %s: %s: %s: %s: %s",
 		streamIndex,
