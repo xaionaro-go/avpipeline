@@ -12,6 +12,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -46,6 +47,10 @@ type Output struct {
 	proxy     *proxy.TCPProxy
 
 	formatContextLocker xsync.RWMutex
+
+	started          bool
+	pendingPackets   []*astiav.Packet
+	waitingKeyFrames map[int]struct{}
 
 	*closeChan
 	*astiav.FormatContext
@@ -97,6 +102,8 @@ func NewOutputFromURL(
 		StreamKey: streamKey,
 		Streams:   make(map[int]*OutputStream),
 		closeChan: newCloseChan(),
+
+		waitingKeyFrames: make(map[int]struct{}),
 	}
 
 	if streamKey.Get() != "" {
@@ -237,18 +244,15 @@ func (o *Output) updateOutputFormat(
 			continue
 		}
 
-		err := o.initOutputStreamFor(ctx, inputStream)
+		outputStream, err := o.initOutputStreamFor(ctx, inputStream)
 		if err != nil {
 			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
 		}
-	}
 
-	var err error
-	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
-		err = o.FormatContext.WriteHeader(nil)
-	})
-	if err != nil {
-		return fmt.Errorf("unable to write the header: %w", err)
+		if outputStream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+			o.waitingKeyFrames[outputStream.Index()] = struct{}{}
+			logger.Debugf(ctx, "len(waitingKeyFrames): increase -> %d", len(o.waitingKeyFrames))
+		}
 	}
 	return nil
 }
@@ -256,12 +260,12 @@ func (o *Output) updateOutputFormat(
 func (o *Output) initOutputStreamFor(
 	ctx context.Context,
 	inputStream *astiav.Stream,
-) (_err error) {
+) (_ *OutputStream, _err error) {
 	logger.Tracef(ctx, "initOutputStreamFor(ctx, stream[%d])", inputStream.Index())
 	defer func() { logger.Tracef(ctx, "/initOutputStreamFor(ctx, stream[%d]) %v", inputStream.Index(), _err) }()
 
 	var outputStream *OutputStream
-	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
+	o.formatContextLocker.Do(ctx, func() {
 		outputStream = &OutputStream{
 			Stream:  o.FormatContext.NewStream(nil),
 			LastDTS: math.MinInt64,
@@ -269,7 +273,7 @@ func (o *Output) initOutputStreamFor(
 	})
 
 	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
-		return fmt.Errorf("unable to copy stream parameters: %w", err)
+		return nil, fmt.Errorf("unable to copy stream parameters: %w", err)
 	}
 
 	logger.Tracef(
@@ -283,23 +287,24 @@ func (o *Output) initOutputStreamFor(
 	)
 
 	o.Streams[inputStream.Index()] = outputStream
-	return nil
+	return outputStream, nil
 }
 
 func (o *Output) GetOutputStream(
 	ctx context.Context,
 	inputPkt packet.Input,
 ) (*OutputStream, error) {
-	outputStream := o.Streams[inputPkt.StreamIndex()]
+	streamIndex := inputPkt.StreamIndex()
+	outputStream := o.Streams[streamIndex]
 	if outputStream != nil {
 		return outputStream, nil
 	}
 
-	logger.Debugf(ctx, "new output stream (#%d)", inputPkt.StreamIndex())
+	logger.Debugf(ctx, "new output stream (#%d)", streamIndex)
 	if err := o.updateOutputFormat(ctx, inputPkt.FormatContext); err != nil {
 		return nil, fmt.Errorf("unable to update the output format: %w", err)
 	}
-	outputStream = o.Streams[inputPkt.StreamIndex()]
+	outputStream = o.Streams[streamIndex]
 	assert(ctx, outputStream != nil)
 	return outputStream, nil
 }
@@ -359,9 +364,85 @@ func (o *Output) SendInputPacket(
 	}
 
 	logger.Tracef(ctx, "sending the current packet")
-	if err := o.doWritePacket(ctx, pkt, outputStream); err != nil {
+	if err := o.send(ctx, inputPkt.NbStreams(), pkt, outputStream); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (o *Output) SendInputFrame(
+	ctx context.Context,
+	input frame.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) error {
+	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
+}
+
+func (o *Output) String() string {
+	return fmt.Sprintf("Output(%s)", o.URL)
+}
+
+func (o *Output) send(
+	ctx context.Context,
+	expectedStreamsCount int,
+	pkt *astiav.Packet,
+	outputStream *OutputStream,
+) error {
+	if o.started {
+		return o.doWritePacket(ctx, pkt, outputStream)
+	}
+
+	activeStreamCount := o.FormatContext.NbStreams()
+	if activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0 {
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
+		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
+		// does not see the video track:
+		if outputStream.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+			return nil
+		}
+		keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
+		if keyFrame {
+			logger.Debugf(ctx, "got a key video frame")
+		}
+		streamIndex := pkt.StreamIndex()
+		_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
+		if waitingKeyFrame {
+			delete(o.waitingKeyFrames, streamIndex)
+			logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
+		}
+		if keyFrame && waitingKeyFrame {
+			o.pendingPackets = append(o.pendingPackets, packet.CloneAsReferenced(pkt))
+			if len(o.pendingPackets) > pendingPacketsLimit {
+				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+				o.pendingPackets = o.pendingPackets[1:]
+			}
+		}
+		return nil
+	} else {
+		o.pendingPackets = append(o.pendingPackets, packet.CloneAsReferenced(pkt))
+	}
+	o.started = true
+
+	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", o.FormatContext.NbStreams(), expectedStreamsCount, len(o.waitingKeyFrames))
+	var err error
+	o.formatContextLocker.Do(ctx, func() {
+		err = o.FormatContext.WriteHeader(nil)
+	})
+	if err != nil {
+		return fmt.Errorf("unable to write the header: %w", err)
+	}
+
+	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), outputStream.CodecParameters().MediaType())
+
+	for _, pkt := range o.pendingPackets {
+		err := o.doWritePacket(belt.WithField(ctx, "reason", "pending_packet"), pkt, outputStream)
+		packet.Pool.Put(pkt)
+		if err != nil {
+			return fmt.Errorf("unable to write a pending packet: %w", err)
+		}
+	}
+	o.pendingPackets = o.pendingPackets[:0]
 	return nil
 }
 
@@ -372,7 +453,7 @@ func (o *Output) doWritePacket(
 ) (_err error) {
 	var err error
 	pts, dts := packet.Pts(), packet.Dts()
-	o.formatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
+	o.formatContextLocker.Do(ctx, func() {
 		err = o.FormatContext.WriteInterleavedFrame(packet)
 	})
 	if err != nil {
@@ -391,17 +472,4 @@ func (o *Output) doWritePacket(
 		)
 	}
 	return nil
-}
-
-func (o *Output) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
-}
-
-func (o *Output) String() string {
-	return fmt.Sprintf("Output(%s)", o.URL)
 }

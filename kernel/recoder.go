@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xsync"
 )
 
 const (
@@ -23,6 +24,12 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
 	*closeChan
+
+	locker             xsync.Mutex
+	started            bool
+	activeStreamsMap   map[int]struct{}
+	activeStreamsCount uint
+	pendingPackets     []packet.Output
 }
 
 var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
@@ -37,6 +44,8 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 		closeChan: newCloseChan(),
 		Decoder:   NewDecoder(ctx, decoderFactory),
 		Encoder:   NewEncoder(ctx, encoderFactory, streamConfigurer),
+
+		activeStreamsMap: make(map[int]struct{}),
 	}
 	return r, nil
 }
@@ -60,15 +69,64 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	_ chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputPacket")
 	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
+	return xsync.DoA3R1(ctx, &r.locker, r.sendInputPacket, ctx, input, outputPacketsCh)
+}
+
+func (r *Recoder[DF, EF]) sendInputPacket(
+	ctx context.Context,
+	input packet.Input,
+	outputPacketCh chan<- packet.Output,
+) (_err error) {
 	if r.IsClosed() {
 		return io.ErrClosedPipe
 	}
 
-	err := r.Encoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
+	if r.started {
+		return r.process(ctx, input, outputPacketCh)
+	}
+
+	resultCh := make(chan packet.Output, 1)
+	observability.Go(ctx, func() {
+		for pkt := range resultCh {
+			r.pendingPackets = append(r.pendingPackets, pkt)
+			if len(r.pendingPackets) > len(r.pendingPackets) {
+				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+				r.pendingPackets = r.pendingPackets[1:]
+			}
+			streamIdx := pkt.Stream.Index()
+			if _, ok := r.activeStreamsMap[streamIdx]; ok {
+				continue
+			}
+			r.activeStreamsCount++
+			r.activeStreamsMap[streamIdx] = struct{}{}
+		}
+	})
+
+	err := r.process(ctx, input, resultCh)
+	close(resultCh)
+
+	if int(r.activeStreamsCount) >= input.FormatContext.NbStreams() {
+		logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), input.FormatContext.NbStreams())
+		for _, pkt := range r.pendingPackets {
+			outputPacketCh <- pkt
+		}
+		r.pendingPackets = r.pendingPackets[:0]
+		r.started = true
+	}
+
+	return err
+}
+
+func (r *Recoder[DF, EF]) process(
+	ctx context.Context,
+	input packet.Input,
+	resultCh chan<- packet.Output,
+) (_err error) {
+	err := r.Encoder.SendInputPacket(ctx, input, resultCh, nil)
 	switch {
 	case err == nil:
 		return
@@ -100,7 +158,7 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 					return
 				}
 
-				err := r.Encoder.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+				err := r.Encoder.SendInputFrame(ctx, frame.Input(f), resultCh, nil)
 				if err != nil {
 					encoderError = err
 				}
@@ -108,7 +166,7 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 		}
 	})
 
-	err = r.Decoder.SendInputPacket(ctx, input, outputPacketsCh, framesCh)
+	err = r.Decoder.SendInputPacket(ctx, input, resultCh, framesCh)
 	close(framesCh)
 	wg.Wait()
 	if encoderError != nil {

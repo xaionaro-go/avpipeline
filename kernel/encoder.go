@@ -9,7 +9,6 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
@@ -29,11 +28,7 @@ type Encoder[EF codec.EncoderFactory] struct {
 
 	encoders                  map[int]*streamEncoder
 	outputStreams             map[int]*astiav.Stream
-	outputStreamsEncodedCount map[int]uint
 	StreamConfigurer          StreamConfigurer
-	pendingPackets            []packet.Output
-	activeStreamCount         uint64
-	started                   bool
 	outputFormatContextLocker xsync.RWMutex
 	outputFormatContext       *astiav.FormatContext
 }
@@ -51,13 +46,12 @@ func NewEncoder[EF codec.EncoderFactory](
 	streamConfigurer StreamConfigurer,
 ) *Encoder[EF] {
 	e := &Encoder[EF]{
-		closeChan:                 newCloseChan(),
-		EncoderFactory:            encoderFactory,
-		encoders:                  map[int]*streamEncoder{},
-		StreamConfigurer:          streamConfigurer,
-		outputFormatContext:       astiav.AllocFormatContext(),
-		outputStreams:             make(map[int]*astiav.Stream),
-		outputStreamsEncodedCount: make(map[int]uint),
+		closeChan:           newCloseChan(),
+		EncoderFactory:      encoderFactory,
+		encoders:            map[int]*streamEncoder{},
+		StreamConfigurer:    streamConfigurer,
+		outputFormatContext: astiav.AllocFormatContext(),
+		outputStreams:       make(map[int]*astiav.Stream),
 	}
 	setFinalizerFree(ctx, e.outputFormatContext)
 	return e
@@ -285,7 +279,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	e.send(ctx, input.FormatContext.NbStreams(), pkt, outputStream, outputPacketsCh)
+	e.send(ctx, pkt, outputStream, outputPacketsCh)
 	return nil
 }
 
@@ -293,7 +287,7 @@ func (e *Encoder[EF]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	_ chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputFrame")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
@@ -301,14 +295,13 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh)
 }
 
 func (e *Encoder[EF]) sendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
@@ -370,6 +363,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 		logger.Tracef(ctx, "encoder.ReceivePacket(): got a %s packet, resulting size: %d (pts: %d)", outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
 
+		// should this be happening here? --
 		//pkt.SetPts(input.Pts())
 		//pkt.SetDts(input.PktDts())
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
@@ -379,7 +373,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		pkt.RescaleTs(input.GetTimeBase(), outputStream.TimeBase())
 		pkt.SetStreamIndex(outputStream.Index())
 
-		e.send(ctx, input.StreamsCount, pkt, outputStream, outputPacketsCh)
+		e.send(ctx, pkt, outputStream, outputPacketsCh)
 	}
 
 	return nil
@@ -387,55 +381,16 @@ func (e *Encoder[EF]) sendInputFrame(
 
 func (e *Encoder[EF]) send(
 	ctx context.Context,
-	streamsCount int,
-	pkt *astiav.Packet,
+	outPkt *astiav.Packet,
 	outputStream *astiav.Stream,
 	out chan<- packet.Output,
 ) {
-	if e.outputStreamsEncodedCount[outputStream.Index()] == 0 {
-		e.activeStreamCount++
-	}
-	e.outputStreamsEncodedCount[outputStream.Index()]++
-
-	outPkt := packet.BuildOutput(
-		pkt,
+	outPktWrapped := packet.BuildOutput(
+		outPkt,
 		outputStream,
 		e.outputFormatContext,
 	)
 
-	if !e.started {
-		// we have to skip non-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
-		// does not see the video track:
-		if outPkt.CodecParameters().MediaType() == astiav.MediaTypeVideo {
-			e.pendingPackets = append(e.pendingPackets, outPkt)
-			if len(e.pendingPackets) > pendingPacketsLimit {
-				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-				e.pendingPackets = e.pendingPackets[1:]
-			}
-		}
-		if e.activeStreamCount < uint64(streamsCount) {
-			logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", e.activeStreamCount, streamsCount, outPkt.CodecParameters().MediaType())
-			return
-		}
-		e.started = true
-
-		logger.Debugf(ctx, "started sending packets (have %d encoders for %d streams); len(pendingPackets): %d; current_packet:%s", len(e.encoders), streamsCount, len(e.pendingPackets), outPkt.CodecParameters().MediaType())
-
-		for _, outPkt := range e.pendingPackets {
-			e.doSend(belt.WithField(ctx, "reason", "pending_video"), outPkt, out)
-		}
-		e.pendingPackets = e.pendingPackets[:0]
-		return
-	}
-
-	e.doSend(ctx, outPkt, out)
-}
-
-func (e *Encoder[EF]) doSend(
-	ctx context.Context,
-	outPkt packet.Output,
-	out chan<- packet.Output,
-) {
-	logger.Tracef(ctx, "sending out %s", outPkt.CodecParameters().MediaType())
-	out <- outPkt
+	logger.Tracef(ctx, "sending out %s", outPktWrapped.CodecParameters().MediaType())
+	out <- outPktWrapped
 }

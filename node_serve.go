@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xsync"
 )
 
 type ErrNode struct {
@@ -52,6 +53,7 @@ func (n *Node[T]) Serve(
 	errCh chan<- ErrNode,
 ) {
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
+	ctx = xsync.WithNoLogging(ctx, true)
 	logger.Tracef(ctx, "Serve")
 	defer func() { logger.Tracef(ctx, "/Serve") }()
 
@@ -181,6 +183,8 @@ func pushFurther[T processor.Abstract, O outputObject, I inputObject, C types.Co
 ) {
 	defer poolPutOutput(outputObj)
 	outputObjPtr := OP(ptr(outputObj))
+
+	ctx = belt.WithField(ctx, "stream_index", outputObjPtr.GetStreamIndex())
 
 	objSize := uint64(outputObjPtr.GetSize())
 	n.BytesCountWrote.Add(objSize)

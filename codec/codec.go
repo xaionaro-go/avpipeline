@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
@@ -74,6 +75,21 @@ func newCodec(
 		}
 	}()
 
+	lazyInitOptions := func() {
+		if options != nil {
+			return
+		}
+		options = astiav.NewDictionary()
+		setFinalizerFree(ctx, options)
+	}
+
+	logIfError := func(err error) {
+		if err == nil {
+			return
+		}
+		logger.Errorf(ctx, "got an error: %v", err)
+	}
+
 	if isEncoder {
 		if codecName != "" {
 			c.codec = astiav.FindEncoderByName(string(codecName))
@@ -116,6 +132,21 @@ func newCodec(
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
+		if isEncoder {
+			lazyInitOptions()
+			if options.Get("g", nil, 0) == nil {
+				fps := codecParameters.FrameRate().Float64()
+				v := int(0.999 + fps)
+				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS value (%d <- %f)", v, fps)
+				logIfError(options.Set("g", fmt.Sprintf("%d", v), 0))
+			}
+			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+				if options.Get("pix_fmt", nil, 0) == nil {
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
+					logIfError(options.Set("pix_fmt", "nv12", 0))
+				}
+			}
+		}
 	}
 
 	if hardwareDeviceType != astiav.HardwareDeviceTypeNone {

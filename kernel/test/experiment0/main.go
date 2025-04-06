@@ -33,14 +33,14 @@ func main() {
 	defer cancelFn()
 	defer belt.Flush(ctx)
 
-	decoder := kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx, 0, "", nil))
+	decoder := kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil))
 	defer decoder.Close(ctx)
 
 	encoder := kernel.NewEncoder(
 		ctx,
 		codec.NewNaiveEncoderFactory(ctx, "libx264", "aac", 0, "", types.DictionaryItems{
 			{Key: "bf", Value: "0"}, // to disable B-frames
-		}),
+		}, nil),
 		nil,
 	)
 	defer encoder.Close(ctx)

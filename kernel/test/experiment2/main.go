@@ -34,10 +34,10 @@ func main() {
 
 	recoder, err := kernel.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(ctx, 0, "", nil),
+		codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil),
 		codec.NewNaiveEncoderFactory(ctx, "libx264", "aac", 0, "", types.DictionaryItems{
 			{Key: "bf", Value: "0"}, // to disable B-frames
-		}),
+		}, nil),
 		nil,
 	)
 	assert(ctx, err == nil, err)

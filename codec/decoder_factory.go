@@ -18,7 +18,8 @@ type DecoderFactory interface {
 type NaiveDecoderFactory struct {
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
-	Options            *astiav.Dictionary
+	VideoOptions       *astiav.Dictionary
+	AudioOptions       *astiav.Dictionary
 }
 
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
@@ -27,19 +28,29 @@ func NewNaiveDecoderFactory(
 	ctx context.Context,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
-	customOptions types.DictionaryItems,
+	videoCustomOptions types.DictionaryItems,
+	audioCustomOptions types.DictionaryItems,
 ) *NaiveDecoderFactory {
 	f := &NaiveDecoderFactory{
 		HardwareDeviceType: hardwareDeviceType,
 		HardwareDeviceName: hardwareDeviceName,
 	}
-	if len(customOptions) > 0 {
-		f.Options = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.Options)
+	if len(videoCustomOptions) > 0 {
+		f.VideoOptions = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.VideoOptions)
 
-		for _, opt := range customOptions {
-			logger.Debugf(ctx, "decoderFactory.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
-			f.Options.Set(opt.Key, opt.Value, 0)
+		for _, opt := range videoCustomOptions {
+			logger.Debugf(ctx, "decoderFactory.VideoOptions['%s'] = '%s'", opt.Key, opt.Value)
+			f.VideoOptions.Set(opt.Key, opt.Value, 0)
+		}
+	}
+	if len(audioCustomOptions) > 0 {
+		f.AudioOptions = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.AudioOptions)
+
+		for _, opt := range audioCustomOptions {
+			logger.Debugf(ctx, "decoderFactory.AudioOptions['%s'] = '%s'", opt.Key, opt.Value)
+			f.AudioOptions.Set(opt.Key, opt.Value, 0)
 		}
 	}
 	return f
@@ -57,7 +68,7 @@ func (f *NaiveDecoderFactory) NewDecoder(
 			codecParameters,
 			0,
 			"",
-			f.Options,
+			f.VideoOptions,
 			0,
 		)
 	}
@@ -67,7 +78,7 @@ func (f *NaiveDecoderFactory) NewDecoder(
 		codecParameters,
 		f.HardwareDeviceType,
 		f.HardwareDeviceName,
-		f.Options,
+		f.VideoOptions,
 		0,
 	)
 }

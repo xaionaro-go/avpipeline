@@ -12,7 +12,8 @@ require (
 	github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
-	github.com/xaionaro-go/avmediacodec v0.0.0-20250317164140-f4ce53d9a1cc
+	github.com/stretchr/testify v1.10.0
+	github.com/xaionaro-go/avmediacodec v0.0.0-20250406231401-a2c73dde769f
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
 	github.com/xaionaro-go/observability v0.0.0-20250309200059-047fad8d76e4
 	github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638
@@ -21,6 +22,11 @@ require (
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
 	github.com/xaionaro-go/xsync v0.0.0-20250113213958-aedf9c8786f5
+)
+
+require (
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (

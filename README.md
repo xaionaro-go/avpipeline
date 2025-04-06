@@ -33,8 +33,8 @@ For example:
 
 	recoder, err := processor.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(ctx, 0, "", nil),
-		codec.NewNaiveEncoderFactory(ctx, "libx264", "copy", 0, "", nil),
+		codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil),
+		codec.NewNaiveEncoderFactory(ctx, "libx264", "copy", 0, "", nil, nil),
 		nil,
 	)
 	assert(ctx, err == nil, err)

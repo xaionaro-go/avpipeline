@@ -20,7 +20,8 @@ type NaiveEncoderFactory struct {
 	AudioCodec         string
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
-	Options            *astiav.Dictionary
+	VideoOptions       *astiav.Dictionary
+	AudioOptions       *astiav.Dictionary
 	VideoEncoders      []Encoder
 	AudioEncoders      []Encoder
 	Locker             xsync.Mutex
@@ -34,7 +35,8 @@ func NewNaiveEncoderFactory(
 	audioCodec string,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
-	customOptions types.DictionaryItems,
+	videoCustomOptions types.DictionaryItems,
+	audioCustomOptions types.DictionaryItems,
 ) *NaiveEncoderFactory {
 	f := &NaiveEncoderFactory{
 		VideoCodec:         videoCodec,
@@ -42,13 +44,22 @@ func NewNaiveEncoderFactory(
 		HardwareDeviceType: hardwareDeviceType,
 		HardwareDeviceName: hardwareDeviceName,
 	}
-	if len(customOptions) > 0 {
-		f.Options = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.Options)
+	if len(videoCustomOptions) > 0 {
+		f.VideoOptions = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.VideoOptions)
 
-		for _, opt := range customOptions {
-			logger.Debugf(ctx, "encoderFactory.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
-			f.Options.Set(opt.Key, opt.Value, 0)
+		for _, opt := range videoCustomOptions {
+			logger.Debugf(ctx, "encoderFactory.VideoOptions['%s'] = '%s'", opt.Key, opt.Value)
+			f.VideoOptions.Set(opt.Key, opt.Value, 0)
+		}
+	}
+	if len(audioCustomOptions) > 0 {
+		f.AudioOptions = astiav.NewDictionary()
+		setFinalizerFree(ctx, f.AudioOptions)
+
+		for _, opt := range audioCustomOptions {
+			logger.Debugf(ctx, "encoderFactory.AudioOptions['%s'] = '%s'", opt.Key, opt.Value)
+			f.AudioOptions.Set(opt.Key, opt.Value, 0)
 		}
 	}
 	return f
@@ -99,14 +110,14 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 			HardwareDeviceType: f.HardwareDeviceType,
 			HardwareDeviceName: f.HardwareDeviceName,
 			TimeBase:           timeBase,
-			Options:            f.Options,
+			Options:            f.VideoOptions,
 		}
 	case astiav.MediaTypeAudio:
 		encParams = &EncoderParams{
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParams,
 			TimeBase:        timeBase,
-			Options:         f.Options,
+			Options:         f.VideoOptions,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
