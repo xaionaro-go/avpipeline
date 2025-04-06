@@ -35,7 +35,7 @@ func (f *Filter) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	_ chan<- frame.Output,
 ) error {
-	if !f.PacketFilter.Match(ctx, input) {
+	if f.PacketFilter != nil && !f.PacketFilter.Match(ctx, input) {
 		return nil
 	}
 	outputPacketsCh <- packet.BuildOutput(
@@ -52,7 +52,7 @@ func (f *Filter) SendInputFrame(
 	_ chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	if !f.FrameFilter.Match(ctx, input) {
+	if f.FrameFilter != nil && !f.FrameFilter.Match(ctx, input) {
 		return nil
 	}
 	outputFramesCh <- frame.BuildOutput(
