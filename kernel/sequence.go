@@ -28,7 +28,7 @@ func NewSequence[T Abstract](kernels ...T) *Sequence[T] {
 	}
 }
 
-func (s *Sequence[Abstract]) SendInputPacket(
+func (s *Sequence[T]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -37,7 +37,7 @@ func (s *Sequence[Abstract]) SendInputPacket(
 	return xsync.DoA4R1(ctx, &s.Locker, s.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[Abstract]) sendInputPacket(
+func (s *Sequence[T]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -46,7 +46,7 @@ func (s *Sequence[Abstract]) sendInputPacket(
 	return s.sendInput(ctx, ptr(input), nil, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[Abstract]) SendInputFrame(
+func (s *Sequence[T]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -55,7 +55,7 @@ func (s *Sequence[Abstract]) SendInputFrame(
 	return xsync.DoA4R1(ctx, &s.Locker, s.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[Abstract]) sendInputFrame(
+func (s *Sequence[T]) sendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -64,7 +64,7 @@ func (s *Sequence[Abstract]) sendInputFrame(
 	return s.sendInput(ctx, nil, ptr(input), outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[Abstract]) sendInput(
+func (s *Sequence[T]) sendInput(
 	ctx context.Context,
 	inputPacket *packet.Input,
 	inputFrame *frame.Input,
@@ -169,15 +169,16 @@ func (s *Sequence[Abstract]) sendInput(
 	return nil
 }
 
-func (s *Sequence[Abstract]) String() string {
+func (s *Sequence[T]) String() string {
 	var result []string
 	for _, node := range s.Kernels {
 		result = append(result, node.String())
 	}
-	return fmt.Sprintf("Sequence(\n\t%s,\n)", strings.Join(result, ",\n\t"))
+	var sample T
+	return fmt.Sprintf("Sequence[%T](\n\t%s,\n)", sample, strings.Join(result, ",\n\t"))
 }
 
-func (s *Sequence[Abstract]) Close(ctx context.Context) error {
+func (s *Sequence[T]) Close(ctx context.Context) error {
 	s.closeChan.Close(ctx)
 	var result []error
 	for idx, node := range s.Kernels {
@@ -189,7 +190,7 @@ func (s *Sequence[Abstract]) Close(ctx context.Context) error {
 	return errors.Join(result...)
 }
 
-func (s *Sequence[Abstract]) Generate(
+func (s *Sequence[T]) Generate(
 	ctx context.Context,
 	_ chan<- packet.Output,
 	_ chan<- frame.Output,

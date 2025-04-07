@@ -347,7 +347,7 @@ func (o *Output) SendInputPacket(
 
 	pkt.SetStreamIndex(outputStream.Index())
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
-	if pkt.Dts() != consts.NoPTSValue && pkt.Dts() < outputStream.LastDTS {
+	if pkt.Dts() != consts.NoPTSValue && pkt.Dts() <= outputStream.LastDTS {
 		logger.Errorf(ctx, "received a DTS from the past, ignoring the packet: %d < %d", pkt.Dts(), outputStream.LastDTS)
 		return nil
 	}
