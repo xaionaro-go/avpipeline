@@ -87,8 +87,7 @@ func (s *Sequence[Abstract]) sendInput(
 		firstOutPacketCh = outputPacketsCh
 		firstOutFrameCh = outputFramesCh
 	} else {
-		packetCh := make(chan packet.Output)
-		frameCh := make(chan frame.Output)
+		packetCh, frameCh := make(chan packet.Output), make(chan frame.Output)
 		firstOutPacketCh, nextInPacketCh = packetCh, packetCh
 		firstOutFrameCh, nextInFrameCh = frameCh, frameCh
 	}
@@ -97,18 +96,18 @@ func (s *Sequence[Abstract]) sendInput(
 	var wg sync.WaitGroup
 	for idx, k := range s.Kernels[1:] {
 		{
+			k := k
 			curInPacketCh, curInFrameCh := nextInPacketCh, nextInFrameCh
 			nextInPacketCh, nextInFrameCh = make(chan packet.Output), make(chan frame.Output)
 			var (
-				nextOutPacketCh chan<- packet.Output
-				nextOutFrameCh  chan<- frame.Output
+				curOutPacketCh chan<- packet.Output
+				curOutFrameCh  chan<- frame.Output
 			)
 			if idx == len(s.Kernels[1:])-1 {
-				nextOutPacketCh, nextOutFrameCh = outputPacketsCh, outputFramesCh
+				curOutPacketCh, curOutFrameCh = outputPacketsCh, outputFramesCh
 			} else {
-				nextOutPacketCh, nextOutFrameCh = nextInPacketCh, nextInFrameCh
+				curOutPacketCh, curOutFrameCh = nextInPacketCh, nextInFrameCh
 			}
-			curInPacketCh, curInFrameCh, k := curInPacketCh, curInFrameCh, k
 			var kernelWG sync.WaitGroup
 			wg.Add(1)
 			kernelWG.Add(1)
@@ -116,7 +115,7 @@ func (s *Sequence[Abstract]) sendInput(
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInPacketCh {
-					errCh <- k.SendInputPacket(ctx, packet.Input(pkt), nextOutPacketCh, nextOutFrameCh)
+					errCh <- k.SendInputPacket(ctx, packet.Input(pkt), curOutPacketCh, curOutFrameCh)
 				}
 			})
 			wg.Add(1)
@@ -125,14 +124,16 @@ func (s *Sequence[Abstract]) sendInput(
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInFrameCh {
-					errCh <- k.SendInputFrame(ctx, frame.Input(pkt), nextOutPacketCh, nextOutFrameCh)
+					errCh <- k.SendInputFrame(ctx, frame.Input(pkt), curOutPacketCh, curOutFrameCh)
 				}
 			})
-			observability.Go(ctx, func() {
-				kernelWG.Wait()
-				close(nextInPacketCh)
-				close(nextInFrameCh)
-			})
+			if idx != len(s.Kernels[1:])-1 {
+				observability.Go(ctx, func() {
+					kernelWG.Wait()
+					close(curOutPacketCh)
+					close(curOutFrameCh)
+				})
+			}
 		}
 	}
 	observability.Go(ctx, func() {
