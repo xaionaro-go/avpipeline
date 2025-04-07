@@ -17,6 +17,10 @@ type SkipStreamIndexOutOfOrder struct {
 
 var _ condition.Condition = (*SkipStreamIndexOutOfOrder)(nil)
 
+func NewSkipStreamIndexOutOfOrder() *SkipStreamIndexOutOfOrder {
+	return &SkipStreamIndexOutOfOrder{}
+}
+
 func (i *SkipStreamIndexOutOfOrder) Match(
 	ctx context.Context,
 	pkt packet.Input,
