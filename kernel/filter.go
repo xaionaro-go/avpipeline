@@ -69,7 +69,16 @@ func (f *Filter) SendInputFrame(
 }
 
 func (f *Filter) String() string {
-	return fmt.Sprintf("Filter(%s, %s)", f.PacketFilter, f.FrameFilter)
+	switch {
+	case f.PacketFilter != nil && f.FrameFilter != nil:
+		return fmt.Sprintf("Filter(pkt:%s, frame:%s)", f.PacketFilter, f.FrameFilter)
+	case f.PacketFilter != nil:
+		return fmt.Sprintf("Filter(pkt:%s)", f.PacketFilter)
+	case f.FrameFilter != nil:
+		return fmt.Sprintf("Filter(frame:%s)", f.PacketFilter)
+	default:
+		return fmt.Sprintf("Filter()")
+	}
 }
 
 func (f *Filter) Close(ctx context.Context) error {

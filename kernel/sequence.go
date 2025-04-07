@@ -174,7 +174,7 @@ func (s *Sequence[Abstract]) String() string {
 	for _, node := range s.Kernels {
 		result = append(result, node.String())
 	}
-	return fmt.Sprintf("Switch(\n\t%s,\n)", strings.Join(result, ",\n\t"))
+	return fmt.Sprintf("Sequence(\n\t%s,\n)", strings.Join(result, ",\n\t"))
 }
 
 func (s *Sequence[Abstract]) Close(ctx context.Context) error {
