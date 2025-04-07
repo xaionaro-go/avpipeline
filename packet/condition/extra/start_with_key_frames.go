@@ -17,7 +17,7 @@ type StartWithKeyFrames struct {
 	Locker           xsync.Mutex
 }
 
-func NewStartWithKeyFrame() *StartWithKeyFrames {
+func NewStartWithKeyFrames() *StartWithKeyFrames {
 	return &StartWithKeyFrames{
 		WaitingKeyFrames: make(map[int]bool),
 	}
