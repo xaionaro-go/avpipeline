@@ -4,16 +4,44 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type InputPacketOrFrames []types.InputPacketOrFrame
+type AbstractPacketOrFrames []types.AbstractPacketOrFrame
 
-func (s InputPacketOrFrames) Len() int {
+func (s AbstractPacketOrFrames) Len() int {
 	return len(s)
 }
 
-func (s InputPacketOrFrames) Less(i, j int) bool {
+func (s AbstractPacketOrFrames) Less(i, j int) bool {
 	return s[i].GetPTS() < s[j].GetPTS()
 }
 
-func (s InputPacketOrFrames) Swap(i, j int) {
+func (s AbstractPacketOrFrames) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type PacketOrFrames[T types.PacketOrFrame, TP types.PacketOrFramePointer[T]] []T
+
+func (s PacketOrFrames[T, TP]) Len() int {
+	return len(s)
+}
+
+func (s PacketOrFrames[T, TP]) Less(i, j int) bool {
+	return (TP)(&s[i]).GetPTS() < (TP)(&s[j]).GetPTS()
+}
+
+func (s PacketOrFrames[T, TP]) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type InputPacketOrFrameUnions []types.InputPacketOrFrameUnion
+
+func (s InputPacketOrFrameUnions) Len() int {
+	return len(s)
+}
+
+func (s InputPacketOrFrameUnions) Less(i, j int) bool {
+	return s[i].GetPTS() < s[j].GetPTS()
+}
+
+func (s InputPacketOrFrameUnions) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }

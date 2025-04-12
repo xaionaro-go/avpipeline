@@ -18,22 +18,26 @@ import (
 )
 
 const (
-	encoderWriteHeader = true
+	encoderWriteHeaderOnFinishedGettingStreams = false
+	encoderWriteHeaderOnNotifyPacketSources    = false
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
 	*closeChan
 	EncoderFactory EF
 	Locker         xsync.Mutex
+	PTSDurDiff     *time.Duration
 
 	encoders                  map[int]*streamEncoder
 	outputStreams             map[int]*astiav.Stream
 	StreamConfigurer          StreamConfigurer
 	outputFormatContextLocker xsync.RWMutex
 	outputFormatContext       *astiav.FormatContext
+	headerIsWritten           bool
 }
 
 var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
+var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
 type streamEncoder struct {
 	codec.Encoder
@@ -174,8 +178,8 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (_err error) {
-	logger.Debugf(ctx, "initEncoderAndOutputFor()")
-	defer func() { logger.Debugf(ctx, "/initEncoderAndOutputFor(): %v", _err) }()
+	logger.Debugf(ctx, "initEncoderAndOutputFor(%d)", streamIndex)
+	defer func() { logger.Debugf(ctx, "/initEncoderAndOutputFor(%d): %v", streamIndex, _err) }()
 	if _, ok := e.encoders[streamIndex]; ok {
 		logger.Errorf(ctx, "stream #%d already exists, not initializing", streamIndex)
 		return nil
@@ -314,15 +318,25 @@ func (e *Encoder[EF]) sendInputFrame(
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
 		encoder = e.encoders[input.GetStreamIndex()]
-		if encoderWriteHeader && len(e.encoders) == input.StreamsCount {
+		if encoderWriteHeaderOnFinishedGettingStreams && len(e.encoders) == input.StreamsCount {
 			logger.Debugf(ctx, "writing the header")
 			err := e.outputFormatContext.WriteHeader(nil)
 			if err != nil {
 				return fmt.Errorf("unable to write header: %w", err)
 			}
+			e.headerIsWritten = true
 		}
 	}
 	assert(ctx, encoder != nil)
+
+	if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
+		logger.Debugf(ctx, "writing the header")
+		err := e.outputFormatContext.WriteHeader(nil)
+		if err != nil {
+			return fmt.Errorf("unable to write header: %w", err)
+		}
+		e.headerIsWritten = true
+	}
 
 	if encoder.Encoder == (codec.EncoderCopy{}) {
 		return fmt.Errorf("one should not call SendInputFrame for the 'copy' encoder")
@@ -363,15 +377,13 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 		logger.Tracef(ctx, "encoder.ReceivePacket(): got a %s packet, resulting size: %d (pts: %d)", outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
 
-		// should this be happening here? --
-		//pkt.SetPts(input.Pts())
-		//pkt.SetDts(input.PktDts())
+		pkt.SetStreamIndex(outputStream.Index())
+		pkt.RescaleTs(input.GetTimeBase(), outputStream.TimeBase())
+		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
-			logger.Errorf(ctx, "dts (%d) > pts (%d); as a correction setting the DTS value to be the no-PTS magic value", pkt.Dts(), pkt.Pts())
+			logger.Errorf(ctx, "DTS (%d) > PTS (%d); as a correction setting the DTS value to be the no-PTS magic value", pkt.Dts(), pkt.Pts())
 			pkt.SetDts(consts.NoPTSValue)
 		}
-		pkt.RescaleTs(input.GetTimeBase(), outputStream.TimeBase())
-		pkt.SetStreamIndex(outputStream.Index())
 
 		e.send(ctx, pkt, outputStream, outputPacketsCh)
 	}
@@ -388,9 +400,59 @@ func (e *Encoder[EF]) send(
 	outPktWrapped := packet.BuildOutput(
 		outPkt,
 		outputStream,
-		e.outputFormatContext,
+		e,
 	)
 
 	logger.Tracef(ctx, "sending out %s", outPktWrapped.CodecParameters().MediaType())
 	out <- outPktWrapped
+}
+
+func (e *Encoder[EF]) WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	e.Locker.Do(ctx, func() {
+		callback(e.outputFormatContext)
+	})
+}
+
+func (e *Encoder[EF]) NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) error {
+	var errs []error
+	source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		e.Locker.Do(ctx, func() {
+			changed := false
+			for _, inputStream := range fmtCtx.Streams() {
+				if e.encoders[inputStream.Index()] != nil {
+					continue
+				}
+				changed = true
+				err := e.initEncoderAndOutputFor(
+					ctx,
+					inputStream.Index(),
+					inputStream.CodecParameters(),
+					inputStream.TimeBase(),
+				)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", inputStream.Index(), source, err))
+				}
+			}
+
+			if encoderWriteHeaderOnNotifyPacketSources && changed {
+				logger.Debugf(ctx, "writing the header")
+				err := e.outputFormatContext.WriteHeader(nil)
+				if err == nil {
+					e.headerIsWritten = true
+				} else {
+					errs = append(errs, fmt.Errorf("unable to write header: %w", err))
+				}
+			}
+		})
+	})
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }

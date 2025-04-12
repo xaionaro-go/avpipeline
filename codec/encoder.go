@@ -36,9 +36,10 @@ type Encoder interface {
 type EncoderFullBackend = Codec
 type EncoderFull struct {
 	*EncoderFullBackend
-	Params EncoderParams
-	InitTS time.Time
-	Next   typing.Optional[SwitchEncoderParams]
+	Params  EncoderParams
+	Quality Quality
+	InitTS  time.Time
+	Next    typing.Optional[SwitchEncoderParams]
 }
 
 type SwitchEncoderParams struct {
@@ -251,6 +252,11 @@ func (e *EncoderFull) setQualityGeneric(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {
+	if q == e.Quality {
+		logger.Debugf(ctx, "the quality is already %v", q)
+		return nil
+	}
+	e.Params.CodecParameters.SetBitRate(0)
 	newEncoder, err := newEncoder(ctx, e.Params, q)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder for quality %#+v: %w", q, err)
@@ -259,5 +265,6 @@ func (e *EncoderFull) setQualityGeneric(
 		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
 	}
 	*e = *newEncoder
+	e.Quality = q
 	return nil
 }

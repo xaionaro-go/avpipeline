@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -14,8 +15,12 @@ type Frame struct {
 	RAMFrame *astiav.Frame
 }
 
-func (f *Frame) MaxPosition() time.Duration {
-	return toDuration(f.InputPacket.FormatContext.Duration(), 1/float64(astiav.TimeBase))
+func (f *Frame) MaxPosition(ctx context.Context) time.Duration {
+	var dur int64
+	f.InputPacket.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		dur = fmtCtx.Duration()
+	})
+	return toDuration(dur, 1/float64(astiav.TimeBase))
 }
 
 func (f *Frame) Position() time.Duration {

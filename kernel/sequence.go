@@ -4,15 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
 
+// Note: Sequence is a very hacky thing, try to never use it. Pipelining
+// should be handled by pipeline, not by a Kernel.
 type Sequence[T Abstract] struct {
 	*closeChan
 	Locker  xsync.Mutex
@@ -20,6 +24,7 @@ type Sequence[T Abstract] struct {
 }
 
 var _ Abstract = (*Sequence[Abstract])(nil)
+var _ packet.Source = (*Sequence[Abstract])(nil)
 
 func NewSequence[T Abstract](kernels ...T) *Sequence[T] {
 	return &Sequence[T]{
@@ -246,4 +251,53 @@ func (s *Sequence[T]) Generate(
 	}
 
 	return errors.Join(errs...)
+}
+
+func (sw *Sequence[T]) WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	for _, k := range slices.Backward(sw.Kernels) {
+		source, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+
+		hasFormatContext := false
+		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			callback(fmtCtx)
+			hasFormatContext = true
+		})
+		if hasFormatContext {
+			return
+		}
+	}
+}
+
+func (sw *Sequence[T]) NotifyAboutPacketSource(
+	ctx context.Context,
+	prevSource packet.Source,
+) error {
+	var errs []error
+	for idx, k := range sw.Kernels {
+		source, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		err := source.NotifyAboutPacketSource(ctx, prevSource)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("got an error from #%d:%s: %w", idx, k, err))
+		}
+		hasFormatContext := false
+		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			hasFormatContext = true
+		})
+		if hasFormatContext {
+			prevSource = source
+		}
+	}
+	if len(errs) != 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }

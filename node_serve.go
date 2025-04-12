@@ -116,7 +116,7 @@ func (n *Node[T]) Serve(
 					return packet.BuildInput(
 						packet.CloneAsReferenced(pkt.Packet),
 						pkt.Stream,
-						pkt.FormatContext,
+						pkt.Source,
 					)
 				},
 				func(n AbstractNode) packetcondition.Condition { return n.GetInputPacketCondition() },
@@ -153,25 +153,13 @@ func (n *Node[T]) Serve(
 	}
 }
 
-type outputObject interface {
-	frame.Output | packet.Output
-}
-
-type outputObjectPtr[T outputObject] interface {
-	*T
-
-	GetSize() int
-	GetStreamIndex() int
-	GetMediaType() astiav.MediaType
-}
-
-type inputObject interface {
-	frame.Input | packet.Input
-}
-
-func pushFurther[T processor.Abstract, O outputObject, I inputObject, C types.Condition[I], OP outputObjectPtr[O]](
+func pushFurther[
+	P processor.Abstract,
+	I types.InputPacketOrFrame, C types.Condition[I],
+	O types.OutputPacketOrFrame, OP types.PacketOrFramePointer[O],
+](
 	ctx context.Context,
-	n *Node[T],
+	n *Node[P],
 	outputObj O,
 	pushTos []PushTo[I, C],
 	serveConfig ServeConfig,

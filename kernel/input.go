@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
+	"github.com/xaionaro-go/unsafetools"
 )
 
 type InputConfig struct {
@@ -30,6 +33,7 @@ type Input struct {
 }
 
 var _ Abstract = (*Input)(nil)
+var _ packet.Source = (*Input)(nil)
 
 var nextInputID atomic.Uint64
 
@@ -85,6 +89,10 @@ func NewInputFromURL(
 		return nil, fmt.Errorf("unable to get stream info: %w", err)
 	}
 
+	for _, stream := range i.FormatContext.Streams() {
+		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
+	}
+
 	return i, nil
 }
 
@@ -136,16 +144,16 @@ func (i *Input) Generate(
 		case nil:
 			logger.Tracef(
 				ctx,
-				"received a packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d), data: 0x %X",
+				"received a packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d), dataLen:%d, data: 0x %X",
 				pkt.StreamIndex(),
 				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
-				pkt.Data(),
+				len(pkt.Data()), pkt.Data(),
 			)
 
 			outputPacketsCh <- packet.BuildOutput(
 				pkt,
 				avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
-				i.FormatContext,
+				i,
 			)
 		case io.EOF:
 			pkt.Free()
@@ -155,6 +163,22 @@ func (i *Input) Generate(
 			return fmt.Errorf("unable to read a packet: %w", err)
 		}
 	}
+}
+
+func (i *Input) WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	logger.Tracef(ctx, "WithFormatContext")
+	defer func() { logger.Tracef(ctx, "/WithFormatContext") }()
+	callback(i.FormatContext)
+}
+
+func (i *Input) NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) error {
+	return fmt.Errorf("an Input is supposed to be the first node in any pipeline, but somehow I was notified that %s is going to send me packets", source)
 }
 
 func (i *Input) SendInputPacket(

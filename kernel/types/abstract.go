@@ -14,10 +14,6 @@ type Abstract interface {
 	Generator
 }
 
-type CloseChaner interface {
-	CloseChan() <-chan struct{}
-}
-
 /*
 
 == for easier copy&paste ==
@@ -41,7 +37,7 @@ func () SendInputFrame(
 func () String() string {
 }
 
-func () Close(context.Context) error {
+func () Close(ctx context.Context) error {
 }
 
 func () CloseChan() <-chan struct{} {

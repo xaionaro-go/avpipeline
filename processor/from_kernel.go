@@ -161,3 +161,11 @@ func (p *FromKernel[T]) outChanError() chan<- error {
 func (p *FromKernel[T]) String() string {
 	return p.Kernel.String()
 }
+
+func (p *FromKernel[T]) GetPacketSource() packet.Source {
+	source, ok := any(p.Kernel).(packet.Source)
+	if !ok {
+		return nil
+	}
+	return source
+}

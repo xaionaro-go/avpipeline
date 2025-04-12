@@ -119,8 +119,20 @@ func (n *Node[T]) String() string {
 		return "<nil>"
 	}
 
+	isSet := map[AbstractNode]struct{}{}
 	var pushToStrs []string
 	for _, pushTo := range n.PushPacketsTo {
+		if _, ok := isSet[pushTo.Node]; ok {
+			continue
+		}
+		isSet[pushTo.Node] = struct{}{}
+		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
+	}
+	for _, pushTo := range n.PushFramesTo {
+		if _, ok := isSet[pushTo.Node]; ok {
+			continue
+		}
+		isSet[pushTo.Node] = struct{}{}
 		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 	}
 

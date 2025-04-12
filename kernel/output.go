@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/stream"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -25,8 +26,11 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-const unwrapTLSViaProxy = false
-const pendingPacketsLimit = 10000
+const (
+	unwrapTLSViaProxy      = false
+	pendingPacketsLimit    = 10000
+	outputWaitForKeyFrames = true
+)
 
 type OutputConfig struct {
 	CustomOptions types.DictionaryItems
@@ -38,10 +42,12 @@ type OutputStream struct {
 }
 
 type Output struct {
-	ID        OutputID
-	URL       string
-	StreamKey secret.String
-	Streams   map[int]*OutputStream
+	ID            OutputID
+	URL           string
+	StreamKey     secret.String
+	InputStreams  map[int]*astiav.Stream
+	OutputStreams map[int]*OutputStream
+	Filter        condition.Condition
 
 	ioContext *astiav.IOContext
 	proxy     *proxy.TCPProxy
@@ -58,6 +64,7 @@ type Output struct {
 }
 
 var _ Abstract = (*Output)(nil)
+var _ packet.Source = (*Output)(nil)
 
 func formatFromScheme(scheme string) string {
 	switch scheme {
@@ -97,11 +104,12 @@ func NewOutputFromURL(
 	}
 
 	o := &Output{
-		ID:        OutputID(nextOutputID.Add(1)),
-		URL:       url.String(),
-		StreamKey: streamKey,
-		Streams:   make(map[int]*OutputStream),
-		closeChan: newCloseChan(),
+		ID:            OutputID(nextOutputID.Add(1)),
+		URL:           url.String(),
+		StreamKey:     streamKey,
+		InputStreams:  make(map[int]*astiav.Stream),
+		OutputStreams: make(map[int]*OutputStream),
+		closeChan:     newCloseChan(),
 
 		waitingKeyFrames: make(map[int]struct{}),
 	}
@@ -239,7 +247,7 @@ func (o *Output) updateOutputFormat(
 	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
 	for _, inputStream := range inputFmt.Streams() {
 		inputStreamIndex := inputStream.Index()
-		if _, ok := o.Streams[inputStreamIndex]; ok {
+		if _, ok := o.OutputStreams[inputStreamIndex]; ok {
 			logger.Tracef(ctx, "stream #%d already exists, not initializing", inputStreamIndex)
 			continue
 		}
@@ -264,21 +272,31 @@ func (o *Output) initOutputStreamFor(
 	logger.Tracef(ctx, "initOutputStreamFor(ctx, stream[%d])", inputStream.Index())
 	defer func() { logger.Tracef(ctx, "/initOutputStreamFor(ctx, stream[%d]) %v", inputStream.Index(), _err) }()
 
-	var outputStream *OutputStream
-	o.formatContextLocker.Do(ctx, func() {
-		outputStream = &OutputStream{
-			Stream:  o.FormatContext.NewStream(nil),
-			LastDTS: math.MinInt64,
-		}
-	})
-
-	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
-		return nil, fmt.Errorf("unable to copy stream parameters: %w", err)
+	outputStream := &OutputStream{
+		Stream:  o.FormatContext.NewStream(nil),
+		LastDTS: math.MinInt64,
 	}
 
-	logger.Tracef(
+	if err := o.configureOutputStream(ctx, outputStream, inputStream); err != nil {
+		return nil, err
+	}
+
+	return outputStream, nil
+}
+
+func (o *Output) configureOutputStream(
+	ctx context.Context,
+	outputStream *OutputStream,
+	inputStream *astiav.Stream,
+) error {
+	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
+		return fmt.Errorf("unable to copy stream parameters: %w", err)
+	}
+
+	logger.Debugf(
 		ctx,
-		"new output stream: %s: %s: %s: %s: %s",
+		"new output stream: %d: %s: %s: %s: %s: %s",
+		outputStream.Index(),
 		outputStream.CodecParameters().MediaType(),
 		outputStream.CodecParameters().CodecID(),
 		outputStream.TimeBase(),
@@ -286,25 +304,34 @@ func (o *Output) initOutputStreamFor(
 		spew.Sdump(outputStream.CodecParameters()),
 	)
 
-	o.Streams[inputStream.Index()] = outputStream
-	return outputStream, nil
+	o.InputStreams[inputStream.Index()] = inputStream
+	o.OutputStreams[inputStream.Index()] = outputStream
+	return nil
 }
 
-func (o *Output) GetOutputStream(
+func (o *Output) getOutputStream(
 	ctx context.Context,
-	inputPkt packet.Input,
+	inputStream *astiav.Stream,
+	fmtCtx *astiav.FormatContext,
 ) (*OutputStream, error) {
-	streamIndex := inputPkt.StreamIndex()
-	outputStream := o.Streams[streamIndex]
+	outputStream := o.OutputStreams[inputStream.Index()]
 	if outputStream != nil {
+		origInputStream := o.InputStreams[inputStream.Index()]
+		if inputStream == origInputStream {
+			return outputStream, nil
+		}
+		logger.Debugf(ctx, "input stream changed: %p -> %p", origInputStream, inputStream)
+		o.configureOutputStream(ctx, outputStream, inputStream)
+		o.InputStreams[inputStream.Index()] = inputStream
 		return outputStream, nil
 	}
 
-	logger.Debugf(ctx, "new output stream (#%d)", streamIndex)
-	if err := o.updateOutputFormat(ctx, inputPkt.FormatContext); err != nil {
+	logger.Debugf(ctx, "new output stream (#%d)", inputStream.Index())
+	err := o.updateOutputFormat(ctx, fmtCtx)
+	if err != nil {
 		return nil, fmt.Errorf("unable to update the output format: %w", err)
 	}
-	outputStream = o.Streams[streamIndex]
+	outputStream = o.OutputStreams[inputStream.Index()]
 	assert(ctx, outputStream != nil)
 	return outputStream, nil
 }
@@ -326,13 +353,20 @@ func (o *Output) SendInputPacket(
 		return fmt.Errorf("packet == nil")
 	}
 
-	outputStream, err := o.GetOutputStream(ctx, inputPkt)
+	var (
+		outputStream *OutputStream
+		err          error
+	)
+	o.formatContextLocker.Do(ctx, func() {
+		inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			outputStream, err = o.getOutputStream(ctx, inputPkt.GetStream(), fmtCtx)
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-		logger.Tracef(
-			ctx,
+		logger.Tracef(ctx,
 			"unmodified packet with pos:%v (pts:%v, dts:%v, dur: %v) for %s stream %d (->%d) with flags 0x%016X",
 			pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
 			outputStream.CodecParameters().MediaType(),
@@ -347,13 +381,20 @@ func (o *Output) SendInputPacket(
 
 	pkt.SetStreamIndex(outputStream.Index())
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
-	if pkt.Dts() != consts.NoPTSValue && pkt.Dts() <= outputStream.LastDTS {
-		logger.Errorf(ctx, "received a DTS from the past, ignoring the packet: %d < %d", pkt.Dts(), outputStream.LastDTS)
+	//pkt.SetPos(-1) // <- TODO: should this happen? why?
+	isNoDTS := pkt.Dts() == consts.NoPTSValue
+	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
+		// TODO: do not skip B-frames
+		logger.Errorf(ctx,
+			"received a DTS from the past or has invalid value (%v), ignoring the packet: %d < %d",
+			outputStream.CodecParameters().MediaType(),
+			pkt.Dts(),
+			outputStream.LastDTS,
+		)
 		return nil
 	}
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-		logger.Tracef(
-			ctx,
+		logger.Tracef(ctx,
 			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
 			pkt.Pos(), pkt.Pts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS,
 			outputStream.CodecParameters().MediaType(),
@@ -363,8 +404,13 @@ func (o *Output) SendInputPacket(
 		)
 	}
 
+	var inputStreamsCount int
+	inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		inputStreamsCount = fmtCtx.NbStreams()
+	})
+
 	logger.Tracef(ctx, "sending the current packet")
-	if err := o.send(ctx, inputPkt.NbStreams(), pkt, outputStream); err != nil {
+	if err := o.send(ctx, inputStreamsCount, pkt, outputStream); err != nil {
 		return err
 	}
 	return nil
@@ -394,7 +440,7 @@ func (o *Output) send(
 	}
 
 	activeStreamCount := o.FormatContext.NbStreams()
-	if activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0 {
+	if outputWaitForKeyFrames && (activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0) {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
@@ -448,28 +494,61 @@ func (o *Output) send(
 
 func (o *Output) doWritePacket(
 	ctx context.Context,
-	packet *astiav.Packet,
+	pkt *astiav.Packet,
 	outputStream *OutputStream,
 ) (_err error) {
 	var err error
-	pts, dts := packet.Pts(), packet.Dts()
-	o.formatContextLocker.Do(ctx, func() {
-		err = o.FormatContext.WriteInterleavedFrame(packet)
-	})
+	pos, pts, dts := pkt.Pos(), pkt.Pts(), pkt.Dts()
+	if o.Filter == nil || o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, o)) {
+		o.formatContextLocker.Do(ctx, func() {
+			err = o.FormatContext.WriteInterleavedFrame(pkt)
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("unable to write the frame: %w", err)
 	}
 	outputStream.LastDTS = dts
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-		logger.Tracef(
-			ctx,
-			"wrote a packet (pts: %d; dts: %d): %s: %s: %v",
-			pts,
-			dts,
+		logger.Tracef(ctx,
+			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s: %v",
+			pos, pts, dts,
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
 			err,
 		)
 	}
 	return nil
+}
+
+func (o *Output) WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	o.formatContextLocker.Do(ctx, func() {
+		callback(o.FormatContext)
+	})
+}
+
+func (o *Output) NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) (_ret error) {
+	logger.Debugf(ctx, "NotifyAboutPacketSource(ctx, %T)", source)
+	defer func() { logger.Debugf(ctx, "/NotifyAboutPacketSource(ctx, %T): %v", source, _ret) }()
+	var errs []error
+	source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		o.formatContextLocker.Do(ctx, func() {
+			for _, stream := range fmtCtx.Streams() {
+				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())
+				_, err := o.getOutputStream(ctx, stream, fmtCtx)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
+				}
+			}
+		})
+	})
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }

@@ -20,6 +20,8 @@ const (
 )
 
 // See also https://github.com/namndev/FFmpegTutorial/blob/master/learn-ffmpeg-libav-the-hard-way.md
+// Note: Recoder is a somewhat hacky thing, try to not use it. Pipelining
+// should be handled by pipeline, not by a Kernel. Use separately Decoder and Encoder, instead.
 type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
@@ -33,6 +35,7 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 }
 
 var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ packet.Source = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
 func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
@@ -109,8 +112,9 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	err := r.process(ctx, input, resultCh)
 	close(resultCh)
 
-	if int(r.activeStreamsCount) >= input.FormatContext.NbStreams() {
-		logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), input.FormatContext.NbStreams())
+	inputStreamsCount := sourceNbStreams(ctx, input.Source)
+	if int(r.activeStreamsCount) >= inputStreamsCount {
+		logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), inputStreamsCount)
 		for _, pkt := range r.pendingPackets {
 			outputPacketCh <- pkt
 		}

@@ -18,7 +18,7 @@ type VideoAverageBitrateLower struct {
 	videoAveragerBufferConsumed int64
 	prevEncodeTS                time.Time
 	isClosed                    bool
-	lastSeenFormat              *astiav.FormatContext
+	lastSeenFormatAccessor      packet.Source
 }
 
 var _ Condition = (*VideoAverageBitrateLower)(nil)
@@ -46,7 +46,7 @@ func (f *VideoAverageBitrateLower) Match(
 	if f.AverageBitRate == 0 {
 		return true
 	}
-	f.lastSeenFormat = input.FormatContext
+	f.lastSeenFormatAccessor = input.Source
 
 	mediaType := input.Stream.CodecParameters().MediaType()
 	switch mediaType {

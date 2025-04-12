@@ -128,9 +128,9 @@ func TestRecoderNoFailure(t *testing.T) {
 
 			observability.Go(ctx, func() {
 				defer cancelFn()
-				avpipeline.ServeRecursively(ctx, inputNode, avpipeline.ServeConfig{
+				avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
 					FrameDrop: false,
-				}, errCh)
+				}, errCh, inputNode)
 			})
 
 			for {

@@ -20,7 +20,7 @@ func (Passthrough) SendInputPacket(
 	outputPacketsCh <- packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
 		input.Stream,
-		input.FormatContext,
+		input.Source,
 	)
 	return nil
 }

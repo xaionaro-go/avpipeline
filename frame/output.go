@@ -57,6 +57,10 @@ func (f *Output) GetDTSAsDuration() time.Duration {
 	return (*Commons)(f).GetDTSAsDuration()
 }
 
+func (f *Output) GetPTS() int64 {
+	return (*Commons)(f).GetPTS()
+}
+
 func (f *Output) GetPTSAsDuration() time.Duration {
 	return (*Commons)(f).GetPTSAsDuration()
 }

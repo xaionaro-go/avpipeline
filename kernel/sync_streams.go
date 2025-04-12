@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/go-ng/container/heap"
 	"github.com/go-ng/xsort"
@@ -30,14 +29,14 @@ import (
 type SyncStreams struct {
 	*closeChan
 	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
-	ItemQueue        sort.InputPacketOrFrames
+	ItemQueue        sort.InputPacketOrFrameUnions
 	StreamsPTSs      map[int]*xsort.OrderedAsc[int64]
 	MaxPTSDifference uint64
 	StartCondition   condition.Condition[*SyncStreams]
 	Started          bool
 
 	emptyQueuesCount         int
-	ConditionArgumentNewItem *types.InputPacketOrFrame
+	ConditionArgumentNewItem *types.InputPacketOrFrameUnion
 }
 
 var _ Abstract = (*SyncStreams)(nil)
@@ -50,7 +49,7 @@ func NewSyncStreams(
 ) *SyncStreams {
 	return &SyncStreams{
 		closeChan:        newCloseChan(),
-		ItemQueue:        make([]types.InputPacketOrFrame, 0, maxBufferSize),
+		ItemQueue:        make(sort.InputPacketOrFrameUnions, 0, maxBufferSize),
 		StreamsPTSs:      make(map[int]*xsort.OrderedAsc[int64]),
 		MaxPTSDifference: maxPtsDifference,
 		StartCondition:   startCondition,
@@ -67,10 +66,10 @@ func (s *SyncStreams) SendInputPacket(
 	return xsync.DoA4R1(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
-		types.InputPacketOrFrame{Packet: &packet.Input{
-			Packet:        packet.CloneAsReferenced(input.Packet),
-			Stream:        input.Stream,
-			FormatContext: input.FormatContext,
+		types.InputPacketOrFrameUnion{Packet: &packet.Input{
+			Packet: packet.CloneAsReferenced(input.Packet),
+			Stream: input.Stream,
+			Source: input.Source,
 		}},
 		outputPacketsCh, outputFramesCh,
 	)
@@ -85,9 +84,9 @@ func (s *SyncStreams) SendInputFrame(
 	return xsync.DoA4R1(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
-		types.InputPacketOrFrame{Frame: ptr(frame.BuildInput(
+		types.InputPacketOrFrameUnion{Frame: ptr(frame.BuildInput(
 			frame.CloneAsReferenced(input.Frame),
-			&astiav.CodecContext{},
+			input.CodecContext,
 			input.StreamIndex, input.StreamsCount,
 			input.StreamDuration,
 			input.TimeBase,
@@ -108,7 +107,7 @@ func (s *SyncStreams) CurrentPTS() typing.Optional[int64] {
 
 func (s *SyncStreams) pushToQueue(
 	ctx context.Context,
-	item types.InputPacketOrFrame,
+	item types.InputPacketOrFrameUnion,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
@@ -241,7 +240,7 @@ func (s *SyncStreams) pullAndSendPendingItems(
 
 func (s *SyncStreams) doSendItem(
 	ctx context.Context,
-	item types.InputPacketOrFrame,
+	item types.InputPacketOrFrameUnion,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {

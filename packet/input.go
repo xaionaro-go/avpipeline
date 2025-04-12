@@ -9,12 +9,12 @@ type Input = Commons
 func BuildInput(
 	pkt *astiav.Packet,
 	s *astiav.Stream,
-	fmt *astiav.FormatContext,
+	fmt Source,
 ) Input {
 	pkt.Pos()
 	return Input{
-		Packet:        pkt,
-		Stream:        s,
-		FormatContext: fmt,
+		Packet: pkt,
+		Stream: s,
+		Source: fmt,
 	}
 }

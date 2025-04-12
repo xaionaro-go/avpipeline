@@ -7,19 +7,20 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type Not struct {
-	Condition Condition
-}
+type Not []Condition
 
 var _ Condition = (*Not)(nil)
 
 func (n Not) String() string {
-	return fmt.Sprintf("Not(%s)", n.Condition)
+	if len(n) == 1 {
+		return fmt.Sprintf("Not(%s)", n[0])
+	}
+	return fmt.Sprintf("Not(%s)", And(n))
 }
 
 func (n Not) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
-	return !n.Condition.Match(ctx, pkt)
+	return !And(n).Match(ctx, pkt)
 }

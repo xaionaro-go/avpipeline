@@ -44,6 +44,11 @@ func (f *Commons) GetDurationAsDuration() time.Duration {
 
 func (f *Commons) GetDTSAsDuration() time.Duration {
 	return avconv.Duration(f.PktDts(), f.CodecContext.TimeBase())
+
+}
+
+func (f *Commons) GetPTS() int64 {
+	return f.Frame.Pts()
 }
 
 func (f *Commons) GetPTSAsDuration() time.Duration {

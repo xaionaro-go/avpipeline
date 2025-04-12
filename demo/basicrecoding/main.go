@@ -101,9 +101,9 @@ func main() {
 	errCh := make(chan avpipeline.ErrNode, 10)
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, inputNode, avpipeline.ServeConfig{
+		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
 			FrameDrop: *frameDrop,
-		}, errCh)
+		}, errCh, inputNode)
 	})
 
 	// observe

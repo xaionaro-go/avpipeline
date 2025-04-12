@@ -162,9 +162,9 @@ func main() {
 
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, inputNode, avpipeline.ServeConfig{
+		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
 			FrameDrop: *frameDrop,
-		}, errCh)
+		}, errCh, inputNode)
 	})
 
 	statusTicker := time.NewTicker(time.Second)

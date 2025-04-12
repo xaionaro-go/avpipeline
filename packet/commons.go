@@ -1,16 +1,26 @@
 package packet
 
 import (
+	"context"
 	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
 )
 
+type Source interface {
+	WithFormatContext(context.Context, func(*astiav.FormatContext))
+	NotifyAboutPacketSource(context.Context, Source) error
+}
+
 type Commons struct {
 	*astiav.Packet
 	*astiav.Stream
-	*astiav.FormatContext
+	Source
+}
+
+func (pkt *Commons) GetSize() int {
+	return pkt.Size()
 }
 
 func (pkt *Commons) GetMediaType() astiav.MediaType {
@@ -18,7 +28,7 @@ func (pkt *Commons) GetMediaType() astiav.MediaType {
 }
 
 func (pkt *Commons) GetStreamIndex() int {
-	return pkt.Packet.StreamIndex()
+	return pkt.Stream.Index()
 }
 
 func (pkt *Commons) GetStream() *astiav.Stream {
@@ -27,4 +37,8 @@ func (pkt *Commons) GetStream() *astiav.Stream {
 
 func (pkt *Commons) PtsAsDuration() time.Duration {
 	return avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
+}
+
+func (pkt *Commons) GetPTS() int64 {
+	return pkt.Pts()
 }

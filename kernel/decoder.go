@@ -123,7 +123,7 @@ func (d *Decoder[DF]) SendInputPacket(
 			outputFramesCh <- frame.BuildOutput(
 				f,
 				decoder.CodecContext(),
-				input.StreamIndex(), input.FormatContext.NbStreams(),
+				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
 				input.Stream.Duration(),
 				timeBase,
 				input.Packet.Pos(), input.Packet.Duration(),

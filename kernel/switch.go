@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -17,6 +18,9 @@ import (
 	"github.com/xaionaro-go/observability"
 )
 
+// Note: Switch is a very hacky thing, try to never use it. Pipelining
+// should be handled by pipeline, not by a Kernel. You may use
+// condition.Switch if you need similar functionality.
 type Switch[T Abstract] struct {
 	*closeChan
 
@@ -30,6 +34,7 @@ type Switch[T Abstract] struct {
 }
 
 var _ Abstract = (*Switch[Abstract])(nil)
+var _ packet.Source = (*Switch[Abstract])(nil)
 
 func NewSwitch[T Abstract](
 	kernels ...T,
@@ -294,4 +299,45 @@ func (sw *Switch[T]) Close(
 		}
 	}
 	return errors.Join(result...)
+}
+
+func (sw *Switch[T]) WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	hasFormatContextCount := 0
+	for _, k := range sw.Kernels {
+		source, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			callback(fmtCtx)
+			hasFormatContextCount++
+		})
+	}
+	if hasFormatContextCount != 0 && hasFormatContextCount != len(sw.Kernels) {
+		logger.Errorf(ctx, "a Switch should container either all kernels that are packet.Source-s or all kernels that are not packet.Source-s, but not a mix")
+	}
+}
+
+func (sw *Switch[T]) NotifyAboutPacketSource(
+	ctx context.Context,
+	prevSource packet.Source,
+) error {
+	var errs []error
+	for idx, k := range sw.Kernels {
+		source, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		err := source.NotifyAboutPacketSource(ctx, prevSource)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("got an error from #%d:%s: %w", idx, k, err))
+		}
+	}
+	if len(errs) != 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }

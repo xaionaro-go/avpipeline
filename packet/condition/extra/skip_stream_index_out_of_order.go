@@ -43,8 +43,9 @@ func (i *SkipStreamIndexOutOfOrder) Match(
 
 func (i *SkipStreamIndexOutOfOrder) String() string {
 	ctx := xsync.WithNoLogging(context.TODO(), true)
-	idx := xsync.DoR1(ctx, &i.Locker, func() int {
-		return i.ExpectingStreamIndexGE
-	})
-	return fmt.Sprintf("SkipStreamIndexOutOfOrder(accepting <= %d)", idx)
+	if !i.Locker.ManualTryRLock(ctx) {
+		return fmt.Sprintf("SkipStreamIndexOutOfOrder")
+	}
+	defer i.Locker.ManualRUnlock(ctx)
+	return fmt.Sprintf("SkipStreamIndexOutOfOrder(accepting <= %d)", i.ExpectingStreamIndexGE)
 }

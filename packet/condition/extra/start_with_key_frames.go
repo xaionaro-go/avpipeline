@@ -38,9 +38,11 @@ func (c *StartWithKeyFrames) match(
 		return true
 	}
 
-	if pkt.NbStreams() != len(c.WaitingKeyFrames) {
-		c.acknowledgeNewStreams(pkt.FormatContext)
-	}
+	pkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		if fmtCtx.NbStreams() != len(c.WaitingKeyFrames) {
+			c.acknowledgeNewStreams(fmtCtx)
+		}
+	})
 
 	streamIndex := pkt.GetStreamIndex()
 	waitingKeyFrame, ok := c.WaitingKeyFrames[streamIndex]
@@ -63,10 +65,11 @@ func (c *StartWithKeyFrames) match(
 
 func (c *StartWithKeyFrames) String() string {
 	ctx := context.TODO()
-	var b []byte
-	c.Locker.Do(ctx, func() {
-		b, _ = json.Marshal(c.WaitingKeyFrames)
-	})
+	if !c.Locker.ManualTryRLock(ctx) {
+		return fmt.Sprintf("StartWithKeyFrames")
+	}
+	defer c.Locker.ManualRUnlock(ctx)
+	b, _ := json.Marshal(c.WaitingKeyFrames)
 	return fmt.Sprintf("StartWithKeyFrames(%s)", b)
 }
 
