@@ -52,6 +52,43 @@ func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
 	return c.codecContext.ToCodecParameters(cp)
 }
 
+func findEncoderCodec(
+	codecID astiav.CodecID,
+	codecName string,
+) *astiav.Codec {
+	if codecName != "" {
+		r := astiav.FindEncoderByName(string(codecName))
+		if r != nil {
+			return r
+		}
+	}
+	return astiav.FindEncoder(codecID)
+}
+
+func findDecoderCodec(
+	codecID astiav.CodecID,
+	codecName string,
+) *astiav.Codec {
+	if codecName != "" {
+		r := astiav.FindDecoderByName(string(codecName))
+		if r != nil {
+			return r
+		}
+	}
+	return astiav.FindDecoder(codecID)
+}
+
+func findCodec(
+	isEncoder bool,
+	codecID astiav.CodecID,
+	codecName string,
+) *astiav.Codec {
+	if isEncoder {
+		return findEncoderCodec(codecID, codecName)
+	}
+	return findDecoderCodec(codecID, codecName)
+}
+
 func newCodec(
 	ctx context.Context,
 	codecName string,
@@ -90,31 +127,14 @@ func newCodec(
 		logger.Errorf(ctx, "got an error: %v", err)
 	}
 
-	if isEncoder {
-		if codecName != "" {
-			c.codec = astiav.FindEncoderByName(string(codecName))
-			if c.codec != nil {
-				codecParameters.SetCodecID(c.codec.ID())
-			}
-		} else {
-			c.codec = astiav.FindEncoder(codecParameters.CodecID())
-		}
-	} else {
-		if codecName != "" {
-			c.codec = astiav.FindDecoderByName(string(codecName))
-			if c.codec != nil {
-				codecParameters.SetCodecID(c.codec.ID())
-			}
-		} else {
-			c.codec = astiav.FindDecoder(codecParameters.CodecID())
-		}
-	}
+	c.codec = findCodec(isEncoder, codecParameters.CodecID(), codecName)
 	if c.codec == nil {
-		if codecParameters == nil {
+		if codecParameters.CodecID() == astiav.CodecIDNone {
 			return nil, fmt.Errorf("unable to find a codec using name '%s'", codecName)
 		}
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
+	codecParameters.SetCodecID(c.codec.ID())
 
 	c.codecContext = astiav.AllocCodecContext(c.codec)
 	if c.codecContext == nil {

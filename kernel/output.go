@@ -30,6 +30,8 @@ const (
 	unwrapTLSViaProxy      = false
 	pendingPacketsLimit    = 10000
 	outputWaitForKeyFrames = true
+	outputCopyStreamIndex  = true
+	outputUpdateStreams    = false
 )
 
 type OutputConfig struct {
@@ -41,11 +43,16 @@ type OutputStream struct {
 	LastDTS int64
 }
 
+type OutputInputStream struct {
+	packet.Source
+	*astiav.Stream
+}
+
 type Output struct {
 	ID            OutputID
 	URL           string
 	StreamKey     secret.String
-	InputStreams  map[int]*astiav.Stream
+	InputStreams  map[int]OutputInputStream
 	OutputStreams map[int]*OutputStream
 	Filter        condition.Condition
 
@@ -107,7 +114,7 @@ func NewOutputFromURL(
 		ID:            OutputID(nextOutputID.Add(1)),
 		URL:           url.String(),
 		StreamKey:     streamKey,
-		InputStreams:  make(map[int]*astiav.Stream),
+		InputStreams:  make(map[int]OutputInputStream),
 		OutputStreams: make(map[int]*OutputStream),
 		closeChan:     newCloseChan(),
 
@@ -241,6 +248,7 @@ func (o *Output) Generate(
 
 func (o *Output) updateOutputFormat(
 	ctx context.Context,
+	inputSource packet.Source,
 	inputFmt *astiav.FormatContext,
 ) (_err error) {
 	logger.Debugf(ctx, "updateOutputFormat: %d streams", inputFmt.NbStreams())
@@ -252,7 +260,7 @@ func (o *Output) updateOutputFormat(
 			continue
 		}
 
-		outputStream, err := o.initOutputStreamFor(ctx, inputStream)
+		outputStream, err := o.initOutputStreamFor(ctx, inputSource, inputStream)
 		if err != nil {
 			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
 		}
@@ -267,6 +275,7 @@ func (o *Output) updateOutputFormat(
 
 func (o *Output) initOutputStreamFor(
 	ctx context.Context,
+	inputSource packet.Source,
 	inputStream *astiav.Stream,
 ) (_ *OutputStream, _err error) {
 	logger.Tracef(ctx, "initOutputStreamFor(ctx, stream[%d])", inputStream.Index())
@@ -277,7 +286,7 @@ func (o *Output) initOutputStreamFor(
 		LastDTS: math.MinInt64,
 	}
 
-	if err := o.configureOutputStream(ctx, outputStream, inputStream); err != nil {
+	if err := o.configureOutputStream(ctx, outputStream, inputSource, inputStream); err != nil {
 		return nil, err
 	}
 
@@ -287,6 +296,7 @@ func (o *Output) initOutputStreamFor(
 func (o *Output) configureOutputStream(
 	ctx context.Context,
 	outputStream *OutputStream,
+	inputSource packet.Source,
 	inputStream *astiav.Stream,
 ) error {
 	if err := stream.CopyParameters(ctx, outputStream.Stream, inputStream); err != nil {
@@ -304,30 +314,45 @@ func (o *Output) configureOutputStream(
 		spew.Sdump(outputStream.CodecParameters()),
 	)
 
-	o.InputStreams[inputStream.Index()] = inputStream
+	if outputCopyStreamIndex {
+		outputStream.SetIndex(inputStream.Index())
+	}
+	o.InputStreams[inputStream.Index()] = OutputInputStream{Source: inputSource, Stream: inputStream}
 	o.OutputStreams[inputStream.Index()] = outputStream
 	return nil
 }
 
 func (o *Output) getOutputStream(
 	ctx context.Context,
+	inputSource packet.Source,
 	inputStream *astiav.Stream,
 	fmtCtx *astiav.FormatContext,
 ) (*OutputStream, error) {
 	outputStream := o.OutputStreams[inputStream.Index()]
 	if outputStream != nil {
-		origInputStream := o.InputStreams[inputStream.Index()]
-		if inputStream == origInputStream {
-			return outputStream, nil
+		if outputUpdateStreams {
+			origInputStream := o.InputStreams[inputStream.Index()]
+			if origInputStream.Source == inputSource {
+				return outputStream, nil
+			}
+			logger.Debugf(ctx,
+				"input %s stream changed: %p -> %p",
+				inputStream.CodecParameters().MediaType(),
+				origInputStream, inputStream,
+			)
+			timeBase := outputStream.TimeBase()
+			o.configureOutputStream(ctx, outputStream, inputSource, inputStream)
+			outputStream.SetTimeBase(timeBase) // Otherwise MPEGTS does not work, sometimes
+			o.InputStreams[inputStream.Index()] = OutputInputStream{
+				Source: inputSource,
+				Stream: inputStream,
+			}
 		}
-		logger.Debugf(ctx, "input stream changed: %p -> %p", origInputStream, inputStream)
-		o.configureOutputStream(ctx, outputStream, inputStream)
-		o.InputStreams[inputStream.Index()] = inputStream
 		return outputStream, nil
 	}
 
 	logger.Debugf(ctx, "new output stream (#%d)", inputStream.Index())
-	err := o.updateOutputFormat(ctx, fmtCtx)
+	err := o.updateOutputFormat(ctx, inputSource, fmtCtx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to update the output format: %w", err)
 	}
@@ -359,9 +384,10 @@ func (o *Output) SendInputPacket(
 	)
 	o.formatContextLocker.Do(ctx, func() {
 		inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-			outputStream, err = o.getOutputStream(ctx, inputPkt.GetStream(), fmtCtx)
+			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.GetStream(), fmtCtx)
 		})
 	})
+
 	if err != nil {
 		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
@@ -540,7 +566,7 @@ func (o *Output) NotifyAboutPacketSource(
 		o.formatContextLocker.Do(ctx, func() {
 			for _, stream := range fmtCtx.Streams() {
 				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())
-				_, err := o.getOutputStream(ctx, stream, fmtCtx)
+				_, err := o.getOutputStream(ctx, source, stream, fmtCtx)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
 				}

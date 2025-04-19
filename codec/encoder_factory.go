@@ -69,6 +69,14 @@ func (f *NaiveEncoderFactory) String() string {
 	return fmt.Sprintf("NaiveEncoderFactory(%s/%s)", f.VideoCodec, f.AudioCodec)
 }
 
+func (f *NaiveEncoderFactory) VideoCodecID() astiav.CodecID {
+	return findEncoderCodec(0, f.VideoCodec).ID()
+}
+
+func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
+	return findEncoderCodec(0, f.AudioCodec).ID()
+}
+
 func (f *NaiveEncoderFactory) NewEncoder(
 	ctx context.Context,
 	params *astiav.CodecParameters,

@@ -13,6 +13,23 @@ type Source interface {
 	NotifyAboutPacketSource(context.Context, Source) error
 }
 
+/* for easier copy&paste:
+
+func () WithFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+
+}
+
+func () NotifyAboutPacketSource(
+	ctx context.Context,
+	source Source,
+) error {
+
+}
+*/
+
 type Commons struct {
 	*astiav.Packet
 	*astiav.Stream
