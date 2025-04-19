@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -218,15 +219,20 @@ func (e *EncoderFull) setQualityNow(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {
-	logger.Debugf(ctx, "setQualityNow(ctx, %#+v)", q)
-	defer func() { logger.Debugf(ctx, "/setQualityNow(ctx, %#+v): %v", q, _err) }()
 	codecName := e.codec.Name()
+	logger.Debugf(ctx, "setQualityNow(ctx, %T(%v)): %s", q, q, codecName)
+	defer func() { logger.Debugf(ctx, "/setQualityNow(ctx, %T(%v)): %s: %v", q, q, codecName, _err) }()
 	defer func() {
 		if _err != nil {
 			_err = fmt.Errorf("%s: %w", codecName, _err)
 		}
 	}()
-	switch codecName {
+	codecWords := strings.Split(codecName, "_")
+	if len(codecWords) != 2 {
+		return e.setQualityGeneric(ctx, q)
+	}
+	codecModifier := codecWords[1]
+	switch strings.ToLower(codecModifier) {
 	case "mediacodec":
 		return e.setQualityMediacodec(ctx, q)
 	default:
@@ -253,9 +259,10 @@ func (e *EncoderFull) setQualityGeneric(
 	q Quality,
 ) (_err error) {
 	if q == e.Quality {
-		logger.Debugf(ctx, "the quality is already %v", q)
+		logger.Debugf(ctx, "the quality is already %T(%v)", q, q)
 		return nil
 	}
+	logger.Infof(ctx, "SetQuality (generic): %T(%v)", q, q)
 	e.Params.CodecParameters.SetBitRate(0)
 	newEncoder, err := newEncoder(ctx, e.Params, q)
 	if err != nil {

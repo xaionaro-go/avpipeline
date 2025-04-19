@@ -412,8 +412,9 @@ func (o *Output) SendInputPacket(
 	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
 		// TODO: do not skip B-frames
 		logger.Errorf(ctx,
-			"received a DTS from the past or has invalid value (%v), ignoring the packet: %d < %d",
+			"received a DTS from the past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
 			outputStream.CodecParameters().MediaType(),
+			outputStream.Index(),
 			pkt.Dts(),
 			outputStream.LastDTS,
 		)

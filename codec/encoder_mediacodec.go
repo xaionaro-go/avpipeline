@@ -17,6 +17,7 @@ func (e *EncoderFull) setQualityMediacodec(
 	ctx context.Context,
 	q Quality,
 ) error {
+	logger.Infof(ctx, "SetQuality (MediaCodec): %T(%v)", q, q)
 	switch q := q.(type) {
 	case quality.ConstantBitrate:
 		return e.setQualityMediacodecConstantBitrate(ctx, q)

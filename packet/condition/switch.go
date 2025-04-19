@@ -78,14 +78,14 @@ func (s *SwitchCondition) Match(
 		return currentValue == s.RequiredValue
 	}
 
-	commitToNextKernel := func() {
+	commitToNextValue := func() {
 		logger.Debugf(ctx, "found a good entrance and switched to the next value: %d -> %d", currentValue, nextValue)
 		s.CurrentValue.Store(int32(nextValue))
 		s.NextValue.CompareAndSwap(nextValue, math.MinInt32)
 	}
 
 	if nextValue == currentValue {
-		commitToNextKernel()
+		commitToNextValue()
 		return currentValue == s.RequiredValue
 	}
 
@@ -94,6 +94,7 @@ func (s *SwitchCondition) Match(
 		return currentValue == s.RequiredValue
 	}
 
+	commitToNextValue()
 	return currentValue == s.RequiredValue
 }
 

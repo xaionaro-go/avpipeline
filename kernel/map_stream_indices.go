@@ -19,7 +19,7 @@ import (
 type MapStreamIndices struct {
 	*closeChan
 	Locker          xsync.Mutex
-	PacketStreamMap map[*astiav.Stream]int
+	PacketStreamMap map[InternalStreamKey]int
 	FrameStreamMap  map[int]int
 	Assigner        StreamIndexAssigner
 
@@ -40,7 +40,7 @@ func NewMapStreamIndices(
 ) *MapStreamIndices {
 	m := &MapStreamIndices{
 		closeChan:       newCloseChan(),
-		PacketStreamMap: make(map[*astiav.Stream]int),
+		PacketStreamMap: make(map[InternalStreamKey]int),
 		FrameStreamMap:  make(map[int]int),
 		Assigner:        assigner,
 
@@ -56,7 +56,13 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	stream *astiav.Stream,
 	input types.InputPacketOrFrameUnion,
 ) (typing.Optional[int], error) {
-	if v, ok := m.PacketStreamMap[stream]; ok {
+	streamKey := InternalStreamKey{
+		StreamIndex: stream.Index(),
+	}
+	if input.Packet != nil {
+		streamKey.Source = input.Packet.Source
+	}
+	if v, ok := m.PacketStreamMap[streamKey]; ok {
 		return typing.Opt(v), nil
 	}
 
@@ -75,8 +81,8 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	}
 
 	v := vOpt.Get()
-	m.PacketStreamMap[stream] = v
-	logger.Debugf(ctx, "assigning index for %p: %d", stream, v)
+	m.PacketStreamMap[streamKey] = v
+	logger.Debugf(ctx, "assigning index for %#+v: %d", streamKey, v)
 	return vOpt, nil
 }
 

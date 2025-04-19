@@ -16,12 +16,21 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-// SyncStreams reorders packets/frames to make sure PTS is monotonic across multiple streams
-// in the assumption that each stream already produces monotonic PTS.
+const (
+	syncStreamsConsiderSource = true
+)
+
+type InternalStreamKey struct {
+	StreamIndex int
+	Source      packet.Source
+}
+
+// SyncStreams reorders packets/frames to make sure DTS is monotonic across multiple streams
+// in the assumption that each stream already produces monotonic DTS.
 //
 // It works by making a queue of packets/frames from each stream, then:
 // When all queues has at least one item, it will gradually send out
-// packets/frames from the queues ensuring monotonic PTS until at least
+// packets/frames from the queues ensuring monotonic DTS until at least
 // one queue is empty. Then it will again wait until all queues has at
 // least one item; rinse and repeat.
 //
@@ -30,8 +39,8 @@ type SyncStreams struct {
 	*closeChan
 	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
 	ItemQueue        sort.InputPacketOrFrameUnions
-	StreamsPTSs      map[int]*xsort.OrderedAsc[int64]
-	MaxPTSDifference uint64
+	StreamsDTSs      map[InternalStreamKey]*xsort.OrderedAsc[int64]
+	MaxDTSDifference uint64
 	StartCondition   condition.Condition[*SyncStreams]
 	Started          bool
 
@@ -45,13 +54,13 @@ func NewSyncStreams(
 	ctx context.Context,
 	startCondition condition.Condition[*SyncStreams],
 	maxBufferSize uint,
-	maxPtsDifference uint64,
+	maxDTSDifference uint64,
 ) *SyncStreams {
 	return &SyncStreams{
 		closeChan:        newCloseChan(),
 		ItemQueue:        make(sort.InputPacketOrFrameUnions, 0, maxBufferSize),
-		StreamsPTSs:      make(map[int]*xsort.OrderedAsc[int64]),
-		MaxPTSDifference: maxPtsDifference,
+		StreamsDTSs:      make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
+		MaxDTSDifference: maxDTSDifference,
 		StartCondition:   startCondition,
 		Started:          false,
 	}
@@ -97,12 +106,12 @@ func (s *SyncStreams) SendInputFrame(
 	)
 }
 
-func (s *SyncStreams) CurrentPTS() typing.Optional[int64] {
+func (s *SyncStreams) CurrentDTS() typing.Optional[int64] {
 	if len(s.ItemQueue) == 0 {
 		return typing.Optional[int64]{}
 	}
 
-	return typing.Opt(s.ItemQueue[0].GetPTS())
+	return typing.Opt(s.ItemQueue[0].Packet.Dts())
 }
 
 func (s *SyncStreams) pushToQueue(
@@ -111,10 +120,10 @@ func (s *SyncStreams) pushToQueue(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	pts := item.GetPTS()
-	shouldContinue, err := s.enforceLowPTSDifference(ctx, pts, outputPacketsCh, outputFramesCh)
+	dts := item.Packet.Dts()
+	shouldContinue, err := s.enforceLowDTSDifference(ctx, dts, outputPacketsCh, outputFramesCh)
 	if err != nil {
-		return fmt.Errorf("unable to enforce low enough PTS difference: %w", err)
+		return fmt.Errorf("unable to enforce low enough DTS difference: %w", err)
 	}
 	if !shouldContinue {
 		logger.Debugf(ctx, "skipping the item")
@@ -129,15 +138,23 @@ func (s *SyncStreams) pushToQueue(
 	}
 	heap.Push(&s.ItemQueue, item)
 
-	streamIndex := item.GetStreamIndex()
-	if _, ok := s.StreamsPTSs[streamIndex]; !ok {
-		s.StreamsPTSs[streamIndex] = &xsort.OrderedAsc[int64]{}
-		s.emptyQueuesCount++
+	streamKey := InternalStreamKey{
+		StreamIndex: item.GetStreamIndex(),
 	}
-	if len(*s.StreamsPTSs[streamIndex]) == 0 {
+	if syncStreamsConsiderSource && item.Packet != nil {
+		streamKey.Source = item.Packet.Source
+	}
+	if _, ok := s.StreamsDTSs[streamKey]; !ok {
+		s.StreamsDTSs[streamKey] = &xsort.OrderedAsc[int64]{}
+		s.emptyQueuesCount++
+		if len(s.StreamsDTSs) > 100 {
+			logger.Errorf(ctx, "too many streams: %d", len(s.StreamsDTSs))
+		}
+	}
+	if len(*s.StreamsDTSs[streamKey]) == 0 {
 		s.emptyQueuesCount--
 	}
-	heap.Push(s.StreamsPTSs[streamIndex], pts)
+	heap.Push(s.StreamsDTSs[streamKey], dts)
 	if s.emptyQueuesCount != 0 {
 		return
 	}
@@ -163,31 +180,31 @@ func (s *SyncStreams) EmptyQueuesCount(ctx context.Context) uint {
 	})
 }
 
-func (s *SyncStreams) enforceLowPTSDifference(
+func (s *SyncStreams) enforceLowDTSDifference(
 	ctx context.Context,
-	newItemPTS int64,
+	newItemDTS int64,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (bool, error) {
-	currentPTSOptional := s.CurrentPTS()
-	if !currentPTSOptional.IsSet() {
+	currentDTSOptional := s.CurrentDTS()
+	if !currentDTSOptional.IsSet() {
 		return true, nil
 	}
 
-	currentPTS := currentPTSOptional.Get()
-	ptsDiff := int64(newItemPTS) - int64(currentPTS)
+	currentDTS := currentDTSOptional.Get()
+	dtsDiff := int64(newItemDTS) - int64(currentDTS)
 	switch {
-	case -ptsDiff > int64(s.MaxPTSDifference):
-		logger.Warnf(ctx, "received too old item (packet or frame): PTS:%d is lesser than %d-%d; discarding it", newItemPTS, currentPTS, s.MaxPTSDifference)
+	case -dtsDiff > int64(s.MaxDTSDifference):
+		logger.Warnf(ctx, "received too old item (packet or frame): DTS:%d is lesser than %d-%d; discarding it", newItemDTS, currentDTS, s.MaxDTSDifference)
 		return false, nil
-	case ptsDiff > int64(s.MaxPTSDifference):
-		logger.Warnf(ctx, "received an item way newer than previously known items (packets or/and frames): PTS %d is greater than %d+%d; submitting old items", newItemPTS, currentPTS, s.MaxPTSDifference)
+	case dtsDiff > int64(s.MaxDTSDifference):
+		logger.Warnf(ctx, "received an item way newer than previously known items (packets or/and frames): DTS %d is greater than %d+%d; submitting old items", newItemDTS, currentDTS, s.MaxDTSDifference)
 		for {
-			currentPTS := s.CurrentPTS()
-			if !currentPTS.IsSet() {
+			currentDTS := s.CurrentDTS()
+			if !currentDTS.IsSet() {
 				break
 			}
-			if currentPTS.Get()+int64(s.MaxPTSDifference) >= newItemPTS {
+			if currentDTS.Get()+int64(s.MaxDTSDifference) >= newItemDTS {
 				break
 			}
 
@@ -207,11 +224,17 @@ func (s *SyncStreams) sendOneItemFromQueue(
 	outputFramesCh chan<- frame.Output,
 ) error {
 	oldestItem := heap.Pop(&s.ItemQueue)
-	streamQueue := s.StreamsPTSs[oldestItem.GetStreamIndex()]
-	oldPTS := heap.Pop(streamQueue)
+	streamKey := InternalStreamKey{
+		StreamIndex: oldestItem.GetStreamIndex(),
+	}
+	if syncStreamsConsiderSource && oldestItem.Packet != nil {
+		streamKey.Source = oldestItem.Packet.Source
+	}
+	streamQueue := s.StreamsDTSs[streamKey]
+	oldDTS := heap.Pop(streamQueue)
 
-	itemPTS := oldestItem.GetPTS()
-	assert(ctx, itemPTS == oldPTS, itemPTS, oldPTS)
+	itemDTS := oldestItem.Packet.Dts()
+	assert(ctx, itemDTS == oldDTS, itemDTS, oldDTS)
 
 	if len(*streamQueue) == 0 {
 		s.emptyQueuesCount++
