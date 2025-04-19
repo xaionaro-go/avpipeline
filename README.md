@@ -100,3 +100,7 @@ For example:
 		}
 	}
 ```
+
+# Examples
+
+* [`ffstream`](https://github.com/xaionaro-go/ffstream) uses `avpipeline` to implement a CLI that could be used as a kick-in replacement to `ffmpeg` in some livestreaming use cases. It allows for dynamic change of bitrate and for enabling a passthrough mode (to disable recoding).
