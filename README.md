@@ -49,14 +49,19 @@ For example:
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
+	// prepare (optionally)
+
+	err := avpipeline.NotifyAboutPacketSourcesRecursively(ctx, nil, nodeInput)
+	assert(ctx, err == nil, err)
+
 	// start
 
 	errCh := make(chan avpipeline.ErrNode, 10)
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, inputNode, avpipeline.ServeConfig{
-			FrameDrop: *frameDrop,
-		}, errCh)
+		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
+			FrameDrop: false,
+		}, errCh, inputNode)
 	})
 
 	// observe
