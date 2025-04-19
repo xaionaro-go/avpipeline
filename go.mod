@@ -43,8 +43,8 @@ require (
 	github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f // indirect
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
-	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/crypto v0.37.0 // indirect
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
+	golang.org/x/sys v0.32.0 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
