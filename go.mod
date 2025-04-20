@@ -13,7 +13,7 @@ require (
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
-	github.com/xaionaro-go/avmediacodec v0.0.0-20250419184228-96422828753a
+	github.com/xaionaro-go/avmediacodec v0.0.0-20250420203032-865fb2e3a9c9
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
 	github.com/xaionaro-go/observability v0.0.0-20250420133500-5c4d2e045932
 	github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638
@@ -26,6 +26,7 @@ require (
 
 require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

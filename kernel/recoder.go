@@ -145,7 +145,6 @@ func (r *Recoder[DF, EF]) process(
 
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer func() {
-		logger.Debugf(ctx, "cancelling context...")
 		cancelFn()
 	}()
 
@@ -158,7 +157,6 @@ func (r *Recoder[DF, EF]) process(
 	observability.Go(ctx, func() {
 		defer wg.Done()
 		defer func() {
-			logger.Debugf(ctx, "cancelling context...")
 			cancelFn()
 		}()
 		for {
