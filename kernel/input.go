@@ -99,6 +99,9 @@ func NewInputFromURL(
 func (i *Input) Close(
 	ctx context.Context,
 ) error {
+	if i == nil {
+		return nil
+	}
 	i.closeChan.Close(ctx)
 	return nil
 }
@@ -150,11 +153,17 @@ func (i *Input) Generate(
 				len(pkt.Data()), pkt.Data(),
 			)
 
-			outputPacketsCh <- packet.BuildOutput(
+			select {
+			case outputPacketsCh <- packet.BuildOutput(
 				pkt,
 				avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
 				i,
-			)
+			):
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-i.CloseChan():
+				return io.EOF
+			}
 		case io.EOF:
 			pkt.Free()
 			return nil

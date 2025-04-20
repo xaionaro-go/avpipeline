@@ -15,13 +15,13 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250419184228-96422828753a
 	github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3
-	github.com/xaionaro-go/observability v0.0.0-20250309200059-047fad8d76e4
+	github.com/xaionaro-go/observability v0.0.0-20250420133500-5c4d2e045932
 	github.com/xaionaro-go/proxy v0.0.0-20250111150848-1f0e7b262638
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
-	github.com/xaionaro-go/xsync v0.0.0-20250113213958-aedf9c8786f5
+	github.com/xaionaro-go/xsync v0.0.0-20250420144932-1e27f4332d4d
 )
 
 require (

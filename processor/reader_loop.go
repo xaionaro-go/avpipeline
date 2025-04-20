@@ -70,8 +70,10 @@ func ReaderLoop(
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Debugf(ctx, "context is closed")
 			return ctx.Err()
 		case <-ch:
+			logger.Debugf(ctx, "kernel is closed")
 			return io.EOF
 		case pkt, ok := <-inputPacketsChan:
 			if !ok {

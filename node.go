@@ -13,9 +13,6 @@ import (
 )
 
 type AbstractNode interface {
-	fmt.Stringer
-	DotString(bool) string
-
 	Serve(context.Context, ServeConfig, chan<- ErrNode)
 
 	GetPushPacketsTos() PushPacketsTos
@@ -115,50 +112,14 @@ func (n *Node[T]) SetInputFrameCondition(cond framecondition.Condition) {
 }
 
 func (n *Node[T]) String() string {
-	if n == nil {
-		return "<nil>"
-	}
-
-	isSet := map[AbstractNode]struct{}{}
-	var pushToStrs []string
-	for _, pushTo := range n.PushPacketsTo {
-		if _, ok := isSet[pushTo.Node]; ok {
-			continue
-		}
-		isSet[pushTo.Node] = struct{}{}
-		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
-	}
-	for _, pushTo := range n.PushFramesTo {
-		if _, ok := isSet[pushTo.Node]; ok {
-			continue
-		}
-		isSet[pushTo.Node] = struct{}{}
-		pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
-	}
-
-	switch len(pushToStrs) {
-	case 0:
-		return n.Processor.String()
-	case 1:
-		return fmt.Sprintf("%s -> %s", n.Processor, pushToStrs[0])
-	default:
-		return fmt.Sprintf("%s -> {%s}", n.Processor, strings.Join(pushToStrs, ", "))
-	}
+	return Nodes[*Node[T]]{n}.String()
 }
 
 func (n *Node[T]) DotString(withStats bool) string {
-	if withStats {
-		panic("not implemented, yet")
-	}
-	var result strings.Builder
-	fmt.Fprintf(&result, "digraph Pipeline {\n")
-	alreadyPrinted := map[processor.Abstract]struct{}{}
-	n.dotBlockContentStringWriteTo(&result, alreadyPrinted)
-	fmt.Fprintf(&result, "}\n")
-	return result.String()
+	return Nodes[*Node[T]]{n}.DotString(withStats)
 }
 
-func (n *Node[T]) dotBlockContentStringWriteTo(
+func (n *Node[T]) DotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
@@ -179,13 +140,11 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
 	for _, pushTo := range n.PushPacketsTo {
-		writer, ok := pushTo.Node.(interface {
-			dotBlockContentStringWriteTo(io.Writer, map[processor.Abstract]struct{})
-		})
+		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
 		}
-		writer.dotBlockContentStringWriteTo(w, alreadyPrinted)
+		writer.DotBlockContentStringWriteTo(w, alreadyPrinted)
 		if pushTo.Condition == nil {
 			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
 			continue
@@ -199,13 +158,11 @@ func (n *Node[T]) dotBlockContentStringWriteTo(
 		)
 	}
 	for _, pushTo := range n.PushFramesTo {
-		writer, ok := pushTo.Node.(interface {
-			dotBlockContentStringWriteTo(io.Writer, map[processor.Abstract]struct{})
-		})
+		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
 		}
-		writer.dotBlockContentStringWriteTo(w, alreadyPrinted)
+		writer.DotBlockContentStringWriteTo(w, alreadyPrinted)
 		if pushTo.Condition == nil {
 			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
 			continue

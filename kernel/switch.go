@@ -213,7 +213,10 @@ func (sw *Switch[T]) doVerifySwitchOutput(
 	defer wg.Wait()
 
 	ctx, cancelFn := context.WithCancel(ctx)
-	defer cancelFn()
+	defer func() {
+		logger.Debugf(ctx, "cancelling context...")
+		cancelFn()
+	}()
 
 	fakeOutputPacketsCh := make(chan packet.Output, 2)
 	fakeOutputFramesCh := make(chan frame.Output, 2)

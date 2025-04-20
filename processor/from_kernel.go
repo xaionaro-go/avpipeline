@@ -105,7 +105,9 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	})
 }
 
-func (p *FromKernel[T]) Close(ctx context.Context) error {
+func (p *FromKernel[T]) Close(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Close[%T]", p.Kernel)
+	defer func() { logger.Debugf(ctx, "/Close[%T]: %v", p.Kernel, _err) }()
 	var err error
 	p.closeOnce.Do(func() {
 		err = p.closer.Close()

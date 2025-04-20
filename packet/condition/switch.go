@@ -46,13 +46,12 @@ func (s *Switch) SetValue(
 	ctx context.Context,
 	idx int32,
 ) error {
+	logger.Debugf(ctx, "setting the next value: %d -> %d", s.CurrentValue.Load(), idx)
+	s.NextValue.Store(int32(idx))
 	if s.GetKeepUnless() == nil {
 		logger.Debugf(ctx, "switched to the next value: %d -> %d", s.CurrentValue.Load(), idx)
 		s.CurrentValue.Store(int32(idx))
-		return nil
 	}
-	logger.Debugf(ctx, "setting the next value: %d -> %d", s.CurrentValue.Load(), idx)
-	s.NextValue.Store(int32(idx))
 	return nil
 }
 
@@ -85,7 +84,6 @@ func (s *SwitchCondition) Match(
 	}
 
 	if nextValue == currentValue {
-		commitToNextValue()
 		return currentValue == s.RequiredValue
 	}
 

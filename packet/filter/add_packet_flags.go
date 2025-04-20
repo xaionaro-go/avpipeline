@@ -34,7 +34,7 @@ func (f *AddPacketFlags) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
-	if !f.Condition.Match(ctx, pkt) {
+	if f.Condition != nil && !f.Condition.Match(ctx, pkt) {
 		return true
 	}
 	flag := pkt.Flags()

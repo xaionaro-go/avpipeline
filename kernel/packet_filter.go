@@ -10,26 +10,26 @@ import (
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
-type ConditionFilter struct {
+type PacketFilter struct {
 	*closeChan
 	PacketFilter packetcondition.Condition
 	FrameFilter  framecondition.Condition
 }
 
-var _ Abstract = (*ConditionFilter)(nil)
+var _ Abstract = (*PacketFilter)(nil)
 
-func NewConditionFilter(
+func NewPacketFilter(
 	packetFilter packetcondition.Condition,
 	frameFilter framecondition.Condition,
-) *ConditionFilter {
-	return &ConditionFilter{
+) *PacketFilter {
+	return &PacketFilter{
 		closeChan:    newCloseChan(),
 		PacketFilter: packetFilter,
 		FrameFilter:  frameFilter,
 	}
 }
 
-func (f *ConditionFilter) SendInputPacket(
+func (f *PacketFilter) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -46,7 +46,7 @@ func (f *ConditionFilter) SendInputPacket(
 	return nil
 }
 
-func (f *ConditionFilter) SendInputFrame(
+func (f *PacketFilter) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	_ chan<- packet.Output,
@@ -68,7 +68,7 @@ func (f *ConditionFilter) SendInputFrame(
 	return nil
 }
 
-func (f *ConditionFilter) String() string {
+func (f *PacketFilter) String() string {
 	switch {
 	case f.PacketFilter != nil && f.FrameFilter != nil:
 		return fmt.Sprintf("ConditionFilter(pkt:%s, frame:%s)", f.PacketFilter, f.FrameFilter)
@@ -81,16 +81,16 @@ func (f *ConditionFilter) String() string {
 	}
 }
 
-func (f *ConditionFilter) Close(ctx context.Context) error {
+func (f *PacketFilter) Close(ctx context.Context) error {
 	f.closeChan.Close(ctx)
 	return nil
 }
 
-func (f *ConditionFilter) CloseChan() <-chan struct{} {
+func (f *PacketFilter) CloseChan() <-chan struct{} {
 	return f.closeChan.CloseChan()
 }
 
-func (f *ConditionFilter) Generate(
+func (f *PacketFilter) Generate(
 	context.Context,
 	chan<- packet.Output,
 	chan<- frame.Output,

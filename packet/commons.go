@@ -24,7 +24,7 @@ func () WithFormatContext(
 
 func () NotifyAboutPacketSource(
 	ctx context.Context,
-	source Source,
+	source packet.Source,
 ) error {
 
 }

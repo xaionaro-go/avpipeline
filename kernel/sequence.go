@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
@@ -201,7 +202,10 @@ func (s *Sequence[T]) Generate(
 	_ chan<- frame.Output,
 ) error {
 	ctx, cancelFn := context.WithCancel(ctx)
-	defer cancelFn()
+	defer func() {
+		logger.Debugf(ctx, "cancelling context...")
+		cancelFn()
+	}()
 	outputPacketsCh := make(chan packet.Output, 1)
 	outputFramesCh := make(chan frame.Output, 1)
 

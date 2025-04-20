@@ -16,7 +16,12 @@ func NotifyAboutPacketSourcesRecursively[T AbstractNode](
 	ctx context.Context,
 	packetSource packet.Source,
 	nodes ...T,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "NotifyAboutPacketSourcesRecursively: %T, %v", packetSource, nodes)
+	defer func() {
+		logger.Debugf(ctx, "NotifyAboutPacketSourcesRecursively: %T, %v: %v", packetSource, nodes, _err)
+	}()
+
 	if len(nodes) != 1 {
 		return fmt.Errorf("we currently require exactly one node in the arguments; to be fixed in the future")
 	}
@@ -28,6 +33,7 @@ func NotifyAboutPacketSourcesRecursively[T AbstractNode](
 			newPacketSource.WithFormatContext(ctx, func(fc *astiav.FormatContext) {
 				hasNewFormatContext = true
 			})
+			logger.Debugf(ctx, "%T: hasNewFormatContext:%t", node, hasNewFormatContext)
 			if hasNewFormatContext {
 				if packetSource != nil {
 					if err := newPacketSource.NotifyAboutPacketSource(ctx, packetSource); err != nil {
@@ -68,43 +74,50 @@ func ServeRecursively[T AbstractNode](
 	errCh chan<- ErrNode,
 	nodes ...T,
 ) {
-	if len(nodes) != 1 {
-		errCh <- ErrNode{Err: fmt.Errorf("we currently require exactly one node in the arguments; to be fixed in the future")}
-	}
+	var nodesWG sync.WaitGroup
+	defer nodesWG.Wait()
 
-	node := nodes[0]
-	logger.Tracef(ctx, "ServeRecursively[%s]", node)
-	defer func() { logger.Tracef(ctx, "/ServeRecursively[%s]", node) }()
+	for _, node := range nodes {
+		func(node T) {
+			logger.Tracef(ctx, "ServeRecursively[%s]", node)
+			defer func() { logger.Tracef(ctx, "/ServeRecursively[%s]", node) }()
 
-	childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
-	var wg sync.WaitGroup
-	dstAlreadyStarted := map[AbstractNode]struct{}{}
-	for _, pushTo := range node.GetPushPacketsTos() {
-		if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
-			continue
-		}
-		pushTo := pushTo
-		wg.Add(1)
-		observability.Go(ctx, func() {
-			defer wg.Done()
-			ServeRecursively(childrenCtx, serveConfig, errCh, pushTo.Node)
-		})
-		dstAlreadyStarted[pushTo.Node] = struct{}{}
-	}
-	for _, pushTo := range node.GetPushFramesTos() {
-		if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
-			continue
-		}
-		pushTo := pushTo
-		wg.Add(1)
-		observability.Go(ctx, func() {
-			defer wg.Done()
-			ServeRecursively(childrenCtx, serveConfig, errCh, pushTo.Node)
-		})
-		dstAlreadyStarted[pushTo.Node] = struct{}{}
-	}
-	defer wg.Wait()
-	defer childrenCancelFn()
+			childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
+			dstAlreadyStarted := map[AbstractNode]struct{}{}
+			for _, pushTo := range node.GetPushPacketsTos() {
+				if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
+					continue
+				}
+				pushTo := pushTo
+				nodesWG.Add(1)
+				observability.Go(ctx, func() {
+					defer nodesWG.Done()
+					ServeRecursively(childrenCtx, serveConfig, errCh, pushTo.Node)
+				})
+				dstAlreadyStarted[pushTo.Node] = struct{}{}
+			}
+			for _, pushTo := range node.GetPushFramesTos() {
+				if _, ok := dstAlreadyStarted[pushTo.Node]; ok {
+					continue
+				}
+				pushTo := pushTo
+				nodesWG.Add(1)
+				observability.Go(ctx, func() {
+					defer nodesWG.Done()
+					ServeRecursively(childrenCtx, serveConfig, errCh, pushTo.Node)
+				})
+				dstAlreadyStarted[pushTo.Node] = struct{}{}
+			}
 
-	node.Serve(ctx, serveConfig, errCh)
+			nodesWG.Add(1)
+			observability.Go(ctx, func() {
+				defer nodesWG.Done()
+				defer func() {
+					logger.Debugf(ctx, "cancelling context...")
+					childrenCancelFn()
+				}()
+				node.Serve(ctx, serveConfig, errCh)
+			})
+		}(node)
+	}
 }

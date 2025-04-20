@@ -55,6 +55,7 @@ type Output struct {
 	InputStreams  map[int]OutputInputStream
 	OutputStreams map[int]*OutputStream
 	Filter        condition.Condition
+	SenderLocker  xsync.Mutex
 
 	ioContext *astiav.IOContext
 	proxy     *proxy.TCPProxy
@@ -211,7 +212,7 @@ func (o *Output) Close(
 	o.closeChan.Close(ctx)
 
 	var result []error
-	if len(o.FormatContext.Streams()) != 0 {
+	if o.started && len(o.FormatContext.Streams()) != 0 {
 		err := func() error {
 			defer func() {
 				r := recover()
@@ -378,6 +379,11 @@ func (o *Output) SendInputPacket(
 		return fmt.Errorf("packet == nil")
 	}
 
+	if pkt.Flags().Has(astiav.PacketFlagDiscard) {
+		logger.Tracef(ctx, "the packet has a discard flag; discarding")
+		return nil
+	}
+
 	var (
 		outputStream *OutputStream
 		err          error
@@ -407,29 +413,6 @@ func (o *Output) SendInputPacket(
 
 	pkt.SetStreamIndex(outputStream.Index())
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
-	//pkt.SetPos(-1) // <- TODO: should this happen? why?
-	isNoDTS := pkt.Dts() == consts.NoPTSValue
-	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
-		// TODO: do not skip B-frames
-		logger.Errorf(ctx,
-			"received a DTS from the past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
-			outputStream.CodecParameters().MediaType(),
-			outputStream.Index(),
-			pkt.Dts(),
-			outputStream.LastDTS,
-		)
-		return nil
-	}
-	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
-			pkt.Pos(), pkt.Pts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS,
-			outputStream.CodecParameters().MediaType(),
-			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
-			pkt.Flags(),
-			pkt.Data(),
-		)
-	}
 
 	var inputStreamsCount int
 	inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
@@ -437,7 +420,9 @@ func (o *Output) SendInputPacket(
 	})
 
 	logger.Tracef(ctx, "sending the current packet")
-	if err := o.send(ctx, inputStreamsCount, pkt, outputStream); err != nil {
+
+	err = xsync.DoA4R1(ctx, &o.SenderLocker, o.send, ctx, inputStreamsCount, pkt, outputStream)
+	if err != nil {
 		return err
 	}
 	return nil
@@ -524,21 +509,61 @@ func (o *Output) doWritePacket(
 	pkt *astiav.Packet,
 	outputStream *OutputStream,
 ) (_err error) {
-	var err error
-	pos, pts, dts := pkt.Pos(), pkt.Pts(), pkt.Dts()
-	if o.Filter == nil || o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, o)) {
-		o.formatContextLocker.Do(ctx, func() {
-			err = o.FormatContext.WriteInterleavedFrame(pkt)
-		})
+	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, o)) {
+		return nil
 	}
+
+	//pkt.SetPos(-1) // <- TODO: should this happen? why?
+	isNoDTS := pkt.Dts() == consts.NoPTSValue
+	isNoPTS := pkt.Pts() == consts.NoPTSValue
+	if !isNoDTS && !isNoPTS && pkt.Dts() > pkt.Pts() {
+		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS", pkt.Dts(), pkt.Pts())
+		pkt.SetDts(pkt.Pts())
+	}
+	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
+		// TODO: do not skip B-frames
+		logger.Errorf(ctx,
+			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
+			outputStream.CodecParameters().MediaType(),
+			outputStream.Index(),
+			pkt.Dts(),
+			outputStream.LastDTS,
+		)
+		return nil
+	}
+	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
+		logger.Tracef(ctx,
+			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
+			pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS,
+			outputStream.CodecParameters().MediaType(),
+			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
+			pkt.Flags(),
+			pkt.Data(),
+		)
+	}
+
+	var err error
+	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
+	o.formatContextLocker.Do(ctx, func() {
+		err = o.FormatContext.WriteInterleavedFrame(pkt)
+	})
 	if err != nil {
-		return fmt.Errorf("unable to write the frame: %w", err)
+		err = fmt.Errorf(
+			"unable to write the packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d: %w",
+			pos, dts, pts, dur, outputStream.LastDTS,
+			outputStream.CodecParameters().MediaType(),
+			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
+			pkt.Flags(),
+			len(pkt.Data()),
+			err,
+		)
+		return err
 	}
 	outputStream.LastDTS = dts
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
 			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s: %v",
-			pos, pts, dts,
+			pos, dts, pts,
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
 			err,
