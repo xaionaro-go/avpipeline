@@ -1,5 +1,5 @@
-//go:build patched_libav
-// +build patched_libav
+//go:build mediacodec && patched_libav
+// +build mediacodec,patched_libav
 
 package codec
 
