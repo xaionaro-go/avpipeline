@@ -46,6 +46,8 @@ github.com/xaionaro-go/avmediacodec v0.0.0-20250420195346-ee0b7909e498 h1:c3lHtf
 github.com/xaionaro-go/avmediacodec v0.0.0-20250420195346-ee0b7909e498/go.mod h1:obX+/HoeX6lzM/Zuzgtm0JdG8CQ58I1isp5xSQEm+kQ=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250420203032-865fb2e3a9c9 h1:B5/y3rnrx1Z9i5JB3p13wr3IO4xUAxoNBZNaQDJ+UIc=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250420203032-865fb2e3a9c9/go.mod h1:obX+/HoeX6lzM/Zuzgtm0JdG8CQ58I1isp5xSQEm+kQ=
+github.com/xaionaro-go/avmediacodec v0.0.0-20250421150856-ddd390422c21 h1:afsJFvZaf4z87n/V9LgXgD6u8MZBesZj8mnHvlfRi2k=
+github.com/xaionaro-go/avmediacodec v0.0.0-20250421150856-ddd390422c21/go.mod h1:obX+/HoeX6lzM/Zuzgtm0JdG8CQ58I1isp5xSQEm+kQ=
 github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d h1:9DyH0lboWWzKUwiqGmp9sTZ3bSPhgJHiiWgV+hqY9Uo=
 github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d/go.mod h1:yI0EvHC6Ir5WIZp3tEk7o42/QqeTb9pkII+T8p4FlPo=
 github.com/xaionaro-go/libsrt v0.0.0-20250105232601-e760c79b2bc3 h1:OeqZZ9i3KHaTKOxLtrF7nBkao299F5QK4acl9Nd/GrI=
