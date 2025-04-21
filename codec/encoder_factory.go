@@ -70,10 +70,16 @@ func (f *NaiveEncoderFactory) String() string {
 }
 
 func (f *NaiveEncoderFactory) VideoCodecID() astiav.CodecID {
+	if f.VideoCodec == CodecNameCopy {
+		return 0
+	}
 	return findEncoderCodec(0, f.VideoCodec).ID()
 }
 
 func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
+	if f.AudioCodec == CodecNameCopy {
+		return 0
+	}
 	return findEncoderCodec(0, f.AudioCodec).ID()
 }
 
