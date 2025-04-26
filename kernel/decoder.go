@@ -34,11 +34,13 @@ func NewDecoder[DF codec.DecoderFactory](
 	return d
 }
 
-func (d *Decoder[DF]) Close(ctx context.Context) error {
+func (d *Decoder[DF]) Close(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Close()")
+	defer func() { logger.Debugf(ctx, "/Close(): %v", _err) }()
 	d.closeChan.Close(ctx)
 	for key, decoder := range d.decoders {
 		err := decoder.Close(ctx)
-		logger.Debugf(ctx, "decoder closed: %v", err)
+		logger.Tracef(ctx, "decoder for stream #%d closed: %v", key, err)
 		delete(d.decoders, key)
 	}
 	return nil

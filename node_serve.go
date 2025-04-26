@@ -68,7 +68,7 @@ func (n *Node[T]) Serve(
 			Err:  err,
 		}:
 		default:
-			logger.Errorf(ctx, "error queue is full, cannot send error: %v", err)
+			logger.Errorf(ctx, "error queue is full, cannot send error: '%v'", err)
 		}
 	}
 

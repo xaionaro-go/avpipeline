@@ -19,8 +19,8 @@ import (
 type MapStreamIndices struct {
 	*closeChan
 	Locker          xsync.Mutex
-	PacketStreamMap map[InternalStreamKey]int
-	FrameStreamMap  map[int]int
+	PacketStreamMap map[InternalStreamKey]typing.Optional[int]
+	FrameStreamMap  map[int]typing.Optional[int]
 	Assigner        StreamIndexAssigner
 
 	outputFormat  *astiav.FormatContext
@@ -40,8 +40,8 @@ func NewMapStreamIndices(
 ) *MapStreamIndices {
 	m := &MapStreamIndices{
 		closeChan:       newCloseChan(),
-		PacketStreamMap: make(map[InternalStreamKey]int),
-		FrameStreamMap:  make(map[int]int),
+		PacketStreamMap: make(map[InternalStreamKey]typing.Optional[int]),
+		FrameStreamMap:  make(map[int]typing.Optional[int]),
 		Assigner:        assigner,
 
 		outputFormat:  astiav.AllocFormatContext(),
@@ -55,7 +55,7 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	ctx context.Context,
 	stream *astiav.Stream,
 	input types.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
+) (_ret typing.Optional[int], _err error) {
 	streamKey := InternalStreamKey{
 		StreamIndex: stream.Index(),
 	}
@@ -63,10 +63,16 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 		streamKey.Source = input.Packet.Source
 	}
 	if v, ok := m.PacketStreamMap[streamKey]; ok {
-		return typing.Opt(v), nil
+		return v, nil
 	}
 
 	var vOpt typing.Optional[int]
+	defer func() {
+		if _err == nil {
+			m.PacketStreamMap[streamKey] = vOpt
+		}
+	}()
+
 	if m.Assigner == nil {
 		vOpt.Set(stream.Index())
 	} else {
@@ -81,7 +87,6 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	}
 
 	v := vOpt.Get()
-	m.PacketStreamMap[streamKey] = v
 	logger.Debugf(ctx, "assigning index for %#+v: %d", streamKey, v)
 	return vOpt, nil
 }
@@ -90,12 +95,17 @@ func (m *MapStreamIndices) getOutputFrameStreamIndex(
 	ctx context.Context,
 	inputStreamIndex int,
 	input types.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
+) (_ret typing.Optional[int], _err error) {
 	if v, ok := m.FrameStreamMap[inputStreamIndex]; ok {
-		return typing.Opt(v), nil
+		return v, nil
 	}
 
 	var vOpt typing.Optional[int]
+	defer func() {
+		if _err == nil {
+			m.FrameStreamMap[inputStreamIndex] = vOpt
+		}
+	}()
 	if m.Assigner == nil {
 		vOpt.Set(inputStreamIndex)
 	} else {
@@ -110,7 +120,7 @@ func (m *MapStreamIndices) getOutputFrameStreamIndex(
 	}
 
 	v := vOpt.Get()
-	m.FrameStreamMap[inputStreamIndex] = v
+	logger.Debugf(ctx, "assigning index for %d: %d", inputStreamIndex, v)
 	return vOpt, nil
 }
 
@@ -120,7 +130,12 @@ func (m *MapStreamIndices) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	_ chan<- frame.Output,
 ) error {
-	return xsync.DoA3R1(ctx, &m.Locker, m.sendInputPacket, ctx, input, outputPacketsCh)
+	return xsync.DoA3R1(
+		ctx,
+		&m.Locker,
+		m.sendInputPacket,
+		ctx, input, outputPacketsCh,
+	)
 }
 
 func (m *MapStreamIndices) getOutputStreamForPacket(
@@ -262,7 +277,11 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 						},
 					},
 				)
-				logger.Debugf(ctx, "attempted to make sure stream #%d (<-%d) is initialized", outputStream.Index(), inputStream.Index())
+				if outputStream != nil {
+					logger.Debugf(ctx, "made sure stream #%d (<-%d) is initialized", outputStream.Index(), inputStream.Index())
+				} else {
+					logger.Debugf(ctx, "no output stream for stream <-%d", inputStream.Index())
+				}
 				if err != nil {
 					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", inputStream.Index(), source, err))
 				}
@@ -281,7 +300,12 @@ func (m *MapStreamIndices) SendInputFrame(
 	_ chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return xsync.DoA3R1(ctx, &m.Locker, m.sendInputFrame, ctx, input, outputFramesCh)
+	return xsync.DoA3R1(
+		ctx,
+		&m.Locker,
+		m.sendInputFrame,
+		ctx, input, outputFramesCh,
+	)
 }
 
 func (m *MapStreamIndices) sendInputFrame(
