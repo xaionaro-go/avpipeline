@@ -50,7 +50,6 @@ type OutputInputStream struct {
 
 type Output struct {
 	ID            OutputID
-	URL           string
 	StreamKey     secret.String
 	InputStreams  map[int]OutputInputStream
 	OutputStreams map[int]*OutputStream
@@ -62,6 +61,8 @@ type Output struct {
 
 	formatContextLocker xsync.RWMutex
 
+	url              string
+	urlParsed        *url.URL
 	started          bool
 	pendingPackets   []*astiav.Packet
 	waitingKeyFrames map[int]struct{}
@@ -113,7 +114,7 @@ func NewOutputFromURL(
 
 	o := &Output{
 		ID:            OutputID(nextOutputID.Add(1)),
-		URL:           url.String(),
+		url:           url.String(),
 		StreamKey:     streamKey,
 		InputStreams:  make(map[int]OutputInputStream),
 		OutputStreams: make(map[int]*OutputStream),
@@ -151,7 +152,7 @@ func NewOutputFromURL(
 		url.Host = proxyAddr.String()
 	}
 
-	formatName := formatFromScheme(url.Scheme)
+	formatNameRequest := formatFromScheme(url.Scheme)
 
 	if len(cfg.CustomOptions) > 0 {
 		o.Dictionary = astiav.NewDictionary()
@@ -159,7 +160,7 @@ func NewOutputFromURL(
 
 		for _, opt := range cfg.CustomOptions {
 			if opt.Key == "f" {
-				formatName = opt.Value
+				formatNameRequest = opt.Value
 				continue
 			}
 			logger.Debugf(ctx, "output.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
@@ -170,7 +171,7 @@ func NewOutputFromURL(
 	logger.Debugf(observability.OnInsecureDebug(ctx), "URL: %s", url)
 	formatContext, err := astiav.AllocOutputFormatContext(
 		nil,
-		formatName,
+		formatNameRequest,
 		url.String(),
 	)
 	if err != nil {
@@ -200,6 +201,10 @@ func NewOutputFromURL(
 	}
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
+	o.urlParsed = url
+
+	formatName := o.FormatContext.OutputFormat().Name()
+	logger.Debugf(ctx, "output format name: '%s'", formatName)
 
 	return o, nil
 }
@@ -320,6 +325,11 @@ func (o *Output) configureOutputStream(
 	}
 	o.InputStreams[inputStream.Index()] = OutputInputStream{Source: inputSource, Stream: inputStream}
 	o.OutputStreams[inputStream.Index()] = outputStream
+	switch o.FormatContext.OutputFormat().Name() {
+	case "flv":
+		logger.Debugf(ctx, "this is a FLV output, setting CodecTag to zero")
+		outputStream.CodecParameters().SetCodecTag(0)
+	}
 	return nil
 }
 
@@ -438,7 +448,7 @@ func (o *Output) SendInputFrame(
 }
 
 func (o *Output) String() string {
-	return fmt.Sprintf("Output(%s)", o.URL)
+	return fmt.Sprintf("Output(%s)", o.url)
 }
 
 func (o *Output) send(
