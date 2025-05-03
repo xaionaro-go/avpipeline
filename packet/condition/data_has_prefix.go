@@ -1,0 +1,24 @@
+package condition
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+
+	"github.com/xaionaro-go/avpipeline/packet"
+)
+
+type DataHasPrefix []byte
+
+var _ Condition = (DataHasPrefix)(nil)
+
+func (v DataHasPrefix) String() string {
+	return fmt.Sprintf("DataHasPrefix(%X)", []byte(v))
+}
+
+func (v DataHasPrefix) Match(
+	_ context.Context,
+	input packet.Input,
+) bool {
+	return bytes.HasPrefix(input.Data(), v)
+}
