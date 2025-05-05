@@ -31,22 +31,23 @@ type AbstractNode interface {
 	SetInputFrameCondition(framecondition.Condition)
 }
 
-type Node[T processor.Abstract] struct {
+type NodeWithCustomData[C any, T processor.Abstract] struct {
 	*NodeStatistics
 	Processor            T
 	PushPacketsTo        PushPacketsTos
 	PushFramesTo         PushFramesTos
 	InputPacketCondition packetcondition.Condition
 	InputFrameCondition  framecondition.Condition
+
+	CustomData C
 }
+
+type Node[T processor.Abstract] = NodeWithCustomData[struct{}, T]
 
 var _ AbstractNode = (*Node[processor.Abstract])(nil)
 
 func NewNode[T processor.Abstract](processor T) *Node[T] {
-	return &Node[T]{
-		NodeStatistics: &NodeStatistics{},
-		Processor:      processor,
-	}
+	return NewNodeWithCustomData[struct{}](processor)
 }
 
 func NewNodeFromKernel[T kernel.Abstract](
@@ -54,7 +55,22 @@ func NewNodeFromKernel[T kernel.Abstract](
 	kernel T,
 	opts ...processor.Option,
 ) *Node[*processor.FromKernel[T]] {
-	return NewNode(
+	return NewNodeWithCustomDataFromKernel[struct{}](ctx, kernel, opts...)
+}
+
+func NewNodeWithCustomData[C any, T processor.Abstract](processor T) *NodeWithCustomData[C, T] {
+	return &NodeWithCustomData[C, T]{
+		NodeStatistics: &NodeStatistics{},
+		Processor:      processor,
+	}
+}
+
+func NewNodeWithCustomDataFromKernel[C any, T kernel.Abstract](
+	ctx context.Context,
+	kernel T,
+	opts ...processor.Option,
+) *NodeWithCustomData[C, *processor.FromKernel[T]] {
+	return NewNodeWithCustomData[C](
 		processor.NewFromKernel(
 			ctx,
 			kernel,
@@ -63,63 +79,63 @@ func NewNodeFromKernel[T kernel.Abstract](
 	)
 }
 
-func (n *Node[T]) GetStatistics() *NodeStatistics {
+func (n *NodeWithCustomData[C, T]) GetStatistics() *NodeStatistics {
 	return n.NodeStatistics
 }
 
-func (n *Node[T]) GetProcessor() processor.Abstract {
+func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
 	return n.Processor
 }
 
-func (n *Node[T]) GetPushPacketsTos() PushPacketsTos {
+func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
 	return n.PushPacketsTo
 }
 
-func (n *Node[T]) AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition) {
+func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition) {
 	n.PushPacketsTo.Add(dst, conds...)
 }
 
-func (n *Node[T]) SetPushPacketsTos(s PushPacketsTos) {
+func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
 	n.PushPacketsTo = s
 }
 
-func (n *Node[T]) GetPushFramesTos() PushFramesTos {
+func (n *NodeWithCustomData[C, T]) GetPushFramesTos() PushFramesTos {
 	return n.PushFramesTo
 }
 
-func (n *Node[T]) AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition) {
+func (n *NodeWithCustomData[C, T]) AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition) {
 	n.PushFramesTo.Add(dst, conds...)
 }
 
-func (n *Node[T]) SetPushFramesTos(s PushFramesTos) {
+func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 	n.PushFramesTo = s
 }
 
-func (n *Node[T]) GetInputPacketCondition() packetcondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputPacketCondition() packetcondition.Condition {
 	return n.InputPacketCondition
 }
 
-func (n *Node[T]) SetInputPacketCondition(cond packetcondition.Condition) {
+func (n *NodeWithCustomData[C, T]) SetInputPacketCondition(cond packetcondition.Condition) {
 	n.InputPacketCondition = cond
 }
 
-func (n *Node[T]) GetInputFrameCondition() framecondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputFrameCondition() framecondition.Condition {
 	return n.InputFrameCondition
 }
 
-func (n *Node[T]) SetInputFrameCondition(cond framecondition.Condition) {
+func (n *NodeWithCustomData[C, T]) SetInputFrameCondition(cond framecondition.Condition) {
 	n.InputFrameCondition = cond
 }
 
-func (n *Node[T]) String() string {
-	return Nodes[*Node[T]]{n}.String()
+func (n *NodeWithCustomData[C, T]) String() string {
+	return Nodes[*NodeWithCustomData[C, T]]{n}.String()
 }
 
-func (n *Node[T]) DotString(withStats bool) string {
-	return Nodes[*Node[T]]{n}.DotString(withStats)
+func (n *NodeWithCustomData[C, T]) DotString(withStats bool) string {
+	return Nodes[*NodeWithCustomData[C, T]]{n}.DotString(withStats)
 }
 
-func (n *Node[T]) DotBlockContentStringWriteTo(
+func (n *NodeWithCustomData[C, T]) DotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {

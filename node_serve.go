@@ -47,7 +47,7 @@ func incrementCounters(
 	}
 }
 
-func (n *Node[T]) Serve(
+func (n *NodeWithCustomData[C, T]) Serve(
 	ctx context.Context,
 	serveConfig ServeConfig,
 	errCh chan<- ErrNode,
@@ -157,9 +157,10 @@ func pushFurther[
 	P processor.Abstract,
 	I types.InputPacketOrFrame, C types.Condition[I],
 	O types.OutputPacketOrFrame, OP types.PacketOrFramePointer[O],
+	CD any,
 ](
 	ctx context.Context,
-	n *Node[P],
+	n *NodeWithCustomData[CD, P],
 	outputObj O,
 	pushTos []PushTo[I, C],
 	serveConfig ServeConfig,
