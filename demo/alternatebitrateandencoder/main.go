@@ -142,7 +142,7 @@ func main() {
 		)
 	}
 	if recodingNode != nil {
-		inputNode.PushPacketsTo.Add(recodingNode)
+		inputNode.PushPacketsTos.Add(recodingNode)
 		finalNode = recodingNode
 
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {

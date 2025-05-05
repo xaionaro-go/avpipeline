@@ -110,7 +110,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			logger.Tracef(ctx, "pulled from %s a packet with stream index %d", n.Processor, pkt.Packet.StreamIndex())
 			n.Locker.Do(ctx, func() {
 				pushFurther(
-					ctx, n, pkt, n.PushPacketsTo, serveConfig,
+					ctx, n, pkt, n.PushPacketsTos, serveConfig,
 					func(
 						pkt packet.Output,
 					) packet.Input {
@@ -133,7 +133,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			}
 			n.Locker.Do(ctx, func() {
 				pushFurther(
-					ctx, n, f, n.PushFramesTo, serveConfig,
+					ctx, n, f, n.PushFramesTos, serveConfig,
 					func(
 						f frame.Output,
 					) frame.Input {

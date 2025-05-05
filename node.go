@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
+	"github.com/facebookincubator/go-belt/tool/logger"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -35,8 +37,8 @@ type AbstractNode interface {
 type NodeWithCustomData[C any, T processor.Abstract] struct {
 	*NodeStatistics
 	Processor            T
-	PushPacketsTo        PushPacketsTos
-	PushFramesTo         PushFramesTos
+	PushPacketsTos       PushPacketsTos
+	PushFramesTos        PushFramesTos
 	InputPacketCondition packetcondition.Condition
 	InputFrameCondition  framecondition.Condition
 	Locker               xsync.Mutex
@@ -97,7 +99,7 @@ func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
 
 func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
 	return xsync.DoR1(context.TODO(), &n.Locker, func() PushPacketsTos {
-		return n.PushPacketsTo
+		return n.PushPacketsTos
 	})
 }
 
@@ -106,19 +108,61 @@ func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
 	conds ...packetcondition.Condition,
 ) {
 	n.Locker.Do(context.TODO(), func() {
-		n.PushPacketsTo.Add(dst, conds...)
+		n.PushPacketsTos.Add(dst, conds...)
 	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
 	n.Locker.Do(context.TODO(), func() {
-		n.PushPacketsTo = s
+		n.PushPacketsTos = s
 	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushFramesTos() PushFramesTos {
 	return xsync.DoR1(context.TODO(), &n.Locker, func() PushFramesTos {
-		return n.PushFramesTo
+		return n.PushFramesTos
+	})
+}
+
+func RemovePushPacketsTo[C any, P processor.Abstract](
+	ctx context.Context,
+	from *NodeWithCustomData[C, P],
+	to AbstractNode,
+) (_err error) {
+	logger.Debugf(ctx, "RemovePushPacketsTo")
+	defer func() { defer logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
+
+	return xsync.DoR1(ctx, &from.Locker, func() error {
+		pushTos := from.PushPacketsTos
+		for idx, pushTo := range pushTos {
+			if pushTo.Node == to {
+				pushTos = slices.Delete(pushTos, idx, idx+1)
+				from.PushPacketsTos = pushTos
+				return nil
+			}
+		}
+		return fmt.Errorf("%s does not push packets to %s", from, to)
+	})
+}
+
+func RemovePushFramesTo[C any, P processor.Abstract](
+	ctx context.Context,
+	from *NodeWithCustomData[C, P],
+	to AbstractNode,
+) (_err error) {
+	logger.Debugf(ctx, "RemovePushFramesTo")
+	defer func() { defer logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
+
+	return xsync.DoR1(ctx, &from.Locker, func() error {
+		pushTos := from.PushFramesTos
+		for idx, pushTo := range pushTos {
+			if pushTo.Node == to {
+				pushTos = slices.Delete(pushTos, idx, idx+1)
+				from.PushFramesTos = pushTos
+				return nil
+			}
+		}
+		return fmt.Errorf("%s does not push frames to %s", from, to)
 	})
 }
 
@@ -127,13 +171,13 @@ func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
 	conds ...framecondition.Condition,
 ) {
 	n.Locker.Do(context.TODO(), func() {
-		n.PushFramesTo.Add(dst, conds...)
+		n.PushFramesTos.Add(dst, conds...)
 	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 	n.Locker.Do(context.TODO(), func() {
-		n.PushFramesTo = s
+		n.PushFramesTos = s
 	})
 }
 
@@ -196,7 +240,7 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		)
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
-	for _, pushTo := range n.PushPacketsTo {
+	for _, pushTo := range n.PushPacketsTos {
 		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
@@ -214,7 +258,7 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 			sanitizeString(n.Processor.String()),
 		)
 	}
-	for _, pushTo := range n.PushFramesTo {
+	for _, pushTo := range n.PushFramesTos {
 		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue

@@ -114,7 +114,7 @@ func TestRecoderNoFailure(t *testing.T) {
 				processor.OptionQueueSizeOutputPacket(1),
 				processor.OptionQueueSizeError(2),
 			)
-			inputNode.PushPacketsTo.Add(recodingNode)
+			inputNode.PushPacketsTos.Add(recodingNode)
 			finalNode = recodingNode
 			finalNode.AddPushPacketsTo(avpipeline.NewNodeFromKernel(
 				ctx,
