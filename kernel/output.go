@@ -36,6 +36,8 @@ const (
 
 type OutputConfig struct {
 	CustomOptions types.DictionaryItems
+	AsyncOpen     bool
+	OnOpened      func(context.Context, *Output) error
 }
 
 type OutputStream struct {
@@ -197,6 +199,28 @@ func NewOutputFromURL(
 		}
 	}()
 
+	if cfg.AsyncOpen {
+		observability.Go(ctx, func() {
+			if err := o.doOpen(ctx, url, formatNameRequest, cfg); err != nil {
+				logger.Errorf(ctx, "unable to open: %v", err)
+				o.Close(ctx)
+			}
+		})
+	} else {
+		if err := o.doOpen(ctx, url, formatNameRequest, cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	return o, nil
+}
+
+func (o *Output) doOpen(
+	ctx context.Context,
+	url *url.URL,
+	formatNameRequest string,
+	cfg OutputConfig,
+) error {
 	logger.Debugf(observability.OnInsecureDebug(ctx), "URL: %s", url)
 	formatContext, err := astiav.AllocOutputFormatContext(
 		nil,
@@ -204,18 +228,18 @@ func NewOutputFromURL(
 		url.String(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("allocating output format context failed using URL '%s': %w", url, err)
+		return fmt.Errorf("allocating output format context failed using URL '%s': %w", url, err)
 	}
 	if formatContext == nil {
 		// TODO: is there a way to extract the actual error code or something?
-		return nil, fmt.Errorf("unable to allocate the output format context")
+		return fmt.Errorf("unable to allocate the output format context")
 	}
 	o.FormatContext = formatContext
 	setFinalizerFree(ctx, o.FormatContext)
 
 	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
 		// if output is not a file then nothing else to do
-		return o, nil
+		return nil
 	}
 	logger.Tracef(ctx, "destination '%s' is a file", url)
 
@@ -226,7 +250,7 @@ func NewOutputFromURL(
 		o.Dictionary,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
+		return fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
 	}
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
@@ -235,7 +259,11 @@ func NewOutputFromURL(
 	formatName := o.FormatContext.OutputFormat().Name()
 	logger.Debugf(ctx, "output format name: '%s'", formatName)
 
-	return o, nil
+	if cfg.OnOpened != nil {
+		cfg.OnOpened(ctx, o)
+	}
+
+	return nil
 }
 
 func (o *Output) Close(
