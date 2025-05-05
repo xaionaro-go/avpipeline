@@ -18,7 +18,7 @@ type Retry[T Abstract] struct {
 	*closeChan
 	Factory      func(context.Context) (T, error)
 	OnStart      func(context.Context, T) error
-	OnEnd        func(context.Context, T, error) error
+	OnError      func(context.Context, T, error) error
 	Kernel       T
 	KernelIsSet  bool
 	KernelLocker xsync.Mutex
@@ -29,17 +29,17 @@ func NewRetry[T Abstract](
 	ctx context.Context,
 	factory func(context.Context) (T, error),
 	onStart func(context.Context, T) error,
-	onEnd func(context.Context, T, error) error,
+	onError func(context.Context, T, error) error,
 ) *Retry[T] {
 	r := &Retry[T]{
 		closeChan: newCloseChan(),
 		Factory:   factory,
 		OnStart:   onStart,
-		OnEnd:     onEnd,
+		OnError:   onError,
 	}
 	observability.Go(ctx, func() {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
-			r.start(ctx)
+			r.startIfNeeded(ctx)
 		})
 	})
 	return r
@@ -48,12 +48,14 @@ func NewRetry[T Abstract](
 var _ Abstract = (*Retry[Abstract])(nil)
 var _ packet.Source = (*Retry[Abstract])(nil)
 
-func (r *Retry[T]) start(
+func (r *Retry[T]) startIfNeeded(
 	ctx context.Context,
 ) {
 	if r.KernelIsSet || r.KernelError != nil {
 		return
 	}
+	logger.Debugf(ctx, "start")
+	defer logger.Debugf(ctx, "/start")
 
 	for {
 		if err := r.checkStatus(ctx); err != nil {
@@ -65,6 +67,7 @@ func (r *Retry[T]) start(
 		}
 
 		k, err := r.Factory(ctx)
+		logger.Debugf(ctx, "factory results: %p %v", k, err)
 		if err == nil {
 			if r.OnStart != nil {
 				err := r.OnStart(ctx, k)
@@ -74,18 +77,19 @@ func (r *Retry[T]) start(
 					return
 				}
 			}
+			logger.Debugf(ctx, "set kernel")
 			r.Kernel = k
 			r.KernelIsSet = true
 			return
 		}
 
-		if r.OnEnd == nil {
+		if r.OnError == nil {
 			r.KernelError = err
 			r.Close(ctx)
 			return
 		}
 
-		err = r.OnEnd(ctx, k, err)
+		err = r.OnError(ctx, k, err)
 		switch {
 		case err == nil:
 		case errors.As(err, &ErrRetry{}):
@@ -121,27 +125,33 @@ func (r *Retry[T]) retry(
 
 			k, err := r.getKernel(ctx)
 			if err != nil {
+				logger.Debugf(ctx, "unset kernel")
 				r.Kernel = zeroValue
 				r.KernelIsSet = false
 				return fmt.Errorf("unable to get kernel: %w", err)
 			}
 
 			err = callback(k)
-			if r.OnEnd != nil {
-				err = r.OnEnd(ctx, k, err)
+			if err == nil {
+				return nil
+			}
+			if r.OnError != nil {
+				err = r.OnError(ctx, k, err)
 				switch {
 				case err == nil:
+					return nil
 				case errors.As(err, &ErrRetry{}):
 				default:
+					logger.Debugf(ctx, "unset kernel")
+					r.Kernel = zeroValue
+					r.KernelIsSet = false
 					r.KernelError = err
 					r.Close(ctx)
 					return err
 				}
 			}
-			if err == nil {
-				return nil
-			}
 
+			logger.Debugf(ctx, "unset kernel")
 			r.Kernel = zeroValue
 			r.KernelIsSet = false
 		}
@@ -156,7 +166,7 @@ func (r *Retry[T]) getKernel(
 		return zeroValue, r.KernelError
 	}
 
-	r.start(ctx)
+	r.startIfNeeded(ctx)
 	return r.Kernel, r.KernelError
 }
 
@@ -197,6 +207,7 @@ func (r *Retry[T]) Close(ctx context.Context) error {
 			if err != nil {
 				logger.Errorf(ctx, "unable to close the kernel: %v", err)
 			}
+			logger.Debugf(ctx, "unset kernel")
 			r.KernelIsSet = false
 		})
 	})

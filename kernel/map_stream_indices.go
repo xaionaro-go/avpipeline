@@ -239,11 +239,14 @@ func (m *MapStreamIndices) sendInputPacket(
 
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	outputPacketsCh <- packet.BuildOutput(
+	outPkt := packet.BuildOutput(
 		pkt,
 		outputStream,
 		m,
 	)
+	m.Locker.UDo(ctx, func() {
+		outputPacketsCh <- outPkt
+	})
 	return nil
 }
 
