@@ -10,6 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/xsync"
 )
 
 type AbstractNode interface {
@@ -38,6 +39,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	PushFramesTo         PushFramesTos
 	InputPacketCondition packetcondition.Condition
 	InputFrameCondition  framecondition.Condition
+	Locker               xsync.Mutex
 
 	CustomData C
 }
@@ -58,7 +60,9 @@ func NewNodeFromKernel[T kernel.Abstract](
 	return NewNodeWithCustomDataFromKernel[struct{}](ctx, kernel, opts...)
 }
 
-func NewNodeWithCustomData[C any, T processor.Abstract](processor T) *NodeWithCustomData[C, T] {
+func NewNodeWithCustomData[C any, T processor.Abstract](
+	processor T,
+) *NodeWithCustomData[C, T] {
 	return &NodeWithCustomData[C, T]{
 		NodeStatistics: &NodeStatistics{},
 		Processor:      processor,
@@ -80,51 +84,81 @@ func NewNodeWithCustomDataFromKernel[C any, T kernel.Abstract](
 }
 
 func (n *NodeWithCustomData[C, T]) GetStatistics() *NodeStatistics {
-	return n.NodeStatistics
+	return xsync.DoR1(context.TODO(), &n.Locker, func() *NodeStatistics {
+		return n.NodeStatistics
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
-	return n.Processor
+	return xsync.DoR1(context.TODO(), &n.Locker, func() processor.Abstract {
+		return n.Processor
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
-	return n.PushPacketsTo
+	return xsync.DoR1(context.TODO(), &n.Locker, func() PushPacketsTos {
+		return n.PushPacketsTo
+	})
 }
 
-func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition) {
-	n.PushPacketsTo.Add(dst, conds...)
+func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
+	dst AbstractNode,
+	conds ...packetcondition.Condition,
+) {
+	n.Locker.Do(context.TODO(), func() {
+		n.PushPacketsTo.Add(dst, conds...)
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
-	n.PushPacketsTo = s
+	n.Locker.Do(context.TODO(), func() {
+		n.PushPacketsTo = s
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushFramesTos() PushFramesTos {
-	return n.PushFramesTo
+	return xsync.DoR1(context.TODO(), &n.Locker, func() PushFramesTos {
+		return n.PushFramesTo
+	})
 }
 
-func (n *NodeWithCustomData[C, T]) AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition) {
-	n.PushFramesTo.Add(dst, conds...)
+func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
+	dst AbstractNode,
+	conds ...framecondition.Condition,
+) {
+	n.Locker.Do(context.TODO(), func() {
+		n.PushFramesTo.Add(dst, conds...)
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
-	n.PushFramesTo = s
+	n.Locker.Do(context.TODO(), func() {
+		n.PushFramesTo = s
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetInputPacketCondition() packetcondition.Condition {
-	return n.InputPacketCondition
+	return xsync.DoR1(context.TODO(), &n.Locker, func() packetcondition.Condition {
+		return n.InputPacketCondition
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetInputPacketCondition(cond packetcondition.Condition) {
-	n.InputPacketCondition = cond
+	n.Locker.Do(context.TODO(), func() {
+		n.InputPacketCondition = cond
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetInputFrameCondition() framecondition.Condition {
-	return n.InputFrameCondition
+	return xsync.DoR1(context.TODO(), &n.Locker, func() framecondition.Condition {
+		return n.InputFrameCondition
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) SetInputFrameCondition(cond framecondition.Condition) {
-	n.InputFrameCondition = cond
+	n.Locker.Do(context.TODO(), func() {
+		n.InputFrameCondition = cond
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) String() string {
@@ -136,6 +170,13 @@ func (n *NodeWithCustomData[C, T]) DotString(withStats bool) string {
 }
 
 func (n *NodeWithCustomData[C, T]) DotBlockContentStringWriteTo(
+	w io.Writer,
+	alreadyPrinted map[processor.Abstract]struct{},
+) {
+	n.dotBlockContentStringWriteTo(w, alreadyPrinted)
+}
+
+func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {

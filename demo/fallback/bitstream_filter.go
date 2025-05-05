@@ -16,7 +16,7 @@ func tryNewBSF(
 	ctx context.Context,
 	codecID astiav.CodecID,
 ) *avpipeline.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
-	recoderBSFName := bitstreamfilter.NameMP4ToAnnexB(codecID)
+	recoderBSFName := bitstreamfilter.NameMP4ToMP2(codecID)
 	if recoderBSFName == bitstreamfilter.NameNull {
 		return nil
 	}

@@ -108,47 +108,51 @@ func (n *NodeWithCustomData[C, T]) Serve(
 				return
 			}
 			logger.Tracef(ctx, "pulled from %s a packet with stream index %d", n.Processor, pkt.Packet.StreamIndex())
-			pushFurther(
-				ctx, n, pkt, n.PushPacketsTo, serveConfig,
-				func(
-					pkt packet.Output,
-				) packet.Input {
-					return packet.BuildInput(
-						packet.CloneAsReferenced(pkt.Packet),
-						pkt.Stream,
-						pkt.Source,
-					)
-				},
-				func(n AbstractNode) packetcondition.Condition { return n.GetInputPacketCondition() },
-				func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
-				func(p packet.Input) { packet.Pool.Put(p.Packet) },
-				func(p packet.Output) { packet.Pool.Put(p.Packet) },
-			)
+			n.Locker.Do(ctx, func() {
+				pushFurther(
+					ctx, n, pkt, n.PushPacketsTo, serveConfig,
+					func(
+						pkt packet.Output,
+					) packet.Input {
+						return packet.BuildInput(
+							packet.CloneAsReferenced(pkt.Packet),
+							pkt.Stream,
+							pkt.Source,
+						)
+					},
+					func(n AbstractNode) packetcondition.Condition { return n.GetInputPacketCondition() },
+					func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
+					func(p packet.Input) { packet.Pool.Put(p.Packet) },
+					func(p packet.Output) { packet.Pool.Put(p.Packet) },
+				)
+			})
 		case f, ok := <-n.Processor.OutputFrameChan():
 			if !ok {
 				sendErr(io.EOF)
 				return
 			}
-			pushFurther(
-				ctx, n, f, n.PushFramesTo, serveConfig,
-				func(
-					f frame.Output,
-				) frame.Input {
-					return frame.BuildInput(
-						frame.CloneAsReferenced(f.Frame),
-						f.CodecContext,
-						f.StreamIndex, f.StreamsCount,
-						f.StreamDuration,
-						f.TimeBase,
-						f.Pos,
-						f.Duration,
-					)
-				},
-				func(n AbstractNode) framecondition.Condition { return n.GetInputFrameCondition() },
-				func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
-				func(f frame.Input) { frame.Pool.Put(f.Frame) },
-				func(f frame.Output) { frame.Pool.Put(f.Frame) },
-			)
+			n.Locker.Do(ctx, func() {
+				pushFurther(
+					ctx, n, f, n.PushFramesTo, serveConfig,
+					func(
+						f frame.Output,
+					) frame.Input {
+						return frame.BuildInput(
+							frame.CloneAsReferenced(f.Frame),
+							f.CodecContext,
+							f.StreamIndex, f.StreamsCount,
+							f.StreamDuration,
+							f.TimeBase,
+							f.Pos,
+							f.Duration,
+						)
+					},
+					func(n AbstractNode) framecondition.Condition { return n.GetInputFrameCondition() },
+					func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
+					func(f frame.Input) { frame.Pool.Put(f.Frame) },
+					func(f frame.Output) { frame.Pool.Put(f.Frame) },
+				)
+			})
 		}
 	}
 }
@@ -181,6 +185,11 @@ func pushFurther[
 	mediaType := outputObjPtr.GetMediaType()
 	incrementCounters(&n.FramesWrote, mediaType)
 
+	if len(pushTos) == 0 {
+		var zeroValue O
+		logger.Debugf(ctx, "nowhere to push to a %T", zeroValue)
+		return
+	}
 	for _, pushTo := range pushTos {
 		inputObj := buildInput(outputObj)
 		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, inputObj) {
@@ -190,29 +199,31 @@ func pushFurther[
 
 		dst := pushTo.Node
 
-		inputCond := getInputCondition(dst)
-		if any(inputCond) != nil && !inputCond.Match(ctx, inputObj) {
-			logger.Tracef(ctx, "input condition %s was not met", inputCond)
-			continue
-		}
-		dstStats := dst.GetStatistics()
-
-		pushChan := getPushChan(dst.GetProcessor())
-		logger.Tracef(ctx, "pushing to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-		if serveConfig.FrameDrop {
-			select {
-			case pushChan <- inputObj:
-			default:
-				logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
-				incrementCounters(&dstStats.FramesMissed, mediaType)
-				poolPutInput(inputObj)
-				continue
+		n.Locker.UDo(ctx, func() {
+			inputCond := getInputCondition(dst)
+			if any(inputCond) != nil && !inputCond.Match(ctx, inputObj) {
+				logger.Tracef(ctx, "input condition %s was not met", inputCond)
+				return
 			}
-		} else {
-			pushChan <- inputObj
-		}
-		dstStats.BytesCountRead.Add(objSize)
-		incrementCounters(&dstStats.FramesRead, mediaType)
-		logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+			dstStats := dst.GetStatistics()
+
+			pushChan := getPushChan(dst.GetProcessor())
+			logger.Tracef(ctx, "pushing to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+			if serveConfig.FrameDrop {
+				select {
+				case pushChan <- inputObj:
+				default:
+					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
+					incrementCounters(&dstStats.FramesMissed, mediaType)
+					poolPutInput(inputObj)
+					return
+				}
+			} else {
+				pushChan <- inputObj
+			}
+			dstStats.BytesCountRead.Add(objSize)
+			incrementCounters(&dstStats.FramesRead, mediaType)
+			logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+		})
 	}
 }

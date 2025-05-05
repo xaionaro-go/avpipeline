@@ -13,7 +13,6 @@ import (
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/packet/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/observability"
 )
@@ -47,7 +46,7 @@ func NewSwitch[T Abstract](
 	return sw
 }
 
-func (sw *Switch[T]) GetKeepUnless() condition.Condition {
+func (sw *Switch[T]) GetKeepUnless() packetcondition.Condition {
 	ptr := xatomic.LoadPointer(&sw.KeepUnlessPacketCond)
 	if ptr == nil {
 		return nil
@@ -55,11 +54,11 @@ func (sw *Switch[T]) GetKeepUnless() condition.Condition {
 	return *ptr
 }
 
-func (sw *Switch[T]) SetKeepUnless(cond condition.Condition) {
+func (sw *Switch[T]) SetKeepUnless(cond packetcondition.Condition) {
 	xatomic.StorePointer(&sw.KeepUnlessPacketCond, ptr(cond))
 }
 
-func (sw *Switch[T]) GetVerifySwitchOutput() condition.Condition {
+func (sw *Switch[T]) GetVerifySwitchOutput() packetcondition.Condition {
 	ptr := xatomic.LoadPointer(&sw.VerifySwitchOutputPacketCond)
 	if ptr == nil {
 		return nil
@@ -67,7 +66,7 @@ func (sw *Switch[T]) GetVerifySwitchOutput() condition.Condition {
 	return *ptr
 }
 
-func (sw *Switch[T]) SetVerifySwitchOutput(cond condition.Condition) {
+func (sw *Switch[T]) SetVerifySwitchOutput(cond packetcondition.Condition) {
 	xatomic.StorePointer(&sw.VerifySwitchOutputPacketCond, ptr(cond))
 }
 
@@ -204,7 +203,7 @@ func (sw *Switch[T]) doVerifySwitchOutput(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 	nextKernelIndex int32,
-	verifySwitchOutput condition.Condition,
+	verifySwitchOutput packetcondition.Condition,
 ) (_ret bool, _err error) {
 	logger.Tracef(ctx, "doVerifySwitchOutput()")
 	defer func() { logger.Tracef(ctx, "/doVerifySwitchOutput(): %v %v", _ret, _err) }()

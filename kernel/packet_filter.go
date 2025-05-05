@@ -77,7 +77,7 @@ func (f *PacketFilter) String() string {
 	case f.FrameFilter != nil:
 		return fmt.Sprintf("ConditionFilter(frame:%s)", f.PacketFilter)
 	default:
-		return fmt.Sprintf("ConditionFilter()")
+		return "ConditionFilter()"
 	}
 }
 

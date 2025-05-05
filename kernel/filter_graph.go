@@ -94,7 +94,7 @@ func (f *FilterGraph[T]) SendInputFrame(
 }
 
 func (f *FilterGraph[T]) String() string {
-	return fmt.Sprintf("Filter")
+	return "Filter"
 }
 
 func (f *FilterGraph[T]) Close(ctx context.Context) error {

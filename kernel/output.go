@@ -98,7 +98,11 @@ func NewOutputFromURL(
 	urlString string,
 	streamKey secret.String,
 	cfg OutputConfig,
-) (_ *Output, _err error) {
+) (_ret *Output, _err error) {
+	logger.Debugf(ctx, "NewOutputFromURL(ctx, '%s', streamKey, %#+v)", urlString, cfg)
+	defer func() {
+		logger.Debugf(ctx, "/NewOutputFromURL(ctx, '%s', streamKey, %#+v): %p %v", urlString, cfg, _ret, _err)
+	}()
 	if urlString == "" {
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
@@ -128,6 +132,7 @@ func NewOutputFromURL(
 		waitingKeyFrames: make(map[int]struct{}),
 	}
 
+	rtmpAppName := strings.Trim(url.Path, "/")
 	if streamKey.Get() != "" {
 		switch {
 		case url.Path == "" || url.Path == "/":
@@ -172,6 +177,25 @@ func NewOutputFromURL(
 			o.Dictionary.Set(opt.Key, opt.Value, 0)
 		}
 	}
+
+	func() {
+		switch url.Scheme {
+		case "rtmp", "rtmps":
+			if o.Dictionary == nil {
+				o.Dictionary = astiav.NewDictionary()
+				setFinalizerFree(ctx, o.Dictionary)
+			}
+
+			for _, opt := range cfg.CustomOptions {
+				if opt.Key == "rtmp_app" {
+					return // is already set, nothing is required from us here
+				}
+			}
+
+			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+			logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
+		}
+	}()
 
 	logger.Debugf(observability.OnInsecureDebug(ctx), "URL: %s", url)
 	formatContext, err := astiav.AllocOutputFormatContext(

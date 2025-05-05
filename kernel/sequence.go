@@ -229,14 +229,14 @@ func (s *Sequence[T]) Generate(
 	readerWG.Add(1)
 	observability.Go(ctx, func() {
 		defer readerWG.Done()
-		for _ = range outputPacketsCh {
+		for range outputPacketsCh {
 			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
 		}
 	})
 	readerWG.Add(1)
 	observability.Go(ctx, func() {
 		defer readerWG.Done()
-		for _ = range outputFramesCh {
+		for range outputFramesCh {
 			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
 		}
 	})

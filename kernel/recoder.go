@@ -100,7 +100,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		defer wg.Done()
 		for pkt := range resultCh {
 			r.pendingPackets = append(r.pendingPackets, pkt)
-			if len(r.pendingPackets) > len(r.pendingPackets) {
+			if len(r.pendingPackets) > pendingPacketsLimit {
 				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 				r.pendingPackets = r.pendingPackets[1:]
 			}
