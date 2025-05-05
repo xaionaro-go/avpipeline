@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"reflect"
 	"sync/atomic"
 
@@ -15,16 +16,21 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
 )
 
 type InputConfig struct {
 	CustomOptions types.DictionaryItems
+	AsyncOpen     bool
+	OnOpened      func(context.Context, *Input) error
 }
 
 type Input struct {
 	*closeChan
+	initialized chan struct{}
+
 	*astiav.FormatContext
 	*astiav.Dictionary
 
@@ -39,22 +45,22 @@ var nextInputID atomic.Uint64
 
 func NewInputFromURL(
 	ctx context.Context,
-	url string,
+	urlString string,
 	authKey secret.String,
 	cfg InputConfig,
 ) (*Input, error) {
-	if url == "" {
+	if urlString == "" {
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
-	if authKey.Get() != "" {
-		return nil, fmt.Errorf("authkeys are not supported, yet")
+	if urlParsed, err := url.Parse(urlString); err == nil && urlParsed.Scheme != "" {
+		urlString += "/"
 	}
-
 	i := &Input{
 		ID:  InputID(nextInputID.Add(1)),
-		URL: url,
+		URL: urlString,
 
-		closeChan: newCloseChan(),
+		initialized: make(chan struct{}),
+		closeChan:   newCloseChan(),
 	}
 
 	if len(cfg.CustomOptions) > 0 {
@@ -76,9 +82,39 @@ func NewInputFromURL(
 		return nil, fmt.Errorf("unable to allocate a format context")
 	}
 
-	if err := i.FormatContext.OpenInput(url, nil, i.Dictionary); err != nil {
+	if cfg.AsyncOpen {
+		observability.Go(ctx, func() {
+			if err := i.doOpen(ctx, urlString, authKey, cfg); err != nil {
+				logger.Errorf(ctx, "unable to open: %v", err)
+				i.Close(ctx)
+			}
+		})
+	} else {
+		if err := i.doOpen(ctx, urlString, authKey, cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	return i, nil
+}
+
+func (i *Input) doOpen(
+	ctx context.Context,
+	urlString string,
+	authKey secret.String,
+	cfg InputConfig,
+) error {
+	urlWithSecret := urlString
+	if authKey.Get() != "" {
+		urlWithSecret += authKey.Get()
+	}
+	if err := i.FormatContext.OpenInput(urlWithSecret, nil, i.Dictionary); err != nil {
 		i.FormatContext.Free()
-		return nil, fmt.Errorf("unable to open input by URL '%s': %w", url, err)
+		if authKey.Get() != "" {
+			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>': %w", urlString, err)
+		} else {
+			return fmt.Errorf("unable to open input by URL '%s': %w", urlString, err)
+		}
 	}
 	setFinalizer(ctx, i, func(i *Input) {
 		i.FormatContext.CloseInput()
@@ -86,14 +122,19 @@ func NewInputFromURL(
 	})
 
 	if err := i.FormatContext.FindStreamInfo(nil); err != nil {
-		return nil, fmt.Errorf("unable to get stream info: %w", err)
+		return fmt.Errorf("unable to get stream info: %w", err)
 	}
 
 	for _, stream := range i.FormatContext.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
 	}
 
-	return i, nil
+	if cfg.OnOpened != nil {
+		cfg.OnOpened(ctx, i)
+	}
+	close(i.initialized)
+
+	return nil
 }
 
 func (i *Input) Close(
@@ -133,6 +174,12 @@ func (i *Input) Generate(
 	defer func() {
 		i.closeChan.Close(ctx)
 	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-i.initialized:
+	}
 
 	for {
 		select {

@@ -54,13 +54,21 @@ const (
 	NameVVCMP4toAnnexB     = Name("vvc_mp4toannexb")
 )
 
-func NameMP4ToAnnexB(codecID astiav.CodecID) Name {
+func NameMP4ToMP2(codecID astiav.CodecID) Name {
 	switch codecID {
 	case astiav.CodecIDH264:
 		return NameH264MP4toAnnexB
 	case astiav.CodecIDHevc:
 		return NameHEVCMP4toAnnexB
 		// TODO: add the case for 'NameVVCMP4toAnnexB'
+	}
+	return NameNull
+}
+
+func NameMP2ToMP4(codecID astiav.CodecID) Name {
+	switch codecID {
+	case astiav.CodecIDAac:
+		return NameAACADTSToASC
 	}
 	return NameNull
 }

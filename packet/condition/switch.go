@@ -11,11 +11,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
+type FuncOnAfterSwitch func(ctx context.Context, from int32, to int32)
+
 type Switch struct {
 	CurrentValue atomic.Int32
 	NextValue    atomic.Int32
 
 	KeepUnlessPacketCond *Condition
+	OnAfterSwitch        *FuncOnAfterSwitch
 }
 
 func NewSwitch() *Switch {
@@ -34,6 +37,18 @@ func (s *Switch) GetKeepUnless() Condition {
 
 func (s *Switch) SetKeepUnless(cond Condition) {
 	xatomic.StorePointer(&s.KeepUnlessPacketCond, ptr(cond))
+}
+
+func (s *Switch) GetOnAfterSwitch() FuncOnAfterSwitch {
+	ptr := xatomic.LoadPointer(&s.OnAfterSwitch)
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func (s *Switch) SetOnAfterSwitch(fn FuncOnAfterSwitch) {
+	xatomic.StorePointer(&s.OnAfterSwitch, ptr(fn))
 }
 
 func (s *Switch) GetValue(
@@ -80,7 +95,13 @@ func (s *SwitchCondition) Match(
 	commitToNextValue := func() {
 		logger.Debugf(ctx, "found a good entrance and switched to the next value: %d -> %d", currentValue, nextValue)
 		s.CurrentValue.Store(int32(nextValue))
-		s.NextValue.CompareAndSwap(nextValue, math.MinInt32)
+		if !s.NextValue.CompareAndSwap(nextValue, math.MinInt32) {
+			return
+		}
+		onAfter := s.GetOnAfterSwitch()
+		if onAfter != nil {
+			onAfter(ctx, currentValue, nextValue)
+		}
 	}
 
 	if nextValue == currentValue {

@@ -48,6 +48,11 @@ type OutputInputStream struct {
 	*astiav.Stream
 }
 
+type pendingPacket struct {
+	*astiav.Packet
+	Source packet.Source
+}
+
 type Output struct {
 	ID            OutputID
 	StreamKey     secret.String
@@ -64,7 +69,7 @@ type Output struct {
 	url              string
 	urlParsed        *url.URL
 	started          bool
-	pendingPackets   []*astiav.Packet
+	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
 
 	*closeChan
@@ -431,7 +436,9 @@ func (o *Output) SendInputPacket(
 
 	logger.Tracef(ctx, "sending the current packet")
 
-	err = xsync.DoA4R1(ctx, &o.SenderLocker, o.send, ctx, inputStreamsCount, pkt, outputStream)
+	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
+		return o.send(ctx, inputStreamsCount, pkt, inputPkt.Source, outputStream)
+	})
 	if err != nil {
 		return err
 	}
@@ -455,10 +462,11 @@ func (o *Output) send(
 	ctx context.Context,
 	expectedStreamsCount int,
 	pkt *astiav.Packet,
+	source packet.Source,
 	outputStream *OutputStream,
 ) error {
 	if o.started {
-		return o.doWritePacket(ctx, pkt, outputStream)
+		return o.doWritePacket(ctx, pkt, source, outputStream)
 	}
 
 	activeStreamCount := o.FormatContext.NbStreams()
@@ -480,7 +488,10 @@ func (o *Output) send(
 			logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
 		}
 		if keyFrame && waitingKeyFrame {
-			o.pendingPackets = append(o.pendingPackets, packet.CloneAsReferenced(pkt))
+			o.pendingPackets = append(o.pendingPackets, pendingPacket{
+				Packet: packet.CloneAsReferenced(pkt),
+				Source: source,
+			})
 			if len(o.pendingPackets) > pendingPacketsLimit {
 				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 				o.pendingPackets = o.pendingPackets[1:]
@@ -488,7 +499,10 @@ func (o *Output) send(
 		}
 		return nil
 	} else {
-		o.pendingPackets = append(o.pendingPackets, packet.CloneAsReferenced(pkt))
+		o.pendingPackets = append(o.pendingPackets, pendingPacket{
+			Packet: packet.CloneAsReferenced(pkt),
+			Source: source,
+		})
 	}
 	o.started = true
 
@@ -504,8 +518,13 @@ func (o *Output) send(
 	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), outputStream.CodecParameters().MediaType())
 
 	for _, pkt := range o.pendingPackets {
-		err := o.doWritePacket(belt.WithField(ctx, "reason", "pending_packet"), pkt, outputStream)
-		packet.Pool.Put(pkt)
+		err := o.doWritePacket(
+			belt.WithField(ctx, "reason", "pending_packet"),
+			pkt.Packet,
+			pkt.Source,
+			outputStream,
+		)
+		packet.Pool.Put(pkt.Packet)
 		if err != nil {
 			return fmt.Errorf("unable to write a pending packet: %w", err)
 		}
@@ -517,6 +536,7 @@ func (o *Output) send(
 func (o *Output) doWritePacket(
 	ctx context.Context,
 	pkt *astiav.Packet,
+	source packet.Source,
 	outputStream *OutputStream,
 ) (_err error) {
 	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, o)) {
@@ -543,8 +563,8 @@ func (o *Output) doWritePacket(
 	}
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
-			pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS,
+			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
+			pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
