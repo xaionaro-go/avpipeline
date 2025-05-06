@@ -274,25 +274,29 @@ func (o *Output) Close(
 	o.closeChan.Close(ctx)
 
 	var result []error
-	if o.started && len(o.FormatContext.Streams()) != 0 {
-		err := func() error {
-			defer func() {
-				r := recover()
-				if r != nil {
-					_err = fmt.Errorf("got panic: %v:\n%s\n", r, debug.Stack())
-				}
+	o.formatContextLocker.Do(ctx, func() {
+		if o.started && len(o.FormatContext.Streams()) != 0 {
+			err := func() error {
+				defer func() {
+					r := recover()
+					if r != nil {
+						result = append(result, fmt.Errorf("got panic: %v:\n%s\n", r, debug.Stack()))
+					}
+				}()
+				logger.Debugf(ctx, "writing the trailer")
+				return o.FormatContext.WriteTrailer()
 			}()
-			return o.FormatContext.WriteTrailer()
-		}()
-		if err != nil {
-			result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
+			if err != nil {
+				result = append(result, fmt.Errorf("unable to write the tailer: %w", err))
+			}
 		}
-	}
-	if o.ioContext != nil {
-		if err := o.ioContext.Close(); err != nil {
-			result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
+		if o.ioContext != nil {
+			if err := o.ioContext.Close(); err != nil {
+				result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
+			}
 		}
-	}
+		o.FormatContext = nil
+	})
 	if o.proxy != nil {
 		if err := o.proxy.Close(); err != nil {
 			result = append(result, fmt.Errorf("unable to close the TLS-proxy: %v", err))
@@ -521,7 +525,10 @@ func (o *Output) send(
 		return o.doWritePacket(ctx, pkt, source, outputStream)
 	}
 
-	activeStreamCount := o.FormatContext.NbStreams()
+	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() int {
+		return o.FormatContext.NbStreams()
+	})
+
 	if outputWaitForKeyFrames && (activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0) {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
@@ -558,9 +565,10 @@ func (o *Output) send(
 	}
 	o.started = true
 
-	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", o.FormatContext.NbStreams(), expectedStreamsCount, len(o.waitingKeyFrames))
+	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames))
 	var err error
 	o.formatContextLocker.Do(ctx, func() {
+		assert(ctx, o.FormatContext.Pb() != nil)
 		err = o.FormatContext.WriteHeader(nil)
 	})
 	if err != nil {
