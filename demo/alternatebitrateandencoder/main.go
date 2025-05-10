@@ -21,6 +21,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
@@ -96,16 +97,14 @@ func main() {
 	}
 	defer output.Close(ctx)
 
-	errCh := make(chan avpipeline.ErrNode, 10)
-	inputNode := avpipeline.NewNode(input)
-	var finalNode avpipeline.AbstractNode
+	errCh := make(chan node.Error, 10)
+	inputNode := node.New(input)
+	var finalNode node.Abstract
 	finalNode = inputNode
-	var encoderFactories []*codec.NaiveEncoderFactory
 	var recoders []*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
 		encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, "copy", 0, hwDeviceName, nil, nil)
-		encoderFactories = append(encoderFactories, encoderFactory)
 		recoder, err := kernel.NewRecoder(
 			ctx,
 			codec.NewNaiveDecoderFactory(ctx, 0, hwDeviceName, nil, nil),
@@ -119,12 +118,12 @@ func main() {
 		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodecs, hwDeviceName)
 		recoders = append(recoders, recoder)
 	}
-	var recodingNode avpipeline.AbstractNode
+	var recodingNode node.Abstract
 	var sw *kernel.Switch[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]
 	switch len(recoders) {
 	case 0:
 	case 1:
-		recodingNode = avpipeline.NewNodeFromKernel(
+		recodingNode = node.NewFromKernel(
 			ctx,
 			recoders[0],
 			processor.DefaultOptionsRecoder()...,
@@ -135,7 +134,7 @@ func main() {
 			condition.MediaType(astiav.MediaTypeVideo),
 			condition.IsKeyFrame(true),
 		})
-		recodingNode = avpipeline.NewNodeFromKernel(
+		recodingNode = node.NewFromKernel(
 			ctx,
 			sw,
 			processor.DefaultOptionsRecoder()...,
@@ -154,7 +153,7 @@ func main() {
 			)
 		}
 	}
-	finalNode.AddPushPacketsTo(avpipeline.NewNode(output))
+	finalNode.AddPushPacketsTo(node.New(output))
 	assert(ctx, len(finalNode.GetPushPacketsTos()) == 1, len(finalNode.GetPushPacketsTos()))
 
 	l.Debugf("resulting pipeline: %s", inputNode.String())
@@ -162,8 +161,10 @@ func main() {
 
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
-			FrameDrop: *frameDrop,
+		avpipeline.Serve(ctx, avpipeline.ServeConfig{
+			EachNode: node.ServeConfig{
+				FrameDrop: *frameDrop,
+			},
 		}, errCh, inputNode)
 	})
 

@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -85,15 +86,15 @@ func TestRecoderNoFailure(t *testing.T) {
 			}
 			defer output.Close(ctx)
 
-			errCh := make(chan avpipeline.ErrNode, 10)
-			inputNode := avpipeline.NewNodeFromKernel(
+			errCh := make(chan node.Error, 10)
+			inputNode := node.NewFromKernel(
 				ctx,
 				input,
 				processor.OptionQueueSizeInputPacket(1),
 				processor.OptionQueueSizeOutputPacket(1),
 				processor.OptionQueueSizeError(2),
 			)
-			var finalNode avpipeline.AbstractNode
+			var finalNode node.Abstract
 			finalNode = inputNode
 			encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, acodec, 0, "", nil, nil)
 			recoder, err := kernel.NewRecoder(
@@ -107,7 +108,7 @@ func TestRecoderNoFailure(t *testing.T) {
 			}
 			defer recoder.Close(ctx)
 			l.Debugf("initialized a recoder to %s (hwdev:%s)...", vcodec, "")
-			recodingNode := avpipeline.NewNodeFromKernel(
+			recodingNode := node.NewFromKernel(
 				ctx,
 				recoder,
 				processor.OptionQueueSizeInputPacket(100),
@@ -116,7 +117,7 @@ func TestRecoderNoFailure(t *testing.T) {
 			)
 			inputNode.PushPacketsTos.Add(recodingNode)
 			finalNode = recodingNode
-			finalNode.AddPushPacketsTo(avpipeline.NewNodeFromKernel(
+			finalNode.AddPushPacketsTo(node.NewFromKernel(
 				ctx,
 				output,
 				processor.OptionQueueSizeInputPacket(600),
@@ -128,8 +129,10 @@ func TestRecoderNoFailure(t *testing.T) {
 
 			observability.Go(ctx, func() {
 				defer cancelFn()
-				avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
-					FrameDrop: false,
+				avpipeline.Serve(ctx, avpipeline.ServeConfig{
+					EachNode: node.ServeConfig{
+						FrameDrop: false,
+					},
 				}, errCh, inputNode)
 			})
 

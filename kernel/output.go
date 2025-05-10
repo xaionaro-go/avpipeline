@@ -199,6 +199,7 @@ func NewOutputFromURL(
 		}
 	}()
 
+	logger.Debugf(ctx, "isAsync: %t", cfg.AsyncOpen)
 	if cfg.AsyncOpen {
 		observability.Go(ctx, func() {
 			if err := o.doOpen(ctx, url, formatNameRequest, cfg); err != nil {
@@ -220,7 +221,10 @@ func (o *Output) doOpen(
 	url *url.URL,
 	formatNameRequest string,
 	cfg OutputConfig,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "doOpen(ctx, url, '%s', %#+v)", formatNameRequest, cfg)
+	defer func() { logger.Debugf(ctx, "/doOpen(ctx, url, '%s', %#+v): %v", formatNameRequest, cfg, _err) }()
+
 	logger.Debugf(observability.OnInsecureDebug(ctx), "URL: %s", url)
 	formatContext, err := astiav.AllocOutputFormatContext(
 		nil,
@@ -236,6 +240,17 @@ func (o *Output) doOpen(
 	}
 	o.FormatContext = formatContext
 	setFinalizerFree(ctx, o.FormatContext)
+
+	defer func() {
+		if _err == nil {
+			if cfg.OnOpened != nil {
+				cfg.OnOpened(ctx, o)
+			}
+		}
+	}()
+
+	formatName := o.FormatContext.OutputFormat().Name()
+	logger.Debugf(ctx, "output format name: '%s'", formatName)
 
 	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
 		// if output is not a file then nothing else to do
@@ -255,13 +270,6 @@ func (o *Output) doOpen(
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
 	o.urlParsed = url
-
-	formatName := o.FormatContext.OutputFormat().Name()
-	logger.Debugf(ctx, "output format name: '%s'", formatName)
-
-	if cfg.OnOpened != nil {
-		cfg.OnOpened(ctx, o)
-	}
 
 	return nil
 }
@@ -284,7 +292,9 @@ func (o *Output) Close(
 					}
 				}()
 				logger.Debugf(ctx, "writing the trailer")
-				return o.FormatContext.WriteTrailer()
+				err := o.FormatContext.WriteTrailer()
+				logger.Debugf(ctx, "write the trailer, result: %v", err)
+				return err
 			}()
 			if err != nil {
 				result = append(result, fmt.Errorf("unable to write the tailer: %w", err))

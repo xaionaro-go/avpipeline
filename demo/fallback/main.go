@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
@@ -89,7 +90,7 @@ func main() {
 		},
 	)
 	defer inputMain.Close(belt.WithFields(ctx, field.Map[string]{"reason": "program_end", "input": "main"}))
-	inputMainNode := avpipeline.NewNodeFromKernel(ctx, inputMain)
+	inputMainNode := node.NewFromKernel(ctx, inputMain)
 
 	// input nodes: fallback
 
@@ -97,7 +98,7 @@ func main() {
 	inputFallback, err := processor.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{})
 	assert(ctx, err == nil, err)
 	defer inputFallback.Close(belt.WithFields(ctx, field.Map[string]{"reason": "program_end", "input": "fallback"}))
-	inputFallbackNode := avpipeline.NewNode(inputFallback)
+	inputFallbackNode := node.New(inputFallback)
 
 	// output node
 
@@ -109,7 +110,7 @@ func main() {
 	)
 	assert(ctx, err == nil, err)
 	defer output.Close(belt.WithField(ctx, "reason", "program_end"))
-	outputNode := avpipeline.NewNode(output)
+	outputNode := node.New(output)
 
 	defer logger.Infof(ctx, "finishing: nodes")
 
@@ -128,7 +129,7 @@ func main() {
 		logger.Fatalf(ctx, "fallback is supported only for mpegts output format")
 	}
 
-	var nodeBSFMain, nodeBSFFallback *avpipeline.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
+	var nodeBSFMain, nodeBSFFallback *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
 	switch outputFormatName {
 	case "mpegts", "rtsp":
 		inputVideoCodecID := getVideoCodecNameFromStreams(
@@ -138,14 +139,14 @@ func main() {
 		nodeBSFFallback = tryNewBSF(ctx, inputVideoCodecID)
 	}
 
-	var filteredInputMain avpipeline.AbstractNode = inputMainNode
+	var filteredInputMain node.Abstract = inputMainNode
 	if nodeBSFMain != nil {
 		logger.Debugf(ctx, "inserting %s to the main pipeline", nodeBSFMain.Processor.Kernel)
 		filteredInputMain.AddPushPacketsTo(nodeBSFMain)
 		filteredInputMain = nodeBSFMain
 	}
 
-	var filteredInputFallback avpipeline.AbstractNode = inputFallbackNode
+	var filteredInputFallback node.Abstract = inputFallbackNode
 	if nodeBSFFallback != nil {
 		logger.Debugf(ctx, "inserting %s to the fallback pipeline", nodeBSFFallback.Processor.Kernel)
 		filteredInputFallback.AddPushPacketsTo(nodeBSFFallback)
@@ -193,7 +194,7 @@ func main() {
 			}),
 		},
 	)
-	pipelineInputs := avpipeline.Nodes[avpipeline.AbstractNode]{
+	pipelineInputs := node.Nodes[node.Abstract]{
 		inputMainNode,
 		inputFallbackNode,
 	}
@@ -204,14 +205,16 @@ func main() {
 
 	// start
 
-	errCh := make(chan avpipeline.ErrNode, 10)
+	errCh := make(chan node.Error, 10)
 	observability.Go(ctx, func() {
 		defer func() {
 			logger.Debugf(ctx, "cancelling context...")
 			cancelFn()
 		}()
-		avpipeline.ServeRecursively[avpipeline.AbstractNode](ctx, avpipeline.ServeConfig{
-			FrameDrop: *frameDrop,
+		avpipeline.Serve[node.Abstract](ctx, avpipeline.ServeConfig{
+			EachNode: node.ServeConfig{
+				FrameDrop: *frameDrop,
+			},
 		}, errCh, pipelineInputs...)
 	})
 	logger.Infof(ctx, "started")

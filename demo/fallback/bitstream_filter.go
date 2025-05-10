@@ -5,9 +5,9 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
+	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
@@ -15,7 +15,7 @@ import (
 func tryNewBSF(
 	ctx context.Context,
 	codecID astiav.CodecID,
-) *avpipeline.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
+) *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
 	recoderBSFName := bitstreamfilter.NameMP4ToMP2(codecID)
 	if recoderBSFName == bitstreamfilter.NameNull {
 		return nil
@@ -29,7 +29,7 @@ func tryNewBSF(
 		return nil
 	}
 
-	return avpipeline.NewNodeFromKernel(
+	return node.NewFromKernel(
 		ctx,
 		bitstreamFilter,
 		processor.DefaultOptionsOutput()...,

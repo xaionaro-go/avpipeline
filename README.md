@@ -15,7 +15,7 @@ For example:
 	input, err := processor.NewInputFromURL(ctx, fromURL, secret.New(""), kernel.InputConfig{})
 	assert(ctx, err == nil, err)
 	defer input.Close(ctx)
-	inputNode := avpipeline.NewNode(input)
+	inputNode := node.New(input)
 
 	// output node
 
@@ -27,20 +27,23 @@ For example:
 	)
 	assert(ctx, err == nil, err)
 	defer output.Close(ctx)
-	outputNode := avpipeline.NewNode(output)
+	outputNode := node.New(output)
 
 	// recoder node
 
+	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
 	recoder, err := processor.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil),
-		codec.NewNaiveEncoderFactory(ctx, "libx264", "copy", 0, "", nil, nil),
+		codec.NewNaiveDecoderFactory(ctx, 0, hwDevName, nil, nil),
+		codec.NewNaiveEncoderFactory(ctx, *videoCodec, "copy", 0, hwDevName, types.DictionaryItems{
+			{Key: "bf", Value: "0"}, // to disable B-frames
+		}, nil),
 		nil,
 	)
 	assert(ctx, err == nil, err)
 	defer recoder.Close(ctx)
-	logger.Debugf(ctx, "initialized a recoder to H264...")
-	recodingNode := avpipeline.NewNode(recoder)
+	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
+	recodingNode := node.New(recoder)
 
 	// route nodes: input -> recoder -> output
 
@@ -49,18 +52,15 @@ For example:
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
-	// prepare (optionally)
-
-	err := avpipeline.NotifyAboutPacketSourcesRecursively(ctx, nil, nodeInput)
-	assert(ctx, err == nil, err)
-
 	// start
 
-	errCh := make(chan avpipeline.ErrNode, 10)
+	errCh := make(chan node.Error, 10)
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
-			FrameDrop: false,
+		avpipeline.Serve(ctx, avpipeline.ServeConfig{
+			EachNode: node.ServeConfig{
+				FrameDrop: *frameDrop,
+			},
 		}, errCh, inputNode)
 	})
 

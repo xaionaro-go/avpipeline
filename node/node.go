@@ -1,4 +1,4 @@
-package avpipeline
+package node
 
 import (
 	"context"
@@ -15,14 +15,14 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type AbstractNode interface {
-	Serve(context.Context, ServeConfig, chan<- ErrNode)
+type Abstract interface {
+	Serve(context.Context, ServeConfig, chan<- Error)
 
 	GetPushPacketsTos() PushPacketsTos
-	AddPushPacketsTo(dst AbstractNode, conds ...packetcondition.Condition)
+	AddPushPacketsTo(dst Abstract, conds ...packetcondition.Condition)
 	SetPushPacketsTos(PushPacketsTos)
 	GetPushFramesTos() PushFramesTos
-	AddPushFramesTo(dst AbstractNode, conds ...framecondition.Condition)
+	AddPushFramesTo(dst Abstract, conds ...framecondition.Condition)
 	SetPushFramesTos(PushFramesTos)
 
 	GetStatistics() *NodeStatistics
@@ -42,27 +42,28 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputPacketCondition packetcondition.Condition
 	InputFrameCondition  framecondition.Condition
 	Locker               xsync.Mutex
+	Started              bool
 
 	CustomData C
 }
 
 type Node[T processor.Abstract] = NodeWithCustomData[struct{}, T]
 
-var _ AbstractNode = (*Node[processor.Abstract])(nil)
+var _ Abstract = (*Node[processor.Abstract])(nil)
 
-func NewNode[T processor.Abstract](processor T) *Node[T] {
-	return NewNodeWithCustomData[struct{}](processor)
+func New[T processor.Abstract](processor T) *Node[T] {
+	return NewWithCustomData[struct{}](processor)
 }
 
-func NewNodeFromKernel[T kernel.Abstract](
+func NewFromKernel[T kernel.Abstract](
 	ctx context.Context,
 	kernel T,
 	opts ...processor.Option,
 ) *Node[*processor.FromKernel[T]] {
-	return NewNodeWithCustomDataFromKernel[struct{}](ctx, kernel, opts...)
+	return NewWithCustomDataFromKernel[struct{}](ctx, kernel, opts...)
 }
 
-func NewNodeWithCustomData[C any, T processor.Abstract](
+func NewWithCustomData[C any, T processor.Abstract](
 	processor T,
 ) *NodeWithCustomData[C, T] {
 	return &NodeWithCustomData[C, T]{
@@ -71,12 +72,12 @@ func NewNodeWithCustomData[C any, T processor.Abstract](
 	}
 }
 
-func NewNodeWithCustomDataFromKernel[C any, T kernel.Abstract](
+func NewWithCustomDataFromKernel[C any, T kernel.Abstract](
 	ctx context.Context,
 	kernel T,
 	opts ...processor.Option,
 ) *NodeWithCustomData[C, *processor.FromKernel[T]] {
-	return NewNodeWithCustomData[C](
+	return NewWithCustomData[C](
 		processor.NewFromKernel(
 			ctx,
 			kernel,
@@ -104,7 +105,7 @@ func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
 }
 
 func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
-	dst AbstractNode,
+	dst Abstract,
 	conds ...packetcondition.Condition,
 ) {
 	n.Locker.Do(context.TODO(), func() {
@@ -127,7 +128,7 @@ func (n *NodeWithCustomData[C, T]) GetPushFramesTos() PushFramesTos {
 func RemovePushPacketsTo[C any, P processor.Abstract](
 	ctx context.Context,
 	from *NodeWithCustomData[C, P],
-	to AbstractNode,
+	to Abstract,
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushPacketsTo")
 	defer func() { defer logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
@@ -148,7 +149,7 @@ func RemovePushPacketsTo[C any, P processor.Abstract](
 func RemovePushFramesTo[C any, P processor.Abstract](
 	ctx context.Context,
 	from *NodeWithCustomData[C, P],
-	to AbstractNode,
+	to Abstract,
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushFramesTo")
 	defer func() { defer logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
@@ -167,7 +168,7 @@ func RemovePushFramesTo[C any, P processor.Abstract](
 }
 
 func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
-	dst AbstractNode,
+	dst Abstract,
 	conds ...framecondition.Condition,
 ) {
 	n.Locker.Do(context.TODO(), func() {

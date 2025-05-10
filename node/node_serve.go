@@ -1,4 +1,4 @@
-package avpipeline
+package node
 
 import (
 	"context"
@@ -20,19 +20,6 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type ErrNode struct {
-	Node AbstractNode
-	Err  error
-}
-
-func (e ErrNode) Error() string {
-	return fmt.Sprintf("received an error on %s: %v", e.Node.GetProcessor(), e.Err)
-}
-
-func (e ErrNode) Unwrap() error {
-	return e.Err
-}
-
 func incrementCounters(
 	s *FramesStatistics,
 	mediaType astiav.MediaType,
@@ -50,7 +37,7 @@ func incrementCounters(
 func (n *NodeWithCustomData[C, T]) Serve(
 	ctx context.Context,
 	serveConfig ServeConfig,
-	errCh chan<- ErrNode,
+	errCh chan<- Error,
 ) {
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
 	ctx = xsync.WithNoLogging(ctx, true)
@@ -63,7 +50,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			return
 		}
 		select {
-		case errCh <- ErrNode{
+		case errCh <- Error{
 			Node: n,
 			Err:  err,
 		}:
@@ -80,6 +67,19 @@ func (n *NodeWithCustomData[C, T]) Serve(
 		}
 		logger.Errorf(ctx, "got panic in Node[%s]: %v:\n%s\n", n, r, debug.Stack())
 	}()
+
+	if err := xsync.DoR1(ctx, &n.Locker, func() error {
+		if n.Started {
+			return ErrAlreadyStarted{}
+		}
+		n.Started = true
+		return nil
+	}); err != nil {
+		if err != nil {
+			sendErr(err)
+		}
+		return
+	}
 
 	procNodeEndCtx := ctx
 	for {
@@ -120,7 +120,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 							pkt.Source,
 						)
 					},
-					func(n AbstractNode) packetcondition.Condition { return n.GetInputPacketCondition() },
+					func(n Abstract) packetcondition.Condition { return n.GetInputPacketCondition() },
 					func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
@@ -147,7 +147,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 							f.Duration,
 						)
 					},
-					func(n AbstractNode) framecondition.Condition { return n.GetInputFrameCondition() },
+					func(n Abstract) framecondition.Condition { return n.GetInputFrameCondition() },
 					func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
@@ -169,7 +169,7 @@ func pushFurther[
 	pushTos []PushTo[I, C],
 	serveConfig ServeConfig,
 	buildInput func(O) I,
-	getInputCondition func(AbstractNode) C,
+	getInputCondition func(Abstract) C,
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
 	poolPutOutput func(O),

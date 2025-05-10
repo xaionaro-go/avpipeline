@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -59,7 +60,7 @@ func main() {
 	input, err := processor.NewInputFromURL(ctx, fromURL, secret.New(""), kernel.InputConfig{})
 	assert(ctx, err == nil, err)
 	defer input.Close(ctx)
-	inputNode := avpipeline.NewNode(input)
+	inputNode := node.New(input)
 
 	// output node
 
@@ -71,7 +72,7 @@ func main() {
 	)
 	assert(ctx, err == nil, err)
 	defer output.Close(ctx)
-	outputNode := avpipeline.NewNode(output)
+	outputNode := node.New(output)
 
 	// recoder node
 
@@ -87,7 +88,7 @@ func main() {
 	assert(ctx, err == nil, err)
 	defer recoder.Close(ctx)
 	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-	recodingNode := avpipeline.NewNode(recoder)
+	recodingNode := node.New(recoder)
 
 	// route nodes: input -> recoder -> output
 
@@ -98,11 +99,13 @@ func main() {
 
 	// start
 
-	errCh := make(chan avpipeline.ErrNode, 10)
+	errCh := make(chan node.Error, 10)
 	observability.Go(ctx, func() {
 		defer cancelFn()
-		avpipeline.ServeRecursively(ctx, avpipeline.ServeConfig{
-			FrameDrop: *frameDrop,
+		avpipeline.Serve(ctx, avpipeline.ServeConfig{
+			EachNode: node.ServeConfig{
+				FrameDrop: *frameDrop,
+			},
 		}, errCh, inputNode)
 	})
 

@@ -1,4 +1,4 @@
-package avpipeline
+package node
 
 import (
 	"fmt"
@@ -8,12 +8,12 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-type Nodes[T AbstractNode] []T
+type Nodes[T Abstract] []T
 
 func (s Nodes[T]) String() string {
 	var results []string
 	for _, n := range s {
-		isSet := map[AbstractNode]struct{}{}
+		isSet := map[Abstract]struct{}{}
 		var pushToStrs []string
 		for _, pushTo := range n.GetPushPacketsTos() {
 			if _, ok := isSet[pushTo.Node]; ok {
@@ -57,7 +57,7 @@ func (s Nodes[T]) DotString(withStats bool) string {
 	fmt.Fprintf(&result, "digraph Pipeline {\n")
 	alreadyPrinted := map[processor.Abstract]struct{}{}
 	for _, n := range s {
-		w, ok := AbstractNode(n).(DotBlockContentStringWriteToer)
+		w, ok := Abstract(n).(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
 		}

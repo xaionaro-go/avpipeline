@@ -1,4 +1,4 @@
-package avpipeline
+package node
 
 import (
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -9,7 +9,7 @@ import (
 )
 
 type PushTo[T any, C types.Condition[T]] struct {
-	Node      AbstractNode
+	Node      Abstract
 	Condition C
 }
 
@@ -17,7 +17,7 @@ type PushFramesTo = PushTo[frame.Input, types.Condition[frame.Input]]
 
 type PushFramesTos []PushFramesTo
 
-func (s *PushFramesTos) Add(dst AbstractNode, conds ...framecondition.Condition) *PushFramesTos {
+func (s *PushFramesTos) Add(dst Abstract, conds ...framecondition.Condition) *PushFramesTos {
 	var cond framecondition.Condition
 	switch len(conds) {
 	case 0:
@@ -38,7 +38,7 @@ type PushPacketsTo = PushTo[packet.Input, types.Condition[packet.Input]]
 
 type PushPacketsTos []PushPacketsTo
 
-func (s *PushPacketsTos) Add(dst AbstractNode, conds ...packetcondition.Condition) *PushPacketsTos {
+func (s *PushPacketsTos) Add(dst Abstract, conds ...packetcondition.Condition) *PushPacketsTos {
 	var cond packetcondition.Condition
 	switch len(conds) {
 	case 0:

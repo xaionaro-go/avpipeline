@@ -1,4 +1,4 @@
-package avpipeline
+package node
 
 import (
 	"sync/atomic"
