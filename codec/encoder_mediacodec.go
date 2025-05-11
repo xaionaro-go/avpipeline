@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
+	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	"github.com/xaionaro-go/avmediacodec"
-	"github.com/xaionaro-go/avmediacodec/astiavmediacodec"
 	"github.com/xaionaro-go/avpipeline/quality"
 )
 
@@ -42,7 +42,7 @@ func (e *EncoderFull) FFAMediaFormatSetInt32(
 	defer func() { logger.Debugf(ctx, "/FFAMediaFormatSetInt32(ctx, '%s', %d): %v", key, value, _err) }()
 
 	mediaCodec := avmediacodec.WrapAVCodecContext(
-		astiavmediacodec.CFromAVCodecContext(e.codecContext),
+		xastiav.CFromAVCodecContext(e.codecContext),
 	).PrivData().Codec()
 
 	mediaCodecFmt := mediaCodec.Format()
