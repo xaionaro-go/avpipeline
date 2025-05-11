@@ -1,4 +1,4 @@
-package transcoder
+package transcoderwithpassthrough
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package transcoder
+package transcoderwithpassthrough
 
 import (
 	"context"
@@ -13,13 +13,13 @@ import (
 )
 
 type streamIndexAssigner[C any, P processor.Abstract] struct {
-	StreamForward      *Transcoder[C, P]
+	StreamForward      *TranscoderWithPassthrough[C, P]
 	PreviousResultsMap map[int]int
 	AlreadyAssignedMap map[int]struct{}
 	Locker             xsync.Mutex
 }
 
-func newStreamIndexAssigner[C any, P processor.Abstract](s *Transcoder[C, P]) *streamIndexAssigner[C, P] {
+func newStreamIndexAssigner[C any, P processor.Abstract](s *TranscoderWithPassthrough[C, P]) *streamIndexAssigner[C, P] {
 	return &streamIndexAssigner[C, P]{
 		StreamForward:      s,
 		PreviousResultsMap: make(map[int]int),

@@ -1,4 +1,4 @@
-package transcoder
+package transcoderwithpassthrough
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
-	"github.com/xaionaro-go/avpipeline/chain/transcoder/types"
+	"github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
@@ -34,7 +34,7 @@ const (
 	passthroughSupport         = true
 )
 
-type Transcoder[C any, P processor.Abstract] struct {
+type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	Input             *node.NodeWithCustomData[C, P]
 	Outputs           []node.Abstract
 	FilterThrottle    *packetcondition.VideoAverageBitrateLower
@@ -62,8 +62,8 @@ func New[C any, P processor.Abstract](
 	ctx context.Context,
 	input *node.NodeWithCustomData[C, P],
 	outputs ...node.Abstract,
-) (*Transcoder[C, P], error) {
-	s := &Transcoder[C, P]{
+) (*TranscoderWithPassthrough[C, P], error) {
+	s := &TranscoderWithPassthrough[C, P]{
 		Input:             input,
 		Outputs:           outputs,
 		FilterThrottle:    packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
@@ -91,7 +91,7 @@ func New[C any, P processor.Abstract](
 	return s, nil
 }
 
-func (s *Transcoder[C, P]) GetRecoderConfig(
+func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
 	ctx context.Context,
 ) (_ret types.RecoderConfig) {
 	logger.Tracef(ctx, "GetRecoderConfig")
@@ -108,7 +108,7 @@ func (s *Transcoder[C, P]) GetRecoderConfig(
 	return cpy
 }
 
-func (s *Transcoder[C, P]) SetRecoderConfig(
+func (s *TranscoderWithPassthrough[C, P]) SetRecoderConfig(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -124,7 +124,7 @@ func (s *Transcoder[C, P]) SetRecoderConfig(
 	return nil
 }
 
-func (s *Transcoder[C, P]) configureRecoder(
+func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
@@ -149,7 +149,7 @@ func (s *Transcoder[C, P]) configureRecoder(
 	return nil
 }
 
-func (s *Transcoder[C, P]) initRecoder(
+func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
@@ -182,7 +182,7 @@ func (s *Transcoder[C, P]) initRecoder(
 	return nil
 }
 
-func (s *Transcoder[C, P]) reconfigureRecoder(
+func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
@@ -244,7 +244,7 @@ func (s *Transcoder[C, P]) reconfigureRecoder(
 	return nil
 }
 
-func (s *Transcoder[C, P]) reconfigureRecoderCopy(
+func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
@@ -257,7 +257,7 @@ func (s *Transcoder[C, P]) reconfigureRecoderCopy(
 	return nil
 }
 
-func (s *Transcoder[C, P]) GetAllStats(
+func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 	ctx context.Context,
 ) map[string]*node.ProcessingStatistics {
 	m := map[string]*node.ProcessingStatistics{
@@ -360,7 +360,7 @@ func asPacketSink(proc processor.Abstract) packet.Sink {
 	return nil
 }
 
-func (s *Transcoder[C, P]) Start(
+func (s *TranscoderWithPassthrough[C, P]) Start(
 	ctx context.Context,
 	recoderInSeparateTracks bool,
 ) (_err error) {
@@ -644,7 +644,7 @@ func (s *Transcoder[C, P]) Start(
 	return nil
 }
 
-func (s *Transcoder[C, P]) Wait(
+func (s *TranscoderWithPassthrough[C, P]) Wait(
 	ctx context.Context,
 ) error {
 	s.waitGroup.Wait()
