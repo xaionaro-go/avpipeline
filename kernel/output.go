@@ -493,7 +493,6 @@ func (o *Output) SendInputPacket(
 	}
 
 	pkt.SetStreamIndex(outputStream.Index())
-	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
 
 	var inputStreamsCount int
 	inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
@@ -503,7 +502,7 @@ func (o *Output) SendInputPacket(
 	logger.Tracef(ctx, "sending the current packet")
 
 	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
-		return o.send(ctx, inputStreamsCount, pkt, inputPkt.Source, outputStream)
+		return o.send(ctx, inputStreamsCount, pkt, inputPkt.Source, inputPkt.Stream, outputStream)
 	})
 	if err != nil {
 		return err
@@ -529,10 +528,11 @@ func (o *Output) send(
 	expectedStreamsCount int,
 	pkt *astiav.Packet,
 	source packet.Source,
+	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) error {
 	if o.started {
-		return o.doWritePacket(ctx, pkt, source, outputStream)
+		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
 	}
 
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() int {
@@ -592,6 +592,7 @@ func (o *Output) send(
 			belt.WithField(ctx, "reason", "pending_packet"),
 			pkt.Packet,
 			pkt.Source,
+			inputStream,
 			outputStream,
 		)
 		packet.Pool.Put(pkt.Packet)
@@ -607,6 +608,7 @@ func (o *Output) doWritePacket(
 	ctx context.Context,
 	pkt *astiav.Packet,
 	source packet.Source,
+	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) (_err error) {
 	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
@@ -614,6 +616,7 @@ func (o *Output) doWritePacket(
 	}
 
 	//pkt.SetPos(-1) // <- TODO: should this happen? why?
+	pkt.RescaleTs(inputStream.TimeBase(), outputStream.TimeBase())
 	isNoDTS := pkt.Dts() == consts.NoPTSValue
 	isNoPTS := pkt.Pts() == consts.NoPTSValue
 	if !isNoDTS && !isNoPTS && pkt.Dts() > pkt.Pts() {

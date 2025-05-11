@@ -373,8 +373,8 @@ func (s *Transcoder[C, P]) Start(
 		return fmt.Errorf("currently we support only the case with a single output, but received %d outputs", len(s.Outputs))
 	}
 	output := s.Outputs[0]
-	outputAsPacketSource := asPacketSink(output.GetProcessor())
-	if outputAsPacketSource == nil {
+	outputAsPacketSink := asPacketSink(output.GetProcessor())
+	if outputAsPacketSink == nil {
 		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
 	}
 
@@ -394,7 +394,7 @@ func (s *Transcoder[C, P]) Start(
 	)
 
 	var outputFormatName string
-	outputAsPacketSource.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	outputAsPacketSink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		outputFormatName = fmtCtx.OutputFormat().Name()
 	})
 	logger.Infof(ctx, "output format: '%s'", outputFormatName)
@@ -527,6 +527,10 @@ func (s *Transcoder[C, P]) Start(
 					filter.NewRescaleTSBetweenKernels(
 						s.inputAsPacketSource,
 						s.NodeRecoder.Processor.Kernel.Decoder,
+					),
+					filter.NewRescaleTSBetweenKernels(
+						s.NodeRecoder.Processor.Kernel.Encoder,
+						outputAsPacketSink,
 					),
 				}
 			} else {

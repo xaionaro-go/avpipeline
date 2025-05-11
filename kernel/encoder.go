@@ -383,7 +383,6 @@ func (e *Encoder[EF]) sendInputFrame(
 			pkt.SetDts(input.PktDts())
 			pkt.SetPts(input.Pts())
 		}
-		pkt.RescaleTs(input.GetTimeBase(), outputStream.TimeBase())
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
 			logger.Errorf(ctx, "DTS (%d) > PTS (%d); as a correction setting the DTS value to be the no-PTS magic value", pkt.Dts(), pkt.Pts())
