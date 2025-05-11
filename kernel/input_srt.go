@@ -1,5 +1,5 @@
-//go:build libsrt
-// +build libsrt
+//go:build with_libsrt
+// +build with_libsrt
 
 package kernel
 
