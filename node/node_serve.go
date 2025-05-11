@@ -41,8 +41,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 ) {
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
 	ctx = xsync.WithNoLogging(ctx, true)
-	logger.Tracef(ctx, "Serve")
-	defer func() { logger.Tracef(ctx, "/Serve") }()
+	logger.Tracef(ctx, "Serve[%T]", n)
+	defer func() { logger.Tracef(ctx, "/Serve[%T]", n) }()
 
 	sendErr := func(err error) {
 		logger.Debugf(ctx, "Serve: sendErr(%v)", err)
@@ -70,14 +70,13 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 	if err := xsync.DoR1(ctx, &n.Locker, func() error {
 		if n.Started {
+			logger.Debugf(ctx, "double-start %T at: %s", n, debug.Stack())
 			return ErrAlreadyStarted{}
 		}
 		n.Started = true
 		return nil
 	}); err != nil {
-		if err != nil {
-			sendErr(err)
-		}
+		sendErr(err)
 		return
 	}
 

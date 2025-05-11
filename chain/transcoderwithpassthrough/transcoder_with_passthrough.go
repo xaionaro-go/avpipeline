@@ -88,7 +88,7 @@ func New[C any, P processor.Abstract](
 	s.MapOutputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerOutput(s))
 	s.inputAsPacketSource = asPacketSource(s.Input.GetProcessor())
 	if s.inputAsPacketSource == nil {
-		return nil, fmt.Errorf("the input node processor is expected to be a packet source, but is not")
+		return nil, fmt.Errorf("the input node processor is expected to be a packet source, but is not: %T", s.Input.GetProcessor())
 	}
 
 	return s, nil
@@ -120,12 +120,6 @@ func (s *TranscoderWithPassthrough[C, P]) SetRecoderConfig(
 	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
 	s.locker.Lock()
 	defer s.locker.Unlock()
-	if len(cfg.VideoTracks) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track (received a request for %d tracks)", len(cfg.VideoTracks))
-	}
-	if len(cfg.AudioTracks) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track (received a request for %d tracks)", len(cfg.AudioTracks))
-	}
 	err := s.configureRecoder(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the recoder: %w", err)
@@ -144,6 +138,12 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 			return fmt.Errorf("unable to initialize the recoder: %w", err)
 		}
 		return nil
+	}
+	if len(cfg.VideoTracks) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track (received a request for %d tracks)", len(cfg.VideoTracks))
+	}
+	if len(cfg.AudioTracks) != 1 {
+		return fmt.Errorf("currently we support only exactly one output audio track (received a request for %d tracks)", len(cfg.AudioTracks))
 	}
 	if cfg.AudioTracks[0].CodecName != "copy" {
 		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTracks[0].CodecName)

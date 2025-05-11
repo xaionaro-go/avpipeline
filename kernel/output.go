@@ -578,7 +578,6 @@ func (o *Output) send(
 	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames))
 	var err error
 	o.formatContextLocker.Do(ctx, func() {
-		assert(ctx, o.FormatContext.Pb() != nil)
 		err = o.FormatContext.WriteHeader(nil)
 	})
 	if err != nil {

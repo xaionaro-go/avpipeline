@@ -173,10 +173,16 @@ func (r *Route) GetPublishers(
 func (r *Route) AddPublisher(
 	ctx context.Context,
 	publisher Publisher,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "AddPublisher(ctx, %s)", publisher)
+	defer func() { logger.Debugf(ctx, "/AddPublisher(ctx, %s): %3", publisher, _err) }()
 	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
-		if len(r.Publishers) > 0 {
-			return fmt.Errorf("there are already %d publishers on this route", len(r.Publishers))
+		for _, publisher := range r.Publishers {
+			logger.Warnf(ctx, "closing publisher %s to free-up the route for another publisher")
+			err := publisher.Close(ctx)
+			if err != nil {
+				logger.Errorf(ctx, "unable to close the publisher: %v", err)
+			}
 		}
 		_ = r.addPublisherLocked(ctx, publisher)
 		return nil

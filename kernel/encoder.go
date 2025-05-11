@@ -284,7 +284,9 @@ func (e *Encoder[EF]) sendInputPacket(
 	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	e.send(ctx, pkt, outputStream, outputPacketsCh)
+	if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {
+		return fmt.Errorf("unable to send a packet: %w", err)
+	}
 	return nil
 }
 
@@ -389,7 +391,9 @@ func (e *Encoder[EF]) sendInputFrame(
 			pkt.SetDts(consts.NoPTSValue)
 		}
 
-		e.send(ctx, pkt, outputStream, outputPacketsCh)
+		if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {
+			return fmt.Errorf("unable to send a packet: %w", err)
+		}
 	}
 
 	return nil
@@ -400,7 +404,7 @@ func (e *Encoder[EF]) send(
 	outPkt *astiav.Packet,
 	outputStream *astiav.Stream,
 	out chan<- packet.Output,
-) {
+) error {
 	outPktWrapped := packet.BuildOutput(
 		outPkt,
 		outputStream,
@@ -408,7 +412,12 @@ func (e *Encoder[EF]) send(
 	)
 
 	logger.Tracef(ctx, "sending out %s", outPktWrapped.CodecParameters().MediaType())
-	out <- outPktWrapped
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out <- outPktWrapped:
+		return nil
+	}
 }
 
 func (e *Encoder[EF]) WithOutputFormatContext(

@@ -150,14 +150,18 @@ func (d *Decoder[DF]) sendInputPacket(
 				return false, fmt.Errorf("internal error: TimeBase is not set")
 			}
 			f.SetPictureType(astiav.PictureTypeNone)
-			outputFramesCh <- frame.BuildOutput(
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case outputFramesCh <- frame.BuildOutput(
 				f,
 				decoder.CodecContext(),
 				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
 				input.Stream.Duration(),
 				timeBase,
 				input.Packet.Pos(), input.Packet.Duration(),
-			)
+			):
+			}
 			return true, nil
 		}()
 		if err != nil {

@@ -119,15 +119,20 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	close(resultCh)
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
-	if int(r.activeStreamsCount) >= inputStreamsCount {
-		logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), inputStreamsCount)
-		for _, pkt := range r.pendingPackets {
-			outputPacketCh <- pkt
-		}
-		r.pendingPackets = r.pendingPackets[:0]
-		r.started = true
+	if int(r.activeStreamsCount) < inputStreamsCount {
+		return err
 	}
 
+	logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), inputStreamsCount)
+	for _, pkt := range r.pendingPackets {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case outputPacketCh <- pkt:
+		}
+	}
+	r.pendingPackets = r.pendingPackets[:0]
+	r.started = true
 	return err
 }
 

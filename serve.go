@@ -24,50 +24,47 @@ func Serve[T node.Abstract](
 ) {
 	var nodesWG sync.WaitGroup
 	defer nodesWG.Wait()
-
+	dstAlreadyVisited := map[node.Abstract]struct{}{}
+	serve(ctx, serveConfig, errCh, &nodesWG, dstAlreadyVisited, nodes...)
+}
+func serve[T node.Abstract](
+	ctx context.Context,
+	serveConfig ServeConfig,
+	errCh chan<- node.Error,
+	nodesWG *sync.WaitGroup,
+	dstAlreadyVisited map[node.Abstract]struct{},
+	nodes ...T,
+) {
 	for _, n := range nodes {
+		logger.Tracef(ctx, "Serve[%s]", n)
 		func(n T) {
-			logger.Tracef(ctx, "Serve[%s]", n)
-			defer func() { logger.Tracef(ctx, "/Serve[%s]", n) }()
+			if _, ok := dstAlreadyVisited[n]; ok {
+				logger.Tracef(ctx, "/Serve[%s]: already visited", n)
+				return
+			}
+			dstAlreadyVisited[n] = struct{}{}
 
 			childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
-			dstAlreadyVisited := map[node.Abstract]struct{}{}
 			for _, pushTo := range n.GetPushPacketsTos() {
-				if _, ok := dstAlreadyVisited[pushTo.Node]; ok {
-					continue
-				}
-				dstAlreadyVisited[pushTo.Node] = struct{}{}
-
-				pushTo := pushTo
-				nodesWG.Add(1)
-				observability.Go(ctx, func() {
-					defer nodesWG.Done()
-					Serve(childrenCtx, serveConfig, errCh, pushTo.Node)
-				})
+				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
 			}
 			for _, pushTo := range n.GetPushFramesTos() {
-				if _, ok := dstAlreadyVisited[pushTo.Node]; ok {
-					continue
-				}
-				dstAlreadyVisited[pushTo.Node] = struct{}{}
-				pushTo := pushTo
-				nodesWG.Add(1)
-				observability.Go(ctx, func() {
-					defer nodesWG.Done()
-					Serve(childrenCtx, serveConfig, errCh, pushTo.Node)
-				})
+				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
 			}
 
 			if serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, n) {
+				logger.Tracef(ctx, "/Serve[%s]: skipped", n)
 				return
 			}
 			nodesWG.Add(1)
 			observability.Go(ctx, func() {
 				defer nodesWG.Done()
+				defer logger.Tracef(ctx, "/Serve[%s]: ended", n)
 				defer func() {
 					logger.Debugf(ctx, "cancelling context...")
 					childrenCancelFn()
 				}()
+				logger.Tracef(ctx, "Serve[%s]: started", n)
 				n.Serve(ctx, serveConfig.EachNode, errCh)
 			})
 		}(n)

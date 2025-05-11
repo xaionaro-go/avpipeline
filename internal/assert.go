@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"runtime/debug"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 )
@@ -16,9 +17,9 @@ func Assert(
 	}
 
 	if len(extraArgs) == 0 {
-		logger.Panic(ctx, "assertion failed")
+		logger.Panicf(ctx, "assertion failed: %s", debug.Stack())
 		return
 	}
 
-	logger.Panic(ctx, "assertion failed", extraArgs)
+	logger.Panic(ctx, "assertion failed:\n", string(debug.Stack()), "\nExtra args:", extraArgs, "\n")
 }
