@@ -68,8 +68,8 @@ type Output struct {
 
 	formatContextLocker xsync.RWMutex
 
-	url              string
-	urlParsed        *url.URL
+	URL              string
+	URLParsed        *url.URL
 	started          bool
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
@@ -125,7 +125,7 @@ func NewOutputFromURL(
 
 	o := &Output{
 		ID:            OutputID(nextOutputID.Add(1)),
-		url:           url.String(),
+		URL:           url.String(),
 		StreamKey:     streamKey,
 		InputStreams:  make(map[int]OutputInputStream),
 		OutputStreams: make(map[int]*OutputStream),
@@ -269,7 +269,7 @@ func (o *Output) doOpen(
 	}
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
-	o.urlParsed = url
+	o.URLParsed = url
 
 	return nil
 }
@@ -520,7 +520,7 @@ func (o *Output) SendInputFrame(
 }
 
 func (o *Output) String() string {
-	return fmt.Sprintf("Output(%s)", o.url)
+	return fmt.Sprintf("Output(%s)", o.URL)
 }
 
 func (o *Output) send(

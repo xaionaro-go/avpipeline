@@ -8,23 +8,23 @@ import (
 
 // TODO: add support for multiple tracks
 type TrackConfig struct {
-	InputTrackIDs      []int
-	CodecName          string
-	AveragingPeriod    time.Duration
-	AverageBitRate     uint64
-	CustomOptions      DictionaryItems
-	HardwareDeviceType HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
+	InputTrackIDs      []int              `yaml:"input_track_ids"`
+	CodecName          string             `yaml:"codec_name"`
+	AveragingPeriod    time.Duration      `yaml:"averaging_period"`
+	AverageBitRate     uint64             `yaml:"average_bit_rate"`
+	CustomOptions      DictionaryItems    `yaml:"custom_options"`
+	HardwareDeviceType HardwareDeviceType `yaml:"hardware_device_type"`
+	HardwareDeviceName HardwareDeviceName `yaml:"hardware_device_name"`
 }
 
 type RecoderConfig struct {
-	AudioTracks []TrackConfig
-	VideoTracks []TrackConfig
+	AudioTracks []TrackConfig `yaml:"audio_tracks"`
+	VideoTracks []TrackConfig `yaml:"video_tracks"`
 }
 
 type DictionaryItem struct {
-	Key   string
-	Value string
+	Key   string `yaml:"key"`
+	Value string `yaml:"value"`
 }
 type DictionaryItems []DictionaryItem
 
