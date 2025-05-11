@@ -37,9 +37,7 @@ func Serve[T node.Abstract](
 					continue
 				}
 				dstAlreadyVisited[pushTo.Node] = struct{}{}
-				if serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, pushTo.Node) {
-					continue
-				}
+
 				pushTo := pushTo
 				nodesWG.Add(1)
 				observability.Go(ctx, func() {
@@ -52,9 +50,6 @@ func Serve[T node.Abstract](
 					continue
 				}
 				dstAlreadyVisited[pushTo.Node] = struct{}{}
-				if serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, pushTo.Node) {
-					continue
-				}
 				pushTo := pushTo
 				nodesWG.Add(1)
 				observability.Go(ctx, func() {
@@ -63,6 +58,9 @@ func Serve[T node.Abstract](
 				})
 			}
 
+			if serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, n) {
+				return
+			}
 			nodesWG.Add(1)
 			observability.Go(ctx, func() {
 				defer nodesWG.Done()
