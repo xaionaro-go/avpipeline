@@ -7,7 +7,8 @@ import (
 )
 
 // TODO: add support for multiple tracks
-type CodecConfig struct {
+type TrackConfig struct {
+	InputTrackIDs      []int
 	CodecName          string
 	AveragingPeriod    time.Duration
 	AverageBitRate     uint64
@@ -17,8 +18,8 @@ type CodecConfig struct {
 }
 
 type RecoderConfig struct {
-	Audio CodecConfig
-	Video CodecConfig
+	AudioTracks []TrackConfig
+	VideoTracks []TrackConfig
 }
 
 type DictionaryItem struct {

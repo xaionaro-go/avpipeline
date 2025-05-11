@@ -12,29 +12,29 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type streamIndexAssigner[C any, P processor.Abstract] struct {
+type streamIndexAssignerOutput[C any, P processor.Abstract] struct {
 	StreamForward      *TranscoderWithPassthrough[C, P]
 	PreviousResultsMap map[int]int
 	AlreadyAssignedMap map[int]struct{}
 	Locker             xsync.Mutex
 }
 
-func newStreamIndexAssigner[C any, P processor.Abstract](s *TranscoderWithPassthrough[C, P]) *streamIndexAssigner[C, P] {
-	return &streamIndexAssigner[C, P]{
+func newStreamIndexAssignerOutput[C any, P processor.Abstract](s *TranscoderWithPassthrough[C, P]) *streamIndexAssignerOutput[C, P] {
+	return &streamIndexAssignerOutput[C, P]{
 		StreamForward:      s,
 		PreviousResultsMap: make(map[int]int),
 		AlreadyAssignedMap: make(map[int]struct{}),
 	}
 }
 
-func (s *streamIndexAssigner[C, P]) StreamIndexAssign(
+func (s *streamIndexAssignerOutput[C, P]) StreamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
 ) (typing.Optional[int], error) {
 	return xsync.DoA2R2(ctx, &s.Locker, s.streamIndexAssign, ctx, input)
 }
 
-func (s *streamIndexAssigner[C, P]) streamIndexAssign(
+func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
 ) (typing.Optional[int], error) {
