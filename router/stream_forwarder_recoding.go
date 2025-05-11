@@ -31,14 +31,6 @@ func NewStreamForwarderRecoding(
 
 	fwd := &StreamForwarderRecoding{}
 
-	ctx, cancelFn := context.WithCancel(ctx)
-	fwd.CancelFunc = cancelFn
-	defer func() {
-		if _err != nil {
-			cancelFn()
-		}
-	}()
-
 	var err error
 	fwd.Chain, err = transcoder.New(ctx, src, dst)
 	if err != nil {
@@ -46,7 +38,7 @@ func NewStreamForwarderRecoding(
 	}
 
 	if recoderConfig == nil {
-		// just copy as is
+		logger.Debugf(ctx, "just copy as is")
 		recoderConfig = &transcodertypes.RecoderConfig{}
 		src.Processor.Kernel.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			for _, stream := range fmtCtx.Streams() {
@@ -76,6 +68,19 @@ func NewStreamForwarderRecoding(
 func (fwd *StreamForwarderRecoding) Start(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
+
+	if fwd.CancelFunc != nil {
+		return fmt.Errorf("internal error: already started")
+	}
+
+	ctx, cancelFn := context.WithCancel(ctx)
+	fwd.CancelFunc = cancelFn
+	defer func() {
+		if _err != nil {
+			cancelFn()
+		}
+	}()
+
 	if err := fwd.Chain.Start(ctx, false); err != nil {
 		return fmt.Errorf("unable to start the StreamForward: %w", err)
 	}
@@ -95,7 +100,12 @@ func (fwd *StreamForwarderRecoding) Stop(
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
+
+	if fwd.CancelFunc == nil {
+		return ErrAlreadyClosed{}
+	}
 	fwd.CancelFunc()
+	fwd.CancelFunc = nil
 	fwd.Chain.Wait(ctx)
 	return nil
 }

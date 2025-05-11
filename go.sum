@@ -75,6 +75,8 @@ github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c h1://sE/WLpO7
 github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c/go.mod h1:MGRT1+2m2adVRc4aAn0RVGysjsSRKN9VCyBJLHvQd4k=
 github.com/xaionaro-go/xsync v0.0.0-20250420144932-1e27f4332d4d h1:paN6zI8tpStL7gEbt4m24vbOFdkNUwnDqXtT3B2dzSo=
 github.com/xaionaro-go/xsync v0.0.0-20250420144932-1e27f4332d4d/go.mod h1:FCpywNAl4a4hgzE8j7Z+TpdhBQi5WHxnI35jOrFpoQw=
+github.com/xaionaro-go/xsync v0.0.0-20250511183132-2cd5ebbcb0c3 h1:9gwYkjVAoyQxhWGpHsLPIHXLibcI4iRxU3JsCAXPB0M=
+github.com/xaionaro-go/xsync v0.0.0-20250511183132-2cd5ebbcb0c3/go.mod h1:FCpywNAl4a4hgzE8j7Z+TpdhBQi5WHxnI35jOrFpoQw=
 golang.org/x/crypto v0.37.0 h1:kJNSjF/Xp7kU0iB2Z+9viTPMW4EqqsrywMXLJOOsXSE=
 golang.org/x/crypto v0.37.0/go.mod h1:vg+k43peMZ0pUMhYmVAWysMK35e6ioLh3wB8ZCAfbVc=
 golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 h1:R84qjqJb5nVJMxqWYb3np9L5ZsaDtB+a39EqjV0JSUM=

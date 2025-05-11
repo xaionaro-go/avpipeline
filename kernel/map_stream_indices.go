@@ -29,6 +29,7 @@ type MapStreamIndices struct {
 
 var _ Abstract = (*MapStreamIndices)(nil)
 var _ packet.Source = (*MapStreamIndices)(nil)
+var _ packet.Sink = (*MapStreamIndices)(nil)
 
 type StreamIndexAssigner interface {
 	StreamIndexAssign(context.Context, types.InputPacketOrFrameUnion) (typing.Optional[int], error)
@@ -245,7 +246,10 @@ func (m *MapStreamIndices) sendInputPacket(
 		m,
 	)
 	m.Locker.UDo(ctx, func() {
-		outputPacketsCh <- outPkt
+		select {
+		case outputPacketsCh <- outPkt:
+		case <-ctx.Done():
+		}
 	})
 	return nil
 }

@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -20,6 +21,7 @@ type FromKernel[T kernel.Abstract] struct {
 
 	closeOnce sync.Once
 	closer    *astikit.Closer
+	OnClosed  func(context.Context) error
 }
 
 var _ Abstract = (*FromKernel[kernel.Abstract])(nil)
@@ -124,7 +126,18 @@ func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	defer func() {
 		close(p.OutputPacketCh)
 	}()
-	return p.Kernel.Close(ctx)
+
+	var errs []error
+	if err := p.Kernel.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close the kernel: %w", err))
+	}
+	if p.OnClosed != nil {
+		if err := p.OnClosed(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("OnClosed returned an error: %w", err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (p *FromKernel[T]) SendOutput(

@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/observability"
@@ -14,6 +15,9 @@ import (
 )
 
 type Router struct {
+	OnRouteCreated func(context.Context, *Route)
+	OnRouteRemoved func(context.Context, *Route)
+
 	WaitGroup sync.WaitGroup
 
 	Locker xsync.Mutex
@@ -58,23 +62,42 @@ func (r *Router) init(
 				logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
 				continue
 			}
+			belt.WithField(ctx, "route_path", route.Path)
+			if errors.Is(err.Err, context.Canceled) {
+				logger.Debugf(ctx, "Cancelled: %v", err)
+				continue
+			}
+			if errors.Is(err.Err, io.EOF) {
+				logger.Debugf(ctx, "EOF: %v", err)
+				continue
+			}
 			logger.Errorf(ctx, "got an error on node %p (path: '%s'): %v", err.Node, route.Path, err)
 		}
 	})
 }
 
-func (r *Router) onRouteOpen(
+func (r *Router) onRouteCreated(
 	ctx context.Context,
 	route *Route,
 ) {
+	logger.Debugf(ctx, "onRouteCreated: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRouteCreated: %s", route) }()
 	r.WaitGroup.Add(1)
+	if r.OnRouteCreated != nil {
+		r.OnRouteCreated(ctx, route)
+	}
 }
 
-func (r *Router) onRouteClosed(
+func (r *Router) onRouteRemoved(
 	ctx context.Context,
 	route *Route,
 ) {
+	logger.Debugf(ctx, "onRouteRemoved: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRouteRemoved: %s", route) }()
 	r.WaitGroup.Done()
+	if r.OnRouteRemoved != nil {
+		r.OnRouteRemoved(ctx, route)
+	}
 }
 
 type GetRouteMode int
@@ -202,8 +225,8 @@ func (r *Router) createRoute(
 		ctx,
 		path,
 		r.ErrorChan,
-		r.onRouteOpen,
-		r.onRouteClosed,
+		r.onRouteCreated,
+		r.onRouteRemoved,
 	)
 	r.RoutesByPath[path] = route
 	var addCh chan<- struct{}

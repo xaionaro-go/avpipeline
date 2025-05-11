@@ -27,8 +27,8 @@ func Serve[T node.Abstract](
 
 	for _, n := range nodes {
 		func(n T) {
-			logger.Tracef(ctx, "ServeRecursively[%s]", n)
-			defer func() { logger.Tracef(ctx, "/ServeRecursively[%s]", n) }()
+			logger.Tracef(ctx, "Serve[%s]", n)
+			defer func() { logger.Tracef(ctx, "/Serve[%s]", n) }()
 
 			childrenCtx, childrenCancelFn := context.WithCancel(xcontext.DetachDone(ctx))
 			dstAlreadyVisited := map[node.Abstract]struct{}{}

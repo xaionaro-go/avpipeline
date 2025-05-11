@@ -46,7 +46,7 @@ func (r *Router) AddRouteForwarding(
 ) (_ret *RouteForwarding, _err error) {
 	logger.Debugf(ctx, "AddRouteForwarding(ctx, '%s', %#+v)", srcPath, outputFactory)
 	defer func() {
-		logger.Debugf(ctx, "/AddRouteForwarding(ctx, '%s', %#+v): %v %v", srcPath, outputFactory, _ret, _err)
+		logger.Debugf(ctx, "/AddRouteForwarding(ctx, '%s', %#+v): %p %v", srcPath, outputFactory, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 
@@ -119,16 +119,16 @@ func (fwd *RouteForwarding) startLocked(ctx context.Context) (_err error) {
 		select {
 		case <-ctx.Done():
 			if err := fwd.stop(ctx); err != nil {
-				logger.Errorf(ctx, "unable to stop: %w", err)
+				logger.Errorf(ctx, "unable to stop: %v", err)
 			}
 			return
 		case <-src.PublishersChangeChan:
 			if err := fwd.stop(ctx); err != nil {
-				logger.Errorf(ctx, "unable to stop: %w", err)
+				logger.Errorf(ctx, "unable to stop: %v", err)
 				return
 			}
 			if fwd.start(ctx); err != nil {
-				logger.Error(ctx, "unable to start: %w", err)
+				logger.Error(ctx, "unable to start: %v", err)
 				return
 			}
 		}

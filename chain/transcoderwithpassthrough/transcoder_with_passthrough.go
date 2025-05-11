@@ -389,8 +389,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
 	}
 
-	ctx, cancelFn := context.WithCancel(ctx)
-
 	// == configure ==
 
 	s.NodeRecoder = node.NewFromKernel(
@@ -406,9 +404,20 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	var outputFormatName string
 	outputAsPacketSink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		outputFormatName = fmtCtx.OutputFormat().Name()
+		if fmtCtx == nil {
+			logger.Errorf(ctx, "the output has no format context")
+			return
+		}
+		outputFmt := fmtCtx.OutputFormat()
+		if outputFmt == nil {
+			logger.Debugf(ctx, "the output has no format (an intermediate node, not an actual output?)")
+			return
+		}
+		outputFormatName = outputFmt.Name()
 	})
 	logger.Infof(ctx, "output format: '%s'", outputFormatName)
+
+	ctx, cancelFn := context.WithCancel(ctx)
 
 	var recoderOutput node.Abstract = s.NodeRecoder
 	var nodeBSFPassthrough *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]

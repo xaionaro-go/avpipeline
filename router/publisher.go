@@ -10,6 +10,7 @@ import (
 
 type Publisher interface {
 	fmt.Stringer
+	Close(context.Context) error
 	GetInputNode(ctx context.Context) node.Abstract
 	GetOutputRoute(ctx context.Context) *Route
 }

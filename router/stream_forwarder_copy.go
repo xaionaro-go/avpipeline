@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -64,8 +65,12 @@ func (fwd *StreamForwarderCopy) addPacketsPushing(
 		}
 	}
 
-	// it will push to fwd.NodeRouting (which is the same as fwd.Destination.Node):
 	fwd.Input.AddPushPacketsTo(dstNode)
+
+	err := avpipeline.NotifyAboutPacketSources(ctx, fwd.Input.Processor.Kernel, dstNode)
+	if err != nil {
+		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
+	}
 	return nil
 }
 

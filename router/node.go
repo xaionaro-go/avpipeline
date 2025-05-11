@@ -16,7 +16,9 @@ import (
 type ProcessorRouting = processor.FromKernel[*kernel.MapStreamIndices]
 type NodeRouting = node.NodeWithCustomData[*Route, *ProcessorRouting]
 
-type Sender any
+type Sender interface {
+	Close(context.Context) error
+}
 type NodeRetryOutput = node.NodeWithCustomData[Sender, *processor.FromKernel[*kernel.Retry[*kernel.Output]]]
 
 func newRetryOutputNode(

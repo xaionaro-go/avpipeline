@@ -21,7 +21,7 @@ require (
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
-	github.com/xaionaro-go/xsync v0.0.0-20250420144932-1e27f4332d4d
+	github.com/xaionaro-go/xsync v0.0.0-20250511183132-2cd5ebbcb0c3
 )
 
 require (

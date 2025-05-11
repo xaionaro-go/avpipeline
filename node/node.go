@@ -93,12 +93,18 @@ func (n *NodeWithCustomData[C, T]) GetStatistics() *NodeStatistics {
 }
 
 func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
+	if n == nil {
+		return nil
+	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() processor.Abstract {
 		return n.Processor
 	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
+	if n == nil {
+		return nil
+	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() PushPacketsTos {
 		return n.PushPacketsTos
 	})
@@ -120,6 +126,9 @@ func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushFramesTos() PushFramesTos {
+	if n == nil {
+		return nil
+	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() PushFramesTos {
 		return n.PushFramesTos
 	})
@@ -183,6 +192,9 @@ func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 }
 
 func (n *NodeWithCustomData[C, T]) GetInputPacketCondition() packetcondition.Condition {
+	if n == nil {
+		return packetcondition.Static(false)
+	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() packetcondition.Condition {
 		return n.InputPacketCondition
 	})
@@ -195,6 +207,9 @@ func (n *NodeWithCustomData[C, T]) SetInputPacketCondition(cond packetcondition.
 }
 
 func (n *NodeWithCustomData[C, T]) GetInputFrameCondition() framecondition.Condition {
+	if n == nil {
+		return framecondition.Static(false)
+	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() framecondition.Condition {
 		return n.InputFrameCondition
 	})
@@ -225,6 +240,9 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
+	if n == nil {
+		return
+	}
 	sanitizeString := func(s string) string {
 		s = strings.ReplaceAll(s, `"`, ``)
 		s = strings.ReplaceAll(s, "\n", `\n`)

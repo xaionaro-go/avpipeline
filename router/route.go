@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"slices"
@@ -19,16 +20,18 @@ import (
 )
 
 const (
-	routeFrameDrop = true
+	routeFrameDrop      = true
+	routeCloseProcessor = false
 )
 
 type RoutePath = routertypes.RoutePath
 
 type Route struct {
-	Locker xsync.Mutex
-
 	// read only:
-	Path RoutePath
+	Path       RoutePath
+	OnOpen     func(context.Context, *Route)
+	OnClose    func(context.Context, *Route)
+	IsNodeOpen bool
 
 	// access only when Locker is locked:
 	Node                 *NodeRouting
@@ -44,12 +47,14 @@ func newRoute(
 	path RoutePath,
 	errCh chan<- node.Error,
 	onOpen func(context.Context, *Route),
-	onClosed func(context.Context, *Route),
+	onClose func(context.Context, *Route),
 ) *Route {
 	ctx = belt.WithField(ctx, "path", path)
 	ctx, cancelFn := context.WithCancel(ctx)
 	r := &Route{
 		Path:                 path,
+		OnOpen:               onOpen,
+		OnClose:              onClose,
 		PublishersChangeChan: make(chan struct{}),
 		CancelFunc:           cancelFn,
 	}
@@ -59,14 +64,9 @@ func newRoute(
 		processor.DefaultOptionsRecoder()...,
 	)
 	r.Node.CustomData = r
-	if onOpen != nil {
-		onOpen(ctx, r)
-	}
+	r.openNodeLocked(ctx)
 	observability.Go(ctx, func() {
 		defer r.Close(ctx)
-		if onClosed != nil {
-			defer onClosed(ctx, r)
-		}
 		defer logger.Debugf(ctx, "ended")
 		logger.Debugf(ctx, "started")
 		r.Node.Serve(ctx, node.ServeConfig{
@@ -77,17 +77,80 @@ func newRoute(
 	return r
 }
 
+func (r *Route) ResetNode(ctx context.Context) (_ret error) {
+	logger.Debugf(ctx, "ResetNode")
+	defer func() { logger.Debugf(ctx, "/ResetNode: %v", _ret) }()
+	return xsync.DoA1R1(ctx, &r.Node.Locker, r.resetNodeLocked, ctx)
+}
+
+func (r *Route) resetNodeLocked(ctx context.Context) (_ret error) {
+	logger.Debugf(ctx, "resetNodeLocked")
+	defer func() { logger.Debugf(ctx, "/resetNodeLocked: %v", _ret) }()
+	var errs []error
+	if err := r.closeNodeLocked(ctx); err != nil {
+		if !errors.Is(err, ErrAlreadyClosed{}) {
+			errs = append(errs, fmt.Errorf("unable to close the old node: %w", err))
+		}
+	}
+	r.openNodeLocked(ctx)
+	return errors.Join(errs...)
+}
+
 func (r *Route) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
+	return xsync.DoA1R1(ctx, &r.Node.Locker, r.closeLocked, ctx)
+}
+
+func (r *Route) openNodeLocked(ctx context.Context) {
+	logger.Debugf(ctx, "openNodeLocked: %s", r.Path)
+	defer func() { logger.Debugf(ctx, "/openNodeLocked: %s", r.Path) }()
+
+	if routeCloseProcessor {
+		r.Node.Processor = processor.NewFromKernel(
+			ctx,
+			kernel.NewMapStreamIndices(ctx, r),
+			processor.DefaultOptionsRecoder()...,
+		)
+	}
+	if r.IsNodeOpen {
+		panic("is already open")
+	}
+	r.IsNodeOpen = true
+	if r.OnOpen != nil {
+		r.OnOpen(ctx, r)
+	}
+}
+
+func (r *Route) closeNodeLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "closeNodeLocked: %s", r.Path)
+	defer func() { logger.Debugf(ctx, "/closeNodeLocked: %s: %v", r.Path, _err) }()
+
+	if !r.IsNodeOpen {
+		return ErrAlreadyClosed{}
+	}
+	r.IsNodeOpen = false
+	if r.OnClose != nil {
+		r.OnClose(ctx, r)
+	}
+	if routeCloseProcessor {
+		_err = r.Node.Processor.Close(ctx)
+	}
+	return
+}
+
+func (r *Route) closeLocked(ctx context.Context) (_err error) {
+	if r.IsNodeOpen {
+		_err = r.closeNodeLocked(ctx)
+	}
 	r.CancelFunc()
-	return nil
+	return
 }
 
 func (r *Route) getPublishersChangeChan(
 	ctx context.Context,
 ) <-chan struct{} {
-	return xsync.DoR1(ctx, &r.Locker, func() <-chan struct{} {
+	return xsync.DoR1(ctx, &r.Node.Locker, func() <-chan struct{} {
 		return r.PublishersChangeChan
 	})
 }
@@ -102,7 +165,7 @@ func (r *Route) StreamIndexAssign(
 func (r *Route) GetPublishers(
 	ctx context.Context,
 ) Publishers {
-	return xsync.DoR1(ctx, &r.Locker, func() Publishers {
+	return xsync.DoR1(ctx, &r.Node.Locker, func() Publishers {
 		return r.Publishers
 	})
 }
@@ -111,7 +174,7 @@ func (r *Route) AddPublisher(
 	ctx context.Context,
 	publisher Publisher,
 ) error {
-	return xsync.DoR1(ctx, &r.Locker, func() error {
+	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
 		if len(r.Publishers) > 0 {
 			return fmt.Errorf("there are already %d publishers on this route", len(r.Publishers))
 		}
@@ -139,7 +202,7 @@ func (r *Route) RemovePublisher(
 	ctx context.Context,
 	publisher Publisher,
 ) (Publishers, error) {
-	return xsync.DoA2R2(ctx, &r.Locker, r.removePublisherLocked, ctx, publisher)
+	return xsync.DoA2R2(ctx, &r.Node.Locker, r.removePublisherLocked, ctx, publisher)
 }
 
 func (r *Route) removePublisherLocked(
@@ -152,6 +215,14 @@ func (r *Route) removePublisherLocked(
 			var ch chan<- struct{}
 			ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
 			close(ch)
+
+			if len(r.Publishers) == 0 {
+				// TODO: add an option to keep the clients to wait for a new stream
+				logger.Debugf(ctx, "zero publishers left; dropping the clients")
+				if err := r.resetNodeLocked(ctx); err != nil {
+					return r.Publishers, fmt.Errorf("unable to reset the node: %w", err)
+				}
+			}
 			return r.Publishers, nil
 		}
 	}

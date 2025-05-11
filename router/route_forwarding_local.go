@@ -37,11 +37,21 @@ func (r *Router) AddRouteForwardingLocal(
 ) (_ret *RouteForwarding, _err error) {
 	logger.Debugf(ctx, "RouteForwarding(ctx, '%s', '%s', %#+v)", srcPath, dstPath, recoderConfig)
 	defer func() {
-		logger.Debugf(ctx, "/RouteForwarding(ctx, '%s', '%s', %#+v): %v %v", srcPath, dstPath, recoderConfig, _ret, _err)
+		logger.Debugf(ctx, "/RouteForwarding(ctx, '%s', '%s', %#+v): %p %v", srcPath, dstPath, recoderConfig, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
 
+	// Overall what will happen is:
+	//
+	// In case of recoderConfig != nil:
+	// * `RouteForwarding` will wait for a publisher on the source route;
+	// * and it will get the source and destination routes.
+	// * `RouteForwarding` will add itself as the publisher in the destination route.
+	// * `RouteForwarding` will create and start a `StreamForwarderRecoding`.
+	// * `StreamForwarderRecoding` will create a `TranscoderWithPassthrough`.
+	// * `StreamForwarderRecoding` will subscribe `TranscoderWithPassthrough`'s input to source route node traffic.
+	// * `StreamForwarderRecoding` will use the `TranscoderWithPassthrough` to push it to the Output.
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
@@ -85,9 +95,12 @@ func (n *forwardOutputNodeLocalPath) Close(
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
-	if _, err := n.NodeRouting.CustomData.RemovePublisher(ctx, n.RouteForwarding); err != nil {
-		errs = append(errs, fmt.Errorf("removePublisher: %w", err))
-	}
+	dstRoute := n.NodeRouting.CustomData
+	dstRoute.Node.Locker.Do(ctx, func() {
+		if _, err := dstRoute.removePublisherLocked(ctx, n.RouteForwarding); err != nil {
+			errs = append(errs, fmt.Errorf("dstRoute.removePublisher: %w", err))
+		}
+	})
 	return errors.Join(errs...)
 }
 
@@ -102,7 +115,7 @@ var _ Publisher = (*RouteForwarding)(nil)
 func (fwd *RouteForwarding) GetInputNode(
 	ctx context.Context,
 ) node.Abstract {
-	return xsync.DoR1(ctx, &fwd.Input.Locker, func() node.Abstract {
+	return xsync.DoR1(ctx, &fwd.Input.Node.Locker, func() node.Abstract {
 		if len(fwd.Input.Publishers) == 0 {
 			return nil
 		}

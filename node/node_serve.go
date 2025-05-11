@@ -198,8 +198,12 @@ func pushFurther[
 		}
 
 		dst := pushTo.Node
-
 		n.Locker.UDo(ctx, func() {
+			if dst == nil {
+				logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
+				return
+			}
+
 			inputCond := getInputCondition(dst)
 			if any(inputCond) != nil && !inputCond.Match(ctx, inputObj) {
 				logger.Tracef(ctx, "input condition %s was not met", inputCond)
@@ -211,6 +215,8 @@ func pushFurther[
 			logger.Tracef(ctx, "pushing to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 			if serveConfig.FrameDrop {
 				select {
+				case <-ctx.Done():
+					return
 				case pushChan <- inputObj:
 				default:
 					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
@@ -219,7 +225,11 @@ func pushFurther[
 					return
 				}
 			} else {
-				pushChan <- inputObj
+				select {
+				case <-ctx.Done():
+					return
+				case pushChan <- inputObj:
+				}
 			}
 			dstStats.BytesCountRead.Add(objSize)
 			incrementCounters(&dstStats.FramesRead, mediaType)

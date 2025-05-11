@@ -15,9 +15,9 @@ func NotifyAboutPacketSources[T node.Abstract](
 	packetSource packet.Source,
 	nodes ...T,
 ) (_err error) {
-	logger.Debugf(ctx, "NotifyAboutPacketSourcesRecursively: %T, %v", packetSource, nodes)
+	logger.Debugf(ctx, "NotifyAboutPacketSources: %T, %v", packetSource, nodes)
 	defer func() {
-		logger.Debugf(ctx, "NotifyAboutPacketSourcesRecursively: %T, %v: %v", packetSource, nodes, _err)
+		logger.Debugf(ctx, "NotifyAboutPacketSources: %T, %v: %v", packetSource, nodes, _err)
 	}()
 
 	if len(nodes) != 1 {
