@@ -26,6 +26,7 @@ type Sequence[T Abstract] struct {
 
 var _ Abstract = (*Sequence[Abstract])(nil)
 var _ packet.Source = (*Sequence[Abstract])(nil)
+var _ packet.Sink = (*Sequence[Abstract])(nil)
 
 func NewSequence[T Abstract](kernels ...T) *Sequence[T] {
 	return &Sequence[T]{
@@ -257,7 +258,28 @@ func (s *Sequence[T]) Generate(
 	return errors.Join(errs...)
 }
 
-func (sw *Sequence[T]) WithFormatContext(
+func (sw *Sequence[T]) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	for _, k := range sw.Kernels {
+		sink, ok := any(k).(packet.Sink)
+		if !ok {
+			continue
+		}
+
+		hasFormatContext := false
+		sink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			callback(fmtCtx)
+			hasFormatContext = true
+		})
+		if hasFormatContext {
+			return
+		}
+	}
+}
+
+func (sw *Sequence[T]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
@@ -268,7 +290,7 @@ func (sw *Sequence[T]) WithFormatContext(
 		}
 
 		hasFormatContext := false
-		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			callback(fmtCtx)
 			hasFormatContext = true
 		})
@@ -284,16 +306,19 @@ func (sw *Sequence[T]) NotifyAboutPacketSource(
 ) error {
 	var errs []error
 	for idx, k := range sw.Kernels {
+		sink, ok := any(k).(packet.Sink)
+		if ok {
+			err := sink.NotifyAboutPacketSource(ctx, prevSource)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("got an error from #%d:%s: %w", idx, k, err))
+			}
+		}
 		source, ok := any(k).(packet.Source)
 		if !ok {
 			continue
 		}
-		err := source.NotifyAboutPacketSource(ctx, prevSource)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("got an error from #%d:%s: %w", idx, k, err))
-		}
 		hasFormatContext := false
-		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			hasFormatContext = true
 		})
 		if hasFormatContext {

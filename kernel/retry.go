@@ -47,6 +47,7 @@ func NewRetry[T Abstract](
 
 var _ Abstract = (*Retry[Abstract])(nil)
 var _ packet.Source = (*Retry[Abstract])(nil)
+var _ packet.Sink = (*Retry[Abstract])(nil)
 
 func (r *Retry[T]) startIfNeeded(
 	ctx context.Context,
@@ -224,7 +225,7 @@ func (r *Retry[T]) Generate(
 	})
 }
 
-func (r *Retry[T]) WithFormatContext(
+func (r *Retry[T]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
@@ -233,7 +234,21 @@ func (r *Retry[T]) WithFormatContext(
 		if !ok {
 			return nil
 		}
-		pktSrc.WithFormatContext(ctx, callback)
+		pktSrc.WithOutputFormatContext(ctx, callback)
+		return nil
+	})
+}
+
+func (r *Retry[T]) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	r.retry(ctx, func(k T) error {
+		pktSink, ok := Abstract(k).(packet.Sink)
+		if !ok {
+			return nil
+		}
+		pktSink.WithInputFormatContext(ctx, callback)
 		return nil
 	})
 }
@@ -243,11 +258,11 @@ func (r *Retry[T]) NotifyAboutPacketSource(
 	source packet.Source,
 ) error {
 	return r.retry(ctx, func(k T) error {
-		pktSrc, ok := Abstract(k).(packet.Source)
+		pktSink, ok := Abstract(k).(packet.Sink)
 		if !ok {
 			return nil
 		}
-		return pktSrc.NotifyAboutPacketSource(ctx, source)
+		return pktSink.NotifyAboutPacketSource(ctx, source)
 	})
 }
 

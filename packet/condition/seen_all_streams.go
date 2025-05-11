@@ -47,7 +47,7 @@ func (c *SeenAllStreamsT) acknowledgeInput(
 	pkt packet.Input,
 ) {
 	if c.ExpectedStreams == 0 {
-		pkt.Source.WithFormatContext(ctx, func(fmtCtc *astiav.FormatContext) {
+		pkt.Source.WithOutputFormatContext(ctx, func(fmtCtc *astiav.FormatContext) {
 			c.ExpectedStreams = uint(fmtCtc.NbStreams())
 		})
 	}

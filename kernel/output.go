@@ -80,7 +80,7 @@ type Output struct {
 }
 
 var _ Abstract = (*Output)(nil)
-var _ packet.Source = (*Output)(nil)
+var _ packet.Sink = (*Output)(nil)
 
 func formatFromScheme(scheme string) string {
 	switch scheme {
@@ -470,7 +470,7 @@ func (o *Output) SendInputPacket(
 		err          error
 	)
 	o.formatContextLocker.Do(ctx, func() {
-		inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.GetStream(), fmtCtx)
 		})
 	})
@@ -496,7 +496,7 @@ func (o *Output) SendInputPacket(
 	pkt.RescaleTs(inputPkt.Stream.TimeBase(), outputStream.TimeBase())
 
 	var inputStreamsCount int
-	inputPkt.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		inputStreamsCount = fmtCtx.NbStreams()
 	})
 
@@ -609,7 +609,7 @@ func (o *Output) doWritePacket(
 	source packet.Source,
 	outputStream *OutputStream,
 ) (_err error) {
-	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, o)) {
+	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
 		return nil
 	}
 
@@ -672,7 +672,7 @@ func (o *Output) doWritePacket(
 	return nil
 }
 
-func (o *Output) WithFormatContext(
+func (o *Output) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
@@ -688,7 +688,7 @@ func (o *Output) NotifyAboutPacketSource(
 	logger.Debugf(ctx, "NotifyAboutPacketSource(ctx, %T)", source)
 	defer func() { logger.Debugf(ctx, "/NotifyAboutPacketSource(ctx, %T): %v", source, _ret) }()
 	var errs []error
-	source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		o.formatContextLocker.Do(ctx, func() {
 			for _, stream := range fmtCtx.Streams() {
 				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())

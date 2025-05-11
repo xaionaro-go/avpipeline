@@ -11,37 +11,48 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/xsync"
 )
 
 type Decoder[DF codec.DecoderFactory] struct {
-	DecoderFactory DF
-
 	*closeChan
-	decoders map[int]*codec.Decoder
+
+	DecoderFactory DF
+	Locker         xsync.Mutex
+	Decoders       map[int]*codec.Decoder
+
+	FormatContext *astiav.FormatContext
 }
 
 var _ Abstract = (*Decoder[codec.DecoderFactory])(nil)
+var _ packet.Sink = (*Decoder[codec.DecoderFactory])(nil)
 
 func NewDecoder[DF codec.DecoderFactory](
 	ctx context.Context,
 	decoderFactory DF,
 ) *Decoder[DF] {
 	d := &Decoder[DF]{
-		DecoderFactory: decoderFactory,
 		closeChan:      newCloseChan(),
-		decoders:       map[int]*codec.Decoder{},
+		DecoderFactory: decoderFactory,
+		Decoders:       map[int]*codec.Decoder{},
+		FormatContext:  astiav.AllocFormatContext(),
 	}
+	setFinalizerFree(ctx, d.FormatContext)
 	return d
 }
 
-func (d *Decoder[DF]) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "Close()")
-	defer func() { logger.Debugf(ctx, "/Close(): %v", _err) }()
+func (d *Decoder[DF]) Close(ctx context.Context) error {
+	return xsync.DoA1R1(ctx, &d.Locker, d.close, ctx)
+}
+
+func (d *Decoder[DF]) close(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "close()")
+	defer func() { logger.Debugf(ctx, "/close(): %v", _err) }()
 	d.closeChan.Close(ctx)
-	for key, decoder := range d.decoders {
+	for key, decoder := range d.Decoders {
 		err := decoder.Close(ctx)
 		logger.Tracef(ctx, "decoder for stream #%d closed: %v", key, err)
-		delete(d.decoders, key)
+		delete(d.Decoders, key)
 	}
 	return nil
 }
@@ -62,7 +73,14 @@ func (d *Decoder[DF]) GetStreamDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
 ) (*codec.Decoder, error) {
-	decoder := d.decoders[stream.Index()]
+	return xsync.DoA2R2(ctx, &d.Locker, d.getStreamDecoder, ctx, stream)
+}
+
+func (d *Decoder[DF]) getStreamDecoder(
+	ctx context.Context,
+	stream *astiav.Stream,
+) (*codec.Decoder, error) {
+	decoder := d.Decoders[stream.Index()]
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder != nil {
 		return decoder, nil
@@ -72,7 +90,7 @@ func (d *Decoder[DF]) GetStreamDecoder(
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
 	assert(ctx, decoder != nil)
-	d.decoders[stream.Index()] = decoder
+	d.Decoders[stream.Index()] = decoder
 	return decoder, nil
 }
 
@@ -88,10 +106,20 @@ func (d *Decoder[DF]) SendInputPacket(
 		return io.ErrClosedPipe
 	}
 
-	decoder, err := d.GetStreamDecoder(ctx, input.Stream)
+	return xsync.DoA3R1(ctx, &d.Locker, d.sendInputPacket, ctx, input, outputFramesCh)
+}
+
+func (d *Decoder[DF]) sendInputPacket(
+	ctx context.Context,
+	input packet.Input,
+	outputFramesCh chan<- frame.Output,
+) (_err error) {
+	decoder, err := d.getStreamDecoder(ctx, input.Stream)
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
+
+	input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.CodecContext().TimeBase())
 
 	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
 		logger.Debugf(ctx, "decoder.CodecContext().SendInput(): %v", err)
@@ -150,4 +178,34 @@ func (d *Decoder[DF]) SendInputFrame(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
+}
+
+func (d *Decoder[DF]) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	d.Locker.Do(ctx, func() {
+		callback(d.FormatContext)
+	})
+}
+
+func (d *Decoder[DF]) NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) error {
+	var errs []error
+	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		d.Locker.Do(ctx, func() {
+			for _, inputStream := range fmtCtx.Streams() {
+				_, err := d.getStreamDecoder(ctx, inputStream)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("unable to get a stream decoder: %w", err))
+				}
+			}
+		})
+	})
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }

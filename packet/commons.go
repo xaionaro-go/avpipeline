@@ -9,7 +9,11 @@ import (
 )
 
 type Source interface {
-	WithFormatContext(context.Context, func(*astiav.FormatContext))
+	WithOutputFormatContext(context.Context, func(*astiav.FormatContext))
+}
+
+type Sink interface {
+	WithInputFormatContext(context.Context, func(*astiav.FormatContext))
 	NotifyAboutPacketSource(context.Context, Source) error
 }
 

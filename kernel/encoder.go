@@ -412,7 +412,7 @@ func (e *Encoder[EF]) send(
 	out <- outPktWrapped
 }
 
-func (e *Encoder[EF]) WithFormatContext(
+func (e *Encoder[EF]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
@@ -426,7 +426,7 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 	source packet.Source,
 ) error {
 	var errs []error
-	source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		e.Locker.Do(ctx, func() {
 			changed := false
 			for _, inputStream := range fmtCtx.Streams() {

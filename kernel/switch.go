@@ -34,6 +34,7 @@ type Switch[T Abstract] struct {
 
 var _ Abstract = (*Switch[Abstract])(nil)
 var _ packet.Source = (*Switch[Abstract])(nil)
+var _ packet.Sink = (*Switch[Abstract])(nil)
 
 func NewSwitch[T Abstract](
 	kernels ...T,
@@ -303,7 +304,7 @@ func (sw *Switch[T]) Close(
 	return errors.Join(result...)
 }
 
-func (sw *Switch[T]) WithFormatContext(
+func (sw *Switch[T]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
@@ -313,7 +314,7 @@ func (sw *Switch[T]) WithFormatContext(
 		if !ok {
 			continue
 		}
-		source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			callback(fmtCtx)
 			hasFormatContextCount++
 		})
@@ -323,17 +324,37 @@ func (sw *Switch[T]) WithFormatContext(
 	}
 }
 
+func (sw *Switch[T]) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	hasFormatContextCount := 0
+	for _, k := range sw.Kernels {
+		sink, ok := any(k).(packet.Sink)
+		if !ok {
+			continue
+		}
+		sink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			callback(fmtCtx)
+			hasFormatContextCount++
+		})
+	}
+	if hasFormatContextCount != 0 && hasFormatContextCount != len(sw.Kernels) {
+		logger.Errorf(ctx, "a Switch should container either all kernels that are packet.Sink-s or all kernels that are not packet.Sink-s, but not a mix")
+	}
+}
+
 func (sw *Switch[T]) NotifyAboutPacketSource(
 	ctx context.Context,
 	prevSource packet.Source,
 ) error {
 	var errs []error
 	for idx, k := range sw.Kernels {
-		source, ok := any(k).(packet.Source)
+		sink, ok := any(k).(packet.Sink)
 		if !ok {
 			continue
 		}
-		err := source.NotifyAboutPacketSource(ctx, prevSource)
+		err := sink.NotifyAboutPacketSource(ctx, prevSource)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("got an error from #%d:%s: %w", idx, k, err))
 		}

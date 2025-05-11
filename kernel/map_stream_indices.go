@@ -23,7 +23,7 @@ type MapStreamIndices struct {
 	FrameStreamMap  map[int]typing.Optional[int]
 	Assigner        StreamIndexAssigner
 
-	outputFormat  *astiav.FormatContext
+	formatContext *astiav.FormatContext
 	outputStreams map[int]*astiav.Stream
 }
 
@@ -44,10 +44,10 @@ func NewMapStreamIndices(
 		FrameStreamMap:  make(map[int]typing.Optional[int]),
 		Assigner:        assigner,
 
-		outputFormat:  astiav.AllocFormatContext(),
+		formatContext: astiav.AllocFormatContext(),
 		outputStreams: make(map[int]*astiav.Stream),
 	}
-	setFinalizerFree(ctx, m.outputFormat)
+	setFinalizerFree(ctx, m.formatContext)
 	return m
 }
 
@@ -203,7 +203,7 @@ func (m *MapStreamIndices) newOutputStream(
 	codecParams *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (*astiav.Stream, error) {
-	outputStream := m.outputFormat.NewStream(nil)
+	outputStream := m.formatContext.NewStream(nil)
 	codecParams.Copy(outputStream.CodecParameters())
 	outputStream.SetTimeBase(timeBase)
 	outputStream.SetIndex(outputStreamIndex)
@@ -250,12 +250,21 @@ func (m *MapStreamIndices) sendInputPacket(
 	return nil
 }
 
-func (m *MapStreamIndices) WithFormatContext(
+func (m *MapStreamIndices) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	m.Locker.Do(ctx, func() {
-		callback(m.outputFormat)
+		callback(m.formatContext)
+	})
+}
+
+func (m *MapStreamIndices) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	m.Locker.Do(ctx, func() {
+		callback(m.formatContext)
 	})
 }
 
@@ -267,7 +276,7 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 	defer func() { logger.Debugf(ctx, "/NotifyAboutPacketSource(ctx, %T): %v", source, _ret) }()
 
 	var errs []error
-	source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		m.Locker.Do(ctx, func() {
 			for _, inputStream := range fmtCtx.Streams() {
 				outputStream, err := m.getOutputStreamForPacket(

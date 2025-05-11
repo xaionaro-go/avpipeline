@@ -221,20 +221,13 @@ func (i *Input) Generate(
 	}
 }
 
-func (i *Input) WithFormatContext(
+func (i *Input) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	logger.Tracef(ctx, "WithFormatContext")
 	defer func() { logger.Tracef(ctx, "/WithFormatContext") }()
 	callback(i.FormatContext)
-}
-
-func (i *Input) NotifyAboutPacketSource(
-	ctx context.Context,
-	source packet.Source,
-) error {
-	return fmt.Errorf("an Input is supposed to be the first node in any pipeline, but somehow I was notified that %s is going to send me packets", source)
 }
 
 func (i *Input) SendInputPacket(

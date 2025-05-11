@@ -25,21 +25,20 @@ func NotifyAboutPacketSources[T node.Abstract](
 	}
 	n := nodes[0]
 
+	if packetSource != nil {
+		if getPacketSinker, ok := n.GetProcessor().(interface{ GetPacketSink() packet.Sink }); ok {
+			if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
+				if err := packetSink.NotifyAboutPacketSource(ctx, packetSource); err != nil {
+					return fmt.Errorf("unable to notify '%s' with '%s': %w", packetSink, packetSource, err)
+				}
+			}
+		}
+	}
 	if getPacketSourcer, ok := n.GetProcessor().(interface{ GetPacketSource() packet.Source }); ok {
 		if newPacketSource := getPacketSourcer.GetPacketSource(); newPacketSource != nil {
-			hasNewFormatContext := false
-			newPacketSource.WithFormatContext(ctx, func(fc *astiav.FormatContext) {
-				hasNewFormatContext = true
-			})
-			logger.Debugf(ctx, "%T: hasNewFormatContext:%t", n, hasNewFormatContext)
-			if hasNewFormatContext {
-				if packetSource != nil {
-					if err := newPacketSource.NotifyAboutPacketSource(ctx, packetSource); err != nil {
-						return fmt.Errorf("unable to notify '%s' with '%s': %w", newPacketSource, packetSource, err)
-					}
-				}
+			newPacketSource.WithOutputFormatContext(ctx, func(fc *astiav.FormatContext) {
 				packetSource = newPacketSource
-			}
+			})
 		}
 	}
 

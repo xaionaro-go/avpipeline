@@ -50,7 +50,7 @@ func (s *streamIndexAssigner[C, P]) streamIndexAssign(
 		}
 
 		maxStreamIndex := 0
-		s.StreamForward.inputAsPacketSource.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		s.StreamForward.inputAsPacketSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			for _, stream := range fmtCtx.Streams() {
 				if stream.Index() > maxStreamIndex {
 					maxStreamIndex = stream.Index()

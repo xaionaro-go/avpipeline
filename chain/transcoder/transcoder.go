@@ -10,12 +10,12 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/chain/transcoder/types"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodecondition "github.com/xaionaro-go/avpipeline/node/condition"
-	"github.com/xaionaro-go/avpipeline/node/transcoder/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
@@ -351,6 +351,15 @@ func asPacketSource(proc processor.Abstract) packet.Source {
 	return nil
 }
 
+func asPacketSink(proc processor.Abstract) packet.Sink {
+	if getPacketSinker, ok := proc.(interface{ GetPacketSink() packet.Sink }); ok {
+		if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
+			return packetSink
+		}
+	}
+	return nil
+}
+
 func (s *Transcoder[C, P]) Start(
 	ctx context.Context,
 	recoderInSeparateTracks bool,
@@ -364,9 +373,9 @@ func (s *Transcoder[C, P]) Start(
 		return fmt.Errorf("currently we support only the case with a single output, but received %d outputs", len(s.Outputs))
 	}
 	output := s.Outputs[0]
-	outputAsPacketSource := asPacketSource(output.GetProcessor())
+	outputAsPacketSource := asPacketSink(output.GetProcessor())
 	if outputAsPacketSource == nil {
-		return fmt.Errorf("the output node processor is expected to be a packet source, but is not")
+		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
 	}
 
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -385,7 +394,7 @@ func (s *Transcoder[C, P]) Start(
 	)
 
 	var outputFormatName string
-	outputAsPacketSource.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	outputAsPacketSource.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		outputFormatName = fmtCtx.OutputFormat().Name()
 	})
 	logger.Infof(ctx, "output format: '%s'", outputFormatName)
@@ -394,7 +403,7 @@ func (s *Transcoder[C, P]) Start(
 	var nodeBSFPassthrough *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
 	{
 		var inputVideoCodecID, inputAudioCodecID astiav.CodecID
-		s.inputAsPacketSource.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		s.inputAsPacketSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			inputVideoCodecID, inputAudioCodecID = getCodecNamesFromStreams(
 				fmtCtx.Streams(),
 			)
@@ -514,10 +523,12 @@ func (s *Transcoder[C, P]) Start(
 			nodeMapStreamIndices.AddPushPacketsTo(output)
 		} else {
 			if rescaleTS && (!startWithPassthrough || notifyAboutPacketSources) {
-				nodeFilterThrottle.InputPacketCondition = filter.NewRescaleTSBetweenKernels(
-					s.inputAsPacketSource,
-					s.NodeRecoder.Processor.Kernel,
-				)
+				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
+					filter.NewRescaleTSBetweenKernels(
+						s.inputAsPacketSource,
+						s.NodeRecoder.Processor.Kernel.Decoder,
+					),
+				}
 			} else {
 				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
 			}

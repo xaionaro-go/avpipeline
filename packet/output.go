@@ -44,7 +44,7 @@ func (o *Output) GetStreamIndex() int {
 func (o *Output) GetStream(ctx context.Context) *astiav.Stream {
 	streamIndex := o.GetStreamIndex()
 	var result *astiav.Stream
-	o.Source.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	o.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		for _, stream := range fmtCtx.Streams() {
 			if stream.Index() == streamIndex {
 				result = stream

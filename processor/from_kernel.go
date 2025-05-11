@@ -171,3 +171,11 @@ func (p *FromKernel[T]) GetPacketSource() packet.Source {
 	}
 	return source
 }
+
+func (p *FromKernel[T]) GetPacketSink() packet.Sink {
+	sink, ok := any(p.Kernel).(packet.Sink)
+	if !ok {
+		return nil
+	}
+	return sink
+}

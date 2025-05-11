@@ -9,7 +9,7 @@ import (
 
 func sourceNbStreams(ctx context.Context, s packet.Source) int {
 	var result int
-	s.WithFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	s.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		result = fmtCtx.NbStreams()
 	})
 	return result

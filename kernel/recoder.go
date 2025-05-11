@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -36,6 +37,7 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 
 var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 var _ packet.Source = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ packet.Sink = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
 func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
@@ -202,4 +204,32 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 
 func (r *Recoder[DF, EF]) String() string {
 	return fmt.Sprintf("Recoder(%s->%s)", r.DecoderFactory, r.EncoderFactory)
+}
+
+func (r *Recoder[DF, EF]) WithOutputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	r.Encoder.WithOutputFormatContext(ctx, callback)
+}
+
+func (r *Recoder[DF, EF]) WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	r.Decoder.WithInputFormatContext(ctx, callback)
+}
+
+func (r *Recoder[DF, EF]) NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) error {
+	var errs []error
+	if err := r.Decoder.NotifyAboutPacketSource(ctx, source); err != nil {
+		errs = append(errs, fmt.Errorf("decoder returned an error: %w", err))
+	}
+	if err := r.Encoder.NotifyAboutPacketSource(ctx, source); err != nil {
+		errs = append(errs, fmt.Errorf("encoder returned an error: %w", err))
+	}
+	return errors.Join(errs...)
 }
