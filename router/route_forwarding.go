@@ -85,7 +85,7 @@ func (fwd *RouteForwarding) start(
 ) (_err error) {
 	logger.Debugf(ctx, "start")
 	defer func() { logger.Debugf(ctx, "/start: %v", _err) }()
-	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.startLocked, ctx)
+	return xsync.DoA1R1(xsync.WithEnableDeadlock(ctx, false), &fwd.Locker, fwd.startLocked, ctx)
 }
 
 func (fwd *RouteForwarding) startLocked(ctx context.Context) (_err error) {
