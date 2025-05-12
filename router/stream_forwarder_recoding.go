@@ -14,12 +14,12 @@ import (
 )
 
 // TODO: remove StreamForwarder from package `router`
-type StreamForwarderFromRouterRecoding[CS any, PS processor.Abstract] struct {
+type StreamForwarderRecoding[CS any, PS processor.Abstract] struct {
 	Chain      *transcoder.TranscoderWithPassthrough[CS, PS]
 	CancelFunc context.CancelFunc
 }
 
-var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderFromRouterRecoding[*Route, *ProcessorRouting])(nil)
+var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderRecoding[*Route, *ProcessorRouting])(nil)
 
 // TODO: remove StreamForwarder from package `router`
 func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
@@ -27,11 +27,11 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *StreamForwarderFromRouterRecoding[CS, PS], _err error) {
+) (_ret *StreamForwarderRecoding[CS, PS], _err error) {
 	logger.Debugf(ctx, "NewStreamForwarderRecoding(%s, %s)", src, dst)
 	defer func() { logger.Debugf(ctx, "/NewStreamForwarderRecoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
 
-	fwd := &StreamForwarderFromRouterRecoding[CS, PS]{}
+	fwd := &StreamForwarderRecoding[CS, PS]{}
 
 	var err error
 	fwd.Chain, err = transcoder.New(ctx, src, dst)
@@ -71,7 +71,7 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 	return fwd, nil
 }
 
-func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Start(ctx context.Context) (_err error) {
+func (fwd *StreamForwarderRecoding[CS, PS]) Start(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
 
@@ -93,15 +93,15 @@ func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Start(ctx context.Context)
 	return nil
 }
 
-func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
+func (fwd *StreamForwarderRecoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
 	return fwd.Chain.Input
 }
 
-func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Destination() node.Abstract {
+func (fwd *StreamForwarderRecoding[CS, PS]) Destination() node.Abstract {
 	return fwd.Chain.Outputs[0]
 }
 
-func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Stop(
+func (fwd *StreamForwarderRecoding[CS, PS]) Stop(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiav"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
@@ -143,17 +144,17 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
-	if s.Recoder == nil {
-		if err := s.initRecoder(ctx, cfg); err != nil {
-			return fmt.Errorf("unable to initialize the recoder: %w", err)
-		}
-		return nil
-	}
 	if len(cfg.VideoTracks) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track (received a request for %d tracks)", len(cfg.VideoTracks))
 	}
 	if len(cfg.AudioTracks) != 1 {
 		return fmt.Errorf("currently we support only exactly one output audio track (received a request for %d tracks)", len(cfg.AudioTracks))
+	}
+	if s.Recoder == nil {
+		if err := s.initRecoder(ctx, cfg); err != nil {
+			return fmt.Errorf("unable to initialize the recoder: %w", err)
+		}
+		return nil
 	}
 	if cfg.AudioTracks[0].CodecName != "copy" {
 		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTracks[0].CodecName)
@@ -303,16 +304,22 @@ func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 func tryNewBSFForMPEG2(
 	ctx context.Context,
 	videoCodecID astiav.CodecID,
-	_ astiav.CodecID,
-) *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
+	audioCodecID astiav.CodecID,
+) (_ret *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]) {
+	logger.Debugf(ctx, "tryNewBSFForMPEG2(ctx, '%s', '%s')", videoCodecID, audioCodecID)
+	defer func() {
+		logger.Debugf(ctx, "/tryNewBSFForMPEG2(ctx, '%s', '%s'): %s", videoCodecID, audioCodecID, spew.Sdump(_ret))
+	}()
 	recoderVideoBSFName := bitstreamfilter.NameMP4ToMP2(videoCodecID)
 	if recoderVideoBSFName == bitstreamfilter.NameNull {
 		return nil
 	}
 
-	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, map[packetcondition.Condition]bitstreamfilter.Name{
+	m := map[packetcondition.Condition]bitstreamfilter.Name{
 		packetcondition.MediaType(astiav.MediaTypeVideo): recoderVideoBSFName,
-	})
+	}
+	logger.Debugf(ctx, "tryNewBSFForMPEG2(ctx, '%s', '%s'): m: %s", spew.Sdump(m))
+	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, m)
 	if err != nil {
 		logger.Errorf(ctx, "unable to initialize the bitstream filter '%s': %w", recoderVideoBSFName, err)
 		return nil
@@ -329,17 +336,23 @@ func tryNewBSFForMPEG4(
 	ctx context.Context,
 	videoCodecID astiav.CodecID,
 	audioCodecID astiav.CodecID,
-) *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
+) (_ret *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]) {
+	logger.Debugf(ctx, "tryNewBSFForMPEG4(ctx, '%s', '%s')", videoCodecID, audioCodecID)
+	defer func() {
+		logger.Debugf(ctx, "/tryNewBSFForMPEG4(ctx, '%s', '%s'): %s", videoCodecID, audioCodecID, spew.Sdump(_ret))
+	}()
 	recoderVideoBSFName := bitstreamfilter.NameMP2ToMP4(videoCodecID)
 	recoderAudioBSFName := bitstreamfilter.NameMP2ToMP4(audioCodecID)
 	if recoderVideoBSFName == bitstreamfilter.NameNull && recoderAudioBSFName == bitstreamfilter.NameNull {
 		return nil
 	}
 
-	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, map[packetcondition.Condition]bitstreamfilter.Name{
+	m := map[packetcondition.Condition]bitstreamfilter.Name{
 		packetcondition.MediaType(astiav.MediaTypeVideo): recoderVideoBSFName,
 		packetcondition.MediaType(astiav.MediaTypeAudio): recoderAudioBSFName,
-	})
+	}
+	logger.Debugf(ctx, "tryNewBSFForMPEG4(ctx, '%s', '%s'): m: %s", spew.Sdump(m))
+	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, m)
 	if err != nil {
 		logger.Errorf(ctx, "unable to initialize the bitstream filters '%s'/'%s': %w", recoderVideoBSFName, recoderAudioBSFName, err)
 		return nil
