@@ -32,6 +32,7 @@ const (
 	outputWaitForKeyFrames = true
 	outputCopyStreamIndex  = true
 	outputUpdateStreams    = false
+	skipTooHighTimestamps  = false
 )
 
 type OutputConfig struct {
@@ -195,7 +196,15 @@ func NewOutputFromURL(
 			}
 
 			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+			o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
 			logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
+		case "rtsp", "srt":
+			if o.Dictionary == nil {
+				o.Dictionary = astiav.NewDictionary()
+				setFinalizerFree(ctx, o.Dictionary)
+			}
+
+			o.Dictionary.Set("live", "1", 0)
 		}
 	}()
 
@@ -498,6 +507,9 @@ func (o *Output) SendInputPacket(
 	inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		inputStreamsCount = fmtCtx.NbStreams()
 	})
+	if inputStreamsCount < 2 {
+		inputStreamsCount = 2
+	}
 
 	logger.Tracef(ctx, "sending the current packet")
 
@@ -612,6 +624,17 @@ func (o *Output) doWritePacket(
 ) (_err error) {
 	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
 		return nil
+	}
+
+	if skipTooHighTimestamps {
+		if pkt.Dts() > 9000000000000000000 {
+			logger.Errorf(ctx, "DTS is too high: %d", pkt.Dts())
+			return nil
+		}
+		if pkt.Pts() > 9000000000000000000 {
+			logger.Errorf(ctx, "PTS is too high: %d", pkt.Pts())
+			return nil
+		}
 	}
 
 	//pkt.SetPos(-1) // <- TODO: should this happen? why?

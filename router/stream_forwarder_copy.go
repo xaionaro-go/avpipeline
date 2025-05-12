@@ -57,12 +57,11 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 		}
 	}
 
-	fwd.Input.AddPushPacketsTo(dstNode)
-
 	err := avpipeline.NotifyAboutPacketSources(ctx, nil, fwd.Input)
 	if err != nil {
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
+	fwd.Input.AddPushPacketsTo(dstNode)
 	return nil
 }
 

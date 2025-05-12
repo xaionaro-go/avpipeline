@@ -62,6 +62,17 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 				})
 			}
 		}
+		if len(recoderConfig.AudioTracks) == 0 && len(recoderConfig.VideoTracks) == 0 {
+			logger.Errorf(ctx, "no audio/video tracks defined, adding one of each just to make it work")
+			recoderConfig.VideoTracks = append(recoderConfig.VideoTracks, transcodertypes.TrackConfig{
+				InputTrackIDs: []int{0, 1, 2, 3, 4, 5, 6, 7},
+				CodecName:     "copy",
+			})
+			recoderConfig.AudioTracks = append(recoderConfig.AudioTracks, transcodertypes.TrackConfig{
+				InputTrackIDs: []int{0, 1, 2, 3, 4, 5, 6, 7},
+				CodecName:     "copy",
+			})
+		}
 	}
 	logger.Debugf(ctx, "resulting config: %#+v", recoderConfig)
 	if err := fwd.Chain.SetRecoderConfig(ctx, *recoderConfig); err != nil {

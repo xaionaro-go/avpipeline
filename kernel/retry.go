@@ -126,7 +126,7 @@ func (r *Retry[T]) retry(
 
 			k, err := r.getKernel(ctx)
 			if err != nil {
-				logger.Debugf(ctx, "unset kernel")
+				logger.Debugf(ctx, "unset kernel: getKernel error %v", err)
 				r.Kernel = zeroValue
 				r.KernelIsSet = false
 				return fmt.Errorf("unable to get kernel: %w", err)
@@ -143,7 +143,7 @@ func (r *Retry[T]) retry(
 					return nil
 				case errors.As(err, &ErrRetry{}):
 				default:
-					logger.Debugf(ctx, "unset kernel")
+					logger.Debugf(ctx, "unset kernel: OnError error: %v", err)
 					r.Kernel = zeroValue
 					r.KernelIsSet = false
 					r.KernelError = err
@@ -152,7 +152,7 @@ func (r *Retry[T]) retry(
 				}
 			}
 
-			logger.Debugf(ctx, "unset kernel")
+			logger.Debugf(ctx, "unset kernel: callback error: %v", err)
 			r.Kernel = zeroValue
 			r.KernelIsSet = false
 		}

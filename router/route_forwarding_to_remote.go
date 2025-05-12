@@ -45,10 +45,6 @@ func (r *Router) AddRouteForwardingToRemote(
 	ctx = belt.WithField(ctx, "src_path", sourcePath)
 	ctx = belt.WithField(ctx, "dst_url", dstURL)
 
-	if recoderConfig != nil {
-		return nil, fmt.Errorf("recoding/transcoding is not implemented, yet")
-	}
-
 	logger.Tracef(ctx, "s.Router.GetRoute")
 	input, err := r.GetRoute(ctx, sourcePath, GetRouteModeWaitForPublisher)
 	logger.Tracef(ctx, "/s.Router.GetRoute: %v %v", input, err)

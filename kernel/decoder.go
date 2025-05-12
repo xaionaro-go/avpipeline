@@ -119,7 +119,9 @@ func (d *Decoder[DF]) sendInputPacket(
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
 
-	input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.CodecContext().TimeBase())
+	if !encoderCopyDTSPTS {
+		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.CodecContext().TimeBase())
+	}
 
 	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
 		logger.Debugf(ctx, "decoder.CodecContext().SendInput(): %v", err)
@@ -150,19 +152,23 @@ func (d *Decoder[DF]) sendInputPacket(
 				return false, fmt.Errorf("internal error: TimeBase is not set")
 			}
 			f.SetPictureType(astiav.PictureTypeNone)
-			select {
-			case <-ctx.Done():
-				return false, ctx.Err()
-			case outputFramesCh <- frame.BuildOutput(
-				f,
-				decoder.CodecContext(),
-				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
-				input.Stream.Duration(),
-				timeBase,
-				input.Packet.Pos(), input.Packet.Duration(),
-			):
-			}
-			return true, nil
+			ret, err := true, nil
+			d.Locker.UDo(ctx, func() {
+				select {
+				case <-ctx.Done():
+					ret, err = false, ctx.Err()
+					return
+				case outputFramesCh <- frame.BuildOutput(
+					f,
+					decoder.CodecContext(),
+					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
+					input.Stream.Duration(),
+					timeBase,
+					input.Packet.Pos(), input.Packet.Duration(),
+				):
+				}
+			})
+			return ret, err
 		}()
 		if err != nil {
 			return err

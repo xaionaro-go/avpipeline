@@ -20,7 +20,7 @@ import (
 const (
 	encoderWriteHeaderOnFinishedGettingStreams = false
 	encoderWriteHeaderOnNotifyPacketSources    = false
-	encoderCopyDTSPTS                          = false
+	encoderCopyDTSPTS                          = true
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -384,6 +384,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		if encoderCopyDTSPTS {
 			pkt.SetDts(input.PktDts())
 			pkt.SetPts(input.Pts())
+			pkt.RescaleTs(input.TimeBase, outputStream.TimeBase())
 		}
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
