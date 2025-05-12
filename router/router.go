@@ -134,19 +134,17 @@ func (r *Router) GetRoute(
 ) (_ret *Route, _err error) {
 	logger.Debugf(ctx, "GetRoute(ctx, '%s', '%s')", path, mode)
 	defer func() { logger.Debugf(ctx, "/GetRoute(ctx, '%s', '%s'): %v %v", path, mode, _ret, _err) }()
-
-	curRoute := xsync.DoR1(ctx, &r.Locker, func() *Route {
-		return r.RoutesByPath[path]
+	return xsync.DoR2(ctx, &r.Locker, func() (*Route, error) {
+		return r.getRouteLocked(ctx, path, mode)
 	})
-	return r.switchGetRoute(ctx, path, mode, curRoute)
 }
 
-func (r *Router) switchGetRoute(
+func (r *Router) getRouteLocked(
 	ctx context.Context,
 	path RoutePath,
 	mode GetRouteMode,
-	curRoute *Route,
 ) (*Route, error) {
+	curRoute := r.RoutesByPath[path]
 	if curRoute != nil {
 		switch mode {
 		case GetRouteModeFailIfNotFound:
@@ -154,7 +152,10 @@ func (r *Router) switchGetRoute(
 		case GetRouteModeWaitUntilCreated:
 			return curRoute, nil
 		case GetRouteModeWaitForPublisher:
-			_, err := curRoute.WaitForPublisher(ctx)
+			var err error
+			r.Locker.UDo(ctx, func() {
+				_, err = curRoute.WaitForPublisher(ctx)
+			})
 			if !errors.Is(err, io.ErrClosedPipe) {
 				if err != nil {
 					return nil, fmt.Errorf("unable to wait for a publisher: %w", err)
@@ -173,7 +174,11 @@ func (r *Router) switchGetRoute(
 	case GetRouteModeFailIfNotFound:
 		return nil, fmt.Errorf("route '%s' found", path)
 	case GetRouteModeWaitUntilCreated:
-		route, err := r.WaitForRoute(ctx, path)
+		var route *Route
+		var err error
+		r.Locker.UDo(ctx, func() {
+			route, err = r.WaitForRoute(ctx, path)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("unable to wait for route '%s': %w", path, err)
 		}
@@ -182,11 +187,15 @@ func (r *Router) switchGetRoute(
 		var route *Route
 		for {
 			var err error
-			route, err = r.WaitForRoute(ctx, path)
+			r.Locker.UDo(ctx, func() {
+				route, err = r.WaitForRoute(ctx, path)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("unable to wait for route '%s': %w", path, err)
 			}
-			_, err = route.WaitForPublisher(ctx)
+			r.Locker.UDo(ctx, func() {
+				_, err = route.WaitForPublisher(ctx)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("unable to wait for a publisher: %w", err)
 			}

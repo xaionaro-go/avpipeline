@@ -114,7 +114,10 @@ func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
 	dst Abstract,
 	conds ...packetcondition.Condition,
 ) {
-	n.Locker.Do(context.TODO(), func() {
+	ctx := context.TODO()
+	logger.Debugf(ctx, "AddPushPacketsTo")
+	defer logger.Debugf(ctx, "/AddPushPacketsTo")
+	n.Locker.Do(ctx, func() {
 		n.PushPacketsTos.Add(dst, conds...)
 	})
 }

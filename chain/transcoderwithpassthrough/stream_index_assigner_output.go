@@ -39,7 +39,7 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	input avptypes.InputPacketOrFrameUnion,
 ) (typing.Optional[int], error) {
 	switch input.Packet.Source {
-	case s.StreamForward.inputAsPacketSource:
+	case s.StreamForward.inputAsPacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource:
 		logger.Tracef(ctx, "passing through index %d as is", input.GetStreamIndex())
 		return typing.Opt(input.GetStreamIndex()), nil
 	case s.StreamForward.Recoder, s.StreamForward.Recoder.Encoder:

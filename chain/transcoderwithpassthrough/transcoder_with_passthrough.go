@@ -49,9 +49,10 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 
 	RecodingConfig types.RecoderConfig
 
-	inputAsPacketSource packet.Source
+	inputAsPacketSource                 packet.Source
+	inputStreamMapIndicesAsPacketSource packet.Source
 
-	locker    sync.Mutex
+	locker    xsync.Mutex
 	waitGroup sync.WaitGroup
 }
 
@@ -84,7 +85,7 @@ func New[C any, P processor.Abstract](
 		logger.Debugf(ctx, "/s.PostSwitchFilter.SetValue(ctx, %d): %v", to, err)
 	})
 	s.PostSwitchFilter.SetKeepUnless(swCond)
-	s.MapInputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(s))
+	s.MapInputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s))
 	s.MapOutputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerOutput(s))
 	s.inputAsPacketSource = asPacketSource(s.Input.GetProcessor())
 	if s.inputAsPacketSource == nil {
@@ -99,8 +100,12 @@ func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
 ) (_ret types.RecoderConfig) {
 	logger.Tracef(ctx, "GetRecoderConfig")
 	defer func() { logger.Tracef(ctx, "/GetRecoderConfig: %v", _ret) }()
-	s.locker.Lock()
-	defer s.locker.Unlock()
+	return xsync.DoA1R1(ctx, &s.locker, s.getRecoderConfigLocked, ctx)
+}
+
+func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
+	ctx context.Context,
+) (_ret types.RecoderConfig) {
 	switchValue := s.PassthroughSwitch.GetValue(ctx)
 	logger.Tracef(ctx, "switchValue: %v", switchValue)
 	if switchValue == 0 {
@@ -118,14 +123,19 @@ func (s *TranscoderWithPassthrough[C, P]) SetRecoderConfig(
 ) (_err error) {
 	logger.Tracef(ctx, "SetRecoderConfig(ctx, %#+v)", cfg)
 	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
-	s.locker.Lock()
-	defer s.locker.Unlock()
+	return xsync.DoA2R1(ctx, &s.locker, s.setRecoderConfigLocked, ctx, cfg)
+}
+
+func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
+	ctx context.Context,
+	cfg types.RecoderConfig,
+) (_err error) {
 	err := s.configureRecoder(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the recoder: %w", err)
 	}
-	s.MapInputStreamIndices.Assigner.(*streamIndexAssignerInput[C, P]).Reload(ctx)
 	s.RecodingConfig = cfg
+	s.MapInputStreamIndices.Assigner.(*streamIndexAssignerInput[C, P]).reload(ctx)
 	return nil
 }
 
@@ -317,19 +327,21 @@ func tryNewBSFForMPEG2(
 
 func tryNewBSFForMPEG4(
 	ctx context.Context,
-	_ astiav.CodecID,
+	videoCodecID astiav.CodecID,
 	audioCodecID astiav.CodecID,
 ) *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]] {
+	recoderVideoBSFName := bitstreamfilter.NameMP2ToMP4(videoCodecID)
 	recoderAudioBSFName := bitstreamfilter.NameMP2ToMP4(audioCodecID)
-	if recoderAudioBSFName == bitstreamfilter.NameNull {
+	if recoderVideoBSFName == bitstreamfilter.NameNull && recoderAudioBSFName == bitstreamfilter.NameNull {
 		return nil
 	}
 
 	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, map[packetcondition.Condition]bitstreamfilter.Name{
+		packetcondition.MediaType(astiav.MediaTypeVideo): recoderVideoBSFName,
 		packetcondition.MediaType(astiav.MediaTypeAudio): recoderAudioBSFName,
 	})
 	if err != nil {
-		logger.Errorf(ctx, "unable to initialize the bitstream filter '%s': %w", recoderAudioBSFName, err)
+		logger.Errorf(ctx, "unable to initialize the bitstream filters '%s'/'%s': %w", recoderVideoBSFName, recoderAudioBSFName, err)
 		return nil
 	}
 
@@ -391,6 +403,15 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	// == configure ==
 
+	ctx, cancelFnOrig := context.WithCancel(ctx)
+	var cancelOnce sync.Once
+	cancelFn := func() {
+		cancelOnce.Do(func() {
+			logger.Debugf(ctx, "Serve: cancel")
+		})
+		cancelFnOrig()
+	}
+
 	s.NodeRecoder = node.NewFromKernel(
 		ctx,
 		s.Recoder,
@@ -416,8 +437,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		outputFormatName = outputFmt.Name()
 	})
 	logger.Infof(ctx, "output format: '%s'", outputFormatName)
-
-	ctx, cancelFn := context.WithCancel(ctx)
 
 	var recoderOutput node.Abstract = s.NodeRecoder
 	var nodeBSFPassthrough *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
@@ -453,7 +472,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 	}
 
-	var secondNodesInChain []node.Abstract
+	mapInputStreamIndicesNode := node.NewFromKernel(
+		ctx,
+		s.MapInputStreamIndices,
+		processor.DefaultOptionsRecoder()...,
+	)
+	s.inputStreamMapIndicesAsPacketSource = asPacketSource(mapInputStreamIndicesNode.Processor)
+	s.Input.AddPushPacketsTo(mapInputStreamIndicesNode)
+
 	if passthroughSupport {
 		audioFrameCount := 0
 		keyFrameCount := 0
@@ -497,7 +523,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			passthroughOutput = nodeBSFPassthrough
 		}
 
-		s.Input.AddPushPacketsTo(
+		mapInputStreamIndicesNode.AddPushPacketsTo(
 			s.NodeRecoder,
 			packetcondition.Or{
 				packetcondition.And{
@@ -507,8 +533,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				bothPipesSwitch,
 			},
 		)
-		secondNodesInChain = append(secondNodesInChain, s.NodeRecoder)
-		s.Input.AddPushPacketsTo(
+		mapInputStreamIndicesNode.AddPushPacketsTo(
 			nodeFilterThrottle,
 			packetcondition.Or{
 				packetcondition.And{
@@ -518,7 +543,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				bothPipesSwitch,
 			},
 		)
-		secondNodesInChain = append(secondNodesInChain, nodeFilterThrottle)
 
 		if startWithPassthrough {
 			s.PassthroughSwitch.CurrentValue.Store(1)
@@ -573,17 +597,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			)
 		}
 	} else {
-		s.Input.AddPushPacketsTo(s.NodeRecoder)
-		secondNodesInChain = append(secondNodesInChain, s.NodeRecoder)
+		mapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
 		recoderOutput.AddPushPacketsTo(output)
 	}
 
 	removeSubscriptionToInput := func(ctx context.Context) error {
 		var errs []error
-		for _, dstNode := range secondNodesInChain {
-			if err := node.RemovePushPacketsTo(ctx, s.Input, dstNode); err != nil {
-				errs = append(errs, fmt.Errorf("unable to remove packet pushing from Input to %s: %w", dstNode, err))
-			}
+		if err := node.RemovePushPacketsTo(ctx, s.Input, mapInputStreamIndicesNode); err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing from Input to %s: %w", mapInputStreamIndicesNode, err))
 		}
 		return errors.Join(errs...)
 	}
@@ -599,18 +620,20 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	// == spawn an observer ==
 
-	errCh := make(chan node.Error, 10)
+	errCh := make(chan node.Error, 100)
 	s.waitGroup.Add(1)
 	observability.Go(ctx, func() {
 		defer s.waitGroup.Done()
 		defer cancelFn()
-		defer logger.Debugf(ctx, "finished the error listening loop")
+		logger.Debugf(ctx, "Serve: started the error listening loop")
+		defer logger.Debugf(ctx, "Serve: finished the error listening loop")
 		for {
 			select {
 			case err := <-ctx.Done():
 				logger.Debugf(ctx, "stopping listening for errors: %v", err)
 				return
 			case err, ok := <-errCh:
+				cancelFn()
 				if !ok {
 					logger.Debugf(ctx, "the error channel is closed")
 					return

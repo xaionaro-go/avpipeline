@@ -67,6 +67,8 @@ func NameMP4ToMP2(codecID astiav.CodecID) Name {
 
 func NameMP2ToMP4(codecID astiav.CodecID) Name {
 	switch codecID {
+	case astiav.CodecIDH264, astiav.CodecIDHevc:
+		return NameExtractExtradata
 	case astiav.CodecIDAac:
 		return NameAACADTSToASC
 	}

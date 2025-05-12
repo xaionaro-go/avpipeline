@@ -39,8 +39,10 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	serveConfig ServeConfig,
 	errCh chan<- Error,
 ) {
+	ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", n))
+	ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", n.GetProcessor()))
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
-	ctx = xsync.WithNoLogging(ctx, true)
+	ctx = xsync.WithLoggingEnabled(ctx, false)
 	logger.Tracef(ctx, "Serve[%T]", n)
 	defer func() { logger.Tracef(ctx, "/Serve[%T]", n) }()
 
@@ -84,8 +86,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	for {
 		select {
 		case <-procNodeEndCtx.Done():
-			logger.Debugf(ctx, "initiating closing")
-			defer func() { logger.Debugf(ctx, "/closed") }()
+			logger.Debugf(ctx, "Serve: initiating closing")
+			defer func() { logger.Debugf(ctx, "Serve: /closed") }()
 			var wg sync.WaitGroup
 			defer wg.Wait()
 			wg.Add(1)
@@ -197,6 +199,11 @@ func pushFurther[
 		}
 
 		dst := pushTo.Node
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		n.Locker.UDo(ctx, func() {
 			if dst == nil {
 				logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
