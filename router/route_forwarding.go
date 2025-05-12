@@ -35,7 +35,7 @@ type RouteForwarding struct {
 	Input         *Route
 	Output        NodeForwardingOutput
 	WaitGroup     sync.WaitGroup
-	StreamForwarder
+	StreamForwarder[*Route, *ProcessorRouting]
 }
 
 func (r *Router) AddRouteForwarding(

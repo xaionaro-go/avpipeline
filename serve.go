@@ -18,8 +18,9 @@ const (
 )
 
 type ServeConfig struct {
-	EachNode   node.ServeConfig
-	NodeFilter condition.Condition
+	EachNode       node.ServeConfig
+	NodeTreeFilter condition.Condition
+	NodeFilter     condition.Condition
 }
 
 func Serve[T node.Abstract](
@@ -54,6 +55,11 @@ func serve[T node.Abstract](
 				return
 			}
 			dstAlreadyVisited[n] = struct{}{}
+
+			if serveConfig.NodeTreeFilter != nil && !serveConfig.NodeTreeFilter.Match(ctx, n) {
+				logger.Tracef(ctx, "/Serve[%s]: skipped the whole tree", n)
+				return
+			}
 
 			childrenCtx := xcontext.DetachDone(ctx)
 			shouldSkip := false

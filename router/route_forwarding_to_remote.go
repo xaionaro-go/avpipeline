@@ -16,7 +16,7 @@ import (
 )
 
 type RouteForwardingToRemote struct {
-	StreamForwarder
+	StreamForwarder[*Route, *ProcessorRouting]
 	Input      *Route
 	Output     *NodeRetryOutput
 	ErrChan    chan node.Error

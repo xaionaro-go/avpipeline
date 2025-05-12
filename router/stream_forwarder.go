@@ -5,24 +5,25 @@ import (
 
 	transcodertypes "github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/processor"
 )
 
 // TODO: remove StreamForwarder from package `router`
-type StreamForwarder interface {
-	Start(ctx context.Context) error
-	Stop(ctx context.Context) error
-	Source() *NodeRouting
+type StreamForwarder[CS any, PS processor.Abstract] interface {
+	Start(context.Context) error
+	Stop(context.Context) error
+	Source() *node.NodeWithCustomData[CS, PS]
 	Destination() node.Abstract
 }
 
 // TODO: remove StreamForwarder from package `router`
-func NewStreamForwarder(
+func NewStreamForwarder[CS any, PS processor.Abstract](
 	ctx context.Context,
-	src *NodeRouting,
+	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret StreamForwarder, _err error) {
-	var fwd StreamForwarder
+) (_ret StreamForwarder[CS, PS], _err error) {
+	var fwd StreamForwarder[CS, PS]
 	var err error
 	if recoderConfig == nil {
 		fwd, err = NewStreamForwarderCopy(ctx, src, dst)

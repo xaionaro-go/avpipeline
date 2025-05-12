@@ -174,8 +174,8 @@ func (r *Route) AddPublisher(
 	ctx context.Context,
 	publisher Publisher,
 ) (_err error) {
-	logger.Debugf(ctx, "AddPublisher(ctx, %#+v)", publisher)
-	defer func() { logger.Debugf(ctx, "/AddPublisher(ctx, %#+v): %3", publisher, _err) }()
+	logger.Debugf(ctx, "AddPublisher[%s](ctx, %#+v)", r.Path, publisher)
+	defer func() { logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): %v", r.Path, publisher, _err) }()
 	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
 		for _, publisher := range r.Publishers {
 			logger.Warnf(ctx, "closing publisher %s to free-up the route for another publisher")

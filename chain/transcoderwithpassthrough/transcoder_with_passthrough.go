@@ -677,10 +677,9 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}()
 
-		dontServeNodes := nodecondition.In{s.Input}
-		dontServeNodes = append(dontServeNodes, nodecondition.In(s.Outputs)...)
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
-			NodeFilter: nodecondition.Not{dontServeNodes},
+			NodeFilter:     nodecondition.Not{nodecondition.In{s.Input}},
+			NodeTreeFilter: nodecondition.Not{nodecondition.In(s.Outputs)},
 		}, errCh, s.Input)
 	})
 

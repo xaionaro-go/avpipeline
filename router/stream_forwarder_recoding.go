@@ -9,27 +9,29 @@ import (
 	transcoder "github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough"
 	transcodertypes "github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/processor"
 )
 
 // TODO: remove StreamForwarder from package `router`
-type StreamForwarderRecoding struct {
-	Chain      *transcoder.TranscoderWithPassthrough[*Route, *ProcessorRouting]
+type StreamForwarderFromRouterRecoding[CS any, PS processor.Abstract] struct {
+	Chain      *transcoder.TranscoderWithPassthrough[CS, PS]
 	CancelFunc context.CancelFunc
 }
 
-var _ StreamForwarder = (*StreamForwarderRecoding)(nil)
+//var _ StreamForwarder[CS, PS] = (*StreamForwarderFromRouterRecoding[CS, PS])(nil)
 
 // TODO: remove StreamForwarder from package `router`
-func NewStreamForwarderRecoding(
+func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 	ctx context.Context,
-	src *NodeRouting,
+	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *StreamForwarderRecoding, _err error) {
+) (_ret *StreamForwarderFromRouterRecoding[CS, PS], _err error) {
 	logger.Debugf(ctx, "NewStreamForwarderRecoding(%s, %s)", src, dst)
 	defer func() { logger.Debugf(ctx, "/NewStreamForwarderRecoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
 
-	fwd := &StreamForwarderRecoding{}
+	fwd := &StreamForwarderFromRouterRecoding[CS, PS]{}
 
 	var err error
 	fwd.Chain, err = transcoder.New(ctx, src, dst)
@@ -40,22 +42,26 @@ func NewStreamForwarderRecoding(
 	if recoderConfig == nil {
 		logger.Debugf(ctx, "just copy as is")
 		recoderConfig = &transcodertypes.RecoderConfig{}
-		src.Processor.Kernel.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-			for _, stream := range fmtCtx.Streams() {
-				switch stream.CodecParameters().MediaType() {
-				case astiav.MediaTypeVideo:
-					recoderConfig.VideoTracks = append(recoderConfig.VideoTracks, transcodertypes.TrackConfig{
-						InputTrackIDs: []int{stream.Index()},
-						CodecName:     "copy",
-					})
-				case astiav.MediaTypeAudio:
-					recoderConfig.AudioTracks = append(recoderConfig.AudioTracks, transcodertypes.TrackConfig{
-						InputTrackIDs: []int{stream.Index()},
-						CodecName:     "copy",
-					})
-				}
+		if getPacketSourcer, ok := any(src.Processor).(interface{ GetPacketSource() packet.Source }); ok {
+			if packetSource := getPacketSourcer.GetPacketSource(); packetSource != nil {
+				packetSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+					for _, stream := range fmtCtx.Streams() {
+						switch stream.CodecParameters().MediaType() {
+						case astiav.MediaTypeVideo:
+							recoderConfig.VideoTracks = append(recoderConfig.VideoTracks, transcodertypes.TrackConfig{
+								InputTrackIDs: []int{stream.Index()},
+								CodecName:     "copy",
+							})
+						case astiav.MediaTypeAudio:
+							recoderConfig.AudioTracks = append(recoderConfig.AudioTracks, transcodertypes.TrackConfig{
+								InputTrackIDs: []int{stream.Index()},
+								CodecName:     "copy",
+							})
+						}
+					}
+				})
 			}
-		})
+		}
 	}
 	logger.Debugf(ctx, "resulting config: %#+v", recoderConfig)
 	if err := fwd.Chain.SetRecoderConfig(ctx, *recoderConfig); err != nil {
@@ -65,7 +71,7 @@ func NewStreamForwarderRecoding(
 	return fwd, nil
 }
 
-func (fwd *StreamForwarderRecoding) Start(ctx context.Context) (_err error) {
+func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Start(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
 
@@ -87,15 +93,15 @@ func (fwd *StreamForwarderRecoding) Start(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (fwd *StreamForwarderRecoding) Source() *NodeRouting {
+func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
 	return fwd.Chain.Input
 }
 
-func (fwd *StreamForwarderRecoding) Destination() node.Abstract {
+func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Destination() node.Abstract {
 	return fwd.Chain.Outputs[0]
 }
 
-func (fwd *StreamForwarderRecoding) Stop(
+func (fwd *StreamForwarderFromRouterRecoding[CS, PS]) Stop(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")
