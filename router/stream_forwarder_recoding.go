@@ -19,7 +19,7 @@ type StreamForwarderFromRouterRecoding[CS any, PS processor.Abstract] struct {
 	CancelFunc context.CancelFunc
 }
 
-//var _ StreamForwarder[CS, PS] = (*StreamForwarderFromRouterRecoding[CS, PS])(nil)
+var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderFromRouterRecoding[*Route, *ProcessorRouting])(nil)
 
 // TODO: remove StreamForwarder from package `router`
 func NewStreamForwarderRecoding[CS any, PS processor.Abstract](

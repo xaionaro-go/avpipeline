@@ -19,7 +19,7 @@ type StreamForwarderCopy[CS any, PS processor.Abstract] struct {
 	Output     node.Abstract
 }
 
-//var _ StreamForwarder[CS, PS] = (*StreamForwarderCopy[CS, PS])(nil)
+var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderCopy[*Route, *ProcessorRouting])(nil)
 
 // TODO: remove StreamForwarder from package `router`
 func NewStreamForwarderCopy[CS any, PS processor.Abstract](
