@@ -160,6 +160,10 @@ func newCodec(
 				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS value (%d <- %f)", v, fps)
 				logIfError(options.Set("g", fmt.Sprintf("%d", v), 0))
 			}
+			if options.Get("bf", nil, 0) == nil {
+				logger.Debugf(ctx, "bf is not set, defaulting to zero")
+				logIfError(options.Set("bf", "0", 0))
+			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")

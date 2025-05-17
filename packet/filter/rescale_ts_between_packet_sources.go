@@ -12,7 +12,7 @@ import (
 
 type RescaleTSBetweenKernels struct {
 	From packet.Source
-	To   packet.Sink
+	To   packet.Source
 
 	Locker     xsync.Mutex
 	FromStream map[int]*astiav.Stream
@@ -23,7 +23,7 @@ var _ condition.Condition = (*RescaleTSBetweenKernels)(nil)
 
 func NewRescaleTSBetweenKernels(
 	from packet.Source,
-	to packet.Sink,
+	to packet.Source,
 ) *RescaleTSBetweenKernels {
 	return &RescaleTSBetweenKernels{
 		From:       from,
@@ -64,7 +64,7 @@ func (f *RescaleTSBetweenKernels) getToStream(
 		if ok {
 			return s
 		}
-		f.To.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		f.To.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			for _, stream := range fmtCtx.Streams() {
 				if stream.Index() == streamIndex {
 					s = stream

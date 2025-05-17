@@ -552,7 +552,7 @@ func (o *Output) send(
 	})
 
 	if outputWaitForKeyFrames && (activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0) {
-		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d || %d != 0; %s", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames), outputStream.CodecParameters().MediaType())
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if outputStream.CodecParameters().MediaType() != astiav.MediaTypeVideo {

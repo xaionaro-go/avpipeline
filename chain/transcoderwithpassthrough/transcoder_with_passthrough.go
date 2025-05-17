@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	rescaleTS                  = true
+	rescaleTS                  = false
 	notifyAboutPacketSources   = true
 	startWithPassthrough       = false
 	autoInsertBitstreamFilters = true
@@ -471,7 +471,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 		var nodeBSFRecoder *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
 		switch outputFormatName {
-		case "mpegts", "rtsp":
+		case "mpegts", "rtsp", "":
 			nodeBSFRecoder = tryNewBSFForMPEG2(ctx, recodedVideoCodecID, recodedAudioCodecID)
 			nodeBSFPassthrough = tryNewBSFForMPEG2(ctx, inputVideoCodecID, inputAudioCodecID)
 		case "flv":
@@ -497,6 +497,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		audioFrameCount := 0
 		keyFrameCount := 0
 		bothPipesSwitch := packetcondition.And{
+			packetcondition.Static(false),
 			packetcondition.Static(recoderInSeparateTracks),
 			s.BothPipesSwitch,
 			packetcondition.Or{
@@ -505,7 +506,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 					packetcondition.MediaType(astiav.MediaTypeVideo),
 					packetcondition.Function(func(ctx context.Context, pkt packet.Input) bool {
 						keyFrameCount++
-						if keyFrameCount%10 == 1 || true {
+						if keyFrameCount <= 2 {
 							logger.Debugf(ctx, "frame size: %d", len(pkt.Data()))
 							return true
 						}
@@ -516,7 +517,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 					packetcondition.MediaType(astiav.MediaTypeAudio),
 					packetcondition.Function(func(ctx context.Context, pkt packet.Input) bool {
 						audioFrameCount++
-						if audioFrameCount%10 == 1 || true {
+						if audioFrameCount <= 10 {
+							logger.Debugf(ctx, "frame size: %d", len(pkt.Data()))
 							return true
 						}
 						return false
@@ -583,11 +585,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
 					filter.NewRescaleTSBetweenKernels(
 						s.inputAsPacketSource,
-						s.NodeRecoder.Processor.Kernel.Decoder,
-					),
-					filter.NewRescaleTSBetweenKernels(
 						s.NodeRecoder.Processor.Kernel.Encoder,
-						outputAsPacketSink,
 					),
 				}
 			} else {
