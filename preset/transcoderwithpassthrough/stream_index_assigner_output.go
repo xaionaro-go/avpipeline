@@ -8,7 +8,6 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/processor"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -30,23 +29,23 @@ func newStreamIndexAssignerOutput[C any, P processor.Abstract](s *TranscoderWith
 func (s *streamIndexAssignerOutput[C, P]) StreamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
+) ([]int, error) {
 	return xsync.DoA2R2(ctx, &s.Locker, s.streamIndexAssign, ctx, input)
 }
 
 func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
+) ([]int, error) {
 	switch input.Packet.Source {
-	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource:
+	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource, s.StreamForward.MapInputStreamIndicesNode.Processor.Kernel, s.StreamForward.PacketSource, s.StreamForward.NodeStreamFixerPassthrough.MapStreamIndicesNode.Processor.Kernel:
 		logger.Tracef(ctx, "passing through index %d as is", input.GetStreamIndex())
-		return typing.Opt(input.GetStreamIndex()), nil
-	case s.StreamForward.Recoder, s.StreamForward.Recoder.Encoder:
+		return []int{input.GetStreamIndex()}, nil
+	case s.StreamForward.Recoder, s.StreamForward.Recoder.Encoder, s.StreamForward.NodeStreamFixerRecoder.MapStreamIndicesNode.Processor.Kernel:
 		inputStreamIndex := input.GetStreamIndex()
 		if v, ok := s.PreviousResultsMap[inputStreamIndex]; ok {
 			logger.Debugf(ctx, "reassigning %d as %d (cache)", inputStreamIndex, v)
-			return typing.Opt(v), nil
+			return []int{v}, nil
 		}
 
 		maxStreamIndex := 0
@@ -67,9 +66,9 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 			s.PreviousResultsMap[inputStreamIndex] = result
 			s.AlreadyAssignedMap[result] = struct{}{}
 			logger.Debugf(ctx, "reassigning %d as %d", inputStreamIndex, result)
-			return typing.Opt(result), nil
+			return []int{result}, nil
 		}
 	default:
-		return typing.Optional[int]{}, fmt.Errorf("unexpected source: %T", input.Packet.Source)
+		return nil, fmt.Errorf("unexpected source: %T %p %s", input.Packet.Source, input.Packet.Source, input.Packet.Source)
 	}
 }

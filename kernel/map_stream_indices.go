@@ -12,15 +12,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
 type MapStreamIndices struct {
 	*closeChan
 	Locker          xsync.Mutex
-	PacketStreamMap map[InternalStreamKey]typing.Optional[int]
-	FrameStreamMap  map[int]typing.Optional[int]
+	PacketStreamMap map[InternalStreamKey][]int
+	FrameStreamMap  map[int][]int
 	Assigner        StreamIndexAssigner
 
 	formatContext *astiav.FormatContext
@@ -32,7 +31,7 @@ var _ packet.Source = (*MapStreamIndices)(nil)
 var _ packet.Sink = (*MapStreamIndices)(nil)
 
 type StreamIndexAssigner interface {
-	StreamIndexAssign(context.Context, types.InputPacketOrFrameUnion) (typing.Optional[int], error)
+	StreamIndexAssign(context.Context, types.InputPacketOrFrameUnion) ([]int, error)
 }
 
 func NewMapStreamIndices(
@@ -41,8 +40,8 @@ func NewMapStreamIndices(
 ) *MapStreamIndices {
 	m := &MapStreamIndices{
 		closeChan:       newCloseChan(),
-		PacketStreamMap: make(map[InternalStreamKey]typing.Optional[int]),
-		FrameStreamMap:  make(map[int]typing.Optional[int]),
+		PacketStreamMap: make(map[InternalStreamKey][]int),
+		FrameStreamMap:  make(map[int][]int),
 		Assigner:        assigner,
 
 		formatContext: astiav.AllocFormatContext(),
@@ -54,11 +53,11 @@ func NewMapStreamIndices(
 
 func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	ctx context.Context,
-	stream *astiav.Stream,
+	inputStreamIndex int,
 	input types.InputPacketOrFrameUnion,
-) (_ret typing.Optional[int], _err error) {
+) (_ret []int, _err error) {
 	streamKey := InternalStreamKey{
-		StreamIndex: stream.Index(),
+		StreamIndex: inputStreamIndex,
 	}
 	if input.Packet != nil {
 		streamKey.Source = input.Packet.Source
@@ -66,63 +65,42 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	if v, ok := m.PacketStreamMap[streamKey]; ok {
 		return v, nil
 	}
-
-	var vOpt typing.Optional[int]
 	defer func() {
-		if _err == nil {
-			m.PacketStreamMap[streamKey] = vOpt
+		if _err != nil {
+			return
 		}
+		logger.Debugf(ctx, "assigning indexes for %#+v: %v", streamKey, _ret)
+		m.PacketStreamMap[streamKey] = _ret
 	}()
 
 	if m.Assigner == nil {
-		vOpt.Set(stream.Index())
-	} else {
-		var err error
-		vOpt, err = m.Assigner.StreamIndexAssign(ctx, input)
-		if err != nil {
-			return typing.Optional[int]{}, err
-		}
-		if !vOpt.IsSet() {
-			return typing.Optional[int]{}, nil
-		}
+		return []int{input.GetStreamIndex()}, nil
 	}
 
-	v := vOpt.Get()
-	logger.Debugf(ctx, "assigning index for %#+v: %d", streamKey, v)
-	return vOpt, nil
+	return m.Assigner.StreamIndexAssign(ctx, input)
 }
 
 func (m *MapStreamIndices) getOutputFrameStreamIndex(
 	ctx context.Context,
-	inputStreamIndex int,
 	input types.InputPacketOrFrameUnion,
-) (_ret typing.Optional[int], _err error) {
+) (_ret []int, _err error) {
+	inputStreamIndex := input.Frame.StreamIndex
 	if v, ok := m.FrameStreamMap[inputStreamIndex]; ok {
 		return v, nil
 	}
-
-	var vOpt typing.Optional[int]
 	defer func() {
-		if _err == nil {
-			m.FrameStreamMap[inputStreamIndex] = vOpt
+		if _err != nil {
+			return
 		}
+		logger.Debugf(ctx, "assigning index for %d: %v", inputStreamIndex, _ret)
+		m.FrameStreamMap[inputStreamIndex] = _ret
 	}()
+
 	if m.Assigner == nil {
-		vOpt.Set(inputStreamIndex)
-	} else {
-		var err error
-		vOpt, err = m.Assigner.StreamIndexAssign(ctx, input)
-		if err != nil {
-			return typing.Optional[int]{}, err
-		}
-		if !vOpt.IsSet() {
-			return typing.Optional[int]{}, nil
-		}
+		return []int{inputStreamIndex}, nil
 	}
 
-	v := vOpt.Get()
-	logger.Debugf(ctx, "assigning index for %d: %d", inputStreamIndex, v)
-	return vOpt, nil
+	return m.Assigner.StreamIndexAssign(ctx, input)
 }
 
 func (m *MapStreamIndices) SendInputPacket(
@@ -139,48 +117,35 @@ func (m *MapStreamIndices) SendInputPacket(
 	)
 }
 
-func (m *MapStreamIndices) getOutputStreamForPacket(
+func (m *MapStreamIndices) getOutputStreamForPacketByIndex(
 	ctx context.Context,
-	inputStream *astiav.Stream,
-	input types.InputPacketOrFrameUnion,
+	outputStreamIndex int,
+	codecParameters *astiav.CodecParameters,
+	timeBase astiav.Rational,
 ) (*astiav.Stream, error) {
-	outputStreamIndexOpt, err := m.getOutputPacketStreamIndex(ctx, inputStream, input)
-	if err != nil {
-		return nil, fmt.Errorf("unable to obtain the output stream index (on packet: %#+v): %w", input, err)
-	}
-	if !outputStreamIndexOpt.IsSet() {
-		return nil, nil
-	}
-	outputStreamIndex := outputStreamIndexOpt.Get()
 	outputStream := m.outputStreams[outputStreamIndex]
 	if outputStream != nil {
 		return outputStream, nil
 	}
 
-	outputStream, err = m.newOutputStream(
+	outputStream, err := m.newOutputStream(
 		ctx,
 		outputStreamIndex,
-		inputStream.CodecParameters(), inputStream.TimeBase(),
+		codecParameters, timeBase,
 	)
+	if err != nil {
+		return nil, err
+	}
 	m.outputStreams[outputStreamIndex] = outputStream
-	return outputStream, err
+	return outputStream, nil
 }
 
-func (m *MapStreamIndices) getOutputStreamForFrame(
+func (m *MapStreamIndices) getOutputStreamForFrameByIndex(
 	ctx context.Context,
-	inputStreamIndex int,
+	outputStreamIndex int,
 	codecCtx *astiav.CodecContext,
 	timeBase astiav.Rational,
-	input types.InputPacketOrFrameUnion,
 ) (*astiav.Stream, error) {
-	outputStreamIndexOpt, err := m.getOutputFrameStreamIndex(ctx, inputStreamIndex, input)
-	if err != nil {
-		return nil, fmt.Errorf("unable to obtain the output stream index (on packet: %#+v): %w", input, err)
-	}
-	if !outputStreamIndexOpt.IsSet() {
-		return nil, nil
-	}
-	outputStreamIndex := outputStreamIndexOpt.Get()
 	outputStream := m.outputStreams[outputStreamIndex]
 	if outputStream != nil {
 		return outputStream, nil
@@ -189,13 +154,16 @@ func (m *MapStreamIndices) getOutputStreamForFrame(
 	codecParams := astiav.AllocCodecParameters()
 	defer codecParams.Free()
 	codecCtx.ToCodecParameters(codecParams)
-	outputStream, err = m.newOutputStream(
+	outputStream, err := m.newOutputStream(
 		ctx,
 		outputStreamIndex,
 		codecParams, timeBase,
 	)
+	if err != nil {
+		return nil, err
+	}
 	m.outputStreams[outputStreamIndex] = outputStream
-	return outputStream, err
+	return outputStream, nil
 }
 
 func (m *MapStreamIndices) newOutputStream(
@@ -226,32 +194,40 @@ func (m *MapStreamIndices) sendInputPacket(
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 ) error {
-	outputStream, err := m.getOutputStreamForPacket(
+	outputStreamIndexes, err := m.getOutputPacketStreamIndex(
 		ctx,
-		input.Stream,
+		input.Stream.Index(),
 		types.InputPacketOrFrameUnion{Packet: &input},
 	)
 	if err != nil {
-		return fmt.Errorf("unable to get an output stream: %w", err)
+		return fmt.Errorf("unable to obtain the output stream indexes (on packet: %#+v): %w", input, err)
 	}
-	if outputStream == nil {
-		return nil
-	}
-
-	pkt := packet.CloneAsReferenced(input.Packet)
-	pkt.SetStreamIndex(outputStream.Index())
-	outPkt := packet.BuildOutput(
-		pkt,
-		outputStream,
-		m,
-	)
-	m.Locker.UDo(ctx, func() {
-		select {
-		case outputPacketsCh <- outPkt:
-		case <-ctx.Done():
+	for _, outputStreamIndex := range outputStreamIndexes {
+		outputStream, err := m.getOutputStreamForPacketByIndex(
+			ctx,
+			outputStreamIndex,
+			input.Stream.CodecParameters(),
+			input.Stream.TimeBase(),
+		)
+		if err != nil {
+			return fmt.Errorf("unable to get an output stream: %w", err)
 		}
-	})
-	return nil
+
+		pkt := packet.CloneAsReferenced(input.Packet)
+		pkt.SetStreamIndex(outputStream.Index())
+		outPkt := packet.BuildOutput(
+			pkt,
+			outputStream,
+			m,
+		)
+		m.Locker.UDo(ctx, func() {
+			select {
+			case outputPacketsCh <- outPkt:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return ctx.Err()
 }
 
 func (m *MapStreamIndices) WithOutputFormatContext(
@@ -283,9 +259,9 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		m.Locker.Do(ctx, func() {
 			for _, inputStream := range fmtCtx.Streams() {
-				outputStream, err := m.getOutputStreamForPacket(
+				outputStreamIndexes, err := m.getOutputPacketStreamIndex(
 					ctx,
-					inputStream,
+					inputStream.Index(),
 					types.InputPacketOrFrameUnion{
 						Packet: &packet.Input{
 							Stream: inputStream,
@@ -293,13 +269,25 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 						},
 					},
 				)
-				if outputStream != nil {
-					logger.Debugf(ctx, "made sure stream #%d (<-%d) is initialized", outputStream.Index(), inputStream.Index())
-				} else {
-					logger.Debugf(ctx, "no output stream for stream <-%d", inputStream.Index())
-				}
 				if err != nil {
-					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", inputStream.Index(), source, err))
+					errs = append(errs, fmt.Errorf("unable to obtain the output stream indexes for input stream %d: %w", inputStream.Index(), err))
+					continue
+				}
+				for _, outputStreamIndex := range outputStreamIndexes {
+					outputStream, err := m.getOutputStreamForPacketByIndex(
+						ctx,
+						outputStreamIndex,
+						inputStream.CodecParameters(),
+						inputStream.TimeBase(),
+					)
+					if outputStream != nil {
+						logger.Debugf(ctx, "made sure stream #%d (<-%d) is initialized", outputStream.Index(), inputStream.Index())
+					} else {
+						logger.Debugf(ctx, "no output stream for stream <-%d", inputStream.Index())
+					}
+					if err != nil {
+						errs = append(errs, fmt.Errorf("unable to initialize an output stream #%d for input stream %d from source %s: %w", outputStreamIndex, inputStream.Index(), source, err))
+					}
 				}
 			}
 		})
@@ -329,31 +317,43 @@ func (m *MapStreamIndices) sendInputFrame(
 	input frame.Input,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	outputStream, err := m.getOutputStreamForFrame(
+	outputStreamIndexes, err := m.getOutputFrameStreamIndex(
 		ctx,
-		input.StreamIndex,
-		input.CodecContext,
-		input.TimeBase,
 		types.InputPacketOrFrameUnion{Frame: &input},
 	)
 	if err != nil {
-		return fmt.Errorf("unable to get an output stream: %w", err)
+		return fmt.Errorf("unable to obtain the output stream index (on frame: %#+v): %w", input, err)
 	}
-	if outputStream == nil {
-		return nil
-	}
+	for _, outputStreamIndex := range outputStreamIndexes {
+		outputStream, err := m.getOutputStreamForFrameByIndex(
+			ctx,
+			outputStreamIndex,
+			input.CodecContext,
+			input.TimeBase,
+		)
+		if err != nil {
+			return fmt.Errorf("unable to get an output stream: %w", err)
+		}
 
-	outputFramesCh <- frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.CodecContext,
-		outputStream.Index(),
-		len(m.outputStreams),
-		input.StreamDuration,
-		input.TimeBase,
-		input.Pos,
-		input.Duration,
-	)
-	return nil
+		outFrame := frame.BuildOutput(
+			frame.CloneAsReferenced(input.Frame),
+			input.CodecContext,
+			outputStream.Index(),
+			len(m.outputStreams),
+			input.StreamDuration,
+			input.TimeBase,
+			input.Pos,
+			input.Duration,
+		)
+		m.Locker.UDo(ctx, func() {
+			select {
+			case outputFramesCh <- outFrame:
+			case <-ctx.Done():
+			}
+		})
+
+	}
+	return ctx.Err()
 }
 
 func (m *MapStreamIndices) String() string {

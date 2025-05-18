@@ -29,7 +29,7 @@ func NotifyAboutPacketSources[T node.Abstract](
 		if getPacketSinker, ok := n.GetProcessor().(interface{ GetPacketSink() packet.Sink }); ok {
 			if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
 				if err := packetSink.NotifyAboutPacketSource(ctx, packetSource); err != nil {
-					return fmt.Errorf("unable to notify '%s' with '%s': %w", packetSink, packetSource, err)
+					return fmt.Errorf("unable to notify '%s' (%p) with '%s' (%p): %w", packetSink, packetSink, packetSource, packetSource, err)
 				}
 			}
 		}

@@ -13,9 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
 	routertypes "github.com/xaionaro-go/avpipeline/router/types"
-	avptypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
-	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -62,7 +60,7 @@ func newRoute(
 	close(r.PublishersChangeChan)
 	r.Node = node.NewWithCustomDataFromKernel[*Route](
 		ctx,
-		kernel.NewMapStreamIndices(ctx, r),
+		kernel.NewMapStreamIndices(ctx, nil),
 		processor.DefaultOptionsRecoder()...,
 	)
 	r.Node.CustomData = r
@@ -88,7 +86,7 @@ func (r *Route) openNodeLocked(
 	if routeCloseProcessor {
 		r.Node.Processor = processor.NewFromKernel(
 			ctx,
-			kernel.NewMapStreamIndices(ctx, r),
+			kernel.NewMapStreamIndices(ctx, nil),
 			processor.DefaultOptionsRecoder()...,
 		)
 	}
@@ -152,13 +150,6 @@ func (r *Route) getPublishersChangeChan(
 	return xsync.DoR1(ctx, &r.Node.Locker, func() <-chan struct{} {
 		return r.PublishersChangeChan
 	})
-}
-
-func (r *Route) StreamIndexAssign(
-	ctx context.Context,
-	input avptypes.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
-	return typing.Opt(input.GetStreamIndex()), nil
 }
 
 func (r *Route) GetPublishers(

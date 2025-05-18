@@ -32,6 +32,7 @@ const (
 	notifyAboutPacketSources = true
 	startWithPassthrough     = false
 	passthroughSupport       = true
+	bothPipesHack            = false
 )
 
 type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
@@ -381,6 +382,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		audioFrameCount := 0
 		keyFrameCount := 0
 		bothPipesSwitch := packetcondition.And{
+			packetcondition.Static(bothPipesHack),
 			packetcondition.Static(recoderInSeparateTracks),
 			s.BothPipesSwitch,
 			packetcondition.Or{
@@ -548,9 +550,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	// == prepare ==
 
 	if notifyAboutPacketSources {
+		logger.Debugf(ctx, "notifying about the sources")
 		err := avpipeline.NotifyAboutPacketSources(ctx, s.PacketSource, s.MapInputStreamIndicesNode)
 		if err != nil {
-			return fmt.Errorf("receive an error while notifying nodes about packet sources: %w", err)
+			return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.PacketSource, s.MapInputStreamIndicesNode, err)
 		}
 	}
 

@@ -8,7 +8,6 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/processor"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -85,7 +84,7 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 func (s *streamIndexAssignerInput[C, P]) StreamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
-) (_ret typing.Optional[int], _err error) {
+) (_ret []int, _err error) {
 	defer func() { logger.Tracef(ctx, "StreamIndexAssign: %v, %v", _ret, _err) }()
 	return xsync.DoA2R2(ctx, &s.Locker, s.streamIndexAssign, ctx, input)
 }
@@ -93,9 +92,9 @@ func (s *streamIndexAssignerInput[C, P]) StreamIndexAssign(
 func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
 	ctx context.Context,
 	input avptypes.InputPacketOrFrameUnion,
-) (typing.Optional[int], error) {
+) ([]int, error) {
 	if len(s.VideoIndexMap) == 0 && len(s.AudioIndexMap) == 0 {
-		return typing.Opt(input.GetStreamIndex()), nil
+		return []int{input.GetStreamIndex()}, nil
 	}
 
 	var v int
@@ -107,7 +106,7 @@ func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
 		v, ok = s.AudioIndexMap[input.GetStreamIndex()]
 	}
 	if !ok {
-		return typing.Optional[int]{}, nil
+		return nil, nil
 	}
-	return typing.Opt(v), nil
+	return []int{v}, nil
 }
