@@ -453,6 +453,18 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			s.PostSwitchFilter.NextValue.Store(1)
 		}
 
+		if rescaleTS {
+			if !startWithPassthrough || notifyAboutPacketSources {
+				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
+					filter.NewRescaleTSBetweenKernels(
+						s.PacketSource,
+						s.NodeRecoder.Processor.Kernel.Encoder,
+					),
+				}
+			} else {
+				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
+			}
+		}
 		if recoderInSeparateTracks {
 			*s.BothPipesSwitch = true
 			nodeMapStreamIndices := node.NewFromKernel(
@@ -472,19 +484,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 			nodeMapStreamIndices.AddPushPacketsTo(output)
 		} else {
-			if rescaleTS {
-				if !startWithPassthrough || notifyAboutPacketSources {
-					nodeFilterThrottle.InputPacketCondition = packetcondition.And{
-						filter.NewRescaleTSBetweenKernels(
-							s.PacketSource,
-							s.NodeRecoder.Processor.Kernel.Encoder,
-						),
-					}
-				} else {
-					logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
-				}
-			}
-
 			condRecoder := packetcondition.And{
 				s.PassthroughSwitch.Condition(0),
 				s.PostSwitchFilter.Condition(0),
@@ -556,6 +555,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.PacketSource, s.MapInputStreamIndicesNode, err)
 		}
 	}
+	logger.Debugf(ctx, "resulting graph: %s", node.Nodes[node.Abstract]{s.MapInputStreamIndicesNode}.StringRecursive())
+	logger.Debugf(ctx, "resulting graph (graphviz): %s", node.Nodes[node.Abstract]{s.MapInputStreamIndicesNode}.DotString(false))
 
 	// == launch ==
 

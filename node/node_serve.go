@@ -228,7 +228,7 @@ func pushFurther[
 					return
 				case pushChan <- inputObj:
 				default:
-					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst.GetProcessor())
+					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst)
 					incrementCounters(&dstStats.FramesMissed, mediaType)
 					poolPutInput(inputObj)
 					return

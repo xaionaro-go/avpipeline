@@ -228,7 +228,12 @@ func (n *NodeWithCustomData[C, T]) SetInputFrameCondition(cond framecondition.Co
 }
 
 func (n *NodeWithCustomData[C, T]) String() string {
-	return Nodes[*NodeWithCustomData[C, T]]{n}.String()
+	nodeString := Nodes[*NodeWithCustomData[C, T]]{n}.String()
+	cdStringer, ok := any(n.CustomData).(fmt.Stringer)
+	if ok {
+		return fmt.Sprintf("%s:%s", nodeString, cdStringer)
+	}
+	return nodeString
 }
 
 func (n *NodeWithCustomData[C, T]) DotString(withStats bool) string {

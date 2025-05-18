@@ -31,7 +31,7 @@ import (
 const (
 	unwrapTLSViaProxy          = false
 	pendingPacketsLimit        = 10000
-	outputWaitForKeyFrames     = true
+	outputWaitForKeyFrames     = false
 	outputWaitForStreams       = true
 	outputCopyStreamIndex      = true
 	outputUpdateStreams        = false

@@ -25,19 +25,26 @@ func (s Nodes[T]) String() string {
 	}
 }
 
+func origNode(n Abstract) Abstract {
+	if origer, ok := n.(interface{ OriginalNodeAbstract() Abstract }); ok {
+		return origer.OriginalNodeAbstract()
+	}
+	return n
+}
+
 func (s Nodes[T]) StringRecursive() string {
 	var results []string
 	for _, n := range s {
 		isSet := map[Abstract]struct{}{}
 		var pushToStrs []string
-		for _, pushTo := range n.GetPushPacketsTos() {
+		for _, pushTo := range origNode(n).GetPushPacketsTos() {
 			if _, ok := isSet[pushTo.Node]; ok {
 				continue
 			}
 			isSet[pushTo.Node] = struct{}{}
 			pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 		}
-		for _, pushTo := range n.GetPushFramesTos() {
+		for _, pushTo := range origNode(n).GetPushFramesTos() {
 			if _, ok := isSet[pushTo.Node]; ok {
 				continue
 			}

@@ -3,6 +3,7 @@ package nodewrapper
 import (
 	"context"
 	"fmt"
+	"io"
 
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -15,12 +16,30 @@ type NoServe[T node.Abstract] struct {
 }
 
 var _ node.Abstract = (*NoServe[node.Abstract])(nil)
+var _ node.DotBlockContentStringWriteToer = (*NoServe[node.Abstract])(nil)
 
 func (n *NoServe[T]) Serve(
 	ctx context.Context,
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+}
+
+func (n *NoServe[T]) OriginalNodeAbstract() node.Abstract {
+	return n.OriginalNode() // TODO: fix the nil value, it should be untyped
+}
+
+func (n *NoServe[T]) OriginalNode() T {
+	return n.Node
+}
+
+func (n *NoServe[T]) DotBlockContentStringWriteTo(
+	w io.Writer,
+	alreadyPrinted map[processor.Abstract]struct{},
+) {
+	if writeToer, ok := any(n.Node).(node.DotBlockContentStringWriteToer); ok {
+		writeToer.DotBlockContentStringWriteTo(w, alreadyPrinted)
+	}
 }
 
 func (n *NoServe[T]) String() string {

@@ -2,6 +2,7 @@ package autofix
 
 import (
 	"context"
+	"io"
 
 	"github.com/xaionaro-go/avpipeline"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
@@ -36,6 +37,15 @@ func (a *AutoFixer[T]) Serve(
 
 func (a *AutoFixer[T]) String() string {
 	return "AutoFixer"
+}
+
+func (a *AutoFixer[T]) DotBlockContentStringWriteTo(
+	w io.Writer,
+	alreadyPrinted map[processor.Abstract]struct{},
+) {
+	if writeToer, ok := any(a.Input()).(node.DotBlockContentStringWriteToer); ok {
+		writeToer.DotBlockContentStringWriteTo(w, alreadyPrinted)
+	}
 }
 
 func (a *AutoFixer[T]) GetPushPacketsTos() node.PushPacketsTos {
