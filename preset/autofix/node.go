@@ -84,10 +84,7 @@ func (a *AutoFixer[T]) GetStatistics() *node.Statistics {
 }
 
 func (a *AutoFixer[T]) GetProcessor() processor.Abstract {
-	if a.AutoHeadersNode == nil {
-		return a.MapStreamIndicesNode.GetProcessor()
-	}
-	panic("not supported")
+	return a
 }
 
 func (a *AutoFixer[T]) GetInputPacketCondition() packetcondition.Condition {

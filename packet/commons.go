@@ -12,6 +12,17 @@ type Source interface {
 	WithOutputFormatContext(context.Context, func(*astiav.FormatContext))
 }
 
+/* for easier copy&paste:
+
+func () WithOutputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+
+}
+
+*/
+
 type Sink interface {
 	WithInputFormatContext(context.Context, func(*astiav.FormatContext))
 	NotifyAboutPacketSource(context.Context, Source) error
@@ -19,7 +30,7 @@ type Sink interface {
 
 /* for easier copy&paste:
 
-func () WithFormatContext(
+func () WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
