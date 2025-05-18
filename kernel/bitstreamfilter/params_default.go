@@ -1,0 +1,26 @@
+package bitstreamfilter
+
+import (
+	"github.com/asticode/go-astiav"
+)
+
+func ParamsMP4ToMP2(codecID astiav.CodecID) []Params {
+	switch codecID {
+	case astiav.CodecIDH264:
+		return []Params{{Name: NameH264MP4toAnnexB}}
+	case astiav.CodecIDHevc:
+		return []Params{{Name: NameHEVCMP4toAnnexB}}
+		// TODO: add the case for 'NameVVCMP4toAnnexB'
+	}
+	return []Params{}
+}
+
+func ParamsMP2ToMP4(codecID astiav.CodecID) []Params {
+	switch codecID {
+	case astiav.CodecIDH264, astiav.CodecIDHevc:
+		return []Params{{Name: NameExtractExtradata}}
+	case astiav.CodecIDAac:
+		return []Params{{Name: NameAACADTSToASC}}
+	}
+	return []Params{}
+}

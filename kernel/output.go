@@ -664,7 +664,10 @@ func (o *Output) doWritePacket(
 		)
 		return nil
 	}
+
+	var dataLen int
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
+		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
 			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
 			pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
@@ -687,7 +690,7 @@ func (o *Output) doWritePacket(
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
-			len(pkt.Data()),
+			dataLen,
 			err,
 		)
 		return err
@@ -699,7 +702,7 @@ func (o *Output) doWritePacket(
 			pos, dts, pts,
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
-			len(pkt.Data()),
+			dataLen,
 			err,
 		)
 	}
