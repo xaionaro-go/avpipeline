@@ -32,11 +32,13 @@ const (
 	unwrapTLSViaProxy          = false
 	pendingPacketsLimit        = 10000
 	outputWaitForKeyFrames     = true
+	outputWaitForStreams       = true
 	outputCopyStreamIndex      = true
 	outputUpdateStreams        = false
 	outputSendPendingPackets   = true
 	skipTooHighTimestamps      = false
 	flvForbidStreamIndexAbove1 = true
+	outputMediaMTXHack         = true
 )
 
 type OutputConfig struct {
@@ -575,41 +577,43 @@ func (o *Output) send(
 		return o.FormatContext.NbStreams()
 	})
 
-	if outputWaitForKeyFrames && (activeStreamCount < expectedStreamsCount || len(o.waitingKeyFrames) != 0) {
-		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d || %d != 0; %s", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames), outputStream.CodecParameters().MediaType())
+	if outputMediaMTXHack {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if outputStream.CodecParameters().MediaType() != astiav.MediaTypeVideo {
 			return nil
 		}
-		keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-		if keyFrame {
-			logger.Debugf(ctx, "got a key video frame")
-		}
-		streamIndex := pkt.StreamIndex()
-		_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
-		if waitingKeyFrame {
-			delete(o.waitingKeyFrames, streamIndex)
-			logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
-		}
-		if keyFrame && waitingKeyFrame {
-			o.pendingPackets = append(o.pendingPackets, pendingPacket{
-				Packet:      packet.CloneAsReferenced(pkt),
-				Source:      source,
-				InputStream: inputStream,
-			})
-			if len(o.pendingPackets) > pendingPacketsLimit {
-				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-				o.pendingPackets = o.pendingPackets[1:]
-			}
-		}
-		return nil
-	} else {
+	}
+	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
+	if keyFrame {
+		logger.Debugf(ctx, "got a key video frame")
+	}
+	streamIndex := pkt.StreamIndex()
+	_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
+	if waitingKeyFrame {
+		delete(o.waitingKeyFrames, streamIndex)
+		logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
+	}
+	if keyFrame && waitingKeyFrame {
 		o.pendingPackets = append(o.pendingPackets, pendingPacket{
 			Packet:      packet.CloneAsReferenced(pkt),
 			Source:      source,
 			InputStream: inputStream,
 		})
+		if len(o.pendingPackets) > pendingPacketsLimit {
+			logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+			o.pendingPackets = o.pendingPackets[1:]
+		}
+	}
+	if outputWaitForStreams && activeStreamCount < expectedStreamsCount {
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
+
+		return nil
+	}
+	if outputWaitForKeyFrames && len(o.waitingKeyFrames) != 0 {
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), outputStream.CodecParameters().MediaType())
+
+		return nil
 	}
 	o.started = true
 
@@ -624,22 +628,23 @@ func (o *Output) send(
 
 	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), outputStream.CodecParameters().MediaType())
 
-	for _, pendingPkt := range o.pendingPackets {
-		var err error
-		if outputSendPendingPackets {
+	if outputSendPendingPackets {
+		for _, pendingPkt := range o.pendingPackets {
 			//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
-			err = o.doWritePacket(
+			err := o.doWritePacket(
 				belt.WithField(ctx, "reason", "pending_packet"),
 				pendingPkt.Packet,
 				pendingPkt.Source,
 				pendingPkt.InputStream,
 				outputStream,
 			)
+			packet.Pool.Put(pendingPkt.Packet)
+			if err != nil {
+				return fmt.Errorf("unable to write a pending packet: %w", err)
+			}
 		}
-		packet.Pool.Put(pendingPkt.Packet)
-		if err != nil {
-			return fmt.Errorf("unable to write a pending packet: %w", err)
-		}
+	} else {
+		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
 	}
 	o.pendingPackets = o.pendingPackets[:0]
 	return nil
