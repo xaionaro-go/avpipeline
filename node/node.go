@@ -25,7 +25,7 @@ type Abstract interface {
 	AddPushFramesTo(dst Abstract, conds ...framecondition.Condition)
 	SetPushFramesTos(PushFramesTos)
 
-	GetStatistics() *NodeStatistics
+	GetStatistics() *Statistics
 	GetProcessor() processor.Abstract
 
 	GetInputPacketCondition() packetcondition.Condition
@@ -35,7 +35,7 @@ type Abstract interface {
 }
 
 type NodeWithCustomData[C any, T processor.Abstract] struct {
-	*NodeStatistics
+	*Statistics
 	Processor            T
 	PushPacketsTos       PushPacketsTos
 	PushFramesTos        PushFramesTos
@@ -67,8 +67,8 @@ func NewWithCustomData[C any, T processor.Abstract](
 	processor T,
 ) *NodeWithCustomData[C, T] {
 	return &NodeWithCustomData[C, T]{
-		NodeStatistics: &NodeStatistics{},
-		Processor:      processor,
+		Statistics: &Statistics{},
+		Processor:  processor,
 	}
 }
 
@@ -86,9 +86,9 @@ func NewWithCustomDataFromKernel[C any, T kernel.Abstract](
 	)
 }
 
-func (n *NodeWithCustomData[C, T]) GetStatistics() *NodeStatistics {
-	return xsync.DoR1(context.TODO(), &n.Locker, func() *NodeStatistics {
-		return n.NodeStatistics
+func (n *NodeWithCustomData[C, T]) GetStatistics() *Statistics {
+	return xsync.DoR1(context.TODO(), &n.Locker, func() *Statistics {
+		return n.Statistics
 	})
 }
 
@@ -145,17 +145,20 @@ func RemovePushPacketsTo[C any, P processor.Abstract](
 	logger.Debugf(ctx, "RemovePushPacketsTo")
 	defer func() { defer logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
 
-	return xsync.DoR1(ctx, &from.Locker, func() error {
+	if !xsync.DoR1(ctx, &from.Locker, func() bool {
 		pushTos := from.PushPacketsTos
 		for idx, pushTo := range pushTos {
 			if pushTo.Node == to {
 				pushTos = slices.Delete(pushTos, idx, idx+1)
 				from.PushPacketsTos = pushTos
-				return nil
+				return true
 			}
 		}
+		return false
+	}) {
 		return fmt.Errorf("%s does not push packets to %s", from, to)
-	})
+	}
+	return nil
 }
 
 func RemovePushFramesTo[C any, P processor.Abstract](

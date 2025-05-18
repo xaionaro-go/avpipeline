@@ -13,6 +13,21 @@ type Nodes[T Abstract] []T
 func (s Nodes[T]) String() string {
 	var results []string
 	for _, n := range s {
+		results = append(results, n.GetProcessor().String())
+	}
+	switch len(results) {
+	case 0:
+		return "{}"
+	case 1:
+		return results[0]
+	default:
+		return fmt.Sprintf("{%s}", strings.Join(results, ", "))
+	}
+}
+
+func (s Nodes[T]) StringRecursive() string {
+	var results []string
+	for _, n := range s {
 		isSet := map[Abstract]struct{}{}
 		var pushToStrs []string
 		for _, pushTo := range n.GetPushPacketsTos() {

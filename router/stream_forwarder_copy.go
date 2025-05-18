@@ -8,20 +8,24 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
-	"github.com/xaionaro-go/avpipeline/chain/autoheaders"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xsync"
 )
 
 // TODO: remove StreamForwarder from package `router`
 type StreamForwarderCopy[CS any, PS processor.Abstract] struct {
-	CancelFunc  context.CancelFunc
-	Input       *node.NodeWithCustomData[CS, PS]
-	AutoHeaders *autoheaders.NodeWithCustomData[CS]
-	Output      node.Abstract
+	xsync.Mutex
+	CancelFunc     context.CancelFunc
+	Input          *node.NodeWithCustomData[CS, PS]
+	AutoFixer      *autofix.AutoFixer[CS]
+	AutoFixerInput *nodewrapper.NoServe[node.Abstract]
+	Output         node.Abstract
 }
 
 var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderCopy[*Route, *ProcessorRouting])(nil)
@@ -37,13 +41,14 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 
 	fwd := &StreamForwarderCopy[CS, PS]{
 		Input:  src,
-		Output: dst,
+		Output: &nodewrapper.NoServe[node.Abstract]{Node: dst},
 	}
 	srcAsPacketSource := asPacketSource(src.GetProcessor())
 	dstAsPacketSink := asPacketSink(dst.GetProcessor())
 	if srcAsPacketSource != nil && dstAsPacketSink != nil {
 		logger.Debugf(ctx, "adding an autoheaders node to handle Source->Sink conversion")
-		fwd.AutoHeaders = autoheaders.NewNodeWithCustomData[CS](ctx, srcAsPacketSource, dstAsPacketSink)
+		fwd.AutoFixer = autofix.NewWithCustomData[CS](ctx, srcAsPacketSource, dstAsPacketSink, src.CustomData)
+		fwd.AutoFixerInput = &nodewrapper.NoServe[node.Abstract]{Node: fwd.AutoFixer.Input()}
 	}
 	return fwd, nil
 }
@@ -51,7 +56,7 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 func (fwd *StreamForwarderCopy[CS, PS]) Start(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
-	return fwd.addPacketsPushing(ctx)
+	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.addPacketsPushing, ctx)
 }
 
 func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
@@ -78,29 +83,25 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 	if err != nil {
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
-	if fwd.AutoHeaders != nil {
-		fwd.AutoHeaders.AddPushPacketsTo(fwd.outputAsNode())
-		fwd.Input.AddPushPacketsTo(fwd.AutoHeaders)
-		errCh := make(chan node.Error, 100)
-		observability.Go(ctx, func() {
-			for err := range errCh {
-				switch {
-				case errors.Is(err, context.Canceled):
-					logger.Debugf(ctx, "cancelled: %v", err)
-				case errors.Is(err, io.EOF):
-					logger.Debugf(ctx, "EOF: %v", err)
-				default:
-					logger.Errorf(ctx, "got an error: %v", err)
-				}
-				fwd.Stop(ctx)
+	fwd.AutoFixer.Output().AddPushPacketsTo(fwd.outputAsNode())
+	fwd.Input.AddPushPacketsTo(fwd.AutoFixerInput) // using a NoServe-wrapped value to make sure nobody accidentally started to serve it elsewhere
+	errCh := make(chan node.Error, 100)
+	observability.Go(ctx, func() {
+		for err := range errCh {
+			switch {
+			case errors.Is(err, context.Canceled):
+				logger.Debugf(ctx, "cancelled: %v", err)
+			case errors.Is(err, io.EOF):
+				logger.Debugf(ctx, "EOF: %v", err)
+			default:
+				logger.Errorf(ctx, "got an error: %v", err)
 			}
-		})
-		observability.Go(ctx, func() {
-			fwd.AutoHeaders.Serve(ctx, node.ServeConfig{}, errCh)
-		})
-	} else {
-		fwd.Input.AddPushPacketsTo(fwd.outputAsNode())
-	}
+			fwd.Stop(ctx)
+		}
+	})
+	observability.Go(ctx, func() {
+		fwd.AutoFixer.Serve(ctx, node.ServeConfig{}, errCh)
+	})
 
 	return nil
 }
@@ -114,14 +115,14 @@ func (fwd *StreamForwarderCopy[CS, PS]) removePacketsPushing(
 		return ErrAlreadyClosed{}
 	}
 	var errs []error
-	if fwd.AutoHeaders != nil {
-		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.AutoHeaders)
+	if fwd.AutoFixer != nil {
+		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.AutoFixerInput)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.AutoHeaders))
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.AutoFixer))
 		}
-		err = node.RemovePushPacketsTo(ctx, fwd.AutoHeaders, fwd.outputAsNode())
+		err = node.RemovePushPacketsTo(ctx, fwd.AutoFixer.Output(), fwd.outputAsNode())
 		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.AutoHeaders, fwd.Output))
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.AutoFixer, fwd.Output))
 		}
 	} else {
 		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.outputAsNode())
@@ -151,7 +152,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) Stop(
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
-	return fwd.removePacketsPushing(ctx)
+	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.removePacketsPushing, ctx)
 }
 
 func (fwd *StreamForwarderCopy[CS, PS]) outputAsNode() *forwarderCopyOutputAsNode[CS, PS] {
@@ -167,7 +168,6 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
-	fwd.Output.Serve(ctx, cfg, errCh)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushPacketsTos() node.PushPacketsTos {
@@ -194,7 +194,7 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetPushFramesTos(pushTos node.Push
 	fwd.Output.SetPushFramesTos(pushTos)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetStatistics() *node.NodeStatistics {
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetStatistics() *node.Statistics {
 	return fwd.Output.GetStatistics()
 }
 

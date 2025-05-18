@@ -39,7 +39,7 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	input avptypes.InputPacketOrFrameUnion,
 ) (typing.Optional[int], error) {
 	switch input.Packet.Source {
-	case s.StreamForward.inputAsPacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource:
+	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource:
 		logger.Tracef(ctx, "passing through index %d as is", input.GetStreamIndex())
 		return typing.Opt(input.GetStreamIndex()), nil
 	case s.StreamForward.Recoder, s.StreamForward.Recoder.Encoder:
@@ -50,7 +50,7 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 		}
 
 		maxStreamIndex := 0
-		s.StreamForward.inputAsPacketSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		s.StreamForward.PacketSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			for _, stream := range fmtCtx.Streams() {
 				if stream.Index() > maxStreamIndex {
 					maxStreamIndex = stream.Index()

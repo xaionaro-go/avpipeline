@@ -11,8 +11,6 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
-	"github.com/xaionaro-go/avpipeline/chain/autoheaders"
-	"github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -20,6 +18,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
+	"github.com/xaionaro-go/avpipeline/preset/autofix"
+	"github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
@@ -28,28 +28,29 @@ import (
 )
 
 const (
-	rescaleTS                  = false
-	notifyAboutPacketSources   = true
-	startWithPassthrough       = false
-	autoInsertBitstreamFilters = true
-	passthroughSupport         = true
+	rescaleTS                = false
+	notifyAboutPacketSources = true
+	startWithPassthrough     = false
+	passthroughSupport       = true
 )
 
 type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
-	Input                  *node.NodeWithCustomData[C, P]
-	Outputs                []node.Abstract
-	FilterThrottle         *packetcondition.VideoAverageBitrateLower
-	PassthroughSwitch      *packetcondition.Switch
-	PostSwitchFilter       *packetcondition.Switch
-	BothPipesSwitch        *packetcondition.Static
-	Recoder                *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
-	MapInputStreamIndices  *kernel.MapStreamIndices
-	MapOutputStreamIndices *kernel.MapStreamIndices
-	NodeRecoder            *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+	PacketSource              packet.Source
+	Outputs                   []node.Abstract
+	FilterThrottle            *packetcondition.VideoAverageBitrateLower
+	PassthroughSwitch         *packetcondition.Switch
+	PostSwitchFilter          *packetcondition.Switch
+	BothPipesSwitch           *packetcondition.Static
+	Recoder                   *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
+	MapInputStreamIndicesNode *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
+	MapOutputStreamIndices    *kernel.MapStreamIndices
+	NodeRecoder               *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+
+	NodeStreamFixerRecoder     *autofix.AutoFixer[struct{}]
+	NodeStreamFixerPassthrough *autofix.AutoFixer[struct{}]
 
 	RecodingConfig types.RecoderConfig
 
-	inputAsPacketSource                 packet.Source
 	inputStreamMapIndicesAsPacketSource packet.Source
 
 	locker    xsync.Mutex
@@ -63,11 +64,11 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 */
 func New[C any, P processor.Abstract](
 	ctx context.Context,
-	input *node.NodeWithCustomData[C, P],
+	input packet.Source,
 	outputs ...node.Abstract,
 ) (*TranscoderWithPassthrough[C, P], error) {
 	s := &TranscoderWithPassthrough[C, P]{
-		Input:             input,
+		PacketSource:      input,
 		Outputs:           outputs,
 		FilterThrottle:    packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		PassthroughSwitch: packetcondition.NewSwitch(),
@@ -85,14 +86,18 @@ func New[C any, P processor.Abstract](
 		logger.Debugf(ctx, "/s.PostSwitchFilter.SetValue(ctx, %d): %v", to, err)
 	})
 	s.PostSwitchFilter.SetKeepUnless(swCond)
-	s.MapInputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s))
+	s.MapInputStreamIndicesNode = node.NewFromKernel(
+		ctx,
+		kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s)),
+		processor.DefaultOptionsRecoder()...,
+	)
+	s.inputStreamMapIndicesAsPacketSource = asPacketSource(s.MapInputStreamIndicesNode.Processor)
 	s.MapOutputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerOutput(s))
-	s.inputAsPacketSource = asPacketSource(s.Input.GetProcessor())
-	if s.inputAsPacketSource == nil {
-		return nil, fmt.Errorf("the input node processor is expected to be a packet source, but is not: %T", s.Input.GetProcessor())
-	}
-
 	return s, nil
+}
+
+func (s *TranscoderWithPassthrough[C, P]) Input() *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]] {
+	return s.MapInputStreamIndicesNode
 }
 
 func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
@@ -135,9 +140,14 @@ func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
 		return fmt.Errorf("unable to configure the recoder: %w", err)
 	}
 	s.RecodingConfig = cfg
-	s.MapInputStreamIndices.Assigner.(*streamIndexAssignerInput[C, P]).reload(ctx)
+	s.MapInputStreamIndicesNode.Processor.Kernel.Assigner.(*streamIndexAssignerInput[C, P]).reload(ctx)
 	return nil
 }
+
+/*
+*transcoderwithpassthrough.streamIndexAssignerOutput[struct {},*github.com/xaionaro-go/avpipeline/processor.FromKernel[*github.com/xaionaro-go/avpipeline/kernel.Input]]
+*transcoderwithpassthrough.streamIndexAssignerInput[struct {},*github.com/xaionaro-go/avpipeline/processor.FromKernel[*github.com/xaionaro-go/avpipeline/kernel.Input]]
+ */
 
 func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	ctx context.Context,
@@ -293,7 +303,7 @@ func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 		}
 		m[key] = getter.GetStats()
 	}
-	tryGetStats("Input", s.Input)
+	tryGetStats("Input", s.MapInputStreamIndicesNode)
 	for idx, output := range s.Outputs {
 		tryGetStats(fmt.Sprintf("Output%d", idx), output)
 	}
@@ -358,34 +368,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		processor.DefaultOptionsOutput()...,
 	)
 
-	var recoderOutput node.Abstract = s.NodeRecoder
-	var nodeBSFPassthrough *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
-	{
-		nodeBSFRecoder := autoheaders.NewNode(
-			ctx,
-			s.Recoder.Encoder,
-			outputAsPacketSink,
-		)
-		nodeBSFPassthrough = autoheaders.NewNode(
-			ctx,
-			s.inputAsPacketSource,
-			outputAsPacketSink,
-		)
-
-		if autoInsertBitstreamFilters && nodeBSFRecoder != nil {
-			logger.Debugf(ctx, "inserting %s to the recoder's output", nodeBSFRecoder.Processor.Kernel)
-			recoderOutput.AddPushPacketsTo(nodeBSFRecoder)
-			recoderOutput = nodeBSFRecoder
-		}
-	}
-
-	mapInputStreamIndicesNode := node.NewFromKernel(
+	s.NodeStreamFixerRecoder = autofix.New(
 		ctx,
-		s.MapInputStreamIndices,
-		processor.DefaultOptionsRecoder()...,
+		s.Recoder.Encoder,
+		outputAsPacketSink,
 	)
-	s.inputStreamMapIndicesAsPacketSource = asPacketSource(mapInputStreamIndicesNode.Processor)
-	s.Input.AddPushPacketsTo(mapInputStreamIndicesNode)
+	if s.NodeStreamFixerRecoder != nil {
+		s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerRecoder)
+	}
 
 	if passthroughSupport {
 		audioFrameCount := 0
@@ -424,14 +414,16 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			},
 		}
 
-		var passthroughOutput node.Abstract = nodeFilterThrottle
-		if autoInsertBitstreamFilters && nodeBSFPassthrough != nil {
-			logger.Debugf(ctx, "inserting %s to the passthrough output", nodeBSFPassthrough.Processor.Kernel)
-			passthroughOutput.AddPushPacketsTo(nodeBSFPassthrough)
-			passthroughOutput = nodeBSFPassthrough
+		s.NodeStreamFixerPassthrough = autofix.New(
+			ctx,
+			s.PacketSource,
+			outputAsPacketSink,
+		)
+		if s.NodeStreamFixerPassthrough != nil {
+			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
 		}
 
-		mapInputStreamIndicesNode.AddPushPacketsTo(
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			s.NodeRecoder,
 			packetcondition.Or{
 				packetcondition.And{
@@ -441,7 +433,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				bothPipesSwitch,
 			},
 		)
-		mapInputStreamIndicesNode.AddPushPacketsTo(
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			nodeFilterThrottle,
 			packetcondition.Or{
 				packetcondition.And{
@@ -466,61 +458,54 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.MapOutputStreamIndices,
 				processor.DefaultOptionsOutput()...,
 			)
-			recoderOutput.AddPushPacketsTo(
-				nodeMapStreamIndices,
-			)
-			passthroughOutput.AddPushPacketsTo(
-				nodeMapStreamIndices,
-			)
+			if s.NodeStreamFixerRecoder != nil {
+				s.NodeStreamFixerRecoder.AddPushPacketsTo(nodeMapStreamIndices)
+			} else {
+				s.NodeRecoder.AddPushPacketsTo(nodeMapStreamIndices)
+			}
+			if s.NodeStreamFixerPassthrough != nil {
+				s.NodeStreamFixerPassthrough.AddPushPacketsTo(nodeMapStreamIndices)
+			} else {
+				nodeFilterThrottle.AddPushPacketsTo(nodeMapStreamIndices)
+			}
 			nodeMapStreamIndices.AddPushPacketsTo(output)
 		} else {
-			if rescaleTS && (!startWithPassthrough || notifyAboutPacketSources) {
-				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
-					filter.NewRescaleTSBetweenKernels(
-						s.inputAsPacketSource,
-						s.NodeRecoder.Processor.Kernel.Encoder,
-					),
+			if rescaleTS {
+				if !startWithPassthrough || notifyAboutPacketSources {
+					nodeFilterThrottle.InputPacketCondition = packetcondition.And{
+						filter.NewRescaleTSBetweenKernels(
+							s.PacketSource,
+							s.NodeRecoder.Processor.Kernel.Encoder,
+						),
+					}
+				} else {
+					logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
 				}
-			} else {
-				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
 			}
 
-			recoderOutput.AddPushPacketsTo(
-				output,
-				packetcondition.And{
-					s.PassthroughSwitch.Condition(0),
-					s.PostSwitchFilter.Condition(0),
-				},
-			)
-			passthroughOutput.AddPushPacketsTo(
-				output,
-				packetcondition.And{
-					s.PassthroughSwitch.Condition(1),
-					s.PostSwitchFilter.Condition(1),
-				},
-			)
+			condRecoder := packetcondition.And{
+				s.PassthroughSwitch.Condition(0),
+				s.PostSwitchFilter.Condition(0),
+			}
+			if s.NodeStreamFixerRecoder != nil {
+				s.NodeStreamFixerRecoder.AddPushPacketsTo(output, condRecoder)
+			} else {
+				s.NodeRecoder.AddPushPacketsTo(output, condRecoder)
+			}
+			condPassthrough := packetcondition.And{
+				s.PassthroughSwitch.Condition(1),
+				s.PostSwitchFilter.Condition(1),
+			}
+			if s.NodeStreamFixerPassthrough != nil {
+				s.NodeStreamFixerPassthrough.AddPushPacketsTo(output, condPassthrough)
+			} else {
+				nodeFilterThrottle.AddPushPacketsTo(output, condPassthrough)
+			}
 		}
 	} else {
-		mapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
-		recoderOutput.AddPushPacketsTo(output)
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
+		s.NodeStreamFixerRecoder.AddPushPacketsTo(output)
 	}
-
-	removeSubscriptionToInput := func(ctx context.Context) error {
-		var errs []error
-		if err := node.RemovePushPacketsTo(ctx, s.Input, mapInputStreamIndicesNode); err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing from Input to %s: %w", mapInputStreamIndicesNode, err))
-		}
-		return errors.Join(errs...)
-	}
-
-	defer func() {
-		if _err != nil {
-			err := removeSubscriptionToInput(ctx)
-			if err != nil {
-				logger.Error(ctx, "unable to cleanup packet pushing: %v", err)
-			}
-		}
-	}()
 
 	// == spawn an observer ==
 
@@ -563,13 +548,11 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	// == prepare ==
 
 	if notifyAboutPacketSources {
-		err := avpipeline.NotifyAboutPacketSources(ctx, nil, s.Input)
+		err := avpipeline.NotifyAboutPacketSources(ctx, s.PacketSource, s.MapInputStreamIndicesNode)
 		if err != nil {
 			return fmt.Errorf("receive an error while notifying nodes about packet sources: %w", err)
 		}
 	}
-	logger.Infof(ctx, "resulting pipeline: %s", s.Input.String())
-	logger.Infof(ctx, "resulting pipeline: %s", s.Input.DotString(false))
 
 	// == launch ==
 
@@ -578,16 +561,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		defer s.waitGroup.Done()
 		defer cancelFn()
 		defer logger.Debugf(ctx, "finished the serving routine")
-		defer func() {
-			if err := removeSubscriptionToInput(ctx); err != nil {
-				logger.Error(ctx, "unable to cleanup packet pushing: %v", err)
-			}
-		}()
 
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
-			NodeFilter:     nodecondition.Not{nodecondition.In{s.Input}},
 			NodeTreeFilter: nodecondition.Not{nodecondition.In(s.Outputs)},
-		}, errCh, s.Input)
+		}, errCh, s.MapInputStreamIndicesNode)
 	})
 
 	return nil

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -27,13 +29,14 @@ import (
 )
 
 const (
-	unwrapTLSViaProxy        = false
-	pendingPacketsLimit      = 10000
-	outputWaitForKeyFrames   = true
-	outputCopyStreamIndex    = true
-	outputUpdateStreams      = false
-	outputSendPendingPackets = true
-	skipTooHighTimestamps    = false
+	unwrapTLSViaProxy          = false
+	pendingPacketsLimit        = 10000
+	outputWaitForKeyFrames     = true
+	outputCopyStreamIndex      = true
+	outputUpdateStreams        = false
+	outputSendPendingPackets   = true
+	skipTooHighTimestamps      = false
+	flvForbidStreamIndexAbove1 = true
 )
 
 type OutputConfig struct {
@@ -348,6 +351,25 @@ func (o *Output) updateOutputFormat(
 			continue
 		}
 
+		outputFormat := o.FormatContext.OutputFormat().Name()
+		logger.Debugf(ctx, "output format is: '%s'", outputFormat)
+		switch outputFormat {
+		case "flv":
+			if flvForbidStreamIndexAbove1 {
+				if inputStreamIndex < 0 || inputStreamIndex >= 2 {
+					return fmt.Errorf("too many streams: requested stream index is %d, while FLV supports only 0 for video and 1 for audio", inputStreamIndex)
+				}
+			}
+			if len(o.OutputStreams) >= 2 {
+				var haveIndexes []int
+				for haveIndex := range o.OutputStreams {
+					haveIndexes = append(haveIndexes, haveIndex)
+				}
+				sort.Ints(haveIndexes)
+				return fmt.Errorf("too many streams: FLV supports only 1 video and 1 audio stream maximum; but I already have %d streams and yet I was requested to initialize at least one more; have indexes: %v, but requested %d", len(o.OutputStreams), haveIndexes, inputStreamIndex)
+			}
+		}
+
 		outputStream, err := o.initOutputStreamFor(ctx, inputSource, inputStream)
 		if err != nil {
 			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
@@ -444,7 +466,7 @@ func (o *Output) getOutputStream(
 		return outputStream, nil
 	}
 
-	logger.Debugf(ctx, "new output stream (#%d)", inputStream.Index())
+	logger.Debugf(ctx, "building new output stream for input stream #%d", inputStream.Index())
 	err := o.updateOutputFormat(ctx, inputSource, fmtCtx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to update the output format: %w", err)
@@ -656,7 +678,7 @@ func (o *Output) doWritePacket(
 	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
 		// TODO: do not skip B-frames
 		logger.Errorf(ctx,
-			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
+			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d <= %d",
 			outputStream.CodecParameters().MediaType(),
 			outputStream.Index(),
 			pkt.Dts(),
@@ -669,8 +691,8 @@ func (o *Output) doWritePacket(
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
-			pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
+			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
+			pkt.Pos(), pkt.Pts(), avconv.Duration(pkt.Pts(), outputStream.TimeBase()), pkt.Dts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
@@ -686,7 +708,7 @@ func (o *Output) doWritePacket(
 	if err != nil {
 		err = fmt.Errorf(
 			"unable to write the packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d: %w",
-			pos, dts, pts, dur, outputStream.LastDTS,
+			pos, pts, dts, dur, outputStream.LastDTS,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),

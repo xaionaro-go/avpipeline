@@ -6,16 +6,20 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	transcoder "github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough"
-	transcodertypes "github.com/xaionaro-go/avpipeline/chain/transcoderwithpassthrough/types"
+	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
+	transcoder "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough"
+	transcodertypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
 // TODO: remove StreamForwarder from package `router`
 type StreamForwarderRecoding[CS any, PS processor.Abstract] struct {
+	Input      *node.NodeWithCustomData[CS, PS]
 	Chain      *transcoder.TranscoderWithPassthrough[CS, PS]
+	ChainInput *nodewrapper.NoServe[*node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]]
 	CancelFunc context.CancelFunc
 }
 
@@ -31,13 +35,22 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 	logger.Debugf(ctx, "NewStreamForwarderRecoding(%s, %s)", src, dst)
 	defer func() { logger.Debugf(ctx, "/NewStreamForwarderRecoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
 
-	fwd := &StreamForwarderRecoding[CS, PS]{}
+	packetSource := asPacketSource(src.Processor)
+	if packetSource == nil {
+		return nil, fmt.Errorf("the source is expected to provide packet.Source")
+	}
+
+	fwd := &StreamForwarderRecoding[CS, PS]{
+		Input: src,
+	}
 
 	var err error
-	fwd.Chain, err = transcoder.New(ctx, src, dst)
+	fwd.Chain, err = transcoder.New[CS, PS](ctx, packetSource, &nodewrapper.NoServe[node.Abstract]{Node: dst})
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize a StreamForward: %w", err)
 	}
+	type chainInputNode = node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
+	fwd.ChainInput = &nodewrapper.NoServe[*chainInputNode]{Node: fwd.Chain.Input()}
 
 	if recoderConfig == nil {
 		logger.Debugf(ctx, "just copy as is")
@@ -101,11 +114,13 @@ func (fwd *StreamForwarderRecoding[CS, PS]) Start(ctx context.Context) (_err err
 	if err := fwd.Chain.Start(ctx, false); err != nil {
 		return fmt.Errorf("unable to start the StreamForward: %w", err)
 	}
+	fwd.Input.AddPushPacketsTo(fwd.ChainInput)
+
 	return nil
 }
 
 func (fwd *StreamForwarderRecoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
-	return fwd.Chain.Input
+	return fwd.Input
 }
 
 func (fwd *StreamForwarderRecoding[CS, PS]) Destination() node.Abstract {
@@ -123,6 +138,10 @@ func (fwd *StreamForwarderRecoding[CS, PS]) Stop(
 	}
 	fwd.CancelFunc()
 	fwd.CancelFunc = nil
+	removePushErr := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.ChainInput)
+	if removePushErr != nil {
+		return fmt.Errorf("unable to remove pushing packets from %s to %s", fwd.Input, fwd.ChainInput.Node)
+	}
 	fwd.Chain.Wait(ctx)
 	return nil
 }

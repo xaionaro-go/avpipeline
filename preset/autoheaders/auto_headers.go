@@ -46,7 +46,7 @@ func NewNodeWithCustomData[T any](
 		}
 		inputFormatName = fmt.Name()
 	})
-	logger.Infof(ctx, "input format: '%s'", inputFormatName)
+	logger.Debugf(ctx, "input format: '%s'", inputFormatName)
 
 	var outputFormatName string
 	forOutput.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
@@ -61,7 +61,7 @@ func NewNodeWithCustomData[T any](
 		}
 		outputFormatName = fmt.Name()
 	})
-	logger.Infof(ctx, "output format: '%s'", outputFormatName)
+	logger.Debugf(ctx, "output format: '%s'", outputFormatName)
 
 	isOOBHeadersInput := isOOBHeadersByFormatName(ctx, inputFormatName)
 	isOOBHeadersOutput := isOOBHeadersByFormatName(ctx, outputFormatName)
