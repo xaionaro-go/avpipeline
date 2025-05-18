@@ -27,12 +27,13 @@ import (
 )
 
 const (
-	unwrapTLSViaProxy      = false
-	pendingPacketsLimit    = 10000
-	outputWaitForKeyFrames = true
-	outputCopyStreamIndex  = true
-	outputUpdateStreams    = false
-	skipTooHighTimestamps  = false
+	unwrapTLSViaProxy        = false
+	pendingPacketsLimit      = 10000
+	outputWaitForKeyFrames   = true
+	outputCopyStreamIndex    = true
+	outputUpdateStreams      = false
+	outputSendPendingPackets = true
+	skipTooHighTimestamps    = false
 )
 
 type OutputConfig struct {
@@ -53,7 +54,8 @@ type OutputInputStream struct {
 
 type pendingPacket struct {
 	*astiav.Packet
-	Source packet.Source
+	Source      packet.Source
+	InputStream *astiav.Stream
 }
 
 type Output struct {
@@ -570,8 +572,9 @@ func (o *Output) send(
 		}
 		if keyFrame && waitingKeyFrame {
 			o.pendingPackets = append(o.pendingPackets, pendingPacket{
-				Packet: packet.CloneAsReferenced(pkt),
-				Source: source,
+				Packet:      packet.CloneAsReferenced(pkt),
+				Source:      source,
+				InputStream: inputStream,
 			})
 			if len(o.pendingPackets) > pendingPacketsLimit {
 				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
@@ -581,8 +584,9 @@ func (o *Output) send(
 		return nil
 	} else {
 		o.pendingPackets = append(o.pendingPackets, pendingPacket{
-			Packet: packet.CloneAsReferenced(pkt),
-			Source: source,
+			Packet:      packet.CloneAsReferenced(pkt),
+			Source:      source,
+			InputStream: inputStream,
 		})
 	}
 	o.started = true
@@ -598,15 +602,19 @@ func (o *Output) send(
 
 	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), outputStream.CodecParameters().MediaType())
 
-	for _, pkt := range o.pendingPackets {
-		err := o.doWritePacket(
-			belt.WithField(ctx, "reason", "pending_packet"),
-			pkt.Packet,
-			pkt.Source,
-			inputStream,
-			outputStream,
-		)
-		packet.Pool.Put(pkt.Packet)
+	for _, pendingPkt := range o.pendingPackets {
+		var err error
+		if outputSendPendingPackets {
+			//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
+			err = o.doWritePacket(
+				belt.WithField(ctx, "reason", "pending_packet"),
+				pendingPkt.Packet,
+				pendingPkt.Source,
+				pendingPkt.InputStream,
+				outputStream,
+			)
+		}
+		packet.Pool.Put(pendingPkt.Packet)
 		if err != nil {
 			return fmt.Errorf("unable to write a pending packet: %w", err)
 		}
@@ -687,10 +695,11 @@ func (o *Output) doWritePacket(
 	outputStream.LastDTS = dts
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
-			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s: %v",
+			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s; len:%d: %v",
 			pos, dts, pts,
 			outputStream.CodecParameters().MediaType(),
 			outputStream.CodecParameters().CodecID(),
+			len(pkt.Data()),
 			err,
 		)
 	}

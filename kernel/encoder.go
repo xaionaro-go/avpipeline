@@ -412,7 +412,7 @@ func (e *Encoder[EF]) send(
 		e,
 	)
 
-	logger.Tracef(ctx, "sending out %s", outPktWrapped.CodecParameters().MediaType())
+	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.CodecParameters().MediaType(), outPktWrapped.Dts(), outPktWrapped.Pts())
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

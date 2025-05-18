@@ -9,7 +9,6 @@ import (
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avd/pkg/avd/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -180,7 +179,7 @@ func (r *Route) AddPublisher(
 	defer wg.Wait()
 	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
 		if !r.IsNodeOpen {
-			return types.ErrRouteClosed{}
+			return ErrRouteClosed{}
 		}
 
 		// currently we support only one publisher:
