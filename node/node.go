@@ -42,7 +42,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputPacketCondition packetcondition.Condition
 	InputFrameCondition  framecondition.Condition
 	Locker               xsync.Mutex
-	Started              bool
+	IsServing            bool
 
 	CustomData C
 }

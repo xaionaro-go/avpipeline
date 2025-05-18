@@ -11,13 +11,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-type Node[T any] = node.NodeWithCustomData[T, *processor.FromKernel[*kernel.BitstreamFilter]]
+type NodeWithCustomData[T any] = node.NodeWithCustomData[T, *processor.FromKernel[*kernel.BitstreamFilter]]
+type Node = NodeWithCustomData[struct{}]
 
 func NewNode(
 	ctx context.Context,
 	forInput packet.Source,
 	forOutput packet.Sink,
-) *Node[struct{}] {
+) *Node {
 	return NewNodeWithCustomData[struct{}](
 		ctx,
 		forInput,
@@ -29,36 +30,51 @@ func NewNodeWithCustomData[T any](
 	ctx context.Context,
 	forInput packet.Source,
 	forOutput packet.Sink,
-) *Node[T] {
+) *NodeWithCustomData[T] {
+	var zeroT T
+	logger.Debugf(ctx, "NewNode[%T]: %s %s", zeroT, forInput, forOutput)
+	var inputFormatName string
+	forInput.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		if fmtCtx == nil {
+			logger.Errorf(ctx, "the output has no format context")
+			return
+		}
+		fmt := fmtCtx.OutputFormat()
+		if fmt == nil {
+			logger.Debugf(ctx, "the output has no format (an intermediate node, not an actual output?)")
+			return
+		}
+		inputFormatName = fmt.Name()
+	})
+	logger.Infof(ctx, "input format: '%s'", inputFormatName)
+
 	var outputFormatName string
 	forOutput.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		if fmtCtx == nil {
 			logger.Errorf(ctx, "the output has no format context")
 			return
 		}
-		outputFmt := fmtCtx.OutputFormat()
-		if outputFmt == nil {
+		fmt := fmtCtx.OutputFormat()
+		if fmt == nil {
 			logger.Debugf(ctx, "the output has no format (an intermediate node, not an actual output?)")
 			return
 		}
-		outputFormatName = outputFmt.Name()
+		outputFormatName = fmt.Name()
 	})
 	logger.Infof(ctx, "output format: '%s'", outputFormatName)
 
-	var inputVideoCodecID, inputAudioCodecID astiav.CodecID
-	forInput.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		inputVideoCodecID, inputAudioCodecID = getCodecNamesFromStreams(
-			fmtCtx.Streams(),
-		)
-	})
+	isOOBHeadersInput := isOOBHeadersByFormatName(ctx, inputFormatName)
+	isOOBHeadersOutput := isOOBHeadersByFormatName(ctx, outputFormatName)
+	logger.Debugf(ctx, "isOOBHeaders: input:%t output:%t", isOOBHeadersInput, isOOBHeadersOutput)
 
-	switch outputFormatName {
+	switch {
+	case isOOBHeadersInput == isOOBHeadersOutput:
+		return nil
+	case isOOBHeadersOutput:
+		return tryNewBSFForOOBHeaders[T](ctx)
+	case isOOBHeadersInput:
+		return tryNewBSFForInBandHeaders[T](ctx)
 	default:
-		logger.Debugf(ctx, "the output format is unknown, so defaulting to in-band headers")
-		fallthrough
-	case "mpegts", "rtsp":
-		return tryNewBSFForInBandHeaders[T](ctx, inputVideoCodecID, inputAudioCodecID)
-	case "flv":
-		return tryNewBSFForOOBHeaders[T](ctx, inputVideoCodecID, inputAudioCodecID)
+		panic("this is supposed to be impossible")
 	}
 }

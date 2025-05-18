@@ -17,6 +17,7 @@ import (
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/chain/autoheaders"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -129,15 +130,16 @@ func main() {
 		logger.Fatalf(ctx, "fallback is supported only for mpegts output format")
 	}
 
-	var nodeBSFMain, nodeBSFFallback *node.Node[*processor.FromKernel[*kernel.BitstreamFilter]]
-	switch outputFormatName {
-	case "mpegts", "rtsp":
-		inputVideoCodecID := getVideoCodecNameFromStreams(
-			inputFallbackNode.Processor.Kernel.FormatContext.Streams(),
-		)
-		nodeBSFMain = tryNewBSF(ctx, inputVideoCodecID)
-		nodeBSFFallback = tryNewBSF(ctx, inputVideoCodecID)
-	}
+	nodeBSFMain := autoheaders.NewNode(
+		ctx,
+		inputMainNode.Processor.GetPacketSource(),
+		outputNode.Processor.GetPacketSink(),
+	)
+	nodeBSFFallback := autoheaders.NewNode(
+		ctx,
+		inputFallbackNode.Processor.GetPacketSource(),
+		outputNode.Processor.GetPacketSink(),
+	)
 
 	var filteredInputMain node.Abstract = inputMainNode
 	if nodeBSFMain != nil {

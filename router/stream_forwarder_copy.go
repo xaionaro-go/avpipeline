@@ -2,21 +2,26 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/chain/autoheaders"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/observability"
 )
 
 // TODO: remove StreamForwarder from package `router`
 type StreamForwarderCopy[CS any, PS processor.Abstract] struct {
-	CancelFunc context.CancelFunc
-	Input      *node.NodeWithCustomData[CS, PS]
-	Output     node.Abstract
+	CancelFunc  context.CancelFunc
+	Input       *node.NodeWithCustomData[CS, PS]
+	AutoHeaders *autoheaders.NodeWithCustomData[CS]
+	Output      node.Abstract
 }
 
 var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderCopy[*Route, *ProcessorRouting])(nil)
@@ -34,6 +39,12 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 		Input:  src,
 		Output: dst,
 	}
+	srcAsPacketSource := asPacketSource(src.GetProcessor())
+	dstAsPacketSink := asPacketSink(dst.GetProcessor())
+	if srcAsPacketSource != nil && dstAsPacketSink != nil {
+		logger.Debugf(ctx, "adding an autoheaders node to handle Source->Sink conversion")
+		fwd.AutoHeaders = autoheaders.NewNodeWithCustomData[CS](ctx, srcAsPacketSource, dstAsPacketSink)
+	}
 	return fwd, nil
 }
 
@@ -48,6 +59,12 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 ) (_err error) {
 	logger.Debugf(ctx, "addPacketsPushing")
 	defer func() { logger.Debugf(ctx, "/addPacketsPushing: %v", _err) }()
+	if fwd.CancelFunc != nil {
+		return ErrAlreadyOpen{}
+	}
+	ctx, cancelFn := context.WithCancel(ctx)
+	fwd.CancelFunc = cancelFn
+
 	dstNode := fwd.outputAsNode()
 
 	pushTos := fwd.Input.GetPushPacketsTos()
@@ -61,7 +78,30 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 	if err != nil {
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
-	fwd.Input.AddPushPacketsTo(dstNode)
+	if fwd.AutoHeaders != nil {
+		fwd.AutoHeaders.AddPushPacketsTo(fwd.outputAsNode())
+		fwd.Input.AddPushPacketsTo(fwd.AutoHeaders)
+		errCh := make(chan node.Error, 100)
+		observability.Go(ctx, func() {
+			for err := range errCh {
+				switch {
+				case errors.Is(err, context.Canceled):
+					logger.Debugf(ctx, "cancelled: %v", err)
+				case errors.Is(err, io.EOF):
+					logger.Debugf(ctx, "EOF: %v", err)
+				default:
+					logger.Errorf(ctx, "got an error: %v", err)
+				}
+				fwd.Stop(ctx)
+			}
+		})
+		observability.Go(ctx, func() {
+			fwd.AutoHeaders.Serve(ctx, node.ServeConfig{}, errCh)
+		})
+	} else {
+		fwd.Input.AddPushPacketsTo(fwd.outputAsNode())
+	}
+
 	return nil
 }
 
@@ -70,7 +110,28 @@ func (fwd *StreamForwarderCopy[CS, PS]) removePacketsPushing(
 ) (_err error) {
 	logger.Debugf(ctx, "removePacketsPushing")
 	defer func() { logger.Debugf(ctx, "/removePacketsPushing: %v", _err) }()
-	return node.RemovePushPacketsTo(ctx, fwd.Input, fwd.outputAsNode())
+	if fwd.CancelFunc == nil {
+		return ErrAlreadyClosed{}
+	}
+	var errs []error
+	if fwd.AutoHeaders != nil {
+		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.AutoHeaders)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.AutoHeaders))
+		}
+		err = node.RemovePushPacketsTo(ctx, fwd.AutoHeaders, fwd.outputAsNode())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.AutoHeaders, fwd.Output))
+		}
+	} else {
+		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.outputAsNode())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.Output))
+		}
+	}
+	fwd.CancelFunc()
+	fwd.CancelFunc = nil
+	return errors.Join(errs...)
 }
 
 func (fwd *StreamForwarderCopy[CS, PS]) String() string {
