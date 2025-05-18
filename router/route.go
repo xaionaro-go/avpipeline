@@ -2,13 +2,14 @@ package router
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sync"
 
 	"slices"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avd/pkg/avd/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -21,7 +22,8 @@ import (
 
 const (
 	routeFrameDrop      = true
-	routeCloseProcessor = false
+	routeCloseProcessor = true
+	routeAutoReset      = false
 )
 
 type RoutePath = routertypes.RoutePath
@@ -58,6 +60,7 @@ func newRoute(
 		PublishersChangeChan: make(chan struct{}),
 		CancelFunc:           cancelFn,
 	}
+	close(r.PublishersChangeChan)
 	r.Node = node.NewWithCustomDataFromKernel[*Route](
 		ctx,
 		kernel.NewMapStreamIndices(ctx, r),
@@ -77,32 +80,9 @@ func newRoute(
 	return r
 }
 
-func (r *Route) ResetNode(ctx context.Context) (_ret error) {
-	logger.Debugf(ctx, "ResetNode")
-	defer func() { logger.Debugf(ctx, "/ResetNode: %v", _ret) }()
-	return xsync.DoA1R1(ctx, &r.Node.Locker, r.resetNodeLocked, ctx)
-}
-
-func (r *Route) resetNodeLocked(ctx context.Context) (_ret error) {
-	logger.Debugf(ctx, "resetNodeLocked")
-	defer func() { logger.Debugf(ctx, "/resetNodeLocked: %v", _ret) }()
-	var errs []error
-	if err := r.closeNodeLocked(ctx); err != nil {
-		if !errors.Is(err, ErrAlreadyClosed{}) {
-			errs = append(errs, fmt.Errorf("unable to close the old node: %w", err))
-		}
-	}
-	r.openNodeLocked(ctx)
-	return errors.Join(errs...)
-}
-
-func (r *Route) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "Close")
-	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
-	return xsync.DoA1R1(ctx, &r.Node.Locker, r.closeLocked, ctx)
-}
-
-func (r *Route) openNodeLocked(ctx context.Context) {
+func (r *Route) openNodeLocked(
+	ctx context.Context,
+) {
 	logger.Debugf(ctx, "openNodeLocked: %s", r.Path)
 	defer func() { logger.Debugf(ctx, "/openNodeLocked: %s", r.Path) }()
 
@@ -116,13 +96,18 @@ func (r *Route) openNodeLocked(ctx context.Context) {
 	if r.IsNodeOpen {
 		panic("is already open")
 	}
+
 	r.IsNodeOpen = true
+	r.PublishersChangeChan = make(chan struct{})
 	if r.OnOpen != nil {
 		r.OnOpen(ctx, r)
 	}
 }
 
-func (r *Route) closeNodeLocked(ctx context.Context) (_err error) {
+func (r *Route) closeNodeLocked(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+) (_err error) {
 	logger.Debugf(ctx, "closeNodeLocked: %s", r.Path)
 	defer func() { logger.Debugf(ctx, "/closeNodeLocked: %s: %v", r.Path, _err) }()
 
@@ -131,22 +116,37 @@ func (r *Route) closeNodeLocked(ctx context.Context) (_err error) {
 	}
 	r.IsNodeOpen = false
 	if r.OnClose != nil {
-		r.OnClose(ctx, r)
+		wg.Add(1)
+		observability.Go(ctx, func() {
+			defer wg.Done()
+			r.OnClose(ctx, r)
+		})
 	}
 	if routeCloseProcessor {
 		_err = r.Node.Processor.Close(ctx)
 	}
+	close(r.PublishersChangeChan)
 	return
 }
 
-func (r *Route) closeLocked(ctx context.Context) (_err error) {
+func (r *Route) closeLocked(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+) (_err error) {
 	if r.IsNodeOpen {
-		_err = r.closeNodeLocked(ctx)
+		_err = r.closeNodeLocked(ctx, wg)
 	}
 	r.CancelFunc()
 	return
 }
 
+func (r *Route) Close(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Close")
+	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoA2R1(ctx, &r.Node.Locker, r.closeLocked, ctx, &wg)
+}
 func (r *Route) getPublishersChangeChan(
 	ctx context.Context,
 ) <-chan struct{} {
@@ -174,18 +174,37 @@ func (r *Route) AddPublisher(
 	ctx context.Context,
 	publisher Publisher,
 ) (_err error) {
-	logger.Debugf(ctx, "AddPublisher[%s](ctx, %#+v)", r.Path, publisher)
-	defer func() { logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): %v", r.Path, publisher, _err) }()
+	logger.Debugf(ctx, "AddPublisher[%s](ctx, %#+v)", r, publisher)
+	defer func() { logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): %v", r, publisher, _err) }()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
-		for _, publisher := range r.Publishers {
-			logger.Warnf(ctx, "closing publisher %s to free-up the route for another publisher")
-			err := publisher.Close(ctx)
-			if err != nil {
-				logger.Errorf(ctx, "unable to close the publisher: %v", err)
-			}
+		if !r.IsNodeOpen {
+			return types.ErrRouteClosed{}
 		}
+
+		// currently we support only one publisher:
+		for _, publisher := range r.Publishers {
+			wg.Add(1)
+			observability.Go(ctx, func() {
+				defer wg.Done()
+				logger.Errorf(ctx, "closing publisher %s to free-up the route for another publisher", publisher)
+				err := publisher.Close(ctx)
+				if err != nil {
+					logger.Errorf(ctx, "unable to close the publisher: %v", err)
+				}
+			})
+		}
+		r.Publishers = r.Publishers[:0]
+
 		_ = r.addPublisherLocked(ctx, publisher)
 		return nil
+	})
+}
+
+func (r *Route) LockDo(ctx context.Context, fn func(ctx context.Context)) {
+	r.Node.Locker.Do(ctx, func() {
+		fn(ctx)
 	})
 }
 
@@ -198,9 +217,11 @@ func (r *Route) addPublisherLocked(
 		return r.Publishers
 	}
 	r.Publishers = append(r.Publishers, publisher)
-	var ch chan<- struct{}
-	ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
-	close(ch)
+	if r.IsNodeOpen {
+		var ch chan<- struct{}
+		ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
+		close(ch)
+	}
 	return r.Publishers
 }
 
@@ -208,24 +229,29 @@ func (r *Route) RemovePublisher(
 	ctx context.Context,
 	publisher Publisher,
 ) (Publishers, error) {
-	return xsync.DoA2R2(ctx, &r.Node.Locker, r.removePublisherLocked, ctx, publisher)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoA3R2(ctx, &r.Node.Locker, r.removePublisherLocked, ctx, publisher, &wg)
 }
 
 func (r *Route) removePublisherLocked(
 	ctx context.Context,
 	publisher Publisher,
+	wg *sync.WaitGroup,
 ) (Publishers, error) {
 	for idx, candidate := range r.Publishers {
 		if publisher == candidate {
 			r.Publishers = slices.Delete(r.Publishers, idx, idx+1)
-			var ch chan<- struct{}
-			ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
-			close(ch)
+			if r.IsNodeOpen {
+				var ch chan<- struct{}
+				ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
+				close(ch)
+			}
 
-			if len(r.Publishers) == 0 {
+			if routeAutoReset && len(r.Publishers) == 0 {
 				// TODO: add an option to keep the clients to wait for a new stream
 				logger.Debugf(ctx, "zero publishers left; dropping the clients")
-				if err := r.resetNodeLocked(ctx); err != nil {
+				if err := r.resetNodeLocked(ctx, wg); err != nil {
 					return r.Publishers, fmt.Errorf("unable to reset the node: %w", err)
 				}
 			}

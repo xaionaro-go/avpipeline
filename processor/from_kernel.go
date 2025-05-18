@@ -125,6 +125,7 @@ func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	logger.Debugf(ctx, "closing %T", p.Kernel)
 	defer func() {
 		close(p.OutputPacketCh)
+		close(p.OutputFrameCh)
 	}()
 
 	var errs []error

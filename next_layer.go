@@ -39,7 +39,7 @@ func nextLayer[T node.Abstract](nodes ...T) ([]nodeAbstractWithItemType, error) 
 	for _, n := range nodes {
 		for _, pushTo := range n.GetPushPacketsTos() {
 			r := nodeAbstractWithItemType{
-				Node:     n,
+				Node:     pushTo.Node,
 				ItemType: reflect.TypeOf((*packet.Input)(nil)),
 			}
 			if _, ok := isSet[r]; ok {
@@ -54,7 +54,7 @@ func nextLayer[T node.Abstract](nodes ...T) ([]nodeAbstractWithItemType, error) 
 		}
 		for _, pushTo := range n.GetPushFramesTos() {
 			r := nodeAbstractWithItemType{
-				Node:     n,
+				Node:     pushTo.Node,
 				ItemType: reflect.TypeOf((*frame.Input)(nil)),
 			}
 			if _, ok := isSet[r]; ok {

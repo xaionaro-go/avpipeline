@@ -97,6 +97,7 @@ func (fwd *RouteSource[C, P]) startLocked(ctx context.Context) (_err error) {
 		return fmt.Errorf("unable to get the destination route by path '%s': %w", fwd.DstPath, err)
 	}
 
+	logger.Debugf(ctx, "AddPublisher")
 	if err := dst.AddPublisher(ctx, fwd); err != nil {
 		return fmt.Errorf("unable to add the forwarder as a publisher to '%s': %w", dst.Path, err)
 	}
@@ -141,8 +142,6 @@ func (fwd *RouteSource[C, P]) stopLocked(
 		}
 		fwd.Output = nil
 	}
-
-	logger.Errorf(ctx, "route node reset is not implemented, yet")
 
 	return errors.Join(errs...)
 }

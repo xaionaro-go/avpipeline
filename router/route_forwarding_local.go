@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
@@ -71,6 +72,7 @@ func (f *forwardOutputFactoryLocalPath) NewOutput(
 	if outputRoute == nil {
 		return nil, fmt.Errorf("there is no active route by path '%s' (source)", f.RoutePath)
 	}
+	logger.Debugf(ctx, "AddPublisher")
 	if err := outputRoute.AddPublisher(ctx, fwd); err != nil {
 		return nil, fmt.Errorf("unable to add the forwarder as a publisher to '%s': %w", outputRoute.Path, err)
 	}
@@ -95,9 +97,11 @@ func (n *forwardOutputNodeLocalPath) Close(
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	dstRoute := n.NodeRouting.CustomData
 	dstRoute.Node.Locker.Do(ctx, func() {
-		if _, err := dstRoute.removePublisherLocked(ctx, n.RouteForwarding); err != nil {
+		if _, err := dstRoute.removePublisherLocked(ctx, n.RouteForwarding, &wg); err != nil {
 			errs = append(errs, fmt.Errorf("dstRoute.removePublisher: %w", err))
 		}
 	})

@@ -99,36 +99,46 @@ func (fwd *RouteForwarding) startLocked(ctx context.Context) (_err error) {
 	defer fwd.WaitGroup.Done()
 	defer func() {
 		if _err != nil {
-			fwd.stopLocked(ctx)
+			var wg sync.WaitGroup
+			fwd.stopLocked(ctx, &wg)
 		}
 	}()
 
 	src, err := fwd.Router.GetRoute(ctx, fwd.SrcPath, GetRouteModeWaitForPublisher)
 	if err != nil {
-		return fmt.Errorf("unable to get the source route by path '%s': %w", fwd.SrcPath, err)
+		return fmt.Errorf("internal error: unable to get the source route by path '%s': %w", fwd.SrcPath, err)
 	}
 	if src == nil {
-		return fmt.Errorf("there is no active route by path '%s' (source)", fwd.SrcPath)
+		return fmt.Errorf("internal error: there is no active route by path '%s' (source)", fwd.SrcPath)
 	}
+	logger.Debugf(ctx, "route instance: %p", src)
 
 	fwd.WaitGroup.Add(1)
 	observability.Go(ctx, func() {
 		defer fwd.WaitGroup.Done()
 		logger.Debugf(ctx, "waiter")
 		defer logger.Debugf(ctx, "/waiter")
-		select {
-		case <-ctx.Done():
-			if err := fwd.stop(ctx); err != nil {
-				logger.Errorf(ctx, "unable to stop: %v", err)
-			}
-			return
-		case <-src.PublishersChangeChan:
-			if err := fwd.stop(ctx); err != nil {
-				logger.Errorf(ctx, "unable to stop: %v", err)
+		for {
+			logger.Debugf(ctx, "waiter: waiting")
+			select {
+			case <-ctx.Done():
+				logger.Debugf(ctx, "<-ctx.Done()")
+				if err := fwd.stop(ctx); err != nil {
+					logger.Errorf(ctx, "unable to stop: %v", err)
+				}
 				return
-			}
-			if fwd.start(ctx); err != nil {
-				logger.Error(ctx, "unable to start: %v", err)
+			case _, ok := <-src.PublishersChangeChan:
+				logger.Debugf(ctx, "<-src[%s].PublishersChangeChan: %t", src, ok)
+				if ok {
+					continue
+				}
+				logger.Debugf(ctx, "the route instance %p is closed, restarting the forwarder to get a new route node (for the same route path)", src)
+				if err := fwd.stop(ctx); err != nil {
+					logger.Errorf(ctx, "unable to stop: %v", err)
+				}
+				if fwd.start(ctx); err != nil {
+					logger.Error(ctx, "unable to start: %v", err)
+				}
 				return
 			}
 		}
@@ -158,11 +168,14 @@ func (fwd *RouteForwarding) stop(
 ) (_err error) {
 	logger.Debugf(ctx, "stop")
 	defer func() { logger.Debugf(ctx, "/stop: %v", _err) }()
-	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.stopLocked, ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.stopLocked, ctx, &wg)
 }
 
 func (fwd *RouteForwarding) stopLocked(
 	ctx context.Context,
+	wg *sync.WaitGroup,
 ) (_err error) {
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
@@ -174,9 +187,14 @@ func (fwd *RouteForwarding) stopLocked(
 		fwd.StreamForwarder = nil
 	}
 	if fwd.Output != nil {
-		if err := fwd.Output.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("fwd.Output.Close: %w", err))
-		}
+		wg.Add(1)
+		output := fwd.Output
+		observability.Go(ctx, func() {
+			defer wg.Done()
+			if err := output.Close(ctx); err != nil {
+				logger.Errorf(ctx, "fwd.Output.Close: %v", err)
+			}
+		})
 		fwd.Output = nil
 	}
 	return errors.Join(errs...)
@@ -187,22 +205,25 @@ func (fwd *RouteForwarding) Close(
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
-	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.closeLocked, ctx)
+	defer fwd.WaitGroup.Wait()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.doCloseLocked, ctx, &wg)
 }
 
-func (fwd *RouteForwarding) closeLocked(
+func (fwd *RouteForwarding) doCloseLocked(
 	ctx context.Context,
+	wg *sync.WaitGroup,
 ) (_err error) {
 	if fwd.CancelFunc == nil {
 		return nil
 	}
 	fwd.CancelFunc()
 	fwd.CancelFunc = nil
-	err := fwd.stopLocked(ctx)
+	err := fwd.stopLocked(ctx, wg)
 	if err != nil {
 		return err
 	}
-	fwd.WaitGroup.Wait()
 	return nil
 }
 

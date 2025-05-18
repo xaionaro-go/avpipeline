@@ -23,18 +23,18 @@ type Router struct {
 	Locker xsync.Mutex
 
 	// access only when Locker is locked:
-	RoutesByPath map[RoutePath]*Route
-	CloseChan    chan struct{}
-	AddedChan    chan struct{}
-	ErrorChan    chan node.Error
+	RoutesByPath      map[RoutePath]*Route
+	RouterCloseChan   chan struct{}
+	RoutesChangedChan chan struct{}
+	ErrorChan         chan node.Error
 }
 
 func New(ctx context.Context) *Router {
 	r := &Router{
-		RoutesByPath: map[RoutePath]*Route{},
-		CloseChan:    make(chan struct{}),
-		AddedChan:    make(chan struct{}),
-		ErrorChan:    make(chan node.Error, 100),
+		RoutesByPath:      map[RoutePath]*Route{},
+		RouterCloseChan:   make(chan struct{}),
+		RoutesChangedChan: make(chan struct{}),
+		ErrorChan:         make(chan node.Error, 100),
 	}
 	r.init(ctx)
 	return r
@@ -44,10 +44,10 @@ func (r *Router) Close(
 	ctx context.Context,
 ) error {
 	r.Locker.Do(ctx, func() { // to make sure we don't have anybody adding more processes
-		close(r.CloseChan)
+		close(r.RouterCloseChan)
 		r.WaitGroup.Wait()
 		close(r.ErrorChan)
-		close(r.AddedChan)
+		close(r.RoutesChangedChan)
 	})
 	return nil
 }
@@ -88,15 +88,14 @@ func (r *Router) onRouteCreated(
 	}
 }
 
-func (r *Router) onRouteRemoved(
+func (r *Router) onRouteClosed(
 	ctx context.Context,
 	route *Route,
 ) {
-	logger.Debugf(ctx, "onRouteRemoved: %s", route)
-	defer func() { logger.Debugf(ctx, "/onRouteRemoved: %s", route) }()
-	r.WaitGroup.Done()
-	if r.OnRouteRemoved != nil {
-		r.OnRouteRemoved(ctx, route)
+	logger.Debugf(ctx, "onRouteClosed: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRouteClosed: %s", route) }()
+	if err := r.RemoveRoute(ctx, route); err != nil {
+		logger.Errorf(ctx, "unable to remove route '%s': %v", route, err)
 	}
 }
 
@@ -226,7 +225,7 @@ func (r *Router) createRoute(
 	}
 
 	select {
-	case <-r.CloseChan:
+	case <-r.RouterCloseChan:
 		return nil
 	default:
 	}
@@ -235,49 +234,88 @@ func (r *Router) createRoute(
 		path,
 		r.ErrorChan,
 		r.onRouteCreated,
-		r.onRouteRemoved,
+		r.onRouteClosed,
 	)
 	r.RoutesByPath[path] = route
 	var addCh chan<- struct{}
-	addCh, r.AddedChan = r.AddedChan, make(chan struct{})
+	addCh, r.RoutesChangedChan = r.RoutesChangedChan, make(chan struct{})
 	close(addCh)
 
 	return route
 }
 
-func (r *Router) GetAddedChan(
+func (r *Router) GetRoutesChangedChan(
 	ctx context.Context,
 ) chan struct{} {
 	return xsync.DoR1(ctx, &r.Locker, func() chan struct{} {
-		return r.AddedChan
+		return r.RoutesChangedChan
+	})
+}
+
+func (r *Router) RemoveRouteByPath(
+	ctx context.Context,
+	path RoutePath,
+) *Route {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoR1(ctx, &r.Locker, func() *Route {
+		route := r.RoutesByPath[path]
+		r.removeRouteLocked(ctx, route, &wg)
+		return route
 	})
 }
 
 func (r *Router) RemoveRoute(
 	ctx context.Context,
-	path RoutePath,
-) *Route {
-	return xsync.DoA2R1(ctx, &r.Locker, r.removeRouteNoLock, ctx, path)
+	route *Route,
+) error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoR1(ctx, &r.Locker, func() error {
+		oldRoute := r.RoutesByPath[route.Path]
+		if oldRoute != route {
+			return fmt.Errorf("route instance is not set in the router")
+		}
+		r.removeRouteLocked(ctx, route, &wg)
+		r.WaitGroup.Done()
+		return nil
+	})
 }
 
-func (r *Router) removeRouteNoLock(
+func (r *Router) removeRouteLocked(
 	ctx context.Context,
-	path RoutePath,
-) *Route {
-	route := r.RoutesByPath[path]
-	delete(r.RoutesByPath, path)
-	return route
+	route *Route,
+	wg *sync.WaitGroup,
+) {
+	logger.Debugf(ctx, "removeRouteLocked: %s", route)
+	defer func() { logger.Debugf(ctx, "/removeRouteLocked: %s", route) }()
+	wg.Add(1)
+	observability.Go(ctx, func() {
+		defer wg.Done()
+		route.Close(ctx)
+	})
+	delete(r.RoutesByPath, route.Path)
+	var remCh chan<- struct{}
+	remCh, r.RoutesChangedChan = r.RoutesChangedChan, make(chan struct{})
+	close(remCh)
+	if r.OnRouteRemoved != nil {
+		r.Locker.UDo(ctx, func() {
+			r.OnRouteRemoved(ctx, route)
+		})
+	}
 }
 
 func (r *Router) WaitForRoute(
 	ctx context.Context,
 	path RoutePath,
-) (*Route, error) {
+) (_ret *Route, _err error) {
+	logger.Debugf(ctx, "WaitForRoute: %s")
+	defer func() { logger.Debugf(ctx, "/WaitForRoute: %s: %v %v", _ret, _err) }()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-r.GetAddedChan(ctx):
+		case <-r.GetRoutesChangedChan(ctx):
 			if route := xsync.DoR1(ctx, &r.Locker, func() *Route {
 				return r.RoutesByPath[path]
 			}); route != nil {
@@ -294,7 +332,7 @@ func (r *Router) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-r.CloseChan:
+	case <-r.RouterCloseChan:
 	}
 
 	endCh := make(chan struct{})
