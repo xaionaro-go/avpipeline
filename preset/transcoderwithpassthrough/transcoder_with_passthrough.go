@@ -28,11 +28,10 @@ import (
 )
 
 const (
-	rescaleTS                = false
+	passthroughRescaleTS     = false
 	notifyAboutPacketSources = true
 	startWithPassthrough     = false
 	passthroughSupport       = true
-	bothPipesHack            = false
 )
 
 type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
@@ -41,7 +40,6 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	FilterThrottle            *packetcondition.VideoAverageBitrateLower
 	PassthroughSwitch         *packetcondition.Switch
 	PostSwitchFilter          *packetcondition.Switch
-	BothPipesSwitch           *packetcondition.Static
 	Recoder                   *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	MapInputStreamIndicesNode *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
 	MapOutputStreamIndices    *kernel.MapStreamIndices
@@ -74,7 +72,6 @@ func New[C any, P processor.Abstract](
 		FilterThrottle:    packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		PassthroughSwitch: packetcondition.NewSwitch(),
 		PostSwitchFilter:  packetcondition.NewSwitch(),
-		BothPipesSwitch:   ptr(packetcondition.Static(false)),
 	}
 	swCond := packetcondition.And{
 		packetcondition.MediaType(astiav.MediaTypeVideo),
@@ -369,6 +366,33 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		processor.DefaultOptionsOutput()...,
 	)
 
+	if passthroughSupport {
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(
+			s.NodeRecoder,
+			packetcondition.And{
+				s.PassthroughSwitch.Condition(0),
+				s.PostSwitchFilter.Condition(0),
+			},
+		)
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(
+			nodeFilterThrottle,
+			packetcondition.And{
+				s.PassthroughSwitch.Condition(1),
+				s.PostSwitchFilter.Condition(1),
+			},
+		)
+
+		if notifyAboutPacketSources {
+			logger.Debugf(ctx, "notifying about the sources (the first time)")
+			err := avpipeline.NotifyAboutPacketSources(ctx, s.PacketSource, s.MapInputStreamIndicesNode)
+			if err != nil {
+				return fmt.Errorf("received an error while notifying nodes about packet sources the first time (%s -> %s): %w", s.PacketSource, s.MapInputStreamIndicesNode, err)
+			}
+		}
+	} else {
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
+	}
+
 	s.NodeStreamFixerRecoder = autofix.New(
 		ctx,
 		s.Recoder.Encoder,
@@ -379,43 +403,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	}
 
 	if passthroughSupport {
-		audioFrameCount := 0
-		keyFrameCount := 0
-		bothPipesSwitch := packetcondition.And{
-			packetcondition.Static(bothPipesHack),
-			packetcondition.Static(recoderInSeparateTracks),
-			s.BothPipesSwitch,
-			packetcondition.Or{
-				packetcondition.And{
-					packetcondition.IsKeyFrame(true),
-					packetcondition.MediaType(astiav.MediaTypeVideo),
-					packetcondition.Function(func(ctx context.Context, pkt packet.Input) bool {
-						keyFrameCount++
-						if keyFrameCount <= 1 {
-							logger.Debugf(ctx, "frame size: %d", len(pkt.Data()))
-							return true
-						}
-						return false
-					}),
-				},
-				packetcondition.And{
-					packetcondition.MediaType(astiav.MediaTypeAudio),
-					packetcondition.Function(func(ctx context.Context, pkt packet.Input) bool {
-						audioFrameCount++
-						if audioFrameCount <= 1 {
-							logger.Debugf(ctx, "frame size: %d", len(pkt.Data()))
-							return true
-						}
-						return false
-					}),
-				},
-				packetcondition.Not{
-					packetcondition.MediaType(astiav.MediaTypeAudio),
-					packetcondition.MediaType(astiav.MediaTypeVideo),
-				},
-			},
-		}
-
 		s.NodeStreamFixerPassthrough = autofix.New(
 			ctx,
 			s.PacketSource,
@@ -425,27 +412,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
 		}
 
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
-			s.NodeRecoder,
-			packetcondition.Or{
-				packetcondition.And{
-					s.PassthroughSwitch.Condition(0),
-					s.PostSwitchFilter.Condition(0),
-				},
-				bothPipesSwitch,
-			},
-		)
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
-			nodeFilterThrottle,
-			packetcondition.Or{
-				packetcondition.And{
-					s.PassthroughSwitch.Condition(1),
-					s.PostSwitchFilter.Condition(1),
-				},
-				bothPipesSwitch,
-			},
-		)
-
 		if startWithPassthrough {
 			s.PassthroughSwitch.CurrentValue.Store(1)
 			s.PostSwitchFilter.CurrentValue.Store(1)
@@ -453,7 +419,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			s.PostSwitchFilter.NextValue.Store(1)
 		}
 
-		if rescaleTS {
+		if passthroughRescaleTS {
 			if !startWithPassthrough || notifyAboutPacketSources {
 				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
 					filter.NewRescaleTSBetweenKernels(
@@ -465,46 +431,39 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
 			}
 		}
+
+		var condRecoder, condPassthrough packetcondition.And
+		var sink node.Abstract
 		if recoderInSeparateTracks {
-			*s.BothPipesSwitch = true
 			nodeMapStreamIndices := node.NewFromKernel(
 				ctx,
 				s.MapOutputStreamIndices,
 				processor.DefaultOptionsOutput()...,
 			)
-			if s.NodeStreamFixerRecoder != nil {
-				s.NodeStreamFixerRecoder.AddPushPacketsTo(nodeMapStreamIndices)
-			} else {
-				s.NodeRecoder.AddPushPacketsTo(nodeMapStreamIndices)
-			}
-			if s.NodeStreamFixerPassthrough != nil {
-				s.NodeStreamFixerPassthrough.AddPushPacketsTo(nodeMapStreamIndices)
-			} else {
-				nodeFilterThrottle.AddPushPacketsTo(nodeMapStreamIndices)
-			}
 			nodeMapStreamIndices.AddPushPacketsTo(output)
+			sink = nodeMapStreamIndices
 		} else {
-			condRecoder := packetcondition.And{
+			condRecoder = packetcondition.And{
 				s.PassthroughSwitch.Condition(0),
 				s.PostSwitchFilter.Condition(0),
 			}
-			if s.NodeStreamFixerRecoder != nil {
-				s.NodeStreamFixerRecoder.AddPushPacketsTo(output, condRecoder)
-			} else {
-				s.NodeRecoder.AddPushPacketsTo(output, condRecoder)
-			}
-			condPassthrough := packetcondition.And{
+			condPassthrough = packetcondition.And{
 				s.PassthroughSwitch.Condition(1),
 				s.PostSwitchFilter.Condition(1),
 			}
-			if s.NodeStreamFixerPassthrough != nil {
-				s.NodeStreamFixerPassthrough.AddPushPacketsTo(output, condPassthrough)
-			} else {
-				nodeFilterThrottle.AddPushPacketsTo(output, condPassthrough)
-			}
+			sink = output
+		}
+		if s.NodeStreamFixerRecoder != nil {
+			s.NodeStreamFixerRecoder.AddPushPacketsTo(sink, condRecoder...)
+		} else {
+			s.NodeRecoder.AddPushPacketsTo(sink, condRecoder...)
+		}
+		if s.NodeStreamFixerPassthrough != nil {
+			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sink, condPassthrough...)
+		} else {
+			nodeFilterThrottle.AddPushPacketsTo(sink, condPassthrough...)
 		}
 	} else {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
 		s.NodeStreamFixerRecoder.AddPushPacketsTo(output)
 	}
 

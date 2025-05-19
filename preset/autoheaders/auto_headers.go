@@ -34,10 +34,18 @@ func NewNodeWithCustomData[T any](
 	var zeroT T
 	logger.Debugf(ctx, "NewNode[%T]: %s %s", zeroT, forInput, forOutput)
 	var inputFormatName string
+	inputAmountOfStreams := 0
+	inputHasExtraData := false
 	forInput.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		if fmtCtx == nil {
 			logger.Errorf(ctx, "the output has no format context")
 			return
+		}
+		inputAmountOfStreams = fmtCtx.NbStreams()
+		for _, stream := range fmtCtx.Streams() {
+			if len(stream.CodecParameters().ExtraData()) > 0 {
+				inputHasExtraData = true
+			}
 		}
 		fmt := fmtCtx.OutputFormat()
 		if fmt == nil {
@@ -46,7 +54,7 @@ func NewNodeWithCustomData[T any](
 		}
 		inputFormatName = fmt.Name()
 	})
-	logger.Debugf(ctx, "input format: '%s'", inputFormatName)
+	logger.Debugf(ctx, "input format: '%s' (has extra_data: %t; amount of streams: %d; source: %T)", inputFormatName, inputHasExtraData, inputAmountOfStreams, forInput)
 
 	var outputFormatName string
 	forOutput.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
@@ -63,7 +71,7 @@ func NewNodeWithCustomData[T any](
 	})
 	logger.Debugf(ctx, "output format: '%s'", outputFormatName)
 
-	isOOBHeadersInput := isOOBHeadersByFormatName(ctx, inputFormatName)
+	isOOBHeadersInput := isOOBHeadersByFormatName(ctx, inputFormatName) || inputHasExtraData
 	isOOBHeadersOutput := isOOBHeadersByFormatName(ctx, outputFormatName)
 	logger.Debugf(ctx, "isOOBHeaders: input:%t output:%t", isOOBHeadersInput, isOOBHeadersOutput)
 

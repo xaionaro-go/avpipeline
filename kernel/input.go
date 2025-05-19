@@ -227,6 +227,7 @@ func (i *Input) WithOutputFormatContext(
 ) {
 	logger.Tracef(ctx, "WithFormatContext")
 	defer func() { logger.Tracef(ctx, "/WithFormatContext") }()
+	<-i.initialized
 	callback(i.FormatContext)
 }
 
