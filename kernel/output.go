@@ -33,7 +33,7 @@ const (
 	pendingPacketsLimit                 = 10000
 	outputWaitForKeyFrames              = false
 	outputWaitForStreams                = true
-	outputCopyStreamIndex               = true
+	outputCopyStreamIndex               = false
 	outputUpdateStreams                 = false
 	outputSendPendingPackets            = false
 	skipTooHighTimestamps               = false
@@ -419,7 +419,8 @@ func (o *Output) configureOutputStream(
 
 	logger.Debugf(
 		ctx,
-		"new output stream: %d: %s: %s: %s: %s: %s",
+		"new output stream: %d->%d: %s: %s: %s: %s: %s",
+		inputStream.Index(),
 		outputStream.Index(),
 		outputStream.CodecParameters().MediaType(),
 		outputStream.CodecParameters().CodecID(),
@@ -427,10 +428,10 @@ func (o *Output) configureOutputStream(
 		spew.Sdump(outputStream),
 		spew.Sdump(outputStream.CodecParameters()),
 	)
-
 	if outputCopyStreamIndex {
 		outputStream.SetIndex(inputStream.Index())
 	}
+
 	o.InputStreams[inputStream.Index()] = OutputInputStream{Source: inputSource, Stream: inputStream}
 	o.OutputStreams[inputStream.Index()] = outputStream
 	switch o.FormatContext.OutputFormat().Name() {
@@ -438,6 +439,7 @@ func (o *Output) configureOutputStream(
 		logger.Debugf(ctx, "this is a FLV output, setting CodecTag to zero")
 		outputStream.CodecParameters().SetCodecTag(0)
 	}
+
 	return nil
 }
 
@@ -508,41 +510,15 @@ func (o *Output) SendInputPacket(
 	)
 	o.formatContextLocker.Do(ctx, func() {
 		inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.GetStream(), fmtCtx)
+			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.Stream, fmtCtx)
 		})
 	})
-
 	if err != nil {
 		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
-	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-		logger.Tracef(ctx,
-			"unmodified packet with pos:%v (pts:%v, dts:%v, dur: %v) for %s stream %d (->%d) with flags 0x%016X",
-			pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
-			outputStream.CodecParameters().MediaType(),
-			pkt.StreamIndex(),
-			outputStream.Index(),
-			pkt.Flags(),
-		)
-	}
-	if outputStream.TimeBase().Num() == 0 {
-		return fmt.Errorf("internal error: TimeBase must be set")
-	}
-
-	pkt.SetStreamIndex(outputStream.Index())
-
-	var inputStreamsCount int
-	inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		inputStreamsCount = fmtCtx.NbStreams()
-	})
-	if inputStreamsCount < 2 {
-		inputStreamsCount = 2
-	}
-
-	logger.Tracef(ctx, "sending the current packet")
 
 	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
-		return o.send(ctx, inputStreamsCount, pkt, inputPkt.Source, inputPkt.Stream, outputStream)
+		return o.send(ctx, pkt, inputPkt.Source, inputPkt.Stream, outputStream)
 	})
 	if err != nil {
 		return err
@@ -565,7 +541,6 @@ func (o *Output) String() string {
 
 func (o *Output) send(
 	ctx context.Context,
-	expectedStreamsCount int,
 	pkt *astiav.Packet,
 	source packet.Source,
 	inputStream *astiav.Stream,
@@ -575,6 +550,16 @@ func (o *Output) send(
 		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
 	}
 
+	mediaType := inputStream.CodecParameters().MediaType()
+
+	var expectedStreamsCount int
+	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		expectedStreamsCount = fmtCtx.NbStreams()
+	})
+	if expectedStreamsCount < 2 {
+		expectedStreamsCount = 2
+	}
+
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() int {
 		return o.FormatContext.NbStreams()
 	})
@@ -582,7 +567,7 @@ func (o *Output) send(
 	if outputMediaMTXHack {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
-		if outputStream.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+		if mediaType != astiav.MediaTypeVideo {
 			return nil
 		}
 	}
@@ -600,22 +585,24 @@ func (o *Output) send(
 		delete(o.waitingKeyFrames, streamIndex)
 		logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
 	}
-	o.pendingPackets = append(o.pendingPackets, pendingPacket{
-		Packet:      packet.CloneAsReferenced(pkt),
-		Source:      source,
-		InputStream: inputStream,
-	})
-	if len(o.pendingPackets) > pendingPacketsLimit {
-		logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-		o.pendingPackets = o.pendingPackets[1:]
+	if outputSendPendingPackets {
+		o.pendingPackets = append(o.pendingPackets, pendingPacket{
+			Packet:      packet.CloneAsReferenced(pkt),
+			Source:      source,
+			InputStream: inputStream,
+		})
+		if len(o.pendingPackets) > pendingPacketsLimit {
+			logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+			o.pendingPackets = o.pendingPackets[1:]
+		}
 	}
 	if outputWaitForStreams && activeStreamCount < expectedStreamsCount {
-		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
 
 		return nil
 	}
 	if outputWaitForKeyFrames && len(o.waitingKeyFrames) != 0 {
-		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), outputStream.CodecParameters().MediaType())
+		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), mediaType)
 
 		return nil
 	}
@@ -630,25 +617,24 @@ func (o *Output) send(
 		return fmt.Errorf("unable to write the header: %w", err)
 	}
 
-	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), outputStream.CodecParameters().MediaType())
+	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s %X", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), mediaType, pkt.Flags())
 
-	if outputSendPendingPackets {
-		for _, pendingPkt := range o.pendingPackets {
-			//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
-			err := o.doWritePacket(
-				belt.WithField(ctx, "reason", "pending_packet"),
-				pendingPkt.Packet,
-				pendingPkt.Source,
-				pendingPkt.InputStream,
-				outputStream,
-			)
-			packet.Pool.Put(pendingPkt.Packet)
-			if err != nil {
-				return fmt.Errorf("unable to write a pending packet: %w", err)
-			}
-		}
-	} else {
+	if !outputSendPendingPackets {
 		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
+	}
+	for _, pendingPkt := range o.pendingPackets {
+		//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
+		err := o.doWritePacket(
+			belt.WithField(ctx, "reason", "pending_packet"),
+			pendingPkt.Packet,
+			pendingPkt.Source,
+			pendingPkt.InputStream,
+			outputStream,
+		)
+		packet.Pool.Put(pendingPkt.Packet)
+		if err != nil {
+			return fmt.Errorf("unable to write a pending packet: %w", err)
+		}
 	}
 	o.pendingPackets = o.pendingPackets[:0]
 	return nil
@@ -661,6 +647,24 @@ func (o *Output) doWritePacket(
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) (_err error) {
+	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
+		logger.Tracef(ctx,
+			"unmodified packet with pos:%v (pts:%v, dts:%v, dur: %v) for %s stream %d (->%d) with flags 0x%016X",
+			pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
+			outputStream.CodecParameters().MediaType(),
+			pkt.StreamIndex(),
+			outputStream.Index(),
+			pkt.Flags(),
+		)
+	}
+	if outputStream.TimeBase().Num() == 0 {
+		return fmt.Errorf("internal error: TimeBase must be set")
+	}
+
+	pkt.SetStreamIndex(outputStream.Index())
+
+	logger.Tracef(ctx, "sending the current packet")
+
 	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
 		return nil
 	}
@@ -709,8 +713,8 @@ func (o *Output) doWritePacket(
 		)
 	}
 
-	var err error
 	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
+	var err error
 	o.formatContextLocker.Do(ctx, func() {
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
 	})
