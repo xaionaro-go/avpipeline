@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	routeFrameDrop      = true
-	routeCloseProcessor = true
-	routeAutoReset      = false
+	routeFrameDrop        = true
+	routeCloseProcessor   = true
+	routeAutoReset        = false
+	routeOnlyOnePublisher = false
 )
 
 type RoutePath = routertypes.RoutePath
@@ -173,19 +174,21 @@ func (r *Route) AddPublisher(
 			return ErrRouteClosed{}
 		}
 
-		// currently we support only one publisher:
-		for _, publisher := range r.Publishers {
-			wg.Add(1)
-			observability.Go(ctx, func() {
-				defer wg.Done()
-				logger.Errorf(ctx, "closing publisher %s to free-up the route for another publisher", publisher)
-				err := publisher.Close(ctx)
-				if err != nil {
-					logger.Errorf(ctx, "unable to close the publisher: %v", err)
-				}
-			})
+		if routeOnlyOnePublisher {
+			// currently we support only one publisher:
+			for _, publisher := range r.Publishers {
+				wg.Add(1)
+				observability.Go(ctx, func() {
+					defer wg.Done()
+					logger.Errorf(ctx, "closing publisher %s to free-up the route for another publisher", publisher)
+					err := publisher.Close(ctx)
+					if err != nil {
+						logger.Errorf(ctx, "unable to close the publisher: %v", err)
+					}
+				})
+			}
+			r.Publishers = r.Publishers[:0]
 		}
-		r.Publishers = r.Publishers[:0]
 
 		_ = r.addPublisherLocked(ctx, publisher)
 		return nil
@@ -202,6 +205,9 @@ func (r *Route) addPublisherLocked(
 	_ context.Context,
 	publisher Publisher,
 ) Publishers {
+	if publisher == nil {
+		panic("publisher == nil")
+	}
 	if slices.Contains(r.Publishers, publisher) {
 		// already added
 		return r.Publishers

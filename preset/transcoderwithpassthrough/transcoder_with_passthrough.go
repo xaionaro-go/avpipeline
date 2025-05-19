@@ -14,7 +14,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
-	nodecondition "github.com/xaionaro-go/avpipeline/node/condition"
+	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
@@ -115,8 +115,8 @@ func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
 		return s.RecodingConfig
 	}
 	cpy := s.RecodingConfig
-	cpy.VideoTracks = slices.Clone(cpy.VideoTracks)
-	cpy.VideoTracks[0].CodecName = codec.CodecNameCopy
+	cpy.VideoTrackConfigs = slices.Clone(cpy.VideoTrackConfigs)
+	cpy.VideoTrackConfigs[0].CodecName = codec.CodecNameCopy
 	return cpy
 }
 
@@ -151,11 +151,11 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) error {
-	if len(cfg.VideoTracks) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track (received a request for %d tracks)", len(cfg.VideoTracks))
+	if len(cfg.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
 	}
-	if len(cfg.AudioTracks) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track (received a request for %d tracks)", len(cfg.AudioTracks))
+	if len(cfg.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
 	}
 	if s.Recoder == nil {
 		if err := s.initRecoder(ctx, cfg); err != nil {
@@ -163,10 +163,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 		}
 		return nil
 	}
-	if cfg.AudioTracks[0].CodecName != "copy" {
-		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTracks[0].CodecName)
+	if cfg.AudioTrackConfigs[0].CodecName != "copy" {
+		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTrackConfigs[0].CodecName)
 	}
-	if cfg.VideoTracks[0].CodecName == "copy" {
+	if cfg.VideoTrackConfigs[0].CodecName == "copy" {
 		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -190,18 +190,18 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	s.Recoder, err = kernel.NewRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
-			avptypes.HardwareDeviceType(cfg.VideoTracks[0].HardwareDeviceType),
-			avptypes.HardwareDeviceName(cfg.VideoTracks[0].HardwareDeviceName),
+			avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
+			avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
 			nil,
 			nil,
 		),
 		codec.NewNaiveEncoderFactory(ctx,
-			cfg.VideoTracks[0].CodecName,
+			cfg.VideoTrackConfigs[0].CodecName,
 			"copy",
-			avptypes.HardwareDeviceType(cfg.VideoTracks[0].HardwareDeviceType),
-			avptypes.HardwareDeviceName(cfg.VideoTracks[0].HardwareDeviceName),
-			convertCustomOptions(cfg.VideoTracks[0].CustomOptions),
-			convertCustomOptions(cfg.AudioTracks[0].CustomOptions),
+			avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
+			avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
+			convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions),
+			convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions),
 		),
 		nil,
 	)
@@ -216,8 +216,8 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	cfg types.RecoderConfig,
 ) error {
 	encoderFactory := s.Recoder.EncoderFactory
-	if cfg.VideoTracks[0].CodecName != encoderFactory.VideoCodec {
-		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTracks[0].CodecName, encoderFactory.VideoCodec)
+	if cfg.VideoTrackConfigs[0].CodecName != encoderFactory.VideoCodec {
+		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
 	}
 
 	err := xsync.DoR1(ctx, &s.Recoder.EncoderFactory.Locker, func() error {
@@ -229,10 +229,10 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 				setFinalizerFree(ctx, s.Recoder.EncoderFactory.VideoOptions)
 			}
 
-			if cfg.VideoTracks[0].AverageBitRate == 0 {
+			if cfg.VideoTrackConfigs[0].AverageBitRate == 0 {
 				s.Recoder.EncoderFactory.VideoOptions.Unset("b")
 			} else {
-				s.Recoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", cfg.VideoTracks[0].AverageBitRate), 0)
+				s.Recoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", cfg.VideoTrackConfigs[0].AverageBitRate), 0)
 			}
 			return nil
 		}
@@ -248,15 +248,15 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 
 		needsChangingBitrate := true
 		if q, ok := q.(quality.ConstantBitrate); ok {
-			if q == quality.ConstantBitrate(cfg.VideoTracks[0].AverageBitRate) {
+			if q == quality.ConstantBitrate(cfg.VideoTrackConfigs[0].AverageBitRate) {
 				needsChangingBitrate = false
 			}
 		}
 
-		if needsChangingBitrate && cfg.VideoTracks[0].AverageBitRate > 0 {
-			err := encoder.SetQuality(ctx, quality.ConstantBitrate(cfg.VideoTracks[0].AverageBitRate), nil)
+		if needsChangingBitrate && cfg.VideoTrackConfigs[0].AverageBitRate > 0 {
+			err := encoder.SetQuality(ctx, quality.ConstantBitrate(cfg.VideoTrackConfigs[0].AverageBitRate), nil)
 			if err != nil {
-				return fmt.Errorf("unable to set bitrate to %v: %w", cfg.VideoTracks[0].AverageBitRate, err)
+				return fmt.Errorf("unable to set bitrate to %v: %w", cfg.VideoTrackConfigs[0].AverageBitRate, err)
 			}
 		}
 		return nil
@@ -281,8 +281,8 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	if err != nil {
 		return fmt.Errorf("unable to switch the pre-filter to passthrough: %w", err)
 	}
-	s.FilterThrottle.BitrateAveragingPeriod = cfg.VideoTracks[0].AveragingPeriod
-	s.FilterThrottle.AverageBitRate = cfg.VideoTracks[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
+	s.FilterThrottle.BitrateAveragingPeriod = cfg.VideoTrackConfigs[0].AveragingPeriod
+	s.FilterThrottle.AverageBitRate = cfg.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
 	return nil
 }
 
@@ -328,18 +328,15 @@ func asPacketSink(proc processor.Abstract) packet.Sink {
 
 func (s *TranscoderWithPassthrough[C, P]) Start(
 	ctx context.Context,
-	recoderInSeparateTracks bool,
+	passthroughMode types.PassthroughMode,
 ) (_err error) {
-	logger.Debugf(ctx, "Start(ctx, %t)", recoderInSeparateTracks)
-	defer logger.Debugf(ctx, "/Start(ctx, %t): %v", recoderInSeparateTracks, _err)
+	logger.Debugf(ctx, "Start(ctx, %s)", passthroughMode)
+	defer logger.Debugf(ctx, "/Start(ctx, %s): %v", passthroughMode, _err)
 	if s.Recoder == nil {
 		return fmt.Errorf("s.Recoder is not configured")
 	}
-	if len(s.Outputs) != 1 {
-		return fmt.Errorf("currently we support only the case with a single output, but received %d outputs", len(s.Outputs))
-	}
-	output := s.Outputs[0]
-	outputAsPacketSink := asPacketSink(output.GetProcessor())
+	outputMain := &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[0]}
+	outputAsPacketSink := asPacketSink(outputMain.GetProcessor())
 	if outputAsPacketSink == nil {
 		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
 	}
@@ -433,16 +430,9 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 
 		var condRecoder, condPassthrough packetcondition.And
-		var sink node.Abstract
-		if recoderInSeparateTracks {
-			nodeMapStreamIndices := node.NewFromKernel(
-				ctx,
-				s.MapOutputStreamIndices,
-				processor.DefaultOptionsOutput()...,
-			)
-			nodeMapStreamIndices.AddPushPacketsTo(output)
-			sink = nodeMapStreamIndices
-		} else {
+		var sinkRecoder, sinkPassthrough node.Abstract
+		switch passthroughMode {
+		case types.PassthroughModeSameTracks:
 			condRecoder = packetcondition.And{
 				s.PassthroughSwitch.Condition(0),
 				s.PostSwitchFilter.Condition(0),
@@ -451,20 +441,32 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.PassthroughSwitch.Condition(1),
 				s.PostSwitchFilter.Condition(1),
 			}
-			sink = output
+			sinkRecoder, sinkPassthrough = outputMain, outputMain
+		case types.PassthroughModeSameConnection:
+			nodeMapStreamIndices := node.NewFromKernel(
+				ctx,
+				s.MapOutputStreamIndices,
+				processor.DefaultOptionsOutput()...,
+			)
+			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
+			sinkRecoder, sinkPassthrough = nodeMapStreamIndices, nodeMapStreamIndices
+		case types.PassthroughModeNextOutput:
+			sinkRecoder, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{s.Outputs[1]}
+		default:
+			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
 		if s.NodeStreamFixerRecoder != nil {
-			s.NodeStreamFixerRecoder.AddPushPacketsTo(sink, condRecoder...)
+			s.NodeStreamFixerRecoder.AddPushPacketsTo(sinkRecoder, condRecoder...)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(sink, condRecoder...)
+			s.NodeRecoder.AddPushPacketsTo(sinkRecoder, condRecoder...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
-			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sink, condPassthrough...)
+			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
 		} else {
-			nodeFilterThrottle.AddPushPacketsTo(sink, condPassthrough...)
+			nodeFilterThrottle.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
 		}
 	} else {
-		s.NodeStreamFixerRecoder.AddPushPacketsTo(output)
+		s.NodeStreamFixerRecoder.AddPushPacketsTo(outputMain)
 	}
 
 	// == spawn an observer ==
@@ -525,9 +527,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		defer cancelFn()
 		defer logger.Debugf(ctx, "finished the serving routine")
 
-		avpipeline.Serve(ctx, avpipeline.ServeConfig{
-			NodeTreeFilter: nodecondition.Not{nodecondition.In(s.Outputs)},
-		}, errCh, s.MapInputStreamIndicesNode)
+		avpipeline.Serve(ctx, avpipeline.ServeConfig{}, errCh, s.MapInputStreamIndicesNode)
 	})
 
 	return nil

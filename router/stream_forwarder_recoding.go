@@ -61,29 +61,33 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 					for _, stream := range fmtCtx.Streams() {
 						switch stream.CodecParameters().MediaType() {
 						case astiav.MediaTypeVideo:
-							recoderConfig.VideoTracks = append(recoderConfig.VideoTracks, transcodertypes.TrackConfig{
-								InputTrackIDs: []int{stream.Index()},
-								CodecName:     "copy",
+							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.TrackConfig{
+								InputTrackIDs:  []int{stream.Index()},
+								OutputTrackIDs: []int{stream.Index()},
+								CodecName:      "copy",
 							})
 						case astiav.MediaTypeAudio:
-							recoderConfig.AudioTracks = append(recoderConfig.AudioTracks, transcodertypes.TrackConfig{
-								InputTrackIDs: []int{stream.Index()},
-								CodecName:     "copy",
+							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.TrackConfig{
+								InputTrackIDs:  []int{stream.Index()},
+								OutputTrackIDs: []int{stream.Index()},
+								CodecName:      "copy",
 							})
 						}
 					}
 				})
 			}
 		}
-		if len(recoderConfig.AudioTracks) == 0 && len(recoderConfig.VideoTracks) == 0 {
+		if len(recoderConfig.AudioTrackConfigs) == 0 && len(recoderConfig.VideoTrackConfigs) == 0 {
 			logger.Errorf(ctx, "no audio/video tracks defined, adding one of each just to make it work")
-			recoderConfig.VideoTracks = append(recoderConfig.VideoTracks, transcodertypes.TrackConfig{
-				InputTrackIDs: []int{0, 1, 2, 3, 4, 5, 6, 7},
-				CodecName:     "copy",
+			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.TrackConfig{
+				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+				OutputTrackIDs: []int{0},
+				CodecName:      "copy",
 			})
-			recoderConfig.AudioTracks = append(recoderConfig.AudioTracks, transcodertypes.TrackConfig{
-				InputTrackIDs: []int{0, 1, 2, 3, 4, 5, 6, 7},
-				CodecName:     "copy",
+			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.TrackConfig{
+				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+				OutputTrackIDs: []int{1},
+				CodecName:      "copy",
 			})
 		}
 	}
@@ -123,7 +127,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 		return fmt.Errorf("unable to set the RecoderConfig to %#+v: %w", fwd.RecoderConfig, err)
 	}
 
-	if err := chain.Start(ctx, false); err != nil {
+	if err := chain.Start(ctx, transcodertypes.PassthroughModeSameTracks); err != nil {
 		return fmt.Errorf("unable to start the StreamForward: %w", err)
 	}
 
@@ -188,7 +192,16 @@ func (fwd *StreamForwarderRecoding[CS, PS]) stop(
 	fwd.CancelFunc = nil
 	removePushErr := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.ChainInput)
 	if removePushErr != nil {
-		return fmt.Errorf("unable to remove pushing packets from %s to %s", fwd.Input, fwd.ChainInput.Node)
+		if fwd.Input == nil {
+			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.Input == nil)", removePushErr)
+		}
+		if fwd.ChainInput == nil {
+			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.ChainInput == nil)", removePushErr)
+		}
+		if fwd.ChainInput.Node == nil {
+			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.ChainInput.Node == nil)", removePushErr)
+		}
+		return fmt.Errorf("unable to remove pushing packets from %s to %s: %w", fwd.Input, fwd.ChainInput.Node, removePushErr)
 	}
 	fwd.Chain.Wait(ctx)
 	return nil

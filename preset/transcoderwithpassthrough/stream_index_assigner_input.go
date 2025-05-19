@@ -13,8 +13,8 @@ import (
 
 type streamIndexAssignerInput[C any, P processor.Abstract] struct {
 	StreamForward *TranscoderWithPassthrough[C, P]
-	AudioIndexMap map[int]int
-	VideoIndexMap map[int]int
+	AudioIndexMap map[int][]int
+	VideoIndexMap map[int][]int
 	Locker        xsync.Mutex
 }
 
@@ -24,8 +24,8 @@ func newStreamIndexAssignerInput[C any, P processor.Abstract](
 ) *streamIndexAssignerInput[C, P] {
 	s := &streamIndexAssignerInput[C, P]{
 		StreamForward: t,
-		AudioIndexMap: make(map[int]int),
-		VideoIndexMap: make(map[int]int),
+		AudioIndexMap: make(map[int][]int),
+		VideoIndexMap: make(map[int][]int),
 	}
 	s.reloadLocked(ctx)
 	return s
@@ -59,20 +59,15 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 		delete(s.AudioIndexMap, k)
 	}
 
-	// TODO: we conflate two different ways of referencing a track, e.g.: global stream ID, and video track ID -- FIX IT.
-	maxVideoTrackID := 0
-	for outputVideoTrackID, cfg := range s.StreamForward.RecodingConfig.VideoTracks {
+	for _, cfg := range s.StreamForward.RecodingConfig.VideoTrackConfigs {
 		for _, inputVideoTrackID := range cfg.InputTrackIDs {
-			s.VideoIndexMap[inputVideoTrackID] = outputVideoTrackID
-			if outputVideoTrackID > maxVideoTrackID {
-				maxVideoTrackID = outputVideoTrackID
-			}
+			s.VideoIndexMap[inputVideoTrackID] = cfg.OutputTrackIDs
 		}
 	}
 
-	for outputAudioTrackID, cfg := range s.StreamForward.RecodingConfig.AudioTracks {
+	for _, cfg := range s.StreamForward.RecodingConfig.AudioTrackConfigs {
 		for _, inputAudioTrackID := range cfg.InputTrackIDs {
-			s.AudioIndexMap[inputAudioTrackID] = outputAudioTrackID + maxVideoTrackID + 1
+			s.AudioIndexMap[inputAudioTrackID] = cfg.OutputTrackIDs
 		}
 	}
 
@@ -97,7 +92,7 @@ func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
 		return []int{input.GetStreamIndex()}, nil
 	}
 
-	var v int
+	var v []int
 	var ok bool
 	switch input.GetMediaType() {
 	case astiav.MediaTypeVideo:
@@ -108,5 +103,5 @@ func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
 	if !ok {
 		return nil, nil
 	}
-	return []int{v}, nil
+	return v, nil
 }

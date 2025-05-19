@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// TODO: add support for multiple tracks
 type TrackConfig struct {
 	InputTrackIDs      []int              `yaml:"input_track_ids"`
+	OutputTrackIDs     []int              `yaml:"output_track_ids"`
 	CodecName          string             `yaml:"codec_name"`
 	AveragingPeriod    time.Duration      `yaml:"averaging_period"`
 	AverageBitRate     uint64             `yaml:"average_bit_rate"`
@@ -18,8 +18,8 @@ type TrackConfig struct {
 }
 
 type RecoderConfig struct {
-	AudioTracks []TrackConfig `yaml:"audio_tracks"`
-	VideoTracks []TrackConfig `yaml:"video_tracks"`
+	AudioTrackConfigs []TrackConfig `yaml:"audio_track_configs"`
+	VideoTrackConfigs []TrackConfig `yaml:"video_track_configs"`
 }
 
 type DictionaryItem struct {
