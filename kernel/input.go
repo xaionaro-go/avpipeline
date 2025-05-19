@@ -53,6 +53,7 @@ func NewInputFromURL(
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
 	if urlParsed, err := url.Parse(urlString); err == nil && urlParsed.Scheme != "" {
+		logger.Debugf(ctx, "URL: %#+v", urlParsed)
 		urlString += "/"
 	}
 	i := &Input{
@@ -63,16 +64,28 @@ func NewInputFromURL(
 		closeChan:   newCloseChan(),
 	}
 
+	var formatName string
 	if len(cfg.CustomOptions) > 0 {
 		i.Dictionary = astiav.NewDictionary()
 		setFinalizerFree(ctx, i.Dictionary)
-
 		for _, opt := range cfg.CustomOptions {
 			if opt.Key == "f" {
-				return nil, fmt.Errorf("overriding input format is not supported, yet")
+				formatName = opt.Value
+				logger.Debugf(ctx, "overriding input format to '%s'", opt.Value)
+				continue
 			}
 			logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
 			i.Dictionary.Set(opt.Key, opt.Value, 0)
+		}
+	}
+
+	var inputFormat *astiav.InputFormat
+	if formatName != "" {
+		inputFormat = astiav.FindInputFormat(formatName)
+		if inputFormat == nil {
+			logger.Errorf(ctx, "unable to find input format by name '%s'", formatName)
+		} else {
+			logger.Debugf(ctx, "using format '%s'", inputFormat.Name())
 		}
 	}
 
@@ -84,13 +97,13 @@ func NewInputFromURL(
 
 	if cfg.AsyncOpen {
 		observability.Go(ctx, func() {
-			if err := i.doOpen(ctx, urlString, authKey, cfg); err != nil {
+			if err := i.doOpen(ctx, urlString, authKey, inputFormat, cfg); err != nil {
 				logger.Errorf(ctx, "unable to open: %v", err)
 				i.Close(ctx)
 			}
 		})
 	} else {
-		if err := i.doOpen(ctx, urlString, authKey, cfg); err != nil {
+		if err := i.doOpen(ctx, urlString, authKey, inputFormat, cfg); err != nil {
 			return nil, err
 		}
 	}
@@ -102,13 +115,14 @@ func (i *Input) doOpen(
 	ctx context.Context,
 	urlString string,
 	authKey secret.String,
+	inputFormat *astiav.InputFormat,
 	cfg InputConfig,
 ) error {
 	urlWithSecret := urlString
 	if authKey.Get() != "" {
 		urlWithSecret += authKey.Get()
 	}
-	if err := i.FormatContext.OpenInput(urlWithSecret, nil, i.Dictionary); err != nil {
+	if err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary); err != nil {
 		i.FormatContext.Free()
 		if authKey.Get() != "" {
 			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>': %w", urlString, err)
