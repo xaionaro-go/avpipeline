@@ -71,6 +71,9 @@ func NewNodeWithCustomData[T any](
 
 	switch {
 	case isOOBHeadersInput == isOOBHeadersOutput:
+		if isOOBHeadersOutput {
+			return tryNewBSFForCorrectedOOBHeaders[T](ctx)
+		}
 		return nil
 	case isOOBHeadersOutput:
 		return tryNewBSFForOOBHeaders[T](ctx)

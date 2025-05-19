@@ -16,6 +16,7 @@ import (
 type InternalBitstreamFilterInstance struct {
 	*astiav.BitStreamFilter
 	*astiav.BitStreamFilterContext
+	Params bitstreamfilter.Params
 }
 
 type BitstreamFilter struct {
@@ -47,16 +48,16 @@ func (bsf *BitstreamFilter) getFilterChain(
 		return r, nil
 	}
 
-	params := bsf.GetChainParamser.GetChainParams(ctx, input)
-	if params == nil {
+	paramss := bsf.GetChainParamser.GetChainParams(ctx, input)
+	if paramss == nil {
 		return nil, nil
 	}
 
 	var filterChain []*InternalBitstreamFilterInstance
-	for _, param := range params {
-		_bsf := astiav.FindBitStreamFilterByName(string(param.Name))
+	for _, params := range paramss {
+		_bsf := astiav.FindBitStreamFilterByName(string(params.Name))
 		if _bsf == nil {
-			return nil, fmt.Errorf("unable to find a bitstream filter '%s'", string(param.Name))
+			return nil, fmt.Errorf("unable to find a bitstream filter '%s'", string(params.Name))
 		}
 
 		bsfCtx, err := astiav.AllocBitStreamFilterContext(_bsf)
@@ -78,6 +79,7 @@ func (bsf *BitstreamFilter) getFilterChain(
 		filterChain = append(filterChain, &InternalBitstreamFilterInstance{
 			BitStreamFilter:        _bsf,
 			BitStreamFilterContext: bsfCtx,
+			Params:                 params,
 		})
 	}
 	bsf.FilterChains[input.GetStreamIndex()] = filterChain
@@ -111,6 +113,10 @@ func (bsf *BitstreamFilter) sendInputPacket(
 			logger.Tracef(ctx, "sending a packet to %s", filter.Name())
 			err = filter.SendPacket(pkt)
 			if err != nil {
+				if filter.Params.SkipOnFailure {
+					logger.Debugf(ctx, "received failure %v (on sending), skipping", err)
+					continue
+				}
 				return fmt.Errorf("unable to send the packet to the filter: %w", err)
 			}
 			packet.Pool.Put(pkt)
@@ -128,6 +134,10 @@ func (bsf *BitstreamFilter) sendInputPacket(
 				packet.Pool.Pool.Put(pkt)
 				if isEOF || isEAgain {
 					break
+				}
+				if filter.Params.SkipOnFailure {
+					logger.Debugf(ctx, "received failure %v (on receiving), skipping", err)
+					continue
 				}
 				return fmt.Errorf("unable receive the packet from the filter: %w", err)
 			}

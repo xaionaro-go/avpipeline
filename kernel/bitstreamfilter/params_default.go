@@ -18,9 +18,20 @@ func ParamsMP4ToMP2(codecID astiav.CodecID) []Params {
 func ParamsMP2ToMP4(codecID astiav.CodecID) []Params {
 	switch codecID {
 	case astiav.CodecIDH264, astiav.CodecIDHevc:
-		return []Params{{Name: NameExtractExtradata}}
+		return []Params{
+			{Name: NameExtractExtradata},
+			//{Name: NameDumpExtra, Options: types.DictionaryItems{{Key: "freq", Value: "all"}}},
+		}
 	case astiav.CodecIDAac:
 		return []Params{{Name: NameAACADTSToASC}}
+	}
+	return []Params{}
+}
+
+func ParamsMP4ToMP4(codecID astiav.CodecID) []Params {
+	switch codecID {
+	case astiav.CodecIDH264:
+		return []Params{}
 	}
 	return []Params{}
 }

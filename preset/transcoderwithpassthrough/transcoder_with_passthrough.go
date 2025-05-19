@@ -451,7 +451,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
 			sinkRecoder, sinkPassthrough = nodeMapStreamIndices, nodeMapStreamIndices
 		case types.PassthroughModeNextOutput:
-			sinkRecoder, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{s.Outputs[1]}
+			sinkRecoder, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}

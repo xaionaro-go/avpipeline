@@ -52,3 +52,24 @@ func tryNewBSFForOOBHeaders[T any](
 		processor.DefaultOptionsOutput()...,
 	)
 }
+
+func tryNewBSFForCorrectedOOBHeaders[T any](
+	ctx context.Context,
+) (_ret *NodeWithCustomData[T]) {
+	logger.Debugf(ctx, "tryNewBSFForCorrectedOOBHeaders(ctx)")
+	defer func() {
+		logger.Debugf(ctx, "/tryNewBSFForCorrectedOOBHeaders(ctx): %s", spew.Sdump(_ret))
+	}()
+
+	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, bitstreamfilter.ParamsGetterToCorrectedOOBHeaders{})
+	if err != nil {
+		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %w", err)
+		return nil
+	}
+
+	return node.NewWithCustomDataFromKernel[T](
+		ctx,
+		bitstreamFilter,
+		processor.DefaultOptionsOutput()...,
+	)
+}

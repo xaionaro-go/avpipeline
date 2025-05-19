@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Params struct {
-	Name Name
+	Name          Name
+	SkipOnFailure bool
+	Options       types.DictionaryItems
 }
 
 type GetChainParamser interface {

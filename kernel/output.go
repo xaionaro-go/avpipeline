@@ -29,16 +29,17 @@ import (
 )
 
 const (
-	unwrapTLSViaProxy          = false
-	pendingPacketsLimit        = 10000
-	outputWaitForKeyFrames     = false
-	outputWaitForStreams       = true
-	outputCopyStreamIndex      = true
-	outputUpdateStreams        = false
-	outputSendPendingPackets   = true
-	skipTooHighTimestamps      = false
-	flvForbidStreamIndexAbove1 = true
-	outputMediaMTXHack         = true
+	unwrapTLSViaProxy                   = false
+	pendingPacketsLimit                 = 10000
+	outputWaitForKeyFrames              = false
+	outputWaitForStreams                = true
+	outputCopyStreamIndex               = true
+	outputUpdateStreams                 = false
+	outputSendPendingPackets            = false
+	skipTooHighTimestamps               = false
+	flvForbidStreamIndexAbove1          = true
+	outputMediaMTXHack                  = true
+	outputAcceptOnlyKeyFramesUntilStart = true
 )
 
 type OutputConfig struct {
@@ -198,13 +199,14 @@ func NewOutputFromURL(
 
 			for _, opt := range cfg.CustomOptions {
 				if opt.Key == "rtmp_app" {
-					return // is already set, nothing is required from us here
+					continue // is already set, nothing is required from us here
 				}
 			}
 
-			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
-			o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
 			logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
+			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+			o.Dictionary.Set("rtmp_live", "live", 0)
+			o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
 		case "rtsp", "srt":
 			if o.Dictionary == nil {
 				o.Dictionary = astiav.NewDictionary()
@@ -585,8 +587,12 @@ func (o *Output) send(
 		}
 	}
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-	if keyFrame {
-		logger.Debugf(ctx, "got a key video frame")
+	logger.Debugf(ctx, "isKeyFrame:%t", keyFrame)
+	if !keyFrame {
+		if outputAcceptOnlyKeyFramesUntilStart {
+			logger.Debugf(ctx, "not a key frame; skipping")
+			return nil
+		}
 	}
 	streamIndex := pkt.StreamIndex()
 	_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
@@ -594,16 +600,14 @@ func (o *Output) send(
 		delete(o.waitingKeyFrames, streamIndex)
 		logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
 	}
-	if keyFrame && waitingKeyFrame {
-		o.pendingPackets = append(o.pendingPackets, pendingPacket{
-			Packet:      packet.CloneAsReferenced(pkt),
-			Source:      source,
-			InputStream: inputStream,
-		})
-		if len(o.pendingPackets) > pendingPacketsLimit {
-			logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-			o.pendingPackets = o.pendingPackets[1:]
-		}
+	o.pendingPackets = append(o.pendingPackets, pendingPacket{
+		Packet:      packet.CloneAsReferenced(pkt),
+		Source:      source,
+		InputStream: inputStream,
+	})
+	if len(o.pendingPackets) > pendingPacketsLimit {
+		logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+		o.pendingPackets = o.pendingPackets[1:]
 	}
 	if outputWaitForStreams && activeStreamCount < expectedStreamsCount {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, outputStream.CodecParameters().MediaType())
