@@ -40,6 +40,7 @@ const (
 	flvForbidStreamIndexAbove1          = true
 	outputMediaMTXHack                  = true
 	outputAcceptOnlyKeyFramesUntilStart = true
+	outputSetRTMPAppName                = false
 )
 
 type OutputConfig struct {
@@ -204,8 +205,10 @@ func NewOutputFromURL(
 				}
 			}
 
-			logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
-			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+			if outputSetRTMPAppName {
+				logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
+				o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+			}
 			o.Dictionary.Set("rtmp_live", "live", 0)
 			o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
 		case "rtsp", "srt":
