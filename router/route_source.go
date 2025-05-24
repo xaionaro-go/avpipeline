@@ -114,11 +114,8 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 	if err != nil {
 		return fmt.Errorf("unable to get the destination route by path '%s': %w", fwd.DstPath, err)
 	}
-
-	_, err = dst.AddPublisher(ctx, fwd)
-	if err != nil {
-		return fmt.Errorf("unable to add a publisher: %w", err)
-	}
+	fwd.Output = dst
+	logger.Debugf(ctx, "fwd.Output = %s", dst)
 
 	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.RecoderConfig)
 	if err != nil {
@@ -147,9 +144,7 @@ func (fwd *RouteSource[T, C, P]) stopLocked(
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
 	if fwd.OnStop != nil {
-		defer func() {
-			fwd.OnStop(ctx, fwd)
-		}()
+		fwd.OnStop(ctx, fwd)
 	}
 
 	var errs []error
@@ -161,9 +156,7 @@ func (fwd *RouteSource[T, C, P]) stopLocked(
 	}
 
 	if fwd.Output != nil {
-		if _, err := fwd.Output.RemovePublisher(ctx, fwd); err != nil {
-			errs = append(errs, fmt.Errorf("fwd.Output.RemovePublisher: %w", err))
-		}
+		logger.Debugf(ctx, "fwd.Output = nil")
 		fwd.Output = nil
 	}
 

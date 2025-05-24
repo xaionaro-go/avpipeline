@@ -165,9 +165,9 @@ func (r *Route[T]) AddPublisher(
 	ctx context.Context,
 	publisher Publisher[T],
 ) (_ret Publishers[T], _err error) {
-	logger.Debugf(ctx, "AddPublisher[%s](ctx, %#+v)", r, publisher)
+	logger.Debugf(ctx, "AddPublisher[%s](ctx, %s)", r, publisher)
 	defer func() {
-		logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): len(ret): len(%v)", r, publisher, len(_ret))
+		logger.Debugf(ctx, "/AddPublisher[%s](ctx, %s): len(ret): len(ret):%d, %v", r, publisher, len(_ret), _err)
 	}()
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -192,9 +192,9 @@ func (r *Route[T]) AddPublisherLocked(
 	publisher Publisher[T],
 	wg *sync.WaitGroup,
 ) (_ret Publishers[T], _err error) {
-	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %#+v)", r, publisher)
+	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %s)", r, publisher)
 	defer func() {
-		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %#+v): len(ret): len(%v)", r, publisher, len(_ret))
+		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %s): len(ret):%d, %v", r, publisher, len(_ret), _err)
 	}()
 
 	if !r.IsNodeOpen {
