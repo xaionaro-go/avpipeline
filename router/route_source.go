@@ -68,6 +68,8 @@ func (fwd *RouteSource[T, C, P]) open(ctx context.Context) (_err error) {
 }
 
 func (fwd *RouteSource[T, C, P]) openLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "openLocked")
+	defer func() { logger.Debugf(ctx, "/openLocked: %v", _err) }()
 	if fwd.CancelFunc != nil {
 		return fmt.Errorf("internal error: already started")
 	}
@@ -93,6 +95,9 @@ func (fwd *RouteSource[T, C, P]) Start(
 }
 
 func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "startLocked")
+	defer func() { logger.Debugf(ctx, "/startLocked: %v", _err) }()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

@@ -298,5 +298,8 @@ func (r *Route[T]) WaitForPublisher(
 }
 
 func (r *Route[T]) String() string {
+	if r == nil {
+		return "<nil>"
+	}
 	return string(r.Path)
 }

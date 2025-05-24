@@ -78,6 +78,8 @@ func (fwd *RouteForwarding[T]) open(ctx context.Context) (_err error) {
 }
 
 func (fwd *RouteForwarding[T]) openLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "openLocked")
+	defer func() { logger.Debugf(ctx, "/openLocked: %v", _err) }()
 	if fwd.CancelFunc != nil {
 		return fmt.Errorf("internal error: already started")
 	}
@@ -155,9 +157,9 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 		}
 	})
 
-	logger.Tracef(ctx, "fwd.OutputFactory.NewOutput(ctx, fwd)")
+	logger.Tracef(ctx, "fwd.OutputFactory.NewOutput(ctx, %s)", fwd)
 	dstNode, err := fwd.OutputFactory.NewOutput(ctx, fwd)
-	logger.Tracef(ctx, "/fwd.OutputFactory.NewOutput(ctx, fwd): %v %v", dstNode, err)
+	logger.Tracef(ctx, "/fwd.OutputFactory.NewOutput(ctx, %s): %v %v", fwd, dstNode, err)
 	if err != nil {
 		return fmt.Errorf("unable to open the output: %w", err)
 	}
@@ -244,5 +246,14 @@ func (fwd *RouteForwarding[T]) doCloseLocked(
 }
 
 func (fwd *RouteForwarding[T]) String() string {
-	return fmt.Sprintf("fwd('%s'->'%s')", fwd.Input.Path, fwd.Output)
+	switch {
+	case fwd.Input != nil && fwd.Output != nil:
+		return fmt.Sprintf("fwd('%s'->'%s')", fwd.Input.Path, fwd.Output)
+	case fwd.Input != nil:
+		return fmt.Sprintf("fwd('%s'->?)", fwd.Input.Path)
+	case fwd.Output != nil:
+		return fmt.Sprintf("fwd(?->'%s')", fwd.Output)
+	default:
+		return "fwd(?->?)"
+	}
 }
