@@ -15,22 +15,22 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
-type RouteForwardingToRemote struct {
-	StreamForwarder[*Route, *ProcessorRouting]
-	Input      *Route
+type RouteForwardingToRemote[T any] struct {
+	StreamForwarder[*Route[T], *ProcessorRouting]
+	Input      *Route[T]
 	Output     *NodeRetryOutput
 	ErrChan    chan node.Error
 	CancelFunc context.CancelFunc
 	CloseOnce  sync.Once
 }
 
-func (r *Router) AddRouteForwardingToRemote(
+func (r *Router[T]) AddRouteForwardingToRemote(
 	ctx context.Context,
 	sourcePath RoutePath,
 	dstURL string,
 	streamKey secret.String,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *RouteForwardingToRemote, _err error) {
+) (_ret *RouteForwardingToRemote[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwardingToRemote(ctx, '%s', '%s')", sourcePath, dstURL)
 	defer func() {
 		logger.Debugf(ctx, "/AddRouteForwardingToRemote(ctx, '%s', '%s'): %v %v", sourcePath, dstURL, _ret, _err)
@@ -57,7 +57,7 @@ func (r *Router) AddRouteForwardingToRemote(
 
 	logger.Tracef(ctx, "building RouteForwardingToRemote")
 
-	fwd := &RouteForwardingToRemote{
+	fwd := &RouteForwardingToRemote[T]{
 		Input:      input,
 		ErrChan:    make(chan node.Error, 100),
 		CancelFunc: cancelFn,
@@ -86,7 +86,7 @@ func (r *Router) AddRouteForwardingToRemote(
 	return fwd, nil
 }
 
-func (fwd *RouteForwardingToRemote) init(
+func (fwd *RouteForwardingToRemote[T]) init(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "init")
@@ -107,7 +107,7 @@ func (fwd *RouteForwardingToRemote) init(
 	return nil
 }
 
-func (fwd *RouteForwardingToRemote) Close(
+func (fwd *RouteForwardingToRemote[T]) Close(
 	ctx context.Context,
 ) (_err error) {
 	var errs []error

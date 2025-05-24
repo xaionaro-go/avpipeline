@@ -14,36 +14,45 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type RouteSource[C any, P processor.Abstract] struct {
-	Router        *Router
+type RouteSource[T any, C any, P processor.Abstract] struct {
+	Router        *Router[T]
 	DstPath       RoutePath
+	PublishMode   PublishMode
 	RecoderConfig *transcodertypes.RecoderConfig
+	OnStart       func(context.Context, *RouteSource[T, C, P])
+	OnStop        func(context.Context, *RouteSource[T, C, P])
 	Locker        xsync.Mutex
 	CancelFunc    context.CancelFunc
 	Input         *node.NodeWithCustomData[C, P]
-	Output        *Route
+	Output        *Route[T]
 	WaitGroup     sync.WaitGroup
 	StreamForwarder[C, P]
 }
 
-func AddRouteSource[C any, P processor.Abstract](
+func AddRouteSource[T any, C any, P processor.Abstract](
 	ctx context.Context,
-	r *Router,
+	r *Router[T],
 	srcNode *node.NodeWithCustomData[C, P],
 	dstPath RoutePath,
+	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *RouteSource[C, P], _err error) {
+	onStart func(context.Context, *RouteSource[T, C, P]),
+	onStop func(context.Context, *RouteSource[T, C, P]),
+) (_ret *RouteSource[T, C, P], _err error) {
 	logger.Debugf(ctx, "AddRouteSource(ctx, %#+v, '%s')", srcNode, dstPath)
 	defer func() {
 		logger.Debugf(ctx, "/AddRouteSource(ctx, %#+v, '%s'): %p %v", srcNode, dstPath, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
 
-	fwd := &RouteSource[C, P]{
+	fwd := &RouteSource[T, C, P]{
 		Router:        r,
 		Input:         srcNode,
 		DstPath:       dstPath,
+		PublishMode:   publishMode,
 		RecoderConfig: recoderConfig,
+		OnStart:       onStart,
+		OnStop:        onStop,
 	}
 	if err := fwd.open(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize: %w", err)
@@ -52,13 +61,13 @@ func AddRouteSource[C any, P processor.Abstract](
 	return fwd, nil
 }
 
-func (fwd *RouteSource[C, P]) open(ctx context.Context) (_err error) {
+func (fwd *RouteSource[T, C, P]) open(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "open")
 	defer func() { logger.Debugf(ctx, "/open: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.openLocked, ctx)
 }
 
-func (fwd *RouteSource[C, P]) openLocked(ctx context.Context) (_err error) {
+func (fwd *RouteSource[T, C, P]) openLocked(ctx context.Context) (_err error) {
 	if fwd.CancelFunc != nil {
 		return fmt.Errorf("internal error: already started")
 	}
@@ -69,7 +78,13 @@ func (fwd *RouteSource[C, P]) openLocked(ctx context.Context) (_err error) {
 	return fwd.startLocked(ctx)
 }
 
-func (fwd *RouteSource[C, P]) Start(
+func (fwd *RouteSource[T, C, P]) GetPublishMode(
+	ctx context.Context,
+) PublishMode {
+	return fwd.PublishMode
+}
+
+func (fwd *RouteSource[T, C, P]) Start(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Start")
@@ -77,7 +92,7 @@ func (fwd *RouteSource[C, P]) Start(
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.startLocked, ctx)
 }
 
-func (fwd *RouteSource[C, P]) startLocked(ctx context.Context) (_err error) {
+func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -87,8 +102,11 @@ func (fwd *RouteSource[C, P]) startLocked(ctx context.Context) (_err error) {
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
 	defer func() {
-		if _err != nil {
-			fwd.stopLocked(ctx)
+		if _err == nil {
+			fwd.OnStart(ctx, fwd)
+		} else {
+			err := fwd.stopLocked(ctx)
+			logger.Debugf(ctx, "stopLocked: %v", err)
 		}
 	}()
 
@@ -97,9 +115,9 @@ func (fwd *RouteSource[C, P]) startLocked(ctx context.Context) (_err error) {
 		return fmt.Errorf("unable to get the destination route by path '%s': %w", fwd.DstPath, err)
 	}
 
-	logger.Debugf(ctx, "AddPublisher")
-	if err := dst.AddPublisher(ctx, fwd); err != nil {
-		return fmt.Errorf("unable to add the forwarder as a publisher to '%s': %w", dst.Path, err)
+	_, err = dst.AddPublisher(ctx, fwd)
+	if err != nil {
+		return fmt.Errorf("unable to add a publisher: %w", err)
 	}
 
 	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.RecoderConfig)
@@ -115,7 +133,7 @@ func (fwd *RouteSource[C, P]) startLocked(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (fwd *RouteSource[C, P]) Stop(
+func (fwd *RouteSource[T, C, P]) Stop(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")
@@ -123,11 +141,17 @@ func (fwd *RouteSource[C, P]) Stop(
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.stopLocked, ctx)
 }
 
-func (fwd *RouteSource[C, P]) stopLocked(
+func (fwd *RouteSource[T, C, P]) stopLocked(
 	ctx context.Context,
 ) (_err error) {
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
+	if fwd.OnStop != nil {
+		defer func() {
+			fwd.OnStop(ctx, fwd)
+		}()
+	}
+
 	var errs []error
 	if fwd.StreamForwarder != nil {
 		if err := fwd.StreamForwarder.Stop(ctx); err != nil {
@@ -146,7 +170,7 @@ func (fwd *RouteSource[C, P]) stopLocked(
 	return errors.Join(errs...)
 }
 
-func (fwd *RouteSource[C, P]) Close(
+func (fwd *RouteSource[T, C, P]) Close(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
@@ -154,7 +178,7 @@ func (fwd *RouteSource[C, P]) Close(
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.closeLocked, ctx)
 }
 
-func (fwd *RouteSource[C, P]) closeLocked(
+func (fwd *RouteSource[T, C, P]) closeLocked(
 	ctx context.Context,
 ) (_err error) {
 	if fwd.CancelFunc == nil {
@@ -170,26 +194,26 @@ func (fwd *RouteSource[C, P]) closeLocked(
 	return nil
 }
 
-func (fwd *RouteSource[C, P]) String() string {
+func (fwd *RouteSource[T, C, P]) String() string {
 	return fmt.Sprintf("fwd('%s'->'%s')", fwd.Input, fwd.Output)
 }
 
-var _ Publisher = (*RouteForwarding)(nil)
+var _ Publisher[any] = (*RouteForwarding[any])(nil)
 
-func (fwd *RouteSource[C, P]) GetInputNode(
+func (fwd *RouteSource[T, C, P]) GetInputNode(
 	ctx context.Context,
 ) node.Abstract {
 	return fwd.Input
 }
 
-func (fwd *RouteSource[C, P]) GetOutputRoute(
+func (fwd *RouteSource[T, C, P]) GetOutputRoute(
 	ctx context.Context,
-) *Route {
+) *Route[T] {
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.getOutputRouteLocked, ctx)
 }
 
-func (fwd *RouteSource[C, P]) getOutputRouteLocked(
-	ctx context.Context,
-) *Route {
+func (fwd *RouteSource[T, C, P]) getOutputRouteLocked(
+	context.Context,
+) *Route[T] {
 	return fwd.Output
 }

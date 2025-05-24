@@ -14,7 +14,7 @@ import (
 )
 
 type ProcessorRouting = processor.FromKernel[*kernel.MapStreamIndices]
-type NodeRouting = node.NodeWithCustomData[*Route, *ProcessorRouting]
+type NodeRouting[T any] = node.NodeWithCustomData[*Route[T], *ProcessorRouting]
 
 type Sender interface {
 	Close(context.Context) error

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
@@ -13,29 +12,30 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type forwardOutputFactoryLocalPath struct {
-	Router    *Router
+type forwardOutputFactoryLocalPath[T any] struct {
+	Router    *Router[T]
 	RoutePath RoutePath
 }
 
-var _ ForwardOutputFactory = (*forwardOutputFactoryLocalPath)(nil)
+var _ ForwardOutputFactory[any] = (*forwardOutputFactoryLocalPath[any])(nil)
 
-func newForwardOutputFactoryLocalPath(
-	Router *Router,
+func newForwardOutputFactoryLocalPath[T any](
+	Router *Router[T],
 	RoutePath RoutePath,
-) *forwardOutputFactoryLocalPath {
-	return &forwardOutputFactoryLocalPath{
+) *forwardOutputFactoryLocalPath[T] {
+	return &forwardOutputFactoryLocalPath[T]{
 		Router:    Router,
 		RoutePath: RoutePath,
 	}
 }
 
-func (r *Router) AddRouteForwardingLocal(
+func (r *Router[T]) AddRouteForwardingLocal(
 	ctx context.Context,
 	srcPath RoutePath,
 	dstPath RoutePath,
+	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *RouteForwarding, _err error) {
+) (_ret *RouteForwarding[T], _err error) {
 	logger.Debugf(ctx, "RouteForwarding(ctx, '%s', '%s', %#+v)", srcPath, dstPath, recoderConfig)
 	defer func() {
 		logger.Debugf(ctx, "/RouteForwarding(ctx, '%s', '%s', %#+v): %p %v", srcPath, dstPath, recoderConfig, _ret, _err)
@@ -56,15 +56,16 @@ func (r *Router) AddRouteForwardingLocal(
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
-		newForwardOutputFactoryLocalPath(r, dstPath),
+		newForwardOutputFactoryLocalPath[T](r, dstPath),
+		publishMode,
 		recoderConfig,
 	)
 }
 
-func (f *forwardOutputFactoryLocalPath) NewOutput(
+func (f *forwardOutputFactoryLocalPath[T]) NewOutput(
 	ctx context.Context,
-	fwd *RouteForwarding,
-) (_ret NodeForwardingOutput, _err error) {
+	fwd *RouteForwarding[T],
+) (_ret NodeForwardingOutput[T], _err error) {
 	outputRoute, err := f.Router.GetRoute(ctx, f.RoutePath, GetRouteModeCreateIfNotFound)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the source route by path '%s': %w", f.RoutePath, err)
@@ -73,50 +74,48 @@ func (f *forwardOutputFactoryLocalPath) NewOutput(
 		return nil, fmt.Errorf("there is no active route by path '%s' (source)", f.RoutePath)
 	}
 	logger.Debugf(ctx, "AddPublisher")
-	if err := outputRoute.AddPublisher(ctx, fwd); err != nil {
+	if _, err := outputRoute.AddPublisher(ctx, fwd); err != nil {
 		return nil, fmt.Errorf("unable to add the forwarder as a publisher to '%s': %w", outputRoute.Path, err)
 	}
-	return &forwardOutputNodeLocalPath{
+	return &forwardOutputNodeLocalPath[T]{
 		NodeRouting:     outputRoute.Node,
 		RouteForwarding: fwd,
 	}, nil
 }
 
-type forwardOutputNodeLocalPath struct {
-	*NodeRouting
-	RouteForwarding *RouteForwarding
+type forwardOutputNodeLocalPath[T any] struct {
+	*NodeRouting[T]
+	RouteForwarding *RouteForwarding[T]
 }
 
-func (n *forwardOutputNodeLocalPath) String() string {
+func (n *forwardOutputNodeLocalPath[T]) String() string {
 	return n.NodeRouting.CustomData.String()
 }
 
-func (n *forwardOutputNodeLocalPath) Close(
+func (n *forwardOutputNodeLocalPath[T]) Close(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
-	var wg sync.WaitGroup
-	defer wg.Wait()
 	dstRoute := n.NodeRouting.CustomData
 	dstRoute.Node.Locker.Do(ctx, func() {
-		if _, err := dstRoute.removePublisherLocked(ctx, n.RouteForwarding, &wg); err != nil {
+		if _, err := dstRoute.RemovePublisherLocked(ctx, n.RouteForwarding); err != nil {
 			errs = append(errs, fmt.Errorf("dstRoute.removePublisher: %w", err))
 		}
 	})
 	return errors.Join(errs...)
 }
 
-func (n *forwardOutputNodeLocalPath) GetOutputRoute(
+func (n *forwardOutputNodeLocalPath[T]) GetOutputRoute(
 	ctx context.Context,
-) *Route {
+) *Route[T] {
 	return n.NodeRouting.CustomData
 }
 
-var _ Publisher = (*RouteForwarding)(nil)
+var _ Publisher[any] = (*RouteForwarding[any])(nil)
 
-func (fwd *RouteForwarding) GetInputNode(
+func (fwd *RouteForwarding[T]) GetInputNode(
 	ctx context.Context,
 ) node.Abstract {
 	return xsync.DoR1(ctx, &fwd.Input.Node.Locker, func() node.Abstract {
@@ -131,15 +130,15 @@ func (fwd *RouteForwarding) GetInputNode(
 	})
 }
 
-func (fwd *RouteForwarding) GetOutputRoute(
+func (fwd *RouteForwarding[T]) GetOutputRoute(
 	ctx context.Context,
-) *Route {
+) *Route[T] {
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.getOutputRouteLocked, ctx)
 }
 
-func (fwd *RouteForwarding) getOutputRouteLocked(
+func (fwd *RouteForwarding[T]) getOutputRouteLocked(
 	ctx context.Context,
-) *Route {
+) *Route[T] {
 	if fwd.Output == nil {
 		return nil
 	}

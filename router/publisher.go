@@ -8,16 +8,17 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 )
 
-type Publisher interface {
+type Publisher[T any] interface {
 	fmt.Stringer
 	Close(context.Context) error
 	GetInputNode(ctx context.Context) node.Abstract
-	GetOutputRoute(ctx context.Context) *Route
+	GetOutputRoute(ctx context.Context) *Route[T]
+	GetPublishMode(ctx context.Context) PublishMode
 }
 
-type Publishers []Publisher
+type Publishers[T any] []Publisher[T]
 
-func (s Publishers) String() string {
+func (s Publishers[T]) String() string {
 	switch len(s) {
 	case 0:
 		return "NONE"

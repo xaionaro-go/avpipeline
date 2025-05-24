@@ -15,45 +15,48 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type NodeForwardingOutput interface {
+type NodeForwardingOutput[T any] interface {
 	node.Abstract
 	types.Closer
-	GetOutputRoute(ctx context.Context) *Route
+	GetOutputRoute(ctx context.Context) *Route[T]
 }
 
-type ForwardOutputFactory interface {
-	NewOutput(ctx context.Context, fwd *RouteForwarding) (NodeForwardingOutput, error)
+type ForwardOutputFactory[T any] interface {
+	NewOutput(ctx context.Context, fwd *RouteForwarding[T]) (NodeForwardingOutput[T], error)
 }
 
-type RouteForwarding struct {
-	Router        *Router
+type RouteForwarding[T any] struct {
+	Router        *Router[T]
 	SrcPath       RoutePath
-	OutputFactory ForwardOutputFactory
+	OutputFactory ForwardOutputFactory[T]
+	PublishMode   PublishMode
 	RecoderConfig *transcodertypes.RecoderConfig
 	Locker        xsync.Mutex
 	CancelFunc    context.CancelFunc
-	Input         *Route
-	Output        NodeForwardingOutput
+	Input         *Route[T]
+	Output        NodeForwardingOutput[T]
 	WaitGroup     sync.WaitGroup
-	StreamForwarder[*Route, *ProcessorRouting]
+	StreamForwarder[*Route[T], *ProcessorRouting]
 }
 
-func (r *Router) AddRouteForwarding(
+func (r *Router[T]) AddRouteForwarding(
 	ctx context.Context,
 	srcPath RoutePath,
-	outputFactory ForwardOutputFactory,
+	outputFactory ForwardOutputFactory[T],
+	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *RouteForwarding, _err error) {
+) (_ret *RouteForwarding[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwarding(ctx, '%s', %#+v)", srcPath, outputFactory)
 	defer func() {
 		logger.Debugf(ctx, "/AddRouteForwarding(ctx, '%s', %#+v): %p %v", srcPath, outputFactory, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 
-	fwd := &RouteForwarding{
+	fwd := &RouteForwarding[T]{
 		Router:        r,
 		SrcPath:       srcPath,
 		OutputFactory: outputFactory,
+		PublishMode:   publishMode,
 		RecoderConfig: recoderConfig,
 	}
 	if err := fwd.open(ctx); err != nil {
@@ -63,13 +66,17 @@ func (r *Router) AddRouteForwarding(
 	return fwd, nil
 }
 
-func (fwd *RouteForwarding) open(ctx context.Context) (_err error) {
+func (fwd *RouteForwarding[T]) GetPublishMode(ctx context.Context) PublishMode {
+	return fwd.PublishMode
+}
+
+func (fwd *RouteForwarding[T]) open(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "open")
 	defer func() { logger.Debugf(ctx, "/open: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.openLocked, ctx)
 }
 
-func (fwd *RouteForwarding) openLocked(ctx context.Context) (_err error) {
+func (fwd *RouteForwarding[T]) openLocked(ctx context.Context) (_err error) {
 	if fwd.CancelFunc != nil {
 		return fmt.Errorf("internal error: already started")
 	}
@@ -80,7 +87,7 @@ func (fwd *RouteForwarding) openLocked(ctx context.Context) (_err error) {
 	return fwd.startLocked(ctx)
 }
 
-func (fwd *RouteForwarding) start(
+func (fwd *RouteForwarding[T]) start(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "start")
@@ -88,7 +95,7 @@ func (fwd *RouteForwarding) start(
 	return xsync.DoA1R1(xsync.WithEnableDeadlock(ctx, false), &fwd.Locker, fwd.startLocked, ctx)
 }
 
-func (fwd *RouteForwarding) startLocked(ctx context.Context) (_err error) {
+func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -163,7 +170,7 @@ func (fwd *RouteForwarding) startLocked(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (fwd *RouteForwarding) stop(
+func (fwd *RouteForwarding[T]) stop(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "stop")
@@ -173,7 +180,7 @@ func (fwd *RouteForwarding) stop(
 	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.stopLocked, ctx, &wg)
 }
 
-func (fwd *RouteForwarding) stopLocked(
+func (fwd *RouteForwarding[T]) stopLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
@@ -200,7 +207,7 @@ func (fwd *RouteForwarding) stopLocked(
 	return errors.Join(errs...)
 }
 
-func (fwd *RouteForwarding) Close(
+func (fwd *RouteForwarding[T]) Close(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
@@ -211,7 +218,7 @@ func (fwd *RouteForwarding) Close(
 	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.doCloseLocked, ctx, &wg)
 }
 
-func (fwd *RouteForwarding) doCloseLocked(
+func (fwd *RouteForwarding[T]) doCloseLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
@@ -227,6 +234,6 @@ func (fwd *RouteForwarding) doCloseLocked(
 	return nil
 }
 
-func (fwd *RouteForwarding) String() string {
+func (fwd *RouteForwarding[T]) String() string {
 	return fmt.Sprintf("fwd('%s'->'%s')", fwd.Input.Path, fwd.Output)
 }

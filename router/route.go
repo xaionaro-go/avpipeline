@@ -18,40 +18,40 @@ import (
 )
 
 const (
-	routeFrameDrop        = true
-	routeCloseProcessor   = true
-	routeAutoReset        = false
-	routeOnlyOnePublisher = false
+	routeFrameDrop      = true
+	routeCloseProcessor = true
 )
 
 type RoutePath = routertypes.RoutePath
 
-type Route struct {
+type Route[T any] struct {
+	CustomData T
+
 	// read only:
 	Path       RoutePath
-	OnOpen     func(context.Context, *Route)
-	OnClose    func(context.Context, *Route)
+	OnOpen     func(context.Context, *Route[T])
+	OnClose    func(context.Context, *Route[T])
 	IsNodeOpen bool
 
 	// access only when Locker is locked:
-	Node                 *NodeRouting
-	Publishers           Publishers
+	Node                 *NodeRouting[T]
+	Publishers           Publishers[T]
 	PublishersChangeChan chan struct{}
 
 	// internal:
 	CancelFunc context.CancelFunc
 }
 
-func newRoute(
+func newRoute[T any](
 	ctx context.Context,
 	path RoutePath,
 	errCh chan<- node.Error,
-	onOpen func(context.Context, *Route),
-	onClose func(context.Context, *Route),
-) *Route {
+	onOpen func(context.Context, *Route[T]),
+	onClose func(context.Context, *Route[T]),
+) *Route[T] {
 	ctx = belt.WithField(ctx, "path", path)
 	ctx, cancelFn := context.WithCancel(ctx)
-	r := &Route{
+	r := &Route[T]{
 		Path:                 path,
 		OnOpen:               onOpen,
 		OnClose:              onClose,
@@ -59,7 +59,7 @@ func newRoute(
 		CancelFunc:           cancelFn,
 	}
 	close(r.PublishersChangeChan)
-	r.Node = node.NewWithCustomDataFromKernel[*Route](
+	r.Node = node.NewWithCustomDataFromKernel[*Route[T]](
 		ctx,
 		kernel.NewMapStreamIndices(ctx, nil),
 		processor.DefaultOptionsRecoder()...,
@@ -78,7 +78,7 @@ func newRoute(
 	return r
 }
 
-func (r *Route) openNodeLocked(
+func (r *Route[T]) openNodeLocked(
 	ctx context.Context,
 ) {
 	logger.Debugf(ctx, "openNodeLocked: %s", r.Path)
@@ -102,7 +102,7 @@ func (r *Route) openNodeLocked(
 	}
 }
 
-func (r *Route) closeNodeLocked(
+func (r *Route[T]) closeNodeLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
@@ -127,7 +127,7 @@ func (r *Route) closeNodeLocked(
 	return
 }
 
-func (r *Route) closeLocked(
+func (r *Route[T]) closeLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
@@ -138,14 +138,14 @@ func (r *Route) closeLocked(
 	return
 }
 
-func (r *Route) Close(ctx context.Context) (_err error) {
+func (r *Route[T]) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	return xsync.DoA2R1(ctx, &r.Node.Locker, r.closeLocked, ctx, &wg)
 }
-func (r *Route) getPublishersChangeChan(
+func (r *Route[T]) getPublishersChangeChan(
 	ctx context.Context,
 ) <-chan struct{} {
 	return xsync.DoR1(ctx, &r.Node.Locker, func() <-chan struct{} {
@@ -153,88 +153,118 @@ func (r *Route) getPublishersChangeChan(
 	})
 }
 
-func (r *Route) GetPublishers(
+func (r *Route[T]) GetPublishers(
 	ctx context.Context,
-) Publishers {
-	return xsync.DoR1(ctx, &r.Node.Locker, func() Publishers {
+) Publishers[T] {
+	return xsync.DoR1(ctx, &r.Node.Locker, func() Publishers[T] {
 		return r.Publishers
 	})
 }
 
-func (r *Route) AddPublisher(
+func (r *Route[T]) AddPublisher(
 	ctx context.Context,
-	publisher Publisher,
-) (_err error) {
+	publisher Publisher[T],
+) (_ret Publishers[T], _err error) {
 	logger.Debugf(ctx, "AddPublisher[%s](ctx, %#+v)", r, publisher)
-	defer func() { logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): %v", r, publisher, _err) }()
+	defer func() {
+		logger.Debugf(ctx, "/AddPublisher[%s](ctx, %#+v): len(ret): len(%v)", r, publisher, len(_ret))
+	}()
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	return xsync.DoR1(ctx, &r.Node.Locker, func() error {
-		if !r.IsNodeOpen {
-			return ErrRouteClosed{}
-		}
+	r.Locker().Do(ctx, func() {
+		_ret, _err = r.AddPublisherLocked(ctx, publisher, &wg)
+	})
+	return
+}
 
-		if routeOnlyOnePublisher {
-			// currently we support only one publisher:
+func (r *Route[T]) Locker() *xsync.Mutex {
+	return &r.Node.Locker
+}
+
+func (r *Route[T]) LockDo(ctx context.Context, fn func(ctx context.Context)) {
+	r.Locker().Do(ctx, func() {
+		fn(ctx)
+	})
+}
+
+func (r *Route[T]) AddPublisherLocked(
+	ctx context.Context,
+	publisher Publisher[T],
+	wg *sync.WaitGroup,
+) (_ret Publishers[T], _err error) {
+	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %#+v)", r, publisher)
+	defer func() {
+		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %#+v): len(ret): len(%v)", r, publisher, len(_ret))
+	}()
+
+	if !r.IsNodeOpen {
+		return nil, ErrRouteClosed{}
+	}
+
+	if publisher == nil {
+		return nil, fmt.Errorf("publisher == nil")
+	}
+	if slices.Contains(r.Publishers, publisher) {
+		return nil, ErrAlreadyAPublisher{}
+	}
+
+	if len(r.Publishers) > 0 {
+		removePublishers := func() {
 			for _, publisher := range r.Publishers {
+				publisher := publisher
 				wg.Add(1)
 				observability.Go(ctx, func() {
 					defer wg.Done()
-					logger.Errorf(ctx, "closing publisher %s to free-up the route for another publisher", publisher)
 					err := publisher.Close(ctx)
 					if err != nil {
-						logger.Errorf(ctx, "unable to close the publisher: %v", err)
+						logger.Errorf(ctx, "unable to close publisher %s: %v", publisher, err)
 					}
 				})
 			}
 			r.Publishers = r.Publishers[:0]
 		}
-
-		_ = r.addPublisherLocked(ctx, publisher)
-		return nil
-	})
-}
-
-func (r *Route) LockDo(ctx context.Context, fn func(ctx context.Context)) {
-	r.Node.Locker.Do(ctx, func() {
-		fn(ctx)
-	})
-}
-
-func (r *Route) addPublisherLocked(
-	_ context.Context,
-	publisher Publisher,
-) Publishers {
-	if publisher == nil {
-		panic("publisher == nil")
+		mode := publisher.GetPublishMode(ctx)
+		switch mode {
+		case PublishModeExclusiveTakeover:
+			removePublishers()
+		case PublishModeExclusiveFail:
+			return nil, ErrAlreadyHasPublisher{}
+		case PublishModeSharedTakeover, PublishModeSharedFail:
+			for _, publisher := range r.Publishers {
+				if !publisher.GetPublishMode(ctx).IsExclusive() {
+					continue
+				}
+				if mode.FailOnConflict() {
+					return nil, ErrAlreadyHasPublisher{}
+				}
+				removePublishers()
+				break
+			}
+		default:
+			return nil, fmt.Errorf("internal error: unknown publishing mode: %s", mode)
+		}
 	}
-	if slices.Contains(r.Publishers, publisher) {
-		// already added
-		return r.Publishers
-	}
+
 	r.Publishers = append(r.Publishers, publisher)
 	if r.IsNodeOpen {
 		var ch chan<- struct{}
 		ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
 		close(ch)
 	}
-	return r.Publishers
+	return r.Publishers, nil
 }
 
-func (r *Route) RemovePublisher(
+func (r *Route[T]) RemovePublisher(
 	ctx context.Context,
-	publisher Publisher,
-) (Publishers, error) {
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	return xsync.DoA3R2(ctx, &r.Node.Locker, r.removePublisherLocked, ctx, publisher, &wg)
+	publisher Publisher[T],
+) (Publishers[T], error) {
+	return xsync.DoA2R2(ctx, &r.Node.Locker, r.RemovePublisherLocked, ctx, publisher)
 }
 
-func (r *Route) removePublisherLocked(
-	ctx context.Context,
-	publisher Publisher,
-	wg *sync.WaitGroup,
-) (Publishers, error) {
+func (r *Route[T]) RemovePublisherLocked(
+	_ context.Context,
+	publisher Publisher[T],
+) (Publishers[T], error) {
 	for idx, candidate := range r.Publishers {
 		if publisher == candidate {
 			r.Publishers = slices.Delete(r.Publishers, idx, idx+1)
@@ -243,24 +273,15 @@ func (r *Route) removePublisherLocked(
 				ch, r.PublishersChangeChan = r.PublishersChangeChan, make(chan struct{})
 				close(ch)
 			}
-
-			if routeAutoReset && len(r.Publishers) == 0 {
-				// TODO: add an option to keep the clients to wait for a new stream
-				logger.Debugf(ctx, "zero publishers left; dropping the clients")
-				if err := r.resetNodeLocked(ctx, wg); err != nil {
-					return r.Publishers, fmt.Errorf("unable to reset the node: %w", err)
-				}
-			}
 			return r.Publishers, nil
 		}
 	}
-
-	return nil, fmt.Errorf("the publisher is not found in the list of route's publishers")
+	return nil, ErrPublisherNotFound{}
 }
 
-func (r *Route) WaitForPublisher(
+func (r *Route[T]) WaitForPublisher(
 	ctx context.Context,
-) (Publishers, error) {
+) (Publishers[T], error) {
 	ch := r.getPublishersChangeChan(ctx)
 	for {
 		publishers := r.GetPublishers(ctx)
@@ -276,6 +297,6 @@ func (r *Route) WaitForPublisher(
 	}
 }
 
-func (r *Route) String() string {
+func (r *Route[T]) String() string {
 	return string(r.Path)
 }

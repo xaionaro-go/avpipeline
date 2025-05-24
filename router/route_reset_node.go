@@ -10,7 +10,7 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-func (r *Route) ResetNode(ctx context.Context) (_ret error) {
+func (r *Route[T]) ResetNode(ctx context.Context) (_ret error) {
 	logger.Debugf(ctx, "ResetNode")
 	defer func() { logger.Debugf(ctx, "/ResetNode: %v", _ret) }()
 	var wg sync.WaitGroup
@@ -18,7 +18,7 @@ func (r *Route) ResetNode(ctx context.Context) (_ret error) {
 	return xsync.DoA2R1(ctx, &r.Node.Locker, r.resetNodeLocked, ctx, &wg)
 }
 
-func (r *Route) resetNodeLocked(
+func (r *Route[T]) resetNodeLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_ret error) {

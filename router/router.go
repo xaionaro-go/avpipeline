@@ -14,24 +14,26 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type Router struct {
-	OnRouteCreated func(context.Context, *Route)
-	OnRouteRemoved func(context.Context, *Route)
+type Router[T any] struct {
+	OnRouteCreated func(context.Context, *Route[T])
+	OnRouteRemoved func(context.Context, *Route[T])
 
 	WaitGroup sync.WaitGroup
 
 	Locker xsync.Mutex
 
 	// access only when Locker is locked:
-	RoutesByPath      map[RoutePath]*Route
+	RoutesByPath      map[RoutePath]*Route[T]
 	RouterCloseChan   chan struct{}
 	RoutesChangedChan chan struct{}
 	ErrorChan         chan node.Error
 }
 
-func New(ctx context.Context) *Router {
-	r := &Router{
-		RoutesByPath:      map[RoutePath]*Route{},
+func New[T any](
+	ctx context.Context,
+) *Router[T] {
+	r := &Router[T]{
+		RoutesByPath:      map[RoutePath]*Route[T]{},
 		RouterCloseChan:   make(chan struct{}),
 		RoutesChangedChan: make(chan struct{}),
 		ErrorChan:         make(chan node.Error, 100),
@@ -40,7 +42,7 @@ func New(ctx context.Context) *Router {
 	return r
 }
 
-func (r *Router) Close(
+func (r *Router[T]) Close(
 	ctx context.Context,
 ) error {
 	r.Locker.Do(ctx, func() { // to make sure we don't have anybody adding more processes
@@ -52,12 +54,12 @@ func (r *Router) Close(
 	return nil
 }
 
-func (r *Router) init(
+func (r *Router[T]) init(
 	ctx context.Context,
 ) {
 	observability.Go(ctx, func() {
 		for err := range r.ErrorChan {
-			route := err.Node.(*NodeRouting).CustomData
+			route := err.Node.(*NodeRouting[T]).CustomData
 			if route == nil {
 				logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
 				continue
@@ -76,9 +78,9 @@ func (r *Router) init(
 	})
 }
 
-func (r *Router) onRouteCreated(
+func (r *Router[T]) onRouteCreated(
 	ctx context.Context,
-	route *Route,
+	route *Route[T],
 ) {
 	logger.Debugf(ctx, "onRouteCreated: %s", route)
 	defer func() { logger.Debugf(ctx, "/onRouteCreated: %s", route) }()
@@ -88,9 +90,9 @@ func (r *Router) onRouteCreated(
 	}
 }
 
-func (r *Router) onRouteClosed(
+func (r *Router[T]) onRouteClosed(
 	ctx context.Context,
-	route *Route,
+	route *Route[T],
 ) {
 	logger.Debugf(ctx, "onRouteClosed: %s", route)
 	defer func() { logger.Debugf(ctx, "/onRouteClosed: %s", route) }()
@@ -126,23 +128,24 @@ func (m GetRouteMode) String() string {
 	}
 }
 
-func (r *Router) GetRoute(
+func (r *Router[T]) GetRoute(
 	ctx context.Context,
 	path RoutePath,
 	mode GetRouteMode,
-) (_ret *Route, _err error) {
+
+) (_ret *Route[T], _err error) {
 	logger.Debugf(ctx, "GetRoute(ctx, '%s', '%s')", path, mode)
 	defer func() { logger.Debugf(ctx, "/GetRoute(ctx, '%s', '%s'): %v %v", path, mode, _ret, _err) }()
-	return xsync.DoR2(ctx, &r.Locker, func() (*Route, error) {
+	return xsync.DoR2(ctx, &r.Locker, func() (*Route[T], error) {
 		return r.getRouteLocked(ctx, path, mode)
 	})
 }
 
-func (r *Router) getRouteLocked(
+func (r *Router[T]) getRouteLocked(
 	ctx context.Context,
 	path RoutePath,
 	mode GetRouteMode,
-) (*Route, error) {
+) (*Route[T], error) {
 	curRoute := r.RoutesByPath[path]
 	if curRoute != nil {
 		switch mode {
@@ -173,7 +176,7 @@ func (r *Router) getRouteLocked(
 	case GetRouteModeFailIfNotFound:
 		return nil, fmt.Errorf("route '%s' found", path)
 	case GetRouteModeWaitUntilCreated:
-		var route *Route
+		var route *Route[T]
 		var err error
 		r.Locker.UDo(ctx, func() {
 			route, err = r.WaitForRoute(ctx, path)
@@ -183,7 +186,7 @@ func (r *Router) getRouteLocked(
 		}
 		return route, nil
 	case GetRouteModeWaitForPublisher:
-		var route *Route
+		var route *Route[T]
 		for {
 			var err error
 			r.Locker.UDo(ctx, func() {
@@ -212,10 +215,10 @@ func (r *Router) getRouteLocked(
 	return nil, fmt.Errorf("unknown mode: %d (%s)", int(mode), mode)
 }
 
-func (r *Router) createRoute(
+func (r *Router[T]) createRoute(
 	ctx context.Context,
 	path RoutePath,
-) (_ret *Route) {
+) (_ret *Route[T]) {
 	logger.Debugf(ctx, "createRoute(ctx, '%s')", path)
 	defer func() { logger.Debugf(ctx, "/createRoute(ctx, '%s'): %v", path, _ret) }()
 
@@ -244,7 +247,7 @@ func (r *Router) createRoute(
 	return route
 }
 
-func (r *Router) GetRoutesChangedChan(
+func (r *Router[T]) GetRoutesChangedChan(
 	ctx context.Context,
 ) chan struct{} {
 	return xsync.DoR1(ctx, &r.Locker, func() chan struct{} {
@@ -252,22 +255,22 @@ func (r *Router) GetRoutesChangedChan(
 	})
 }
 
-func (r *Router) RemoveRouteByPath(
+func (r *Router[T]) RemoveRouteByPath(
 	ctx context.Context,
 	path RoutePath,
-) *Route {
+) *Route[T] {
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	return xsync.DoR1(ctx, &r.Locker, func() *Route {
+	return xsync.DoR1(ctx, &r.Locker, func() *Route[T] {
 		route := r.RoutesByPath[path]
 		r.removeRouteLocked(ctx, route, &wg)
 		return route
 	})
 }
 
-func (r *Router) RemoveRoute(
+func (r *Router[T]) RemoveRoute(
 	ctx context.Context,
-	route *Route,
+	route *Route[T],
 ) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -282,9 +285,9 @@ func (r *Router) RemoveRoute(
 	})
 }
 
-func (r *Router) removeRouteLocked(
+func (r *Router[T]) removeRouteLocked(
 	ctx context.Context,
-	route *Route,
+	route *Route[T],
 	wg *sync.WaitGroup,
 ) {
 	logger.Debugf(ctx, "removeRouteLocked: %s", route)
@@ -305,10 +308,10 @@ func (r *Router) removeRouteLocked(
 	}
 }
 
-func (r *Router) WaitForRoute(
+func (r *Router[T]) WaitForRoute(
 	ctx context.Context,
 	path RoutePath,
-) (_ret *Route, _err error) {
+) (_ret *Route[T], _err error) {
 	logger.Debugf(ctx, "WaitForRoute: %s", path)
 	defer func() { logger.Debugf(ctx, "/WaitForRoute: %s: %v %v", path, _ret, _err) }()
 	for {
@@ -316,7 +319,7 @@ func (r *Router) WaitForRoute(
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-r.GetRoutesChangedChan(ctx):
-			if route := xsync.DoR1(ctx, &r.Locker, func() *Route {
+			if route := xsync.DoR1(ctx, &r.Locker, func() *Route[T] {
 				return r.RoutesByPath[path]
 			}); route != nil {
 				return route, nil
@@ -325,7 +328,7 @@ func (r *Router) WaitForRoute(
 	}
 }
 
-func (r *Router) Wait(ctx context.Context) error {
+func (r *Router[T]) Wait(ctx context.Context) error {
 	logger.Debugf(ctx, "Wait")
 	defer func() { logger.Debugf(ctx, "/Wait") }()
 

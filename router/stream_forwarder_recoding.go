@@ -29,7 +29,7 @@ type StreamForwarderRecoding[CS any, PS processor.Abstract] struct {
 	Mutex               xsync.Mutex
 }
 
-var _ StreamForwarder[*Route, *ProcessorRouting] = (*StreamForwarderRecoding[*Route, *ProcessorRouting])(nil)
+var _ StreamForwarder[*Route[any], *ProcessorRouting] = (*StreamForwarderRecoding[*Route[any], *ProcessorRouting])(nil)
 
 // TODO: remove StreamForwarder from package `router`
 func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
