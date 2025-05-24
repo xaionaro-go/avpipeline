@@ -105,8 +105,9 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 		if _err == nil {
 			fwd.OnStart(ctx, fwd)
 		} else {
-			err := fwd.stopLocked(ctx)
-			logger.Debugf(ctx, "stopLocked: %v", err)
+			logger.Tracef(ctx, "initiating doStopLocked because startLocked failed with %v", _err)
+			err := fwd.doStopLocked(ctx)
+			logger.Tracef(ctx, "doStopLocked result: %v", err)
 		}
 	}()
 
@@ -115,17 +116,21 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 		return fmt.Errorf("unable to get the destination route by path '%s': %w", fwd.DstPath, err)
 	}
 	fwd.Output = dst
-	logger.Debugf(ctx, "fwd.Output = %s", dst)
+	logger.Tracef(ctx, "fwd.Output = %s", dst)
+
+	logger.Tracef(ctx, "AddPublisher")
+	if _, err := dst.AddPublisher(ctx, fwd); err != nil {
+		return fmt.Errorf("unable to add the RouteSource as a publisher to Route '%s': %w", dst.Path, err)
+	}
 
 	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.RecoderConfig)
 	if err != nil {
 		return fmt.Errorf("unable to initialize a forwarder from %T to '%s' (%#+v): %w", fwd.Input, dst.Path, fwd.RecoderConfig, err)
 	}
-	fwd.StreamForwarder = f
-
-	if err := fwd.StreamForwarder.Start(ctx); err != nil {
+	if err := f.Start(ctx); err != nil {
 		return fmt.Errorf("unable to start stream forwarding: %w", err)
 	}
+	fwd.StreamForwarder = f
 
 	return nil
 }
@@ -141,10 +146,31 @@ func (fwd *RouteSource[T, C, P]) Stop(
 func (fwd *RouteSource[T, C, P]) stopLocked(
 	ctx context.Context,
 ) (_err error) {
+	logger.Tracef(ctx, "stopLocked")
+	defer func() { logger.Tracef(ctx, "/stopLocked: %v", _err) }()
+
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
 	if fwd.OnStop != nil {
 		fwd.OnStop(ctx, fwd)
+	}
+
+	return fwd.doStopLocked(ctx)
+}
+
+func (fwd *RouteSource[T, C, P]) doStopLocked(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "doStopLocked")
+	defer func() { logger.Tracef(ctx, "/doStopLocked: %v", _err) }()
+
+	if fwd.Output != nil {
+		logger.Tracef(ctx, "RemovePublisher")
+		if _, err := fwd.Output.RemovePublisher(ctx, fwd); err != nil {
+			return fmt.Errorf("unable to remove the RouteSource as a publisher to Route '%s': %w", fwd.Output.Path, err)
+		}
+		logger.Tracef(ctx, "fwd.Output = nil")
+		fwd.Output = nil
 	}
 
 	var errs []error
@@ -153,11 +179,6 @@ func (fwd *RouteSource[T, C, P]) stopLocked(
 			errs = append(errs, fmt.Errorf("fwd.StreamForwarder.Stop: %w", err))
 		}
 		fwd.StreamForwarder = nil
-	}
-
-	if fwd.Output != nil {
-		logger.Debugf(ctx, "fwd.Output = nil")
-		fwd.Output = nil
 	}
 
 	return errors.Join(errs...)

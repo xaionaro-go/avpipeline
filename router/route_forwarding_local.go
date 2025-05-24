@@ -29,6 +29,10 @@ func newForwardOutputFactoryLocalPath[T any](
 	}
 }
 
+func (ff *forwardOutputFactoryLocalPath[T]) String() string {
+	return string(ff.RoutePath)
+}
+
 func (r *Router[T]) AddRouteForwardingLocal(
 	ctx context.Context,
 	srcPath RoutePath,
@@ -36,9 +40,9 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
 ) (_ret *RouteForwarding[T], _err error) {
-	logger.Debugf(ctx, "RouteForwarding(ctx, '%s', '%s', %#+v)", srcPath, dstPath, recoderConfig)
+	logger.Debugf(ctx, "AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v)", srcPath, dstPath, publishMode, recoderConfig)
 	defer func() {
-		logger.Debugf(ctx, "/RouteForwarding(ctx, '%s', '%s', %#+v): %p %v", srcPath, dstPath, recoderConfig, _ret, _err)
+		logger.Debugf(ctx, "/AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v): %p %v", srcPath, dstPath, publishMode, recoderConfig, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
@@ -56,7 +60,7 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
-		newForwardOutputFactoryLocalPath[T](r, dstPath),
+		newForwardOutputFactoryLocalPath(r, dstPath),
 		publishMode,
 		recoderConfig,
 	)
@@ -66,6 +70,8 @@ func (f *forwardOutputFactoryLocalPath[T]) NewOutput(
 	ctx context.Context,
 	fwd *RouteForwarding[T],
 ) (_ret NodeForwardingOutput[T], _err error) {
+	logger.Tracef(ctx, "NewOutput(ctx, %s)", fwd)
+	defer func() { logger.Tracef(ctx, "/NewOutput(ctx, %s): %v %v", fwd, _ret, _err) }()
 	outputRoute, err := f.Router.GetRoute(ctx, f.RoutePath, GetRouteModeCreateIfNotFound)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the source route by path '%s': %w", f.RoutePath, err)
@@ -73,7 +79,7 @@ func (f *forwardOutputFactoryLocalPath[T]) NewOutput(
 	if outputRoute == nil {
 		return nil, fmt.Errorf("there is no active route by path '%s' (source)", f.RoutePath)
 	}
-	logger.Debugf(ctx, "AddPublisher")
+	logger.Tracef(ctx, "AddPublisher")
 	if _, err := outputRoute.AddPublisher(ctx, fwd); err != nil {
 		return nil, fmt.Errorf("unable to add the forwarder as a publisher to '%s': %w", outputRoute.Path, err)
 	}

@@ -21,9 +21,9 @@ func (m PublishMode) String() string {
 	case PublishModeExclusiveFail:
 		return "exclusive-fail"
 	case PublishModeSharedTakeover:
-		return "exclusive-shared-takeover"
+		return "shared-takeover"
 	case PublishModeSharedFail:
-		return "exclusive-shared-fail"
+		return "shared-fail"
 	default:
 		return fmt.Sprintf("<unknown_mode_%d>", int(m))
 	}

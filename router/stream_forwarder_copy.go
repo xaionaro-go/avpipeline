@@ -36,8 +36,8 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 ) (_ret *StreamForwarderCopy[CS, PS], _err error) {
-	logger.Debugf(ctx, "NewStreamForwarderToRouterCopy(%s, %s)", src, dst)
-	defer func() { logger.Debugf(ctx, "/NewStreamForwarderToRouterCopy(%s, %s): %p, %v", src, dst, _ret, _err) }()
+	logger.Debugf(ctx, "NewStreamForwarderCopy(%s, %s)", src, dst)
+	defer func() { logger.Debugf(ctx, "/NewStreamForwarderCopy(%s, %s): %p, %v", src, dst, _ret, _err) }()
 
 	fwd := &StreamForwarderCopy[CS, PS]{
 		Input:  src,

@@ -22,6 +22,7 @@ type NodeForwardingOutput[T any] interface {
 }
 
 type ForwardOutputFactory[T any] interface {
+	String() string
 	NewOutput(ctx context.Context, fwd *RouteForwarding[T]) (NodeForwardingOutput[T], error)
 }
 
@@ -46,9 +47,9 @@ func (r *Router[T]) AddRouteForwarding(
 	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
 ) (_ret *RouteForwarding[T], _err error) {
-	logger.Debugf(ctx, "AddRouteForwarding(ctx, '%s', %#+v)", srcPath, outputFactory)
+	logger.Debugf(ctx, "AddRouteForwarding(ctx, '%s', '%s', %s)", srcPath, outputFactory, publishMode)
 	defer func() {
-		logger.Debugf(ctx, "/AddRouteForwarding(ctx, '%s', %#+v): %p %v", srcPath, outputFactory, _ret, _err)
+		logger.Debugf(ctx, "/AddRouteForwarding(ctx, '%s', '%s', %s): %p %v", srcPath, outputFactory, publishMode, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 
@@ -96,6 +97,9 @@ func (fwd *RouteForwarding[T]) start(
 }
 
 func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "startLocked")
+	defer func() { logger.Debugf(ctx, "/startLocked: %v", _err) }()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -151,7 +155,9 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 		}
 	})
 
+	logger.Tracef(ctx, "fwd.OutputFactory.NewOutput(ctx, fwd)")
 	dstNode, err := fwd.OutputFactory.NewOutput(ctx, fwd)
+	logger.Tracef(ctx, "/fwd.OutputFactory.NewOutput(ctx, fwd): %v %v", dstNode, err)
 	if err != nil {
 		return fmt.Errorf("unable to open the output: %w", err)
 	}
@@ -184,6 +190,9 @@ func (fwd *RouteForwarding[T]) stopLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
+	logger.Debugf(ctx, "stopLocked")
+	defer func() { logger.Debugf(ctx, "/stopLocked: %v", _err) }()
+
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
 	var errs []error
