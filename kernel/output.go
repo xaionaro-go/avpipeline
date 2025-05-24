@@ -50,7 +50,8 @@ type OutputConfig struct {
 
 type OutputStream struct {
 	*astiav.Stream
-	LastDTS int64
+	LastKeyFrameSource packet.Source
+	LastDTS            int64
 }
 
 type OutputInputStream struct {
@@ -661,12 +662,25 @@ func (o *Output) doWritePacket(
 		return fmt.Errorf("internal error: TimeBase must be set")
 	}
 
-	pkt.SetStreamIndex(outputStream.Index())
-
-	logger.Tracef(ctx, "sending the current packet")
-
-	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
-		return nil
+	if outputStream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+		codecID := outputStream.CodecParameters().CodecID()
+		switch codecID {
+		case astiav.CodecIDH264, astiav.CodecIDH265:
+			logger.Tracef(ctx, "an H264/H265 packet: %s", codecID)
+			if source != outputStream.LastKeyFrameSource {
+				if pkt.Flags().Has(astiav.PacketFlagKey) {
+					outputStream.LastKeyFrameSource = source
+					logger.Debugf(ctx, "received a key frame from a new source: %p:%s", source, outputStream.LastKeyFrameSource)
+				} else {
+					logger.Errorf(
+						ctx,
+						"ignoring a non-keyframe packet received from another source (%p:%s != %p:%s) until we start a group using a key frame from that source",
+						source, source, outputStream.LastKeyFrameSource, outputStream.LastKeyFrameSource,
+					)
+					return nil
+				}
+			}
+		}
 	}
 
 	if skipTooHighTimestamps {
@@ -697,6 +711,11 @@ func (o *Output) doWritePacket(
 			pkt.Dts(),
 			outputStream.LastDTS,
 		)
+		return nil
+	}
+
+	pkt.SetStreamIndex(outputStream.Index())
+	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
 		return nil
 	}
 

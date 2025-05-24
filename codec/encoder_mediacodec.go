@@ -11,6 +11,7 @@ import (
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	"github.com/xaionaro-go/avmediacodec"
 	"github.com/xaionaro-go/avpipeline/quality"
+	"github.com/xaionaro-go/xsync"
 )
 
 func (e *EncoderFull) setQualityMediacodec(
@@ -30,7 +31,7 @@ func (e *EncoderFull) setQualityMediacodecConstantBitrate(
 	ctx context.Context,
 	q quality.ConstantBitrate,
 ) error {
-	return e.FFAMediaFormatSetInt32(ctx, "video-bitrate", int32(q))
+	return e.ffAMediaFormatSetInt32(ctx, "video-bitrate", int32(q))
 }
 
 func (e *EncoderFull) FFAMediaFormatSetInt32(
@@ -40,7 +41,14 @@ func (e *EncoderFull) FFAMediaFormatSetInt32(
 ) (_err error) {
 	logger.Debugf(ctx, "FFAMediaFormatSetInt32(ctx, '%s', %d)", key, value)
 	defer func() { logger.Debugf(ctx, "/FFAMediaFormatSetInt32(ctx, '%s', %d): %v", key, value, _err) }()
+	return xsync.DoA3R1(ctx, &e.locker, e.ffAMediaFormatSetInt32, ctx, key, value)
+}
 
+func (e *EncoderFull) ffAMediaFormatSetInt32(
+	ctx context.Context,
+	key string,
+	value int32,
+) (_err error) {
 	mediaCodec := avmediacodec.WrapAVCodecContext(
 		xastiav.CFromAVCodecContext(e.codecContext),
 	).PrivData().Codec()

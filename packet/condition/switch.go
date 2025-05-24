@@ -11,7 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type FuncOnAfterSwitch func(ctx context.Context, from int32, to int32)
+type FuncOnAfterSwitch func(ctx context.Context, pkt packet.Input, from int32, to int32)
 
 type Switch struct {
 	CurrentValue atomic.Int32
@@ -100,7 +100,7 @@ func (s *SwitchCondition) Match(
 		}
 		onAfter := s.GetOnAfterSwitch()
 		if onAfter != nil {
-			onAfter(ctx, currentValue, nextValue)
+			onAfter(ctx, pkt, currentValue, nextValue)
 		}
 	}
 

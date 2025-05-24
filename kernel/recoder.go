@@ -238,3 +238,19 @@ func (r *Recoder[DF, EF]) NotifyAboutPacketSource(
 	}
 	return errors.Join(errs...)
 }
+
+func (r *Recoder[DF, EF]) Reset(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+
+	var errs []error
+	if err := r.Encoder.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+	}
+	if err := r.Decoder.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+	}
+	return errors.Join(errs...)
+}

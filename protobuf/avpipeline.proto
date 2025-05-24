@@ -1,0 +1,33 @@
+syntax = "proto3";
+package avpipeline;
+option go_package = "github.com/xaionaro-go/avpipeline/protobuf/avpipeline;avpipeline";
+import "libav.proto";
+
+message Object {
+  uint32 type = 1;
+  bytes data = 2;
+}
+
+/*
+type Commons struct {
+	*astiav.Frame
+	*astiav.CodecContext
+	StreamIndex    int
+	StreamsCount   int
+	StreamDuration int64
+	TimeBase       astiav.Rational
+	Pos            int64
+	Duration       int64
+}
+*/
+
+message Frame {
+  libav.Frame frame = 1;
+  libav.CodecContext codecContext = 2;
+  int32 streamIndex = 3;
+  int32 streamsCount = 4;
+  int64 streamDuration = 5;
+  libav.Rational timeBase = 6;
+  int64 pos = 7;
+  int64 duration = 8;
+}

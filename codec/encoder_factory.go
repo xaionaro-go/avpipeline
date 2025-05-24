@@ -88,10 +88,12 @@ func (f *NaiveEncoderFactory) NewEncoder(
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (_ret Encoder, _err error) {
-	return xsync.DoA3R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderNoLock, ctx, params, timeBase)
+	logger.Tracef(ctx, "NewEncoder")
+	defer func() { logger.Tracef(ctx, "/NewEncoder: %T %v", _ret, _err) }()
+	return xsync.DoA3R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderLocked, ctx, params, timeBase)
 }
 
-func (f *NaiveEncoderFactory) newEncoderNoLock(
+func (f *NaiveEncoderFactory) newEncoderLocked(
 	ctx context.Context,
 	codecParamsOrig *astiav.CodecParameters,
 	timeBase astiav.Rational,
@@ -115,10 +117,10 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 		}
 	}()
 
-	var encParams *EncoderParams
+	var encParams *CodecParams
 	switch codecParams.MediaType() {
 	case astiav.MediaTypeVideo:
-		encParams = &EncoderParams{
+		encParams = &CodecParams{
 			CodecName:          f.VideoCodec,
 			CodecParameters:    codecParams,
 			HardwareDeviceType: f.HardwareDeviceType,
@@ -127,7 +129,7 @@ func (f *NaiveEncoderFactory) newEncoderNoLock(
 			Options:            f.VideoOptions,
 		}
 	case astiav.MediaTypeAudio:
-		encParams = &EncoderParams{
+		encParams = &CodecParams{
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParams,
 			TimeBase:        timeBase,

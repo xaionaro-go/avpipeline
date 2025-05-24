@@ -112,6 +112,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 		for _, pkt := range pkts {
 			logger.Tracef(ctx, "sending a packet to %s", filter.Name())
 			err = filter.SendPacket(pkt)
+			packet.Pool.Put(pkt)
 			if err != nil {
 				if filter.Params.SkipOnFailure {
 					logger.Debugf(ctx, "received failure %v (on sending), skipping", err)
@@ -119,7 +120,6 @@ func (bsf *BitstreamFilter) sendInputPacket(
 				}
 				return fmt.Errorf("unable to send the packet to the filter: %w", err)
 			}
-			packet.Pool.Put(pkt)
 		}
 		pkts = pkts[:0]
 
@@ -147,14 +147,21 @@ func (bsf *BitstreamFilter) sendInputPacket(
 		}
 	}
 
-	for _, pkt := range pkts {
-		outputPacketsCh <- packet.BuildOutput(
-			pkt,
-			input.Stream,
-			input.Source,
-		)
-	}
-	return nil
+	bsf.Mutex.UDo(ctx, func() {
+		for _, pkt := range pkts {
+			pkt := packet.BuildOutput(
+				pkt,
+				input.Stream,
+				input.Source,
+			)
+			select {
+			case <-ctx.Done():
+				return
+			case outputPacketsCh <- pkt:
+			}
+		}
+	})
+	return ctx.Err()
 }
 
 func (bsf *BitstreamFilter) SendInputFrame(

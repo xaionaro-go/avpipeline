@@ -143,7 +143,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					) frame.Input {
 						return frame.BuildInput(
 							frame.CloneAsReferenced(f.Frame),
-							f.CodecContext,
+							f.CodecParameters,
 							f.StreamIndex, f.StreamsCount,
 							f.StreamDuration,
 							f.TimeBase,

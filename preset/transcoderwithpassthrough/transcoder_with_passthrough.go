@@ -73,17 +73,19 @@ func New[C any, P processor.Abstract](
 		PassthroughSwitch: packetcondition.NewSwitch(),
 		PostSwitchFilter:  packetcondition.NewSwitch(),
 	}
-	swCond := packetcondition.And{
+	s.PassthroughSwitch.SetKeepUnless(packetcondition.And{
 		packetcondition.MediaType(astiav.MediaTypeVideo),
 		packetcondition.IsKeyFrame(true),
-	}
-	s.PassthroughSwitch.SetKeepUnless(swCond)
-	s.PassthroughSwitch.SetOnAfterSwitch(func(ctx context.Context, from, to int32) {
+	})
+	s.PassthroughSwitch.SetOnAfterSwitch(func(ctx context.Context, pkt packet.Input, from, to int32) {
 		logger.Debugf(ctx, "s.PostSwitchFilter.SetValue(ctx, %d)", to)
 		err := s.PostSwitchFilter.SetValue(ctx, to)
 		logger.Debugf(ctx, "/s.PostSwitchFilter.SetValue(ctx, %d): %v", to, err)
 	})
-	s.PostSwitchFilter.SetKeepUnless(swCond)
+	s.PostSwitchFilter.SetKeepUnless(packetcondition.And{
+		packetcondition.MediaType(astiav.MediaTypeVideo),
+		packetcondition.IsKeyFrame(true),
+	})
 	s.MapInputStreamIndicesNode = node.NewFromKernel(
 		ctx,
 		kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s)),
@@ -142,15 +144,12 @@ func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
 	return nil
 }
 
-/*
-*transcoderwithpassthrough.streamIndexAssignerOutput[struct {},*github.com/xaionaro-go/avpipeline/processor.FromKernel[*github.com/xaionaro-go/avpipeline/kernel.Input]]
-*transcoderwithpassthrough.streamIndexAssignerInput[struct {},*github.com/xaionaro-go/avpipeline/processor.FromKernel[*github.com/xaionaro-go/avpipeline/kernel.Input]]
- */
-
 func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "configureRecoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/configureRecoder(ctx, %#+v): %v", cfg, _err) }()
 	if len(cfg.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
 	}
@@ -181,7 +180,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "initRecoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/initRecoder(ctx, %#+v): %v", cfg, _err) }()
+
 	if s.Recoder != nil {
 		return fmt.Errorf("internal error: an encoder is already initialized")
 	}
@@ -214,7 +216,10 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
+
 	encoderFactory := s.Recoder.EncoderFactory
 	if cfg.VideoTrackConfigs[0].CodecName != encoderFactory.VideoCodec {
 		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
@@ -245,6 +250,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 			logger.Errorf(ctx, "unable to get the current encoding quality")
 			q = quality.ConstantBitrate(0)
 		}
+		logger.Debugf(ctx, "current quality: %#+v; requested quality: %#+v", q, quality.ConstantBitrate(cfg.VideoTrackConfigs[0].AverageBitRate))
 
 		needsChangingBitrate := true
 		if q, ok := q.(quality.ConstantBitrate); ok {
@@ -254,6 +260,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 		}
 
 		if needsChangingBitrate && cfg.VideoTrackConfigs[0].AverageBitRate > 0 {
+			logger.Debugf(ctx, "bitrate needs changing...")
 			err := encoder.SetQuality(ctx, quality.ConstantBitrate(cfg.VideoTrackConfigs[0].AverageBitRate), nil)
 			if err != nil {
 				return fmt.Errorf("unable to set bitrate to %v: %w", cfg.VideoTrackConfigs[0].AverageBitRate, err)
@@ -276,13 +283,26 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	ctx context.Context,
 	cfg types.RecoderConfig,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureRecoderCopy(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureRecoderCopy(ctx, %#+v): %v", cfg, _err) }()
+
+	switchState := s.PassthroughSwitch.CurrentValue.Load()
+
 	err := s.PassthroughSwitch.SetValue(ctx, 1)
 	if err != nil {
 		return fmt.Errorf("unable to switch the pre-filter to passthrough: %w", err)
 	}
 	s.FilterThrottle.BitrateAveragingPeriod = cfg.VideoTrackConfigs[0].AveragingPeriod
 	s.FilterThrottle.AverageBitRate = cfg.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
+
+	if switchState == 0 { // was in the recoding state
+		// to avoid the recoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.
+		if err := s.Recoder.Reset(ctx); err != nil {
+			logger.Errorf(ctx, "unable to reset the recoder: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -451,6 +471,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
 			sinkRecoder, sinkPassthrough = nodeMapStreamIndices, nodeMapStreamIndices
 		case types.PassthroughModeNextOutput:
+			condRecoder = packetcondition.And{
+				s.PassthroughSwitch.Condition(0),
+				s.PostSwitchFilter.Condition(0),
+			}
+			condPassthrough = packetcondition.And{
+				s.PassthroughSwitch.Condition(1),
+				s.PostSwitchFilter.Condition(1),
+			}
 			sinkRecoder, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)

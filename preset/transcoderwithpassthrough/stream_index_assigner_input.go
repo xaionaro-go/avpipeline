@@ -48,6 +48,9 @@ func (s *streamIndexAssignerInput[C, P]) reload(
 func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 	ctx context.Context,
 ) {
+	logger.Tracef(ctx, "reloadLocked")
+	defer func() { logger.Tracef(ctx, "/reloadLocked") }()
+
 	if logger.FromCtx(ctx).Level() >= logger.LevelDebug {
 		logger.Debugf(ctx, "%#+v", spew.Sdump(s.StreamForward.RecodingConfig))
 	}

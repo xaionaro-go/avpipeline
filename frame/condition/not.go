@@ -19,7 +19,7 @@ func (n Not) String() string {
 
 func (n Not) Match(
 	ctx context.Context,
-	pkt frame.Input,
+	f frame.Input,
 ) bool {
-	return !n.Condition.Match(ctx, pkt)
+	return !n.Condition.Match(ctx, f)
 }

@@ -57,7 +57,7 @@ func (f *PacketFilter) SendInputFrame(
 	}
 	outputFramesCh <- frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.CodecContext,
+		input.CodecParameters,
 		input.StreamIndex,
 		input.StreamsCount,
 		input.StreamDuration,

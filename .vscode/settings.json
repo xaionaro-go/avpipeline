@@ -1,3 +1,9 @@
 {
-    "go.buildTags": "mediacodec,patched_libav,with_libsrt"
+    "go.buildTags": "mediacodec,patched_libav,with_libsrt",
+    "protoc": {
+        "options": [
+            "-I./protobuf/ -I./kernel/server/grpc"
+        ]
+    },
+    "go.showWelcome": false
 }

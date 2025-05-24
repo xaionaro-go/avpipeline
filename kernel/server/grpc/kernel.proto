@@ -1,0 +1,48 @@
+syntax = "proto3";
+package kernel;
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+import "libav.proto";
+import "avpipeline.proto";
+option go_package = "github.com/xaionaro-go/avpipeline/kernel/server/grpc/kernel";
+
+service Kernel {
+  rpc SendInputPacket(SendInputPacketRequest) returns (SendInputPacketReply) {}
+  rpc SendInputFrame(SendInputFrameRequest) returns (SendInputFrameReply) {}
+  rpc String(google.protobuf.Empty) returns (google.protobuf.StringValue) {}
+  rpc Close(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc CloseChan(google.protobuf.Empty) returns (stream google.protobuf.Empty) {}
+  rpc GeneratePackets(google.protobuf.Empty) returns (stream libav.Packet) {}
+  rpc GenerateFrame(google.protobuf.Empty) returns (stream libav.Frame) {}
+  rpc GetOutputFormatContext(google.protobuf.Empty) returns (GetOutputFormatContextReply) {}
+  rpc GetInputFormatContext(google.protobuf.Empty) returns (GetInputFormatContextReply) {}
+  rpc NotifyAboutPacketFormatContext(NotifyAboutPacketFormatContextRequest) returns (google.protobuf.Empty) {}
+}
+
+message SendInputPacketRequest {
+  libav.Packet packet = 1;
+  libav.Stream stream = 2;
+	avpipeline.Object source = 3;
+}
+
+message SendInputPacketReply {}
+
+message SendInputFrameRequest {
+  libav.Frame frame = 1;
+  libav.Stream stream = 2;
+	avpipeline.Object source = 3;
+}
+
+message SendInputFrameReply {}
+
+message NotifyAboutPacketFormatContextRequest {
+  libav.FormatContext formatContext = 1;
+}
+
+message GetOutputFormatContextReply {
+  optional libav.FormatContext formatContext = 1;
+}
+
+message GetInputFormatContextReply {
+  optional libav.FormatContext formatContext = 1;
+}

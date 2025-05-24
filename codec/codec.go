@@ -20,6 +20,8 @@ const (
 )
 
 type Codec struct {
+	InitParams            CodecParams
+	IsEncoder             bool
 	codec                 *astiav.Codec
 	codecContext          *astiav.CodecContext
 	hardwareDeviceContext *astiav.HardwareDeviceContext
@@ -29,27 +31,80 @@ type Codec struct {
 }
 
 func (c *Codec) Codec() *astiav.Codec {
-	return c.codec
+	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.Codec {
+		return c.codec
+	})
 }
 
 func (c *Codec) CodecContext() *astiav.CodecContext {
-	return c.codecContext
+	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.CodecContext {
+		return c.codecContext
+	})
+}
+
+func (c *Codec) MediaType() astiav.MediaType {
+	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.MediaType {
+		if c.codecContext == nil {
+			return astiav.MediaTypeUnknown
+		}
+		return c.codecContext.MediaType()
+	})
+}
+
+func (c *Codec) TimeBase() astiav.Rational {
+	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.Rational {
+		if c.codecContext == nil {
+			return astiav.Rational{}
+		}
+		return c.codecContext.TimeBase()
+	})
 }
 
 func (c *Codec) HardwareDeviceContext() *astiav.HardwareDeviceContext {
-	return c.hardwareDeviceContext
+	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.HardwareDeviceContext {
+		return c.hardwareDeviceContext
+	})
 }
 
 func (c *Codec) HardwarePixelFormat() astiav.PixelFormat {
-	return c.hardwarePixelFormat
+	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.PixelFormat {
+		return c.hardwarePixelFormat
+	})
 }
 
 func (c *Codec) Close(ctx context.Context) error {
+	return xsync.DoA1R1(ctx, &c.locker, c.closeLocked, ctx)
+}
+
+func (c *Codec) closeLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "closeLocked")
+	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
+	if c.closer == nil {
+		return nil
+	}
 	return c.closer.Close()
 }
 
 func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
-	return c.codecContext.ToCodecParameters(cp)
+	return xsync.DoR1(context.TODO(), &c.locker, func() error {
+		if c.codecContext == nil {
+			return fmt.Errorf("c.codecContext == nil")
+		}
+		return c.codecContext.ToCodecParameters(cp)
+	})
+}
+
+func (c *Codec) Reset(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	return xsync.DoA1R1(ctx, &c.locker, c.reset, ctx)
+}
+
+func (c *Codec) reset(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "reset")
+	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+	c.codecContext.FlushBuffers()
+	return nil
 }
 
 func findEncoderCodec(
@@ -91,20 +146,28 @@ func findCodec(
 
 func newCodec(
 	ctx context.Context,
-	codecName string,
-	codecParameters *astiav.CodecParameters,
 	isEncoder bool, // otherwise: decoder
-	hardwareDeviceType astiav.HardwareDeviceType,
-	hardwareDeviceName HardwareDeviceName,
-	timeBase astiav.Rational,
-	options *astiav.Dictionary,
-	flags int,
+	params CodecParams,
 ) (_ret *Codec, _err error) {
+	params = params.Clone(ctx)
+	codecName := params.CodecName
+	codecParameters := params.CodecParameters
+	hardwareDeviceType := params.HardwareDeviceType
+	hardwareDeviceName := params.HardwareDeviceName
+	timeBase := params.TimeBase
+	options := params.Options
+	flags := params.Flags
+
 	logger.Tracef(ctx, "newCodec(ctx, '%s', %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags)
+	defer func() {
+		logger.Tracef(ctx, "/newCodec(ctx, '%s', %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags, _ret, _err)
+	}()
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	c := &Codec{
-		closer: astikit.NewCloser(),
+		InitParams: params,
+		IsEncoder:  isEncoder,
+		closer:     astikit.NewCloser(),
 	}
 	defer func() {
 		if _err != nil {
@@ -236,7 +299,7 @@ func newCodec(
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
 		c.codecContext.SetSampleRate(codecParameters.SampleRate())
 		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
-		logger.Tracef(ctx, "sample_rate: %s", c.codecContext.SampleRate())
+		logger.Tracef(ctx, "sample_rate: %d", c.codecContext.SampleRate())
 	}
 
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {

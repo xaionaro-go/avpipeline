@@ -309,8 +309,8 @@ func (r *Router) WaitForRoute(
 	ctx context.Context,
 	path RoutePath,
 ) (_ret *Route, _err error) {
-	logger.Debugf(ctx, "WaitForRoute: %s")
-	defer func() { logger.Debugf(ctx, "/WaitForRoute: %s: %v %v", _ret, _err) }()
+	logger.Debugf(ctx, "WaitForRoute: %s", path)
+	defer func() { logger.Debugf(ctx, "/WaitForRoute: %s: %v %v", path, _ret, _err) }()
 	for {
 		select {
 		case <-ctx.Done():

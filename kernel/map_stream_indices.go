@@ -143,7 +143,7 @@ func (m *MapStreamIndices) getOutputStreamForPacketByIndex(
 func (m *MapStreamIndices) getOutputStreamForFrameByIndex(
 	ctx context.Context,
 	outputStreamIndex int,
-	codecCtx *astiav.CodecContext,
+	codecParams *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (*astiav.Stream, error) {
 	outputStream := m.outputStreams[outputStreamIndex]
@@ -151,9 +151,6 @@ func (m *MapStreamIndices) getOutputStreamForFrameByIndex(
 		return outputStream, nil
 	}
 
-	codecParams := astiav.AllocCodecParameters()
-	defer codecParams.Free()
-	codecCtx.ToCodecParameters(codecParams)
 	outputStream, err := m.newOutputStream(
 		ctx,
 		outputStreamIndex,
@@ -328,7 +325,7 @@ func (m *MapStreamIndices) sendInputFrame(
 		outputStream, err := m.getOutputStreamForFrameByIndex(
 			ctx,
 			outputStreamIndex,
-			input.CodecContext,
+			input.CodecParameters,
 			input.TimeBase,
 		)
 		if err != nil {
@@ -337,7 +334,7 @@ func (m *MapStreamIndices) sendInputFrame(
 
 		outFrame := frame.BuildOutput(
 			frame.CloneAsReferenced(input.Frame),
-			input.CodecContext,
+			input.CodecParameters,
 			outputStream.Index(),
 			len(m.outputStreams),
 			input.StreamDuration,

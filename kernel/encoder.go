@@ -50,6 +50,8 @@ func NewEncoder[EF codec.EncoderFactory](
 	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
 ) *Encoder[EF] {
+	logger.Tracef(ctx, "NewEncoder")
+	defer func() { logger.Tracef(ctx, "/NewEncoder") }()
 	e := &Encoder[EF]{
 		closeChan:           newCloseChan(),
 		EncoderFactory:      encoderFactory,
@@ -267,6 +269,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
+		logger.Debugf(ctx, "an encoder is not initialized, yet")
 		err := e.initEncoderAndOutputFor(ctx, input.GetStreamIndex(), input.CodecParameters(), input.GetStream().TimeBase())
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (packet): %w", err)
@@ -313,10 +316,8 @@ func (e *Encoder[EF]) sendInputFrame(
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
-		codecParams := astiav.AllocCodecParameters()
-		setFinalizerFree(ctx, codecParams)
-		input.CodecContext.ToCodecParameters(codecParams)
-		err := e.initEncoderAndOutputFor(ctx, input.StreamIndex, codecParams, input.GetTimeBase())
+		logger.Debugf(ctx, "an encoder is not initialized, yet")
+		err := e.initEncoderAndOutputFor(ctx, input.StreamIndex, input.CodecParameters, input.GetTimeBase())
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
@@ -388,8 +389,9 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
-			logger.Errorf(ctx, "DTS (%d) > PTS (%d); as a correction setting the DTS value to be the no-PTS magic value", pkt.Dts(), pkt.Pts())
-			pkt.SetDts(consts.NoPTSValue)
+			logger.Errorf(ctx, "DTS (%d) > PTS (%d) skipping the packet", pkt.Dts(), pkt.Pts())
+			packet.Pool.Put(pkt)
+			continue
 		}
 
 		if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {
@@ -468,5 +470,29 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 	if len(errs) == 0 {
 		return nil
 	}
+	return errors.Join(errs...)
+}
+
+func (e *Encoder[EF]) Reset(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	return xsync.DoA1R1(ctx, &e.Locker, e.reset, ctx)
+}
+
+func (e *Encoder[EF]) reset(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "reset")
+	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+
+	var errs []error
+	for streamIndex, encoder := range e.encoders {
+		if err := encoder.Reset(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to reset the encoder for stream #%d: %w", streamIndex, err))
+		}
+	}
+
 	return errors.Join(errs...)
 }

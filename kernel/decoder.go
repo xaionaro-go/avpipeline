@@ -17,9 +17,10 @@ import (
 type Decoder[DF codec.DecoderFactory] struct {
 	*closeChan
 
-	DecoderFactory DF
-	Locker         xsync.Mutex
-	Decoders       map[int]*codec.Decoder
+	DecoderFactory        DF
+	Locker                xsync.Mutex
+	Decoders              map[int]*codec.Decoder
+	OutputCodecParameters map[int]*astiav.CodecParameters
 
 	FormatContext *astiav.FormatContext
 }
@@ -32,10 +33,11 @@ func NewDecoder[DF codec.DecoderFactory](
 	decoderFactory DF,
 ) *Decoder[DF] {
 	d := &Decoder[DF]{
-		closeChan:      newCloseChan(),
-		DecoderFactory: decoderFactory,
-		Decoders:       map[int]*codec.Decoder{},
-		FormatContext:  astiav.AllocFormatContext(),
+		closeChan:             newCloseChan(),
+		DecoderFactory:        decoderFactory,
+		Decoders:              map[int]*codec.Decoder{},
+		FormatContext:         astiav.AllocFormatContext(),
+		OutputCodecParameters: map[int]*astiav.CodecParameters{},
 	}
 	setFinalizerFree(ctx, d.FormatContext)
 	return d
@@ -120,7 +122,7 @@ func (d *Decoder[DF]) sendInputPacket(
 	}
 
 	if !encoderCopyDTSPTS {
-		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.CodecContext().TimeBase())
+		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())
 	}
 
 	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
@@ -152,20 +154,21 @@ func (d *Decoder[DF]) sendInputPacket(
 				return false, fmt.Errorf("internal error: TimeBase is not set")
 			}
 			f.SetPictureType(astiav.PictureTypeNone)
+			frameToSend := frame.BuildOutput(
+				f,
+				d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
+				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
+				input.Stream.Duration(),
+				timeBase,
+				input.Packet.Pos(), input.Packet.Duration(),
+			)
 			ret, err := true, nil
 			d.Locker.UDo(ctx, func() {
 				select {
 				case <-ctx.Done():
 					ret, err = false, ctx.Err()
 					return
-				case outputFramesCh <- frame.BuildOutput(
-					f,
-					decoder.CodecContext(),
-					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
-					input.Stream.Duration(),
-					timeBase,
-					input.Packet.Pos(), input.Packet.Duration(),
-				):
+				case outputFramesCh <- frameToSend:
 				}
 			})
 			return ret, err
@@ -179,6 +182,22 @@ func (d *Decoder[DF]) sendInputPacket(
 	}
 
 	return nil
+}
+
+func (d *Decoder[DF]) getOutputCodecParameters(
+	ctx context.Context,
+	streamIndex int,
+	decoder *codec.Decoder,
+) *astiav.CodecParameters {
+	if v, ok := d.OutputCodecParameters[streamIndex]; ok {
+		return v
+	}
+
+	codecParams := astiav.AllocCodecParameters()
+	setFinalizerFree(ctx, codecParams)
+	decoder.ToCodecParameters(codecParams)
+	d.OutputCodecParameters[streamIndex] = codecParams
+	return codecParams
 }
 
 func (d *Decoder[DF]) SendInputFrame(
@@ -217,5 +236,29 @@ func (d *Decoder[DF]) NotifyAboutPacketSource(
 	if len(errs) == 0 {
 		return nil
 	}
+	return errors.Join(errs...)
+}
+
+func (d *Decoder[DF]) Reset(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	return xsync.DoA1R1(ctx, &d.Locker, d.reset, ctx)
+}
+
+func (d *Decoder[DF]) reset(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "reset")
+	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+
+	var errs []error
+	for streamIndex, decoder := range d.Decoders {
+		if err := decoder.Reset(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to reset the decoder for stream #%d: %w", streamIndex, err))
+		}
+	}
+
 	return errors.Join(errs...)
 }

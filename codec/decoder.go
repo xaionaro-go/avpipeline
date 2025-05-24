@@ -27,14 +27,16 @@ func NewDecoder(
 	codecParameters.Copy(_codecParameters)
 	c, err := newCodec(
 		ctx,
-		codecName,
-		_codecParameters,
 		false,
-		hardwareDeviceType,
-		hardwareDeviceName,
-		astiav.NewRational(0, 0),
-		options,
-		flags,
+		CodecParams{
+			CodecName:          codecName,
+			CodecParameters:    _codecParameters,
+			HardwareDeviceType: hardwareDeviceType,
+			HardwareDeviceName: hardwareDeviceName,
+			TimeBase:           astiav.NewRational(0, 0),
+			Options:            options,
+			Flags:              flags,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -51,7 +53,7 @@ func (d *Decoder) SendPacket(
 	p *astiav.Packet,
 ) error {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() error {
-		return d.CodecContext().SendPacket(p)
+		return d.codecContext.SendPacket(p)
 	})
 }
 
@@ -60,7 +62,7 @@ func (d *Decoder) ReceiveFrame(
 	f *astiav.Frame,
 ) error {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() error {
-		return d.CodecContext().ReceiveFrame(f)
+		return d.codecContext.ReceiveFrame(f)
 	})
 }
 

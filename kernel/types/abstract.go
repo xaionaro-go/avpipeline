@@ -50,4 +50,29 @@ func () Generate(
 ) error {
 }
 
+== for a packet source also: ==
+
+func () WithOutputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+
+}
+
+== for a packet sink also: ==
+
+func () WithInputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+
+}
+
+func () NotifyAboutPacketSource(
+	ctx context.Context,
+	source packet.Source,
+) error {
+
+}
+
 */

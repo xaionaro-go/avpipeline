@@ -28,16 +28,17 @@ type Encoder interface {
 	ToCodecParameters(cp *astiav.CodecParameters) error
 	HardwareDeviceContext() *astiav.HardwareDeviceContext
 	HardwarePixelFormat() astiav.PixelFormat
+	TimeBase() astiav.Rational
 	SendFrame(context.Context, *astiav.Frame) error
 	ReceivePacket(context.Context, *astiav.Packet) error
 	GetQuality(ctx context.Context) Quality
 	SetQuality(context.Context, Quality, condition.Condition) error
+	Reset(ctx context.Context) error
 }
 
 type EncoderFullBackend = Codec
 type EncoderFull struct {
 	*EncoderFullBackend
-	Params  EncoderParams
 	Quality Quality
 	InitTS  time.Time
 	Next    typing.Optional[SwitchEncoderParams]
@@ -50,20 +51,12 @@ type SwitchEncoderParams struct {
 
 var _ Encoder = (*EncoderFull)(nil)
 
-type EncoderParams struct {
-	CodecName          string
-	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType astiav.HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	TimeBase           astiav.Rational
-	Options            *astiav.Dictionary
-	Flags              int
-}
-
 func NewEncoder(
 	ctx context.Context,
-	params EncoderParams,
+	params CodecParams,
 ) (_ret Encoder, _err error) {
+	logger.Tracef(ctx, "NewEncoder")
+	defer func() { logger.Tracef(ctx, "/NewEncoder: %T %v", _ret, _err) }()
 	if params.CodecName == CodecNameCopy {
 		return EncoderCopy{}, nil
 	}
@@ -76,21 +69,12 @@ func NewEncoder(
 
 func newEncoder(
 	ctx context.Context,
-	params EncoderParams,
+	params CodecParams,
 	overrideQuality Quality,
 ) (_ret *EncoderFull, _err error) {
-	if params.CodecParameters != nil {
-		cp := astiav.AllocCodecParameters()
-		setFinalizerFree(ctx, cp)
-		params.CodecParameters.Copy(cp)
-		params.CodecParameters = cp
-	}
-	if params.Options != nil {
-		opts := astiav.NewDictionary()
-		setFinalizerFree(ctx, opts)
-		opts.Unpack(params.Options.Pack())
-		params.Options = opts
-	}
+	logger.Tracef(ctx, "newEncoder")
+	defer func() { logger.Tracef(ctx, "/newEncoder: %p %v", _ret, _err) }()
+	params = params.Clone(ctx)
 	if overrideQuality != nil {
 		if params.CodecParameters == nil {
 			params.CodecParameters = astiav.AllocCodecParameters()
@@ -103,21 +87,14 @@ func newEncoder(
 	}
 	c, err := newCodec(
 		ctx,
-		params.CodecName,
-		params.CodecParameters,
 		true,
-		params.HardwareDeviceType,
-		params.HardwareDeviceName,
-		params.TimeBase,
-		params.Options,
-		params.Flags,
+		params,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &EncoderFull{
 		EncoderFullBackend: c,
-		Params:             params,
 		InitTS:             time.Now(),
 	}, nil
 }
@@ -135,15 +112,15 @@ func (e *EncoderFull) SendFrame(
 	f *astiav.Frame,
 ) error {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() error {
-		return e.sendFrameNoLock(ctx, f)
+		return e.sendFrameLocked(ctx, f)
 	})
 }
 
-func (e *EncoderFull) sendFrameNoLock(
+func (e *EncoderFull) sendFrameLocked(
 	_ context.Context,
 	f *astiav.Frame,
 ) error {
-	return e.CodecContext().SendFrame(f)
+	return e.codecContext.SendFrame(f)
 }
 
 func (e *EncoderFull) ReceivePacket(
@@ -151,15 +128,15 @@ func (e *EncoderFull) ReceivePacket(
 	p *astiav.Packet,
 ) error {
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() error {
-		return e.receivePacketNoLock(ctx, p)
+		return e.receivePacketLocked(ctx, p)
 	})
 }
 
-func (e *EncoderFull) receivePacketNoLock(
+func (e *EncoderFull) receivePacketLocked(
 	ctx context.Context,
 	p *astiav.Packet,
 ) (err error) {
-	err = e.CodecContext().ReceivePacket(p)
+	err = e.codecContext.ReceivePacket(p)
 	if !e.Next.IsSet() {
 		return
 	}
@@ -180,13 +157,20 @@ func (e *EncoderFull) receivePacketNoLock(
 func (e *EncoderFull) GetQuality(
 	ctx context.Context,
 ) Quality {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() Quality {
-		bitRate := e.codecContext.BitRate()
-		if bitRate != 0 {
-			return quality.ConstantBitrate(e.codecContext.BitRate())
-		}
-		return nil
-	})
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.getQualityLocked, ctx)
+}
+
+func (e *EncoderFull) getQualityLocked(
+	ctx context.Context,
+) Quality {
+	if e.codecContext == nil {
+		panic(fmt.Errorf("e.codecContext == nil"))
+	}
+	bitRate := e.codecContext.BitRate()
+	if bitRate != 0 {
+		return quality.ConstantBitrate(e.codecContext.BitRate())
+	}
+	return nil
 }
 
 func (e *EncoderFull) SetQuality(
@@ -196,10 +180,10 @@ func (e *EncoderFull) SetQuality(
 ) (_err error) {
 	logger.Debugf(ctx, "SetQuality(ctx, %#+v)", q)
 	defer func() { logger.Tracef(ctx, "/SetQuality(ctx, %#+v): %v", q, _err) }()
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setQualityNoLock, ctx, q, when)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setQualityLocked, ctx, q, when)
 }
 
-func (e *EncoderFull) setQualityNoLock(
+func (e *EncoderFull) setQualityLocked(
 	ctx context.Context,
 	q Quality,
 	when condition.Condition,
@@ -207,7 +191,7 @@ func (e *EncoderFull) setQualityNoLock(
 	if when == nil {
 		return e.setQualityNow(ctx, q)
 	}
-	logger.Tracef(ctx, "setQualityNoLock(): will set the new quality when condition '%s' is satisfied", when)
+	logger.Tracef(ctx, "setQualityLocked(): will set the new quality when condition '%s' is satisfied", when)
 	e.Next.Set(SwitchEncoderParams{
 		When:    when,
 		Quality: q,
@@ -240,17 +224,19 @@ func (e *EncoderFull) setQualityNow(
 	}
 }
 
-func (e *EncoderFull) Close(ctx context.Context) error {
-	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.closeNoLock, ctx)
+func (e *EncoderFull) Close(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Close")
+	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.closeLocked, ctx)
 }
 
-func (e *EncoderFull) closeNoLock(ctx context.Context) error {
+func (e *EncoderFull) closeLocked(ctx context.Context) error {
 	var result []error
-	if err := e.EncoderFullBackend.Close(ctx); err != nil {
+	if err := e.EncoderFullBackend.closeLocked(ctx); err != nil {
 		result = append(result, fmt.Errorf("unable to close the old encoder: %w", err))
 	}
-	e.Params.Options = nil
-	e.Params.CodecParameters = nil
+	e.InitParams.Options = nil
+	e.InitParams.CodecParameters = nil
 	return errors.Join(result...)
 }
 
@@ -263,12 +249,13 @@ func (e *EncoderFull) setQualityGeneric(
 		return nil
 	}
 	logger.Infof(ctx, "SetQuality (generic): %T(%v)", q, q)
-	e.Params.CodecParameters.SetBitRate(0)
-	newEncoder, err := newEncoder(ctx, e.Params, q)
+	e.InitParams.CodecParameters.SetBitRate(0)
+	// TODO: consider user Reset() instead of reimplementing the same logic
+	newEncoder, err := newEncoder(ctx, e.InitParams, q)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder for quality %#+v: %w", q, err)
 	}
-	if err := e.closeNoLock(ctx); err != nil {
+	if err := e.closeLocked(ctx); err != nil {
 		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
 	}
 	*e = *newEncoder

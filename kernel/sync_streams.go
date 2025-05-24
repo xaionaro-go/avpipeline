@@ -95,7 +95,7 @@ func (s *SyncStreams) SendInputFrame(
 		ctx,
 		types.InputPacketOrFrameUnion{Frame: ptr(frame.BuildInput(
 			frame.CloneAsReferenced(input.Frame),
-			input.CodecContext,
+			input.CodecParameters,
 			input.StreamIndex, input.StreamsCount,
 			input.StreamDuration,
 			input.TimeBase,

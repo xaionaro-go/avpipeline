@@ -27,10 +27,10 @@ func (s Or) String() string {
 
 func (s Or) Match(
 	ctx context.Context,
-	pkt frame.Input,
+	f frame.Input,
 ) bool {
 	for _, item := range s {
-		if item.Match(ctx, pkt) {
+		if item.Match(ctx, f) {
 			return true
 		}
 	}

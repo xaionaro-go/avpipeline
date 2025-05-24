@@ -8,6 +8,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
+// TODO: delete me
 type EncoderCopy struct{}
 
 var _ Encoder = (*EncoderCopy)(nil)
@@ -40,6 +41,10 @@ func (EncoderCopy) HardwarePixelFormat() astiav.PixelFormat {
 	return 0
 }
 
+func (EncoderCopy) TimeBase() astiav.Rational {
+	panic(fmt.Errorf("'copy' needs to be processed manually"))
+}
+
 func (EncoderCopy) SendFrame(context.Context, *astiav.Frame) error {
 	return fmt.Errorf("'copy' needs to be processed manually")
 }
@@ -56,4 +61,8 @@ func (EncoderCopy) GetQuality(
 
 func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) error {
 	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
+}
+
+func (EncoderCopy) Reset(context.Context) error {
+	return nil
 }

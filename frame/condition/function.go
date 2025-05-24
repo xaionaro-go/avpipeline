@@ -15,6 +15,6 @@ func (fn Function) String() string {
 	return fmt.Sprintf("<custom_function:%p>", fn)
 }
 
-func (fn Function) Match(ctx context.Context, pkt frame.Input) bool {
-	return fn(ctx, pkt)
+func (fn Function) Match(ctx context.Context, f frame.Input) bool {
+	return fn(ctx, f)
 }

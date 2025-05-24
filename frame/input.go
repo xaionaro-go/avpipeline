@@ -10,7 +10,7 @@ type Input Commons
 
 func BuildInput(
 	f *astiav.Frame,
-	codecCtx *astiav.CodecContext,
+	codecParameters *astiav.CodecParameters,
 	streamIndex, streamsCount int,
 	streamDuration int64,
 	timeBase astiav.Rational,
@@ -18,14 +18,14 @@ func BuildInput(
 	duration int64,
 ) Input {
 	return Input{
-		Frame:          f,
-		CodecContext:   codecCtx,
-		StreamIndex:    streamIndex,
-		StreamsCount:   streamsCount,
-		StreamDuration: streamDuration,
-		TimeBase:       timeBase,
-		Pos:            pos,
-		Duration:       duration,
+		Frame:           f,
+		CodecParameters: codecParameters,
+		StreamIndex:     streamIndex,
+		StreamsCount:    streamsCount,
+		StreamDuration:  streamDuration,
+		TimeBase:        timeBase,
+		Pos:             pos,
+		Duration:        duration,
 	}
 }
 
@@ -43,10 +43,6 @@ func (f *Input) GetSize() int {
 
 func (f *Input) GetStreamIndex() int {
 	return (*Commons)(f).GetStreamIndex()
-}
-
-func (f *Input) GetCodecContext() *astiav.CodecContext {
-	return (*Commons)(f).GetCodecContext()
 }
 
 func (f *Input) GetDurationAsDuration() time.Duration {
