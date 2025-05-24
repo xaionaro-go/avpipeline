@@ -43,7 +43,11 @@ func (n *NoServe[T]) DotBlockContentStringWriteTo(
 }
 
 func (n *NoServe[T]) String() string {
-	return fmt.Sprintf("NoServe(%s)", n.Node)
+	stringer, ok := any(n.Node).(fmt.Stringer)
+	if !ok {
+		return "NoServe"
+	}
+	return fmt.Sprintf("NoServe(%s)", stringer)
 }
 
 func (n *NoServe[T]) GetPushPacketsTos() node.PushPacketsTos {

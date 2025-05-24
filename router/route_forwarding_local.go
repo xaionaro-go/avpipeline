@@ -89,7 +89,7 @@ type forwardOutputNodeLocalPath[T any] struct {
 }
 
 func (n *forwardOutputNodeLocalPath[T]) String() string {
-	return n.NodeRouting.CustomData.String()
+	return n.NodeRouting.CustomData.(*Route[T]).String()
 }
 
 func (n *forwardOutputNodeLocalPath[T]) Close(
@@ -99,8 +99,8 @@ func (n *forwardOutputNodeLocalPath[T]) Close(
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
 	dstRoute := n.NodeRouting.CustomData
-	dstRoute.Node.Locker.Do(ctx, func() {
-		if _, err := dstRoute.RemovePublisherLocked(ctx, n.RouteForwarding); err != nil {
+	dstRoute.(*Route[T]).Node.Locker.Do(ctx, func() {
+		if _, err := dstRoute.(*Route[T]).RemovePublisherLocked(ctx, n.RouteForwarding); err != nil {
 			errs = append(errs, fmt.Errorf("dstRoute.removePublisher: %w", err))
 		}
 	})
@@ -110,7 +110,7 @@ func (n *forwardOutputNodeLocalPath[T]) Close(
 func (n *forwardOutputNodeLocalPath[T]) GetOutputRoute(
 	ctx context.Context,
 ) *Route[T] {
-	return n.NodeRouting.CustomData
+	return n.NodeRouting.CustomData.(*Route[T])
 }
 
 var _ Publisher[any] = (*RouteForwarding[any])(nil)

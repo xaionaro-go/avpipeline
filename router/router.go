@@ -59,7 +59,7 @@ func (r *Router[T]) init(
 ) {
 	observability.Go(ctx, func() {
 		for err := range r.ErrorChan {
-			route := err.Node.(*NodeRouting[T]).CustomData
+			route := err.Node.(*NodeRouting[T]).CustomData.(*Route[T])
 			if route == nil {
 				logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
 				continue

@@ -302,6 +302,10 @@ func (o *Output) Close(
 
 	var result []error
 	o.formatContextLocker.Do(ctx, func() {
+		if o.FormatContext == nil {
+			logger.Debugf(ctx, "already closed")
+			return
+		}
 		if o.started && len(o.FormatContext.Streams()) != 0 {
 			err := func() error {
 				defer func() {

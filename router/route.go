@@ -59,7 +59,7 @@ func newRoute[T any](
 		CancelFunc:           cancelFn,
 	}
 	close(r.PublishersChangeChan)
-	r.Node = node.NewWithCustomDataFromKernel[*Route[T]](
+	r.Node = node.NewWithCustomDataFromKernel[GoBug63285RouteInterface[T]](
 		ctx,
 		kernel.NewMapStreamIndices(ctx, nil),
 		processor.DefaultOptionsRecoder()...,

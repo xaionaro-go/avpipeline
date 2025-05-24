@@ -13,8 +13,21 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
+// unfortunately there is a bug in Go compiler that leads to compilation errors:
+// > fatal error: all goroutines are asleep - deadlock!
+//
+// to workaround the issue we do not reference type `*Route[T]` directly in `NodeRouting`,
+// and instead we add this interface type.
+//
+// TODO: delete me after https://github.com/golang/go/issues/63285 is fixed
+type GoBug63285RouteInterface[T any] interface {
+	GetPublishers(
+		ctx context.Context,
+	) Publishers[T]
+}
+
 type ProcessorRouting = processor.FromKernel[*kernel.MapStreamIndices]
-type NodeRouting[T any] = node.NodeWithCustomData[*Route[T], *ProcessorRouting]
+type NodeRouting[T any] = node.NodeWithCustomData[GoBug63285RouteInterface[T], *ProcessorRouting]
 
 type Sender interface {
 	Close(context.Context) error

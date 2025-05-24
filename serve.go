@@ -45,9 +45,9 @@ func serve[T node.Abstract](
 	for _, n := range nodes {
 		func(n T) {
 			if tooVerbosePTRTracing && logger.FromCtx(ctx).Level() >= logger.LevelTrace {
-				ctx = logger.CtxWithLogger(ctx, logger.FromCtx(ctx).WithMessagePrefix(fmt.Sprintf("%p: ", n)))
-				ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", n))
-				ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", n.GetProcessor()))
+				ctx = logger.CtxWithLogger(ctx, logger.FromCtx(ctx).WithMessagePrefix(fmt.Sprintf("%p: ", any(n))))
+				ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", any(n)))
+				ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", any(n.GetProcessor())))
 			}
 			logger.Tracef(ctx, "Serve[%s]: %p", n, n)
 			if _, ok := dstAlreadyVisited[n]; ok {
