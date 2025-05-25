@@ -48,6 +48,8 @@ type OutputConfig struct {
 	CustomOptions types.DictionaryItems
 	AsyncOpen     bool
 	OnOpened      func(context.Context, *Output) error
+
+	ErrorOnNSequentialInvalidDTS uint
 }
 
 type OutputStream struct {
@@ -74,6 +76,9 @@ type Output struct {
 	OutputStreams map[int]*OutputStream
 	Filter        condition.Condition
 	SenderLocker  xsync.Mutex
+	Config        OutputConfig
+
+	SequentialInvalidPacketsCount uint
 
 	ioContext *astiav.IOContext
 	proxy     *proxy.TCPProxy
@@ -141,6 +146,7 @@ func NewOutputFromURL(
 		StreamKey:     streamKey,
 		InputStreams:  make(map[int]OutputInputStream),
 		OutputStreams: make(map[int]*OutputStream),
+		Config:        cfg,
 		closeChan:     newCloseChan(),
 
 		waitingKeyFrames: make(map[int]struct{}),
@@ -714,6 +720,12 @@ func (o *Output) doWritePacket(
 		pkt.SetDts(pkt.Pts())
 	}
 	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
+		o.SequentialInvalidPacketsCount++
+		if o.Config.ErrorOnNSequentialInvalidDTS > 0 {
+			if o.SequentialInvalidPacketsCount > o.Config.ErrorOnNSequentialInvalidDTS {
+				return fmt.Errorf("received %d sequential invalid DTSes, the session seems broken", o.SequentialInvalidPacketsCount)
+			}
+		}
 		// TODO: do not skip B-frames
 		logger.Errorf(ctx,
 			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d <= %d",
@@ -724,6 +736,7 @@ func (o *Output) doWritePacket(
 		)
 		return nil
 	}
+	o.SequentialInvalidPacketsCount = 0
 
 	pkt.SetStreamIndex(outputStream.Index())
 	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
