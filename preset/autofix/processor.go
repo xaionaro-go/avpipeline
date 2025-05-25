@@ -11,11 +11,11 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-var _ processor.Abstract = (*AutoFixer[struct{}])(nil)
-var _ packet.Source = (*AutoFixer[struct{}])(nil)
-var _ packet.Sink = (*AutoFixer[struct{}])(nil)
+var _ processor.Abstract = (*AutoFixerWithCustomData[struct{}])(nil)
+var _ packet.Source = (*AutoFixerWithCustomData[struct{}])(nil)
+var _ packet.Sink = (*AutoFixerWithCustomData[struct{}])(nil)
 
-func (a *AutoFixer[T]) Close(ctx context.Context) error {
+func (a *AutoFixerWithCustomData[T]) Close(ctx context.Context) error {
 	var errs []error
 	if a.AutoHeadersNode != nil {
 		if err := a.AutoHeadersNode.Processor.Close(ctx); err != nil {
@@ -28,41 +28,41 @@ func (a *AutoFixer[T]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (a *AutoFixer[T]) SendInputPacketChan() chan<- packet.Input {
+func (a *AutoFixerWithCustomData[T]) SendInputPacketChan() chan<- packet.Input {
 	return a.Input().GetProcessor().SendInputPacketChan()
 }
 
-func (a *AutoFixer[T]) OutputPacketChan() <-chan packet.Output {
+func (a *AutoFixerWithCustomData[T]) OutputPacketChan() <-chan packet.Output {
 	return a.Output().GetProcessor().OutputPacketChan()
 }
 
-func (a *AutoFixer[T]) SendInputFrameChan() chan<- frame.Input {
+func (a *AutoFixerWithCustomData[T]) SendInputFrameChan() chan<- frame.Input {
 	return a.Input().GetProcessor().SendInputFrameChan()
 }
 
-func (a *AutoFixer[T]) OutputFrameChan() <-chan frame.Output {
+func (a *AutoFixerWithCustomData[T]) OutputFrameChan() <-chan frame.Output {
 	return a.Output().GetProcessor().OutputFrameChan()
 }
 
-func (a *AutoFixer[T]) ErrorChan() <-chan error {
+func (a *AutoFixerWithCustomData[T]) ErrorChan() <-chan error {
 	panic("not supported")
 }
 
-func (a *AutoFixer[T]) WithOutputFormatContext(
+func (a *AutoFixerWithCustomData[T]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	a.MapStreamIndicesNode.Processor.Kernel.WithOutputFormatContext(ctx, callback)
 }
 
-func (a *AutoFixer[T]) WithInputFormatContext(
+func (a *AutoFixerWithCustomData[T]) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	a.MapStreamIndicesNode.Processor.Kernel.WithInputFormatContext(ctx, callback)
 }
 
-func (a *AutoFixer[T]) NotifyAboutPacketSource(
+func (a *AutoFixerWithCustomData[T]) NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
 ) error {

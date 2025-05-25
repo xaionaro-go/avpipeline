@@ -12,19 +12,23 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-type AutoFixer[T any] struct {
+type AutoFixer = AutoFixerWithCustomData[DefaultCustomData]
+
+type AutoFixerWithCustomData[T any] struct {
 	AutoHeadersNode      *autoheaders.NodeWithCustomData[T]
 	MapStreamIndicesNode *node.NodeWithCustomData[T, *processor.FromKernel[*kernel.MapStreamIndices]]
 }
 
-var _ node.DotBlockContentStringWriteToer = (*AutoFixer[any])(nil)
+var _ node.DotBlockContentStringWriteToer = (*AutoFixerWithCustomData[any])(nil)
+
+type DefaultCustomData struct{}
 
 func New(
 	ctx context.Context,
 	forInput packet.Source,
 	forOutput packet.Sink,
-) *AutoFixer[struct{}] {
-	return NewWithCustomData[struct{}](
+) *AutoFixer {
+	return NewWithCustomData[DefaultCustomData](
 		ctx,
 		forInput,
 		forOutput,
@@ -37,7 +41,7 @@ func NewWithCustomData[T any](
 	forInput packet.Source,
 	forOutput packet.Sink,
 	customData T,
-) *AutoFixer[T] {
+) *AutoFixerWithCustomData[T] {
 	var zeroT T
 	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, forInput, forOutput)
 
@@ -62,7 +66,7 @@ func NewWithCustomData[T any](
 		streamIndexAssigner = streamIndexAssignerFLV{}
 	}
 
-	a := &AutoFixer[T]{
+	a := &AutoFixerWithCustomData[T]{
 		AutoHeadersNode: autoheaders.NewNodeWithCustomData[T](ctx, forInput, forOutput),
 		MapStreamIndicesNode: node.NewWithCustomData[T](
 			processor.NewFromKernel(
@@ -80,13 +84,13 @@ func NewWithCustomData[T any](
 	return a
 }
 
-func (a *AutoFixer[T]) Input() node.Abstract {
+func (a *AutoFixerWithCustomData[T]) Input() node.Abstract {
 	if a.AutoHeadersNode != nil {
 		return a.AutoHeadersNode
 	}
 	return a.MapStreamIndicesNode
 }
 
-func (a *AutoFixer[T]) Output() *node.NodeWithCustomData[T, *processor.FromKernel[*kernel.MapStreamIndices]] {
+func (a *AutoFixerWithCustomData[T]) Output() *node.NodeWithCustomData[T, *processor.FromKernel[*kernel.MapStreamIndices]] {
 	return a.MapStreamIndicesNode
 }

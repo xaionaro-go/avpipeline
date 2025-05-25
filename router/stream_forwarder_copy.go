@@ -23,7 +23,7 @@ type StreamForwarderCopy[CS any, PS processor.Abstract] struct {
 	xsync.Mutex
 	CancelFunc     context.CancelFunc
 	Input          *node.NodeWithCustomData[CS, PS]
-	AutoFixer      *autofix.AutoFixer[CS]
+	AutoFixer      *autofix.AutoFixerWithCustomData[CS]
 	AutoFixerInput *nodewrapper.NoServe[node.Abstract]
 	Output         node.Abstract
 }

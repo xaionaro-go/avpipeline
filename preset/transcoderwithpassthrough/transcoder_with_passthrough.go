@@ -46,8 +46,8 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	MapOutputStreamIndices    *kernel.MapStreamIndices
 	NodeRecoder               *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 
-	NodeStreamFixerMain        *autofix.AutoFixer[struct{}]
-	NodeStreamFixerPassthrough *autofix.AutoFixer[struct{}]
+	NodeStreamFixerMain        *autofix.AutoFixer
+	NodeStreamFixerPassthrough *autofix.AutoFixer
 
 	RecodingConfig types.RecoderConfig
 

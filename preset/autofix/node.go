@@ -5,43 +5,46 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
-	"github.com/xaionaro-go/avpipeline"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/observability"
 )
 
-var _ node.Abstract = (*AutoFixer[struct{}])(nil)
+var _ node.Abstract = (*AutoFixerWithCustomData[struct{}])(nil)
 
-func (a *AutoFixer[T]) Serve(
+func (a *AutoFixerWithCustomData[T]) Serve(
 	ctx context.Context,
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
-	var nodes []node.Abstract
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	if a.AutoHeadersNode != nil {
-		nodes = append(nodes, a.AutoHeadersNode)
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			a.AutoHeadersNode.Serve(ctx, cfg, errCh)
+		})
 	}
 	if a.MapStreamIndicesNode != nil {
-		nodes = append(nodes, a.MapStreamIndicesNode)
+		defer wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			a.MapStreamIndicesNode.Serve(ctx, cfg, errCh)
+		})
 	}
-	avpipeline.Serve(
-		ctx,
-		avpipeline.ServeConfig{
-			EachNode: cfg,
-		},
-		errCh,
-		nodes...,
-	)
 }
 
-func (a *AutoFixer[T]) String() string {
+func (a *AutoFixerWithCustomData[T]) String() string {
 	return "AutoFixer"
 }
 
-func (a *AutoFixer[T]) DotBlockContentStringWriteTo(
+func (a *AutoFixerWithCustomData[T]) DotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
@@ -69,31 +72,31 @@ func (a *AutoFixer[T]) DotBlockContentStringWriteTo(
 	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.GetProcessor(), a.Output().GetProcessor())
 }
 
-func (a *AutoFixer[T]) GetPushPacketsTos() node.PushPacketsTos {
+func (a *AutoFixerWithCustomData[T]) GetPushPacketsTos() node.PushPacketsTos {
 	return a.Output().GetPushPacketsTos()
 }
 
-func (a *AutoFixer[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetcondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetcondition.Condition) {
 	a.Output().AddPushPacketsTo(dst, conds...)
 }
 
-func (a *AutoFixer[T]) SetPushPacketsTos(pushTos node.PushPacketsTos) {
+func (a *AutoFixerWithCustomData[T]) SetPushPacketsTos(pushTos node.PushPacketsTos) {
 	a.Output().SetPushPacketsTos(pushTos)
 }
 
-func (a *AutoFixer[T]) GetPushFramesTos() node.PushFramesTos {
+func (a *AutoFixerWithCustomData[T]) GetPushFramesTos() node.PushFramesTos {
 	return a.Output().GetPushFramesTos()
 }
 
-func (a *AutoFixer[T]) AddPushFramesTo(dst node.Abstract, conds ...framecondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(dst node.Abstract, conds ...framecondition.Condition) {
 	a.Output().AddPushFramesTo(dst, conds...)
 }
 
-func (a *AutoFixer[T]) SetPushFramesTos(pushTos node.PushFramesTos) {
+func (a *AutoFixerWithCustomData[T]) SetPushFramesTos(pushTos node.PushFramesTos) {
 	a.Output().SetPushFramesTos(pushTos)
 }
 
-func (a *AutoFixer[T]) GetStatistics() *node.Statistics {
+func (a *AutoFixerWithCustomData[T]) GetStatistics() *node.Statistics {
 	inputStats := a.Input().GetStatistics().Convert()
 	outputStats := a.Output().GetStatistics().Convert()
 	return node.FromProcessingStatistics(&node.ProcessingStatistics{
@@ -104,22 +107,22 @@ func (a *AutoFixer[T]) GetStatistics() *node.Statistics {
 	})
 }
 
-func (a *AutoFixer[T]) GetProcessor() processor.Abstract {
+func (a *AutoFixerWithCustomData[T]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *AutoFixer[T]) GetInputPacketCondition() packetcondition.Condition {
+func (a *AutoFixerWithCustomData[T]) GetInputPacketCondition() packetcondition.Condition {
 	return a.Input().GetInputPacketCondition()
 }
 
-func (a *AutoFixer[T]) SetInputPacketCondition(cond packetcondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) SetInputPacketCondition(cond packetcondition.Condition) {
 	a.Input().SetInputPacketCondition(cond)
 }
 
-func (a *AutoFixer[T]) GetInputFrameCondition() framecondition.Condition {
+func (a *AutoFixerWithCustomData[T]) GetInputFrameCondition() framecondition.Condition {
 	return a.Input().GetInputFrameCondition()
 }
 
-func (a *AutoFixer[T]) SetInputFrameCondition(cond framecondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) SetInputFrameCondition(cond framecondition.Condition) {
 	a.Input().SetInputFrameCondition(cond)
 }

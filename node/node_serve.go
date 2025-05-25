@@ -73,7 +73,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 	if err := xsync.DoR1(ctx, &n.Locker, func() error {
 		if n.IsServing {
-			logger.Debugf(ctx, "double-start: %s", nodeKey)
+			logger.Debugf(ctx, "double-start: %T: %s", n.CustomData, nodeKey)
 			return ErrAlreadyStarted{}
 		}
 		n.IsServing = true
