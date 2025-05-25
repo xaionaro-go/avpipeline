@@ -2,7 +2,9 @@ package autofix
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/xaionaro-go/avpipeline"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
@@ -43,9 +45,28 @@ func (a *AutoFixer[T]) DotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
-	if writeToer, ok := any(a.Input()).(node.DotBlockContentStringWriteToer); ok {
-		writeToer.DotBlockContentStringWriteTo(w, alreadyPrinted)
+	if a == nil {
+		return
 	}
+	sanitizeString := func(s string) string {
+		s = strings.ReplaceAll(s, `"`, ``)
+		s = strings.ReplaceAll(s, "\n", `\n`)
+		s = strings.ReplaceAll(s, "\t", ``)
+		return s
+	}
+
+	if _, ok := alreadyPrinted[a.GetProcessor()]; !ok {
+		fmt.Fprintf(
+			w,
+			"\tnode_%p [label="+`"%s"`+"]\n",
+			any(a.GetProcessor()),
+			sanitizeString(a.String()),
+		)
+		alreadyPrinted[a.GetProcessor()] = struct{}{}
+	}
+
+	a.Output().DotBlockContentStringWriteTo(w, alreadyPrinted)
+	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.GetProcessor(), a.Output().GetProcessor())
 }
 
 func (a *AutoFixer[T]) GetPushPacketsTos() node.PushPacketsTos {

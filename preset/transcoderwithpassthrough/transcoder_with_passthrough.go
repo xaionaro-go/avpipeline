@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -45,7 +46,7 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	MapOutputStreamIndices    *kernel.MapStreamIndices
 	NodeRecoder               *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 
-	NodeStreamFixerRecoder     *autofix.AutoFixer[struct{}]
+	NodeStreamFixerMain        *autofix.AutoFixer[struct{}]
 	NodeStreamFixerPassthrough *autofix.AutoFixer[struct{}]
 
 	RecodingConfig types.RecoderConfig
@@ -57,9 +58,20 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 }
 
 /*
-//                           +--> THROTTLE ->---+
-// INPUT --> MAP INDICES ->--+                  +--> MAP INDICES --> OUTPUT
-//                           +--> RECODER -->---+
+// 1 output (same_tracks, same_connection)
+//
+//                           +--> THROTTLE --> AutoFixer ->--+
+// INPUT --> MAP INDICES ->--+               (passthrough)   +-> AutoFixer (--> MAP INDICES) --> OUTPUT-main
+//                           +--> RECODER -------------------+    (main)   [same_connection]
+*/
+
+/*
+// 2 outputs (next_output):
+//
+//                           +--> THROTTLE ---> AutoFixer --> OUTPUT-passthrough
+// INPUT --> MAP INDICES ->--+                (passthrough)
+//                           +--> RECODER ----> AutoFixer --> OUTPUT-main
+//                                               (main)
 */
 func New[C any, P processor.Abstract](
 	ctx context.Context,
@@ -410,20 +422,21 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
 	}
 
-	s.NodeStreamFixerRecoder = autofix.New(
-		ctx,
+	s.NodeStreamFixerMain = autofix.New(
+		belt.WithField(ctx, "branch", "output-main"),
 		s.Recoder.Encoder,
 		outputAsPacketSink,
 	)
-	if s.NodeStreamFixerRecoder != nil {
-		s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerRecoder)
-	}
 
 	if passthroughSupport {
+		var passthroughOutputReference packet.Sink = s.Recoder.Decoder
+		if passthroughMode == types.PassthroughModeNextOutput {
+			passthroughOutputReference = asPacketSink(s.Outputs[1].GetProcessor())
+		}
 		s.NodeStreamFixerPassthrough = autofix.New(
-			ctx,
+			belt.WithField(ctx, "branch", "passthrough"),
 			s.PacketSource,
-			outputAsPacketSink,
+			passthroughOutputReference,
 		)
 		if s.NodeStreamFixerPassthrough != nil {
 			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
@@ -450,7 +463,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 
 		var condRecoder, condPassthrough packetcondition.And
-		var sinkRecoder, sinkPassthrough node.Abstract
+		var sinkMain, sinkPassthrough node.Abstract
 		switch passthroughMode {
 		case types.PassthroughModeSameTracks:
 			condRecoder = packetcondition.And{
@@ -461,7 +474,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.PassthroughSwitch.Condition(1),
 				s.PostSwitchFilter.Condition(1),
 			}
-			sinkRecoder, sinkPassthrough = outputMain, outputMain
+			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
+			if s.NodeStreamFixerMain == nil {
+				sinkPassthrough = outputMain
+			}
 		case types.PassthroughModeSameConnection:
 			nodeMapStreamIndices := node.NewFromKernel(
 				ctx,
@@ -469,7 +485,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				processor.DefaultOptionsOutput()...,
 			)
 			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
-			sinkRecoder, sinkPassthrough = nodeMapStreamIndices, nodeMapStreamIndices
+			sinkMain, sinkPassthrough = nodeMapStreamIndices, s.NodeStreamFixerMain
+			if s.NodeStreamFixerMain == nil {
+				sinkPassthrough = nodeMapStreamIndices
+			}
 		case types.PassthroughModeNextOutput:
 			condRecoder = packetcondition.And{
 				s.PassthroughSwitch.Condition(0),
@@ -479,14 +498,15 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.PassthroughSwitch.Condition(1),
 				s.PostSwitchFilter.Condition(1),
 			}
-			sinkRecoder, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
+			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
-		if s.NodeStreamFixerRecoder != nil {
-			s.NodeStreamFixerRecoder.AddPushPacketsTo(sinkRecoder, condRecoder...)
+		if s.NodeStreamFixerMain != nil {
+			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain, condRecoder...)
+			s.NodeStreamFixerMain.AddPushPacketsTo(sinkMain)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(sinkRecoder, condRecoder...)
+			s.NodeRecoder.AddPushPacketsTo(sinkMain, condRecoder...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
 			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
@@ -494,7 +514,12 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			nodeFilterThrottle.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
 		}
 	} else {
-		s.NodeStreamFixerRecoder.AddPushPacketsTo(outputMain)
+		if s.NodeStreamFixerMain != nil {
+			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain)
+			s.NodeStreamFixerMain.AddPushPacketsTo(outputMain)
+		} else {
+			s.NodeRecoder.AddPushPacketsTo(outputMain)
+		}
 	}
 
 	// == spawn an observer ==

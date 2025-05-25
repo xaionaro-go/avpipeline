@@ -17,6 +17,8 @@ type AutoFixer[T any] struct {
 	MapStreamIndicesNode *node.NodeWithCustomData[T, *processor.FromKernel[*kernel.MapStreamIndices]]
 }
 
+var _ node.DotBlockContentStringWriteToer = (*AutoFixer[any])(nil)
+
 func New(
 	ctx context.Context,
 	forInput packet.Source,
