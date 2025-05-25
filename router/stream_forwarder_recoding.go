@@ -134,7 +134,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 	fwd.ChainInput = &nodewrapper.NoServe[*chainInputNode]{Node: fwd.Chain.Input()}
 	fwd.Input.AddPushPacketsTo(fwd.ChainInput)
 
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		logger.Debugf(ctx, "waiter")
 		defer func() { logger.Debugf(ctx, "/waiter") }()
 		err := chain.Wait(ctx)

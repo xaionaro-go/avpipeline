@@ -66,7 +66,7 @@ func newRoute[T any](
 	)
 	r.Node.CustomData = r
 	r.openNodeLocked(ctx)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer r.Close(ctx)
 		defer logger.Debugf(ctx, "ended")
 		logger.Debugf(ctx, "started")
@@ -115,7 +115,7 @@ func (r *Route[T]) closeNodeLocked(
 	r.IsNodeOpen = false
 	if r.OnClose != nil {
 		wg.Add(1)
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
 			r.OnClose(ctx, r)
 		})
@@ -213,7 +213,7 @@ func (r *Route[T]) AddPublisherLocked(
 			for _, publisher := range r.Publishers {
 				publisher := publisher
 				wg.Add(1)
-				observability.Go(ctx, func() {
+				observability.Go(ctx, func(ctx context.Context) {
 					defer wg.Done()
 					err := publisher.Close(ctx)
 					if err != nil {

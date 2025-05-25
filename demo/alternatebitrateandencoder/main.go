@@ -58,7 +58,7 @@ func main() {
 	defer belt.Flush(ctx)
 
 	if *netPprofAddr != "" {
-		observability.Go(ctx, func() { l.Error(http.ListenAndServe(*netPprofAddr, nil)) })
+		observability.Go(ctx, func(context.Context) { l.Error(http.ListenAndServe(*netPprofAddr, nil)) })
 	}
 
 	fromURL := pflag.Arg(0)
@@ -159,7 +159,7 @@ func main() {
 	l.Debugf("resulting pipeline: %s", inputNode.String())
 	l.Debugf("resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer cancelFn()
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
 			EachNode: node.ServeConfig{

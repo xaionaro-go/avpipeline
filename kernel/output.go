@@ -41,6 +41,7 @@ const (
 	outputMediaMTXHack                  = true
 	outputAcceptOnlyKeyFramesUntilStart = true
 	outputSetRTMPAppName                = false
+	outputWriteHeaders                  = true
 )
 
 type OutputConfig struct {
@@ -223,7 +224,7 @@ func NewOutputFromURL(
 
 	logger.Debugf(ctx, "isAsync: %t", cfg.AsyncOpen)
 	if cfg.AsyncOpen {
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			if err := o.doOpen(ctx, url, formatNameRequest, cfg); err != nil {
 				logger.Errorf(ctx, "unable to open: %v", err)
 				o.Close(ctx)
@@ -576,6 +577,7 @@ func (o *Output) send(
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
+			logger.Tracef(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
 			return nil
 		}
 	}
@@ -618,9 +620,11 @@ func (o *Output) send(
 
 	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames))
 	var err error
-	o.formatContextLocker.Do(ctx, func() {
-		err = o.FormatContext.WriteHeader(nil)
-	})
+	if outputWriteHeaders {
+		o.formatContextLocker.Do(ctx, func() {
+			err = o.FormatContext.WriteHeader(nil)
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("unable to write the header: %w", err)
 	}

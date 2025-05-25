@@ -64,7 +64,7 @@ func main() {
 	defer belt.Flush(ctx)
 
 	if *netPprofAddr != "" {
-		observability.Go(ctx, func() { logger.Error(ctx, http.ListenAndServe(*netPprofAddr, nil)) })
+		observability.Go(ctx, func(context.Context) { logger.Error(ctx, http.ListenAndServe(*netPprofAddr, nil)) })
 	}
 
 	defer logger.Infof(ctx, "finishing: finalization")
@@ -208,7 +208,7 @@ func main() {
 	// start
 
 	errCh := make(chan node.Error, 10)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer func() {
 			logger.Debugf(ctx, "cancelling context...")
 			cancelFn()

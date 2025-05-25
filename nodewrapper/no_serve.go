@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/facebookincubator/go-belt/tool/logger"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -23,6 +24,7 @@ func (n *NoServe[T]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+	logger.Debugf(ctx, "NoServe")
 }
 
 func (n *NoServe[T]) OriginalNodeAbstract() node.Abstract {

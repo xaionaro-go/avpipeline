@@ -100,7 +100,7 @@ func main() {
 	// start
 
 	errCh := make(chan node.Error, 10)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer cancelFn()
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
 			EachNode: node.ServeConfig{

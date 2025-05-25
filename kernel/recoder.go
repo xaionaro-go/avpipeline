@@ -98,7 +98,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	wg.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		for pkt := range resultCh {
 			r.pendingPackets = append(r.pendingPackets, pkt)
@@ -161,7 +161,7 @@ func (r *Recoder[DF, EF]) process(
 	framesCh := make(chan frame.Output, 2)
 	wg.Add(1)
 	var encoderError error
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		defer func() {
 			cancelFn()

@@ -118,7 +118,7 @@ func (s *Sequence[T]) sendInput(
 			var kernelWG sync.WaitGroup
 			wg.Add(1)
 			kernelWG.Add(1)
-			observability.Go(ctx, func() {
+			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInPacketCh {
@@ -127,7 +127,7 @@ func (s *Sequence[T]) sendInput(
 			})
 			wg.Add(1)
 			kernelWG.Add(1)
-			observability.Go(ctx, func() {
+			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInFrameCh {
@@ -135,7 +135,7 @@ func (s *Sequence[T]) sendInput(
 				}
 			})
 			if idx != len(s.Kernels[1:])-1 {
-				observability.Go(ctx, func() {
+				observability.Go(ctx, func(ctx context.Context) {
 					kernelWG.Wait()
 					close(curOutPacketCh)
 					close(curOutFrameCh)
@@ -143,7 +143,7 @@ func (s *Sequence[T]) sendInput(
 			}
 		}
 	}
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		wg.Wait()
 		close(errCh)
 	})
@@ -215,12 +215,12 @@ func (s *Sequence[T]) Generate(
 	var kernelWG sync.WaitGroup
 	for _, k := range s.Kernels {
 		kernelWG.Add(1)
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			defer kernelWG.Done()
 			errCh <- k.Generate(ctx, outputPacketsCh, outputFramesCh)
 		})
 	}
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		kernelWG.Wait()
 		close(outputPacketsCh)
 		close(outputFramesCh)
@@ -228,20 +228,20 @@ func (s *Sequence[T]) Generate(
 
 	var readerWG sync.WaitGroup
 	readerWG.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer readerWG.Done()
 		for range outputPacketsCh {
 			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
 		}
 	})
 	readerWG.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer readerWG.Done()
 		for range outputFramesCh {
 			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
 		}
 	})
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		readerWG.Wait()
 		close(errCh)
 	})

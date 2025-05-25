@@ -32,14 +32,14 @@ func Serve[T node.Abstract](
 	var nodesWG sync.WaitGroup
 	defer nodesWG.Wait()
 	dstAlreadyVisited := map[node.Abstract]struct{}{}
-	serve(ctx, serveConfig, errCh, &nodesWG, dstAlreadyVisited, nodes...)
+	serve(ctx, serveConfig, errCh, &nodesWG, &dstAlreadyVisited, nodes...)
 }
 func serve[T node.Abstract](
 	ctx context.Context,
 	serveConfig ServeConfig,
 	errCh chan<- node.Error,
 	nodesWG *sync.WaitGroup,
-	dstAlreadyVisited map[node.Abstract]struct{},
+	dstAlreadyVisited *map[node.Abstract]struct{},
 	nodes ...T,
 ) {
 	for _, n := range nodes {
@@ -49,15 +49,17 @@ func serve[T node.Abstract](
 				ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", any(n)))
 				ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", any(n.GetProcessor())))
 			}
-			logger.Tracef(ctx, "Serve[%s]: %p", n, n)
-			if _, ok := dstAlreadyVisited[n]; ok {
-				logger.Tracef(ctx, "/Serve[%s]: already visited", n)
+			nodeKey := fmt.Sprintf("%s:%p", n, n)
+			logger.Tracef(ctx, "Serve[%s]", nodeKey)
+			if _, ok := (*dstAlreadyVisited)[n]; ok {
+				logger.Tracef(ctx, "/Serve[%s]: already visited", nodeKey)
 				return
 			}
-			dstAlreadyVisited[n] = struct{}{}
+			logger.Tracef(ctx, "Serve[%s]: was not visited (%v)", nodeKey, (*dstAlreadyVisited))
+			(*dstAlreadyVisited)[n] = struct{}{}
 
 			if serveConfig.NodeTreeFilter != nil && !serveConfig.NodeTreeFilter.Match(ctx, n) {
-				logger.Tracef(ctx, "/Serve[%s]: skipped the whole tree", n)
+				logger.Tracef(ctx, "/Serve[%s]: skipped the whole tree", nodeKey)
 				return
 			}
 
@@ -77,19 +79,19 @@ func serve[T node.Abstract](
 			}
 
 			if shouldSkip {
-				logger.Tracef(ctx, "/Serve[%s]: skipped", n)
+				logger.Tracef(ctx, "/Serve[%s]: skipped", nodeKey)
 				return
 			}
 
+			logger.Tracef(ctx, "Serve[%s]: starting", nodeKey)
 			nodesWG.Add(1)
-			observability.Go(ctx, func() {
+			observability.Go(ctx, func(ctx context.Context) {
 				defer nodesWG.Done()
-				defer logger.Tracef(ctx, "/Serve[%s]: ended: %p", n, n)
+				defer logger.Tracef(ctx, "/Serve[%s]: ended", nodeKey)
 				defer func() {
-					logger.Debugf(ctx, "Serve[%s]: cancelling context...", n)
+					logger.Debugf(ctx, "Serve[%s]: cancelling context...", nodeKey)
 					childrenCancelFn()
 				}()
-				logger.Tracef(ctx, "Serve[%s]: started: %p", n, n)
 				n.Serve(ctx, serveConfig.EachNode, errCh)
 			})
 		}(n)

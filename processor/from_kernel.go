@@ -61,8 +61,8 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	ctx, cancelFn := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	observability.Go(ctx, func() {
-		defer observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
+		defer observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
 			logger.Tracef(ctx, "finalize[%s]", p)
 			err := p.finalize(ctx)
@@ -77,7 +77,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		var swg sync.WaitGroup
 		defer swg.Wait()
 		swg.Add(1)
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			defer swg.Done()
 			err := p.Kernel.Generate(ctx, p.OutputPacketCh, p.OutputFrameCh)
 			logger.Tracef(ctx, "p.Kernel.Generate: %v", err)

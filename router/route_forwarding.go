@@ -127,7 +127,7 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "route instance: %p", src)
 
 	fwd.WaitGroup.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer fwd.WaitGroup.Done()
 		logger.Debugf(ctx, "waiter")
 		defer logger.Debugf(ctx, "/waiter")
@@ -207,7 +207,7 @@ func (fwd *RouteForwarding[T]) stopLocked(
 	if fwd.Output != nil {
 		wg.Add(1)
 		output := fwd.Output
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
 			if err := output.Close(ctx); err != nil {
 				logger.Errorf(ctx, "fwd.Output.Close: %v", err)

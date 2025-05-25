@@ -94,11 +94,11 @@ func (fwd *RouteForwardingToRemote[T]) init(
 	if err := fwd.StreamForwarder.Start(ctx); err != nil {
 		return fmt.Errorf("unable to add myself into the source's 'PushPacketsTo': %w", err)
 	}
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer close(fwd.ErrChan)
 		fwd.Output.Serve(ctx, node.ServeConfig{}, fwd.ErrChan)
 	})
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		for err := range fwd.ErrChan {
 			logger.Errorf(ctx, "got an error: %v", err)
 			_ = fwd.Close(ctx)

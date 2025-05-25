@@ -57,7 +57,7 @@ func (r *Router[T]) Close(
 func (r *Router[T]) init(
 	ctx context.Context,
 ) {
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		for err := range r.ErrorChan {
 			route := err.Node.(*NodeRouting[T]).CustomData.(*Route[T])
 			if route == nil {
@@ -293,7 +293,7 @@ func (r *Router[T]) removeRouteLocked(
 	logger.Debugf(ctx, "removeRouteLocked: %s", route)
 	defer func() { logger.Debugf(ctx, "/removeRouteLocked: %s", route) }()
 	wg.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		route.Close(ctx)
 	})
@@ -339,7 +339,7 @@ func (r *Router[T]) Wait(ctx context.Context) error {
 	}
 
 	endCh := make(chan struct{})
-	observability.Go(ctx, func() { // TODO: fix this leak
+	observability.Go(ctx, func(ctx context.Context) { // TODO: fix this leak
 		r.WaitGroup.Wait()
 		close(endCh)
 	})

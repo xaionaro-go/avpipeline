@@ -96,7 +96,7 @@ func NewInputFromURL(
 	}
 
 	if cfg.AsyncOpen {
-		observability.Go(ctx, func() {
+		observability.Go(ctx, func(ctx context.Context) {
 			if err := i.doOpen(ctx, urlString, authKey, inputFormat, cfg); err != nil {
 				logger.Errorf(ctx, "unable to open: %v", err)
 				i.Close(ctx)

@@ -37,7 +37,7 @@ func NewRetry[T Abstract](
 		OnStart:   onStart,
 		OnError:   onError,
 	}
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
 			r.startIfNeeded(ctx)
 		})
@@ -199,7 +199,7 @@ func (r *Retry[T]) String() string {
 
 func (r *Retry[T]) Close(ctx context.Context) error {
 	r.closeChan.Close(ctx)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(ctx, func() {
 			if !r.KernelIsSet {
 				return

@@ -526,7 +526,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	errCh := make(chan node.Error, 100)
 	s.waitGroup.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer s.waitGroup.Done()
 		defer cancelFn()
 		logger.Debugf(ctx, "Serve: started the error listening loop")
@@ -575,7 +575,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	// == launch ==
 
 	s.waitGroup.Add(1)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		defer s.waitGroup.Done()
 		defer cancelFn()
 		defer logger.Debugf(ctx, "finished the serving routine")

@@ -43,11 +43,12 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", n.GetProcessor()))
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
 	ctx = xsync.WithLoggingEnabled(ctx, false)
-	logger.Tracef(ctx, "Serve[%T]", n)
-	defer func() { logger.Tracef(ctx, "/Serve[%T]", n) }()
+	nodeKey := fmt.Sprintf("%s:%p", n, n)
+	logger.Tracef(ctx, "Serve[%s]: %s", nodeKey, debug.Stack())
+	defer func() { logger.Tracef(ctx, "/Serve[%s]", nodeKey) }()
 
 	sendErr := func(err error) {
-		logger.Debugf(ctx, "Serve: sendErr(%v)", err)
+		logger.Debugf(ctx, "Serve[%s]: sendErr(%v)", nodeKey, err)
 		if errCh == nil {
 			return
 		}
@@ -67,12 +68,12 @@ func (n *NodeWithCustomData[C, T]) Serve(
 		if r == nil {
 			return
 		}
-		logger.Errorf(ctx, "got panic in Node[%s]: %v:\n%s\n", n, r, debug.Stack())
+		logger.Errorf(ctx, "got panic in Node[%s]: %v:\n%s\n", nodeKey, r, debug.Stack())
 	}()
 
 	if err := xsync.DoR1(ctx, &n.Locker, func() error {
 		if n.IsServing {
-			logger.Debugf(ctx, "double-start %T at: %s", n, debug.Stack())
+			logger.Debugf(ctx, "double-start: %s", nodeKey)
 			return ErrAlreadyStarted{}
 		}
 		n.IsServing = true
@@ -89,12 +90,12 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	for {
 		select {
 		case <-procNodeEndCtx.Done():
-			logger.Debugf(ctx, "Serve: initiating closing")
-			defer func() { logger.Debugf(ctx, "Serve: /closed") }()
+			logger.Debugf(ctx, "Serve[%s]: initiating closing", nodeKey)
+			defer func() { logger.Debugf(ctx, "Serve[%s]: /closed", nodeKey) }()
 			var wg sync.WaitGroup
 			defer wg.Wait()
 			wg.Add(1)
-			observability.Go(ctx, func() {
+			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
 				err := n.Processor.Close(ctx)
 				if err != nil {

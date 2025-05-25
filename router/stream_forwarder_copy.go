@@ -86,7 +86,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 	fwd.AutoFixer.Output().AddPushPacketsTo(fwd.outputAsNode())
 	fwd.Input.AddPushPacketsTo(fwd.AutoFixerInput) // using a NoServe-wrapped value to make sure nobody accidentally started to serve it elsewhere
 	errCh := make(chan node.Error, 100)
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		for err := range errCh {
 			switch {
 			case errors.Is(err, context.Canceled):
@@ -99,7 +99,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 			fwd.Stop(ctx)
 		}
 	})
-	observability.Go(ctx, func() {
+	observability.Go(ctx, func(ctx context.Context) {
 		fwd.AutoFixer.Serve(ctx, node.ServeConfig{}, errCh)
 	})
 
