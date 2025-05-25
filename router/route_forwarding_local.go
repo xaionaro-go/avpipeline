@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
@@ -104,9 +105,11 @@ func (n *forwardOutputNodeLocalPath[T]) Close(
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	dstRoute := n.NodeRouting.CustomData
 	dstRoute.(*Route[T]).Node.Locker.Do(ctx, func() {
-		if _, err := dstRoute.(*Route[T]).RemovePublisherLocked(ctx, n.RouteForwarding); err != nil {
+		if _, err := dstRoute.(*Route[T]).RemovePublisherLocked(ctx, n.RouteForwarding, &wg); err != nil {
 			errs = append(errs, fmt.Errorf("dstRoute.removePublisher: %w", err))
 		}
 	})

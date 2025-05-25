@@ -24,8 +24,16 @@ const (
 
 type RoutePath = routertypes.RoutePath
 
+type FuncPublisherEvent[T any] func(context.Context, *Route[T], Publisher[T])
+
 type Route[T any] struct {
-	CustomData T
+	CustomData         T
+	OnPublisherAdded   FuncPublisherEvent[T]
+	OnPublisherRemoved FuncPublisherEvent[T]
+
+	// not supported, yet (TODO: fix)
+	OnConsumerAdded   func(context.Context, *Route[T], Consumer[T])
+	OnConsumerRemoved func(context.Context, *Route[T], Consumer[T])
 
 	// read only:
 	Path       RoutePath
@@ -48,6 +56,8 @@ func newRoute[T any](
 	errCh chan<- node.Error,
 	onOpen func(context.Context, *Route[T]),
 	onClose func(context.Context, *Route[T]),
+	onPublisherAdded func(context.Context, *Route[T], Publisher[T]),
+	onPublisherRemoved func(context.Context, *Route[T], Publisher[T]),
 ) *Route[T] {
 	ctx = belt.WithField(ctx, "path", path)
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -55,6 +65,8 @@ func newRoute[T any](
 		Path:                 path,
 		OnOpen:               onOpen,
 		OnClose:              onClose,
+		OnPublisherAdded:     onPublisherAdded,
+		OnPublisherRemoved:   onPublisherRemoved,
 		PublishersChangeChan: make(chan struct{}),
 		CancelFunc:           cancelFn,
 	}
@@ -169,11 +181,15 @@ func (r *Route[T]) AddPublisher(
 	defer func() {
 		logger.Debugf(ctx, "/AddPublisher[%s](ctx, %s): len(ret): len(ret):%d, %v", r, publisher, len(_ret), _err)
 	}()
+
+	var callbackFunc FuncPublisherEvent[T]
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	r.Locker().Do(ctx, func() {
 		_ret, _err = r.AddPublisherLocked(ctx, publisher, &wg)
+		callbackFunc = r.OnPublisherAdded
 	})
+	callbackFunc(ctx, r, publisher)
 	return
 }
 
@@ -258,13 +274,24 @@ func (r *Route[T]) RemovePublisher(
 	ctx context.Context,
 	publisher Publisher[T],
 ) (Publishers[T], error) {
-	return xsync.DoA2R2(ctx, &r.Node.Locker, r.RemovePublisherLocked, ctx, publisher)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	return xsync.DoA3R2(ctx, &r.Node.Locker, r.RemovePublisherLocked, ctx, publisher, &wg)
 }
 
 func (r *Route[T]) RemovePublisherLocked(
-	_ context.Context,
+	ctx context.Context,
 	publisher Publisher[T],
+	wg *sync.WaitGroup,
 ) (Publishers[T], error) {
+	if r.OnPublisherRemoved != nil {
+		callback := r.OnPublisherRemoved
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			callback(ctx, r, publisher)
+		})
+	}
 	for idx, candidate := range r.Publishers {
 		if publisher == candidate {
 			r.Publishers = slices.Delete(r.Publishers, idx, idx+1)

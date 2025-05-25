@@ -15,8 +15,10 @@ import (
 )
 
 type Router[T any] struct {
-	OnRouteCreated func(context.Context, *Route[T])
-	OnRouteRemoved func(context.Context, *Route[T])
+	OnRouteCreated          func(context.Context, *Route[T])
+	OnRouteRemoved          func(context.Context, *Route[T])
+	OnRoutePublisherAdded   func(context.Context, *Route[T], Publisher[T])
+	OnRoutePublisherRemoved func(context.Context, *Route[T], Publisher[T])
 
 	WaitGroup sync.WaitGroup
 
@@ -98,6 +100,33 @@ func (r *Router[T]) onRouteClosed(
 	defer func() { logger.Debugf(ctx, "/onRouteClosed: %s", route) }()
 	if err := r.RemoveRoute(ctx, route); err != nil {
 		logger.Errorf(ctx, "unable to remove route '%s': %v", route, err)
+	}
+	// TODO: figure out: should I add r.WaitGroup.Done() here? (see also onRouteCreated)
+}
+
+func (r *Router[T]) onRoutePublisherAdded(
+	ctx context.Context,
+	route *Route[T],
+	publisher Publisher[T],
+) {
+	logger.Debugf(ctx, "onRoutePublisherAdded: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRoutePublisherAdded: %s", route) }()
+
+	if r.OnRoutePublisherAdded != nil {
+		r.OnRoutePublisherAdded(ctx, route, publisher)
+	}
+}
+
+func (r *Router[T]) onRoutePublisherRemoved(
+	ctx context.Context,
+	route *Route[T],
+	publisher Publisher[T],
+) {
+	logger.Debugf(ctx, "onRoutePublisherRemoved: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRoutePublisherRemoved: %s", route) }()
+
+	if r.OnRoutePublisherRemoved != nil {
+		r.OnRoutePublisherRemoved(ctx, route, publisher)
 	}
 }
 
@@ -238,6 +267,8 @@ func (r *Router[T]) createRoute(
 		r.ErrorChan,
 		r.onRouteCreated,
 		r.onRouteClosed,
+		r.onRoutePublisherAdded,
+		r.onRoutePublisherRemoved,
 	)
 	r.RoutesByPath[path] = route
 	var addCh chan<- struct{}
