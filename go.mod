@@ -18,7 +18,7 @@ require (
 	github.com/xaionaro-go/avcommon v0.0.0-20250510235605-840f8210b727
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20250505013920-61d894a3b7e9
-	github.com/xaionaro-go/observability v0.0.0-20250525145134-da72421b86a8
+	github.com/xaionaro-go/observability v0.0.0-20250525153415-e6c2d935ab34
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
