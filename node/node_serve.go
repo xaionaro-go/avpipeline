@@ -11,9 +11,10 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/frame"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	"github.com/xaionaro-go/avpipeline/node/filter"
+	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -125,7 +126,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 							pkt.Source,
 						)
 					},
-					func(n Abstract) packetcondition.Condition { return n.GetInputPacketCondition() },
+					func(n Abstract) packetcondition.Condition { return n.GetInputPacketFilter() },
 					func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
@@ -152,7 +153,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 							f.Duration,
 						)
 					},
-					func(n Abstract) framecondition.Condition { return n.GetInputFrameCondition() },
+					func(n Abstract) framecondition.Condition { return n.GetInputFrameFilter() },
 					func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
@@ -164,7 +165,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 func pushFurther[
 	P processor.Abstract,
-	I types.InputPacketOrFrame, C types.Condition[I],
+	I types.InputPacketOrFrame, C filter.Condition[I],
 	O types.OutputPacketOrFrame, OP types.PacketOrFramePointer[O],
 	CD any,
 ](
@@ -196,13 +197,17 @@ func pushFurther[
 		return
 	}
 	for _, pushTo := range pushTos {
+		dst := pushTo.Node
 		inputObj := buildInput(outputObj)
-		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, inputObj) {
+		filterArg := filter.Input[I]{
+			Destination: dst,
+			Input:       inputObj,
+		}
+		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, filterArg) {
 			logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
 			continue
 		}
 
-		dst := pushTo.Node
 		select {
 		case <-ctx.Done():
 			return
@@ -215,7 +220,7 @@ func pushFurther[
 			}
 
 			inputCond := getInputCondition(dst)
-			if any(inputCond) != nil && !inputCond.Match(ctx, inputObj) {
+			if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
 				logger.Tracef(ctx, "input condition %s was not met", inputCond)
 				return
 			}

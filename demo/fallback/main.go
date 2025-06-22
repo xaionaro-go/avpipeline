@@ -19,6 +19,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
@@ -158,42 +159,46 @@ func main() {
 	lastDTS := int64(0)
 	filteredInputMain.AddPushPacketsTo(
 		outputNode,
-		condition.And{
-			sw.Condition(0),
-			tsShifter,
-			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+		packetfiltercondition.Packet{
+			Condition: condition.And{
+				sw.Condition(0),
+				tsShifter,
+				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
+					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+						return true
+					}
+					if !pkt.Flags().Has(astiav.PacketFlagKey) {
+						return true
+					}
+					if pkt.Dts() > lastDTS {
+						lastDTS = pkt.Dts()
+					}
+					if pkt.Dts() < lastDTS {
+						tsShifter.Offset += lastDTS - pkt.Dts()
+					}
 					return true
-				}
-				if !pkt.Flags().Has(astiav.PacketFlagKey) {
-					return true
-				}
-				if pkt.Dts() > lastDTS {
-					lastDTS = pkt.Dts()
-				}
-				if pkt.Dts() < lastDTS {
-					tsShifter.Offset += lastDTS - pkt.Dts()
-				}
-				return true
-			}),
+				}),
+			},
 		},
 	)
 	filteredInputFallback.AddPushPacketsTo(
 		outputNode,
-		condition.And{
-			sw.Condition(1),
-			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+		packetfiltercondition.Packet{
+			Condition: condition.And{
+				sw.Condition(1),
+				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
+					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+						return true
+					}
+					if !pkt.Flags().Has(astiav.PacketFlagKey) {
+						return true
+					}
+					if pkt.Dts() > lastDTS {
+						lastDTS = pkt.Dts()
+					}
 					return true
-				}
-				if !pkt.Flags().Has(astiav.PacketFlagKey) {
-					return true
-				}
-				if pkt.Dts() > lastDTS {
-					lastDTS = pkt.Dts()
-				}
-				return true
-			}),
+				}),
+			},
 		},
 	)
 	pipelineInputs := node.Nodes[node.Abstract]{

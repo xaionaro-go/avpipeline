@@ -190,7 +190,21 @@ func newCodec(
 		logger.Errorf(ctx, "got an error: %v", err)
 	}
 
-	c.codec = findCodec(isEncoder, codecParameters.CodecID(), codecName)
+	c.codec = nil
+	if hardwareDeviceName != "" {
+		c.codec = findCodec(
+			isEncoder,
+			codecParameters.CodecID(),
+			codecName+"_"+string(hardwareDeviceName),
+		)
+	}
+	if c.codec == nil {
+		c.codec = findCodec(
+			isEncoder,
+			codecParameters.CodecID(),
+			codecName,
+		)
+	}
 	if c.codec == nil {
 		if codecParameters.CodecID() == astiav.CodecIDNone {
 			return nil, fmt.Errorf("unable to find a codec using name '%s'", codecName)
@@ -198,6 +212,7 @@ func newCodec(
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
 	codecParameters.SetCodecID(c.codec.ID())
+	logger.Tracef(ctx, "codec name: '%s'", c.codec.Name())
 
 	c.codecContext = astiav.AllocCodecContext(c.codec)
 	if c.codecContext == nil {

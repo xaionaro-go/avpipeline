@@ -22,6 +22,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
@@ -145,11 +146,13 @@ func main() {
 		finalNode = recodingNode
 
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
-			recodingNode.SetInputPacketCondition(
-				condition.Function(sillyAlternationsJustForDemonstration(
-					sw,
-					*alternateBitrate,
-				)),
+			recodingNode.SetInputPacketFilter(
+				packetfiltercondition.Packet{
+					Condition: condition.Function(sillyAlternationsJustForDemonstration(
+						sw,
+						*alternateBitrate,
+					)),
+				},
 			)
 		}
 	}

@@ -6,6 +6,10 @@ replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v
 
 replace github.com/xaionaro-go/observability => ../observability
 
+replace github.com/xaionaro-go/avcommon => ../avcommon
+
+replace github.com/xaionaro-go/sockopt => ../sockopt
+
 require (
 	github.com/asticode/go-astiav v0.36.0
 	github.com/asticode/go-astikit v0.54.0
@@ -21,6 +25,7 @@ require (
 	github.com/xaionaro-go/observability v0.0.0-20250525153415-e6c2d935ab34
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
+	github.com/xaionaro-go/sockopt v0.0.0-00010101000000-000000000000
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c

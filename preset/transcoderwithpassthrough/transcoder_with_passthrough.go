@@ -15,6 +15,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -361,6 +362,7 @@ func asPacketSink(proc processor.Abstract) packet.Sink {
 func (s *TranscoderWithPassthrough[C, P]) Start(
 	ctx context.Context,
 	passthroughMode types.PassthroughMode,
+	serveCfg avpipeline.ServeConfig,
 ) (_err error) {
 	logger.Debugf(ctx, "Start(ctx, %s)", passthroughMode)
 	defer logger.Debugf(ctx, "/Start(ctx, %s): %v", passthroughMode, _err)
@@ -398,16 +400,20 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	if passthroughSupport {
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			s.NodeRecoder,
-			packetcondition.And{
-				s.PassthroughSwitch.Condition(0),
-				s.PostSwitchFilter.Condition(0),
+			packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(0),
+					s.PostSwitchFilter.Condition(0),
+				},
 			},
 		)
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			nodeFilterThrottle,
-			packetcondition.And{
-				s.PassthroughSwitch.Condition(1),
-				s.PostSwitchFilter.Condition(1),
+			packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(1),
+					s.PostSwitchFilter.Condition(1),
+				},
 			},
 		)
 
@@ -451,8 +457,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 		if passthroughRescaleTS {
 			if !startWithPassthrough || notifyAboutPacketSources {
-				nodeFilterThrottle.InputPacketCondition = packetcondition.And{
-					filter.NewRescaleTSBetweenKernels(
+				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
+					Condition: filter.NewRescaleTSBetweenKernels(
 						s.PacketSource,
 						s.NodeRecoder.Processor.Kernel.Encoder,
 					),
@@ -462,18 +468,22 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}
 
-		var condRecoder, condPassthrough packetcondition.And
+		var condRecoder, condPassthrough packetfiltercondition.And
 		var sinkMain, sinkPassthrough node.Abstract
 		switch passthroughMode {
 		case types.PassthroughModeSameTracks:
-			condRecoder = packetcondition.And{
-				s.PassthroughSwitch.Condition(0),
-				s.PostSwitchFilter.Condition(0),
-			}
-			condPassthrough = packetcondition.And{
-				s.PassthroughSwitch.Condition(1),
-				s.PostSwitchFilter.Condition(1),
-			}
+			condRecoder = append(condRecoder, packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(0),
+					s.PostSwitchFilter.Condition(0),
+				},
+			})
+			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(1),
+					s.PostSwitchFilter.Condition(1),
+				},
+			})
 			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = outputMain
@@ -490,14 +500,18 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				sinkPassthrough = nodeMapStreamIndices
 			}
 		case types.PassthroughModeNextOutput:
-			condRecoder = packetcondition.And{
-				s.PassthroughSwitch.Condition(0),
-				s.PostSwitchFilter.Condition(0),
-			}
-			condPassthrough = packetcondition.And{
-				s.PassthroughSwitch.Condition(1),
-				s.PostSwitchFilter.Condition(1),
-			}
+			condRecoder = append(condRecoder, packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(0),
+					s.PostSwitchFilter.Condition(0),
+				},
+			})
+			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
+				Condition: packetcondition.And{
+					s.PassthroughSwitch.Condition(1),
+					s.PostSwitchFilter.Condition(1),
+				},
+			})
 			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
@@ -580,7 +594,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		defer cancelFn()
 		defer logger.Debugf(ctx, "finished the serving routine")
 
-		avpipeline.Serve(ctx, avpipeline.ServeConfig{}, errCh, s.MapInputStreamIndicesNode)
+		avpipeline.Serve(ctx, serveCfg, errCh, s.MapInputStreamIndicesNode)
 	})
 
 	return nil

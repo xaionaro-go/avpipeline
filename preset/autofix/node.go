@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
 )
@@ -76,7 +76,7 @@ func (a *AutoFixerWithCustomData[T]) GetPushPacketsTos() node.PushPacketsTos {
 	return a.Output().GetPushPacketsTos()
 }
 
-func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetcondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetfiltercondition.Condition) {
 	a.Output().AddPushPacketsTo(dst, conds...)
 }
 
@@ -88,7 +88,7 @@ func (a *AutoFixerWithCustomData[T]) GetPushFramesTos() node.PushFramesTos {
 	return a.Output().GetPushFramesTos()
 }
 
-func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(dst node.Abstract, conds ...framecondition.Condition) {
+func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(dst node.Abstract, conds ...framefiltercondition.Condition) {
 	a.Output().AddPushFramesTo(dst, conds...)
 }
 
@@ -111,18 +111,18 @@ func (a *AutoFixerWithCustomData[T]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *AutoFixerWithCustomData[T]) GetInputPacketCondition() packetcondition.Condition {
-	return a.Input().GetInputPacketCondition()
+func (a *AutoFixerWithCustomData[T]) GetInputPacketFilter() packetfiltercondition.Condition {
+	return a.Input().GetInputPacketFilter()
 }
 
-func (a *AutoFixerWithCustomData[T]) SetInputPacketCondition(cond packetcondition.Condition) {
-	a.Input().SetInputPacketCondition(cond)
+func (a *AutoFixerWithCustomData[T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
+	a.Input().SetInputPacketFilter(cond)
 }
 
-func (a *AutoFixerWithCustomData[T]) GetInputFrameCondition() framecondition.Condition {
-	return a.Input().GetInputFrameCondition()
+func (a *AutoFixerWithCustomData[T]) GetInputFrameFilter() framefiltercondition.Condition {
+	return a.Input().GetInputFrameFilter()
 }
 
-func (a *AutoFixerWithCustomData[T]) SetInputFrameCondition(cond framecondition.Condition) {
-	a.Input().SetInputFrameCondition(cond)
+func (a *AutoFixerWithCustomData[T]) SetInputFrameFilter(cond framefiltercondition.Condition) {
+	a.Input().SetInputFrameFilter(cond)
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
+	"github.com/xaionaro-go/sockopt"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -45,9 +46,10 @@ const (
 )
 
 type OutputConfig struct {
-	CustomOptions types.DictionaryItems
-	AsyncOpen     bool
-	OnOpened      func(context.Context, *Output) error
+	CustomOptions  types.DictionaryItems
+	AsyncOpen      bool
+	OnOpened       func(context.Context, *Output) error
+	SendBufferSize uint
 
 	ErrorOnNSequentialInvalidDTS uint
 }
@@ -299,8 +301,53 @@ func (o *Output) doOpen(
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
+	if cfg.SendBufferSize != 0 {
+		if err := o.SetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
+			return fmt.Errorf("unable to set the send buffer size to %d: %w", cfg.SendBufferSize, err)
+		}
+	}
 
 	return nil
+}
+
+func (o *Output) SetSendBufferSize(
+	ctx context.Context,
+	size uint,
+) (_err error) {
+	logger.Debugf(ctx, "SetSendBufferSize(ctx, %d)", size)
+	defer func() { logger.Debugf(ctx, "/SetSendBufferSize(ctx, %d): %v", size, _err) }()
+
+	fd, err := o.GetFileDescriptor(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get file descriptor: %w", err)
+	}
+
+	err = sockopt.SetWriteBuffer(fd, int(size))
+	if err != nil {
+		return fmt.Errorf("unable to set the buffer size of file descriptor %d to %d", fd, int(size))
+	}
+
+	return nil
+}
+
+func (o *Output) GetFileDescriptor(
+	ctx context.Context,
+) (_ret int, _err error) {
+	logger.Debugf(ctx, "GetFileDescriptor")
+	defer func() { logger.Debugf(ctx, "/GetFileDescriptor: %v %v", _ret, _err) }()
+	return xsync.DoA1R2(ctx, &o.formatContextLocker, o.getFileDescriptor, ctx)
+}
+
+func (o *Output) getFileDescriptor(
+	ctx context.Context,
+) (_ret int, _err error) {
+	switch o.URLParsed.Scheme {
+	case "rtmp":
+		return formatContextToRTMPFD(ctx, o.FormatContext)
+	case "srt":
+		return formatContextToSRTFD(ctx, o.FormatContext)
+	}
+	return 0, fmt.Errorf("do not know how to obtain the file descriptor of the output for network scheme '%s'", o.URLParsed.Scheme)
 }
 
 func (o *Output) Close(
@@ -719,7 +766,7 @@ func (o *Output) doWritePacket(
 		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS", pkt.Dts(), pkt.Pts())
 		pkt.SetDts(pkt.Pts())
 	}
-	if !isNoDTS && pkt.Dts() <= outputStream.LastDTS {
+	if !isNoDTS && pkt.Dts() < outputStream.LastDTS {
 		o.SequentialInvalidPacketsCount++
 		if o.Config.ErrorOnNSequentialInvalidDTS > 0 {
 			if o.SequentialInvalidPacketsCount > o.Config.ErrorOnNSequentialInvalidDTS {
@@ -728,7 +775,7 @@ func (o *Output) doWritePacket(
 		}
 		// TODO: do not skip B-frames
 		logger.Errorf(ctx,
-			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d <= %d",
+			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
 			outputStream.CodecParameters().MediaType(),
 			outputStream.Index(),
 			pkt.Dts(),

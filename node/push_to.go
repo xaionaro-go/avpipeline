@@ -2,30 +2,30 @@ package node
 
 import (
 	"github.com/xaionaro-go/avpipeline/frame"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	"github.com/xaionaro-go/avpipeline/node/filter"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
-	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type PushTo[T any, C types.Condition[T]] struct {
+type PushTo[T any, C filter.Condition[T]] struct {
 	Node      Abstract
 	Condition C
 }
 
-type PushFramesTo = PushTo[frame.Input, types.Condition[frame.Input]]
+type PushFramesTo = PushTo[frame.Input, framefiltercondition.Condition]
 
 type PushFramesTos []PushFramesTo
 
-func (s *PushFramesTos) Add(dst Abstract, conds ...framecondition.Condition) *PushFramesTos {
-	var cond framecondition.Condition
+func (s *PushFramesTos) Add(dst Abstract, conds ...framefiltercondition.Condition) *PushFramesTos {
+	var cond framefiltercondition.Condition
 	switch len(conds) {
 	case 0:
 		break
 	case 1:
 		cond = conds[0]
 	case 2:
-		cond = framecondition.And(conds)
+		cond = framefiltercondition.And(conds)
 	}
 	*s = append(*s, PushFramesTo{
 		Node:      dst,
@@ -34,19 +34,19 @@ func (s *PushFramesTos) Add(dst Abstract, conds ...framecondition.Condition) *Pu
 	return s
 }
 
-type PushPacketsTo = PushTo[packet.Input, types.Condition[packet.Input]]
+type PushPacketsTo = PushTo[packet.Input, packetfiltercondition.Condition]
 
 type PushPacketsTos []PushPacketsTo
 
-func (s *PushPacketsTos) Add(dst Abstract, conds ...packetcondition.Condition) *PushPacketsTos {
-	var cond packetcondition.Condition
+func (s *PushPacketsTos) Add(dst Abstract, conds ...packetfiltercondition.Condition) *PushPacketsTos {
+	var cond packetfiltercondition.Condition
 	switch len(conds) {
 	case 0:
 		break
 	case 1:
 		cond = conds[0]
 	case 2:
-		cond = packetcondition.And(conds)
+		cond = packetfiltercondition.And(conds)
 	}
 	*s = append(*s, PushPacketsTo{
 		Node:      dst,

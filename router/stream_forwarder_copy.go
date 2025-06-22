@@ -8,10 +8,10 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
@@ -174,7 +174,7 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushPacketsTos() node.PushPacke
 	return fwd.Output.GetPushPacketsTos()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushPacketsTo(dst node.Abstract, conds ...packetcondition.Condition) {
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushPacketsTo(dst node.Abstract, conds ...packetfiltercondition.Condition) {
 	fwd.Output.AddPushPacketsTo(dst, conds...)
 }
 
@@ -186,7 +186,7 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushFramesTos() node.PushFrames
 	return fwd.Output.GetPushFramesTos()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushFramesTo(dst node.Abstract, conds ...framecondition.Condition) {
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushFramesTo(dst node.Abstract, conds ...framefiltercondition.Condition) {
 	fwd.Output.AddPushFramesTo(dst, conds...)
 }
 
@@ -202,18 +202,18 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetProcessor() processor.Abstract 
 	return fwd.Output.GetProcessor()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputPacketCondition() packetcondition.Condition {
-	return fwd.Output.GetInputPacketCondition()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputPacketFilter() packetfiltercondition.Condition {
+	return fwd.Output.GetInputPacketFilter()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputPacketCondition(cond packetcondition.Condition) {
-	fwd.Output.SetInputPacketCondition(cond)
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
+	fwd.Output.SetInputPacketFilter(cond)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameCondition() framecondition.Condition {
-	return fwd.Output.GetInputFrameCondition()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameFilter() framefiltercondition.Condition {
+	return fwd.Output.GetInputFrameFilter()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameCondition(cond framecondition.Condition) {
-	fwd.Output.SetInputFrameCondition(cond)
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameFilter(cond framefiltercondition.Condition) {
+	fwd.Output.SetInputFrameFilter(cond)
 }

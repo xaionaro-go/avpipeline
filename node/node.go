@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/xsync"
 )
@@ -19,30 +19,30 @@ type Abstract interface {
 	Serve(context.Context, ServeConfig, chan<- Error)
 
 	GetPushPacketsTos() PushPacketsTos
-	AddPushPacketsTo(dst Abstract, conds ...packetcondition.Condition)
+	AddPushPacketsTo(dst Abstract, conds ...packetfiltercondition.Condition)
 	SetPushPacketsTos(PushPacketsTos)
 	GetPushFramesTos() PushFramesTos
-	AddPushFramesTo(dst Abstract, conds ...framecondition.Condition)
+	AddPushFramesTo(dst Abstract, conds ...framefiltercondition.Condition)
 	SetPushFramesTos(PushFramesTos)
 
 	GetStatistics() *Statistics
 	GetProcessor() processor.Abstract
 
-	GetInputPacketCondition() packetcondition.Condition
-	SetInputPacketCondition(packetcondition.Condition)
-	GetInputFrameCondition() framecondition.Condition
-	SetInputFrameCondition(framecondition.Condition)
+	GetInputPacketFilter() packetfiltercondition.Condition
+	SetInputPacketFilter(packetfiltercondition.Condition)
+	GetInputFrameFilter() framefiltercondition.Condition
+	SetInputFrameFilter(framefiltercondition.Condition)
 }
 
 type NodeWithCustomData[C any, T processor.Abstract] struct {
 	*Statistics
-	Processor            T
-	PushPacketsTos       PushPacketsTos
-	PushFramesTos        PushFramesTos
-	InputPacketCondition packetcondition.Condition
-	InputFrameCondition  framecondition.Condition
-	Locker               xsync.Mutex
-	IsServing            bool
+	Processor         T
+	PushPacketsTos    PushPacketsTos
+	PushFramesTos     PushFramesTos
+	InputPacketFilter packetfiltercondition.Condition
+	InputFrameFilter  framefiltercondition.Condition
+	Locker            xsync.Mutex
+	IsServing         bool
 
 	CustomData C
 }
@@ -112,7 +112,7 @@ func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {
 
 func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
 	dst Abstract,
-	conds ...packetcondition.Condition,
+	conds ...packetfiltercondition.Condition,
 ) {
 	ctx := context.TODO()
 	logger.Debugf(ctx, "AddPushPacketsTo")
@@ -184,7 +184,7 @@ func RemovePushFramesTo[C any, P processor.Abstract](
 
 func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
 	dst Abstract,
-	conds ...framecondition.Condition,
+	conds ...framefiltercondition.Condition,
 ) {
 	n.Locker.Do(context.TODO(), func() {
 		n.PushFramesTos.Add(dst, conds...)
@@ -197,33 +197,33 @@ func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputPacketCondition() packetcondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputPacketFilter() packetfiltercondition.Condition {
 	if n == nil {
-		return packetcondition.Static(false)
+		return packetfiltercondition.Static(false)
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() packetcondition.Condition {
-		return n.InputPacketCondition
+	return xsync.DoR1(context.TODO(), &n.Locker, func() packetfiltercondition.Condition {
+		return n.InputPacketFilter
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) SetInputPacketCondition(cond packetcondition.Condition) {
+func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
 	n.Locker.Do(context.TODO(), func() {
-		n.InputPacketCondition = cond
+		n.InputPacketFilter = cond
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputFrameCondition() framecondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputFrameFilter() framefiltercondition.Condition {
 	if n == nil {
-		return framecondition.Static(false)
+		return framefiltercondition.Static(false)
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() framecondition.Condition {
-		return n.InputFrameCondition
+	return xsync.DoR1(context.TODO(), &n.Locker, func() framefiltercondition.Condition {
+		return n.InputFrameFilter
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) SetInputFrameCondition(cond framecondition.Condition) {
+func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(cond framefiltercondition.Condition) {
 	n.Locker.Do(context.TODO(), func() {
-		n.InputFrameCondition = cond
+		n.InputFrameFilter = cond
 	})
 }
 

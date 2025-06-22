@@ -6,9 +6,9 @@ import (
 	"io"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/node"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -84,18 +84,18 @@ func (n *NoServe[T]) GetProcessor() processor.Abstract {
 	return n.Node.GetProcessor()
 }
 
-func (n *NoServe[T]) GetInputPacketCondition() packetcondition.Condition {
-	return n.Node.GetInputPacketCondition()
+func (n *NoServe[T]) GetInputPacketFilter() packetcondition.Condition {
+	return n.Node.GetInputPacketFilter()
 }
 
-func (n *NoServe[T]) SetInputPacketCondition(cond packetcondition.Condition) {
-	n.Node.SetInputPacketCondition(cond)
+func (n *NoServe[T]) SetInputPacketFilter(cond packetcondition.Condition) {
+	n.Node.SetInputPacketFilter(cond)
 }
 
-func (n *NoServe[T]) GetInputFrameCondition() framecondition.Condition {
-	return n.Node.GetInputFrameCondition()
+func (n *NoServe[T]) GetInputFrameFilter() framecondition.Condition {
+	return n.Node.GetInputFrameFilter()
 }
 
-func (n *NoServe[T]) SetInputFrameCondition(cond framecondition.Condition) {
-	n.Node.SetInputFrameCondition(cond)
+func (n *NoServe[T]) SetInputFrameFilter(cond framecondition.Condition) {
+	n.Node.SetInputFrameFilter(cond)
 }
