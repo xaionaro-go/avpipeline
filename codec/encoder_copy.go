@@ -29,6 +29,10 @@ func (EncoderCopy) CodecContext() *astiav.CodecContext {
 	return nil
 }
 
+func (EncoderCopy) MediaType() astiav.MediaType {
+	panic(fmt.Errorf("'copy' needs to be processed manually"))
+}
+
 func (EncoderCopy) ToCodecParameters(cp *astiav.CodecParameters) error {
 	return nil
 }

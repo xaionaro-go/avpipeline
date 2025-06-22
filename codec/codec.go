@@ -134,14 +134,34 @@ func findDecoderCodec(
 }
 
 func findCodec(
+	ctx context.Context,
 	isEncoder bool,
 	codecID astiav.CodecID,
 	codecName string,
-) *astiav.Codec {
+) (_ret *astiav.Codec) {
+	logger.Tracef(ctx, "findCodec(ctx, %t, %s, '%s')", isEncoder, codecID, codecName)
+	defer func() {
+		logger.Tracef(ctx, "/findCodec(ctx, %t, %s, '%s'): %v", isEncoder, codecID, codecName, _ret)
+	}()
 	if isEncoder {
 		return findEncoderCodec(codecID, codecName)
 	}
 	return findDecoderCodec(codecID, codecName)
+}
+
+func findCodecByName(
+	ctx context.Context,
+	isEncoder bool,
+	codecName string,
+) (_ret *astiav.Codec) {
+	logger.Tracef(ctx, "findCodecByName(ctx, %t, '%s')", isEncoder, codecName)
+	defer func() {
+		logger.Tracef(ctx, "/findCodecByName(ctx, %t, '%s'): %v", isEncoder, codecName, _ret)
+	}()
+	if isEncoder {
+		return astiav.FindEncoderByName(string(codecName))
+	}
+	return astiav.FindDecoderByName(string(codecName))
 }
 
 func newCodec(
@@ -190,16 +210,24 @@ func newCodec(
 		logger.Errorf(ctx, "got an error: %v", err)
 	}
 
+	isHW := false
 	c.codec = nil
-	if hardwareDeviceName != "" {
-		c.codec = findCodec(
+	if codecName != "" && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+		hwCodecName := codecName + "_" + hardwareDeviceType.String()
+		logger.Tracef(ctx, "hw codec name: '%s'", hwCodecName)
+		hwCodec := findCodecByName(
+			ctx,
 			isEncoder,
-			codecParameters.CodecID(),
-			codecName+"_"+string(hardwareDeviceName),
+			hwCodecName,
 		)
+		if c.codec != nil {
+			isHW = true
+			c.codec = hwCodec
+		}
 	}
 	if c.codec == nil {
 		c.codec = findCodec(
+			ctx,
 			isEncoder,
 			codecParameters.CodecID(),
 			codecName,
@@ -210,6 +238,19 @@ func newCodec(
 			return nil, fmt.Errorf("unable to find a codec using name '%s'", codecName)
 		}
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
+	}
+	if !isHW && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+		hwCodecName := c.codec.Name() + "_" + hardwareDeviceType.String()
+		logger.Tracef(ctx, "hw codec name: '%s'", hwCodecName)
+		hwCodec := findCodecByName(
+			ctx,
+			isEncoder,
+			hwCodecName,
+		)
+		if hwCodec != nil {
+			isHW = true
+			c.codec = hwCodec
+		}
 	}
 	codecParameters.SetCodecID(c.codec.ID())
 	logger.Tracef(ctx, "codec name: '%s'", c.codec.Name())
@@ -275,7 +316,7 @@ func newCodec(
 			flags,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("unable to create hardware device context: %w", err)
+			return nil, fmt.Errorf("unable to create hardware (%s:%s) device context: %w", hardwareDeviceType, hardwareDeviceName, err)
 		}
 		c.closer.Add(c.hardwareDeviceContext.Free)
 

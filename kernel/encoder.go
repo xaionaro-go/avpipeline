@@ -21,6 +21,7 @@ const (
 	encoderWriteHeaderOnFinishedGettingStreams = false
 	encoderWriteHeaderOnNotifyPacketSources    = false
 	encoderCopyDTSPTS                          = true
+	encoderDTSHigherPTSCorrect                 = false
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -359,7 +360,9 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 
-	assert(ctx, outputStream.CodecParameters().MediaType() == encoder.CodecContext().MediaType(), outputStream.CodecParameters().MediaType(), encoder.CodecContext().MediaType())
+	outputMediaType := outputStream.CodecParameters().MediaType()
+	encoderMediaType := encoder.MediaType()
+	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
 	err := encoder.SendFrame(ctx, input.Frame)
 	if err != nil {
@@ -389,9 +392,14 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
-			logger.Errorf(ctx, "DTS (%d) > PTS (%d) skipping the packet", pkt.Dts(), pkt.Pts())
-			packet.Pool.Put(pkt)
-			continue
+			if encoderDTSHigherPTSCorrect {
+				logger.Errorf(ctx, "DTS (%d) > PTS (%d) correcting DTS to %d", pkt.Dts(), pkt.Pts(), pkt.Pts())
+				pkt.SetDts(pkt.Pts())
+			} else {
+				logger.Errorf(ctx, "DTS (%d) > PTS (%d) skipping the packet", pkt.Dts(), pkt.Pts())
+				packet.Pool.Put(pkt)
+				continue
+			}
 		}
 
 		if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {

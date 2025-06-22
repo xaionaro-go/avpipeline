@@ -118,6 +118,9 @@ func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
 ) (_ret types.RecoderConfig) {
 	logger.Tracef(ctx, "GetRecoderConfig")
 	defer func() { logger.Tracef(ctx, "/GetRecoderConfig: %v", _ret) }()
+	if s == nil {
+		return types.RecoderConfig{}
+	}
 	return xsync.DoA1R1(ctx, &s.locker, s.getRecoderConfigLocked, ctx)
 }
 

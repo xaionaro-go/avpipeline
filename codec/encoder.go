@@ -25,6 +25,7 @@ type Encoder interface {
 	Closer
 	Codec() *astiav.Codec
 	CodecContext() *astiav.CodecContext
+	MediaType() astiav.MediaType
 	ToCodecParameters(cp *astiav.CodecParameters) error
 	HardwareDeviceContext() *astiav.HardwareDeviceContext
 	HardwarePixelFormat() astiav.PixelFormat
@@ -204,13 +205,16 @@ func (e *EncoderFull) setQualityNow(
 	q Quality,
 ) (_err error) {
 	codecName := e.codec.Name()
-	logger.Debugf(ctx, "setQualityNow(ctx, %T(%v)): %s", q, q, codecName)
-	defer func() { logger.Debugf(ctx, "/setQualityNow(ctx, %T(%v)): %s: %v", q, q, codecName, _err) }()
+	logger.Debugf(ctx, "setQualityNow(ctx, %T(%v)): %s:%v", q, q, codecName, e.InitParams.HardwareDeviceType)
+	defer func() {
+		logger.Debugf(ctx, "/setQualityNow(ctx, %T(%v)): %s:%v: %v", q, q, codecName, e.InitParams.HardwareDeviceType, _err)
+	}()
 	defer func() {
 		if _err != nil {
 			_err = fmt.Errorf("%s: %w", codecName, _err)
 		}
 	}()
+
 	codecWords := strings.Split(codecName, "_")
 	if len(codecWords) != 2 {
 		return e.setQualityGeneric(ctx, q)
@@ -219,9 +223,8 @@ func (e *EncoderFull) setQualityNow(
 	switch strings.ToLower(codecModifier) {
 	case "mediacodec":
 		return e.setQualityMediacodec(ctx, q)
-	default:
-		return e.setQualityGeneric(ctx, q)
 	}
+	return e.setQualityGeneric(ctx, q)
 }
 
 func (e *EncoderFull) Close(ctx context.Context) (_err error) {
