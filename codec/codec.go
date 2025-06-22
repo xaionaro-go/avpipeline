@@ -207,6 +207,7 @@ func newCodec(
 	}()
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
 	ctx = belt.WithField(ctx, "codec_name", codecName)
+	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 	c := &Codec{
 		InitParams: params,
 		IsEncoder:  isEncoder,
@@ -264,7 +265,7 @@ func newCodec(
 		hwCodec := findCodecByName(
 			ctx,
 			isEncoder,
-			hwCodecName(ctx, isEncoder, codecName, hardwareDeviceType),
+			hwCodecName(ctx, isEncoder, c.codec.Name(), hardwareDeviceType),
 		)
 		if hwCodec != nil {
 			isHW = true
@@ -287,6 +288,7 @@ func newCodec(
 		}
 	}
 
+	var forcePixelFormat astiav.PixelFormat
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
 		lazyInitOptions()
@@ -307,10 +309,18 @@ func newCodec(
 				logIfError(options.Set("bf", "0", 0))
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
-				lazyInitOptions()
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
 					logIfError(options.Set("pix_fmt", "nv12", 0))
+					forcePixelFormat = astiav.PixelFormatNv12
+				}
+			}
+		} else {
+			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+				if options.Get("pixel_format", nil, 0) == nil {
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
+					logIfError(options.Set("pixel_format", "nv12", 0))
+					forcePixelFormat = astiav.PixelFormatNv12
 				}
 			}
 		}
@@ -359,9 +369,14 @@ func newCodec(
 
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
-		c.codecContext.SetFramerate(codecParameters.FrameRate())
+		if v := codecParameters.FrameRate(); v.Float64() > 0 {
+			c.codecContext.SetFramerate(v)
+		}
 		c.codecContext.SetWidth(codecParameters.Width())
 		c.codecContext.SetHeight(codecParameters.Height())
+		if forcePixelFormat != astiav.PixelFormatNone {
+			c.codecContext.SetPixelFormat(forcePixelFormat)
+		}
 		if c.codecContext.PixelFormat() == astiav.PixelFormatNone {
 			c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
 		}
