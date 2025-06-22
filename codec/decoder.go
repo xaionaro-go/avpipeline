@@ -3,8 +3,10 @@ package codec
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
 )
@@ -76,4 +78,41 @@ func (d *Decoder) GetQuality(
 		}
 		return nil
 	})
+}
+
+func (d *Decoder) SetLowLatency(
+	ctx context.Context,
+	v bool,
+) (_err error) {
+	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() (_err error) {
+		codecName := d.codec.Name()
+		logger.Debugf(ctx, "SetLowLatency(ctx): %s:%v: %v", codecName, d.InitParams.HardwareDeviceType, v)
+		defer func() {
+			logger.Debugf(ctx, "/SetLowLatency(ctx): %s:%v: %v: %v", codecName, d.InitParams.HardwareDeviceType, v, _err)
+		}()
+		defer func() {
+			if _err != nil {
+				_err = fmt.Errorf("%s: %w", codecName, _err)
+			}
+		}()
+
+		codecWords := strings.Split(codecName, "_")
+		if len(codecWords) != 2 {
+			return d.setLowLatencyGeneric(ctx, v)
+		}
+		codecModifier := codecWords[1]
+		switch strings.ToLower(codecModifier) {
+		case "mediacodec":
+			return d.setLowLatencyMediacodec(ctx, v)
+		}
+		return d.setLowLatencyGeneric(ctx, v)
+	})
+}
+
+func (d *Decoder) setLowLatencyGeneric(
+	ctx context.Context,
+	v bool,
+) error {
+	logger.Infof(ctx, "SetLowLatency (Generic): %v", v)
+	return fmt.Errorf("not implemented, yet")
 }
