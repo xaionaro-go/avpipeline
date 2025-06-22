@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	doFullCopyOfParameters = false
+	doFullCopyOfParameters     = false
+	manuallySetHardwareContext = false
 )
 
 type Codec struct {
@@ -164,6 +165,28 @@ func findCodecByName(
 	return astiav.FindDecoderByName(string(codecName))
 }
 
+func hwCodecName(
+	ctx context.Context,
+	isEncoder bool,
+	codecName string,
+	hwDeviceType HardwareDeviceType,
+) (_ret string) {
+	logger.Tracef(ctx, "hwCodecName(ctx, %t, '%s', %v)", isEncoder, codecName, hwDeviceType)
+	defer func() {
+		logger.Tracef(ctx, "/hwCodecName(ctx, %t, '%s', %v): %v", isEncoder, codecName, hwDeviceType, _ret)
+	}()
+	switch hwDeviceType {
+	case astiav.HardwareDeviceTypeCUDA:
+		if isEncoder {
+			return codecName + "_nvenc"
+		} else {
+			return codecName + "_cuvid"
+		}
+	default:
+		return codecName + "_" + hwDeviceType.String()
+	}
+}
+
 func newCodec(
 	ctx context.Context,
 	isEncoder bool, // otherwise: decoder
@@ -213,12 +236,10 @@ func newCodec(
 	isHW := false
 	c.codec = nil
 	if codecName != "" && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
-		hwCodecName := codecName + "_" + hardwareDeviceType.String()
-		logger.Tracef(ctx, "hw codec name: '%s'", hwCodecName)
 		hwCodec := findCodecByName(
 			ctx,
 			isEncoder,
-			hwCodecName,
+			hwCodecName(ctx, isEncoder, codecName, hardwareDeviceType),
 		)
 		if c.codec != nil {
 			isHW = true
@@ -240,12 +261,10 @@ func newCodec(
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
 	if !isHW && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
-		hwCodecName := c.codec.Name() + "_" + hardwareDeviceType.String()
-		logger.Tracef(ctx, "hw codec name: '%s'", hwCodecName)
 		hwCodec := findCodecByName(
 			ctx,
 			isEncoder,
-			hwCodecName,
+			hwCodecName(ctx, isEncoder, codecName, hardwareDeviceType),
 		)
 		if hwCodec != nil {
 			isHW = true
@@ -270,11 +289,15 @@ func newCodec(
 
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
+		lazyInitOptions()
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 		if isEncoder {
-			lazyInitOptions()
 			if options.Get("g", nil, 0) == nil {
 				fps := codecParameters.FrameRate().Float64()
+				if fps < 1 {
+					logger.Warnf(ctx, "unable to detect the FPS, assuming 30")
+					fps = 30
+				}
 				v := int(0.999 + fps)
 				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS value (%d <- %f)", v, fps)
 				logIfError(options.Set("g", fmt.Sprintf("%d", v), 0))
@@ -284,6 +307,7 @@ func newCodec(
 				logIfError(options.Set("bf", "0", 0))
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+				lazyInitOptions()
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
 					logIfError(options.Set("pix_fmt", "nv12", 0))
@@ -292,7 +316,7 @@ func newCodec(
 		}
 	}
 
-	if hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+	if manuallySetHardwareContext && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
 		if codecParameters.MediaType() != astiav.MediaTypeVideo {
 			return nil, fmt.Errorf("currently hardware encoding/decoding is supported only for video streams")
 		}
