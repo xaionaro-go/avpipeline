@@ -20,6 +20,7 @@ type NaiveDecoderFactory struct {
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
 	AudioOptions       *astiav.Dictionary
+	PostInitFunc       func(context.Context, *Decoder)
 }
 
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
@@ -30,10 +31,12 @@ func NewNaiveDecoderFactory(
 	hardwareDeviceName HardwareDeviceName,
 	videoCustomOptions types.DictionaryItems,
 	audioCustomOptions types.DictionaryItems,
+	postInit func(context.Context, *Decoder),
 ) *NaiveDecoderFactory {
 	f := &NaiveDecoderFactory{
 		HardwareDeviceType: hardwareDeviceType,
 		HardwareDeviceName: hardwareDeviceName,
+		PostInitFunc:       postInit,
 	}
 	if len(videoCustomOptions) > 0 {
 		f.VideoOptions = astiav.NewDictionary()
@@ -59,7 +62,15 @@ func NewNaiveDecoderFactory(
 func (f *NaiveDecoderFactory) NewDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
-) (*Decoder, error) {
+) (_ret *Decoder, _err error) {
+	if fn := f.PostInitFunc; fn != nil {
+		defer func() {
+			if _err != nil {
+				return
+			}
+			f.PostInitFunc(ctx, _ret)
+		}()
+	}
 	codecParameters := stream.CodecParameters()
 	if codecParameters.MediaType() != astiav.MediaTypeVideo {
 		return NewDecoder(

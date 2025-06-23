@@ -99,7 +99,7 @@ func TestRecoderNoFailure(t *testing.T) {
 			encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, acodec, 0, "", nil, nil)
 			recoder, err := kernel.NewRecoder(
 				ctx,
-				codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil),
+				codec.NewNaiveDecoderFactory(ctx, 0, "", nil, nil, nil),
 				encoderFactory,
 				nil,
 			)

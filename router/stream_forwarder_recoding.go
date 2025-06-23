@@ -62,13 +62,13 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 					for _, stream := range fmtCtx.Streams() {
 						switch stream.CodecParameters().MediaType() {
 						case astiav.MediaTypeVideo:
-							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.TrackConfig{
+							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      "copy",
 							})
 						case astiav.MediaTypeAudio:
-							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.TrackConfig{
+							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      "copy",
@@ -80,12 +80,12 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 		}
 		if len(recoderConfig.AudioTrackConfigs) == 0 && len(recoderConfig.VideoTrackConfigs) == 0 {
 			logger.Errorf(ctx, "no audio/video tracks defined, adding one of each just to make it work")
-			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.TrackConfig{
+			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{0},
 				CodecName:      "copy",
 			})
-			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.TrackConfig{
+			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{1},
 				CodecName:      "copy",

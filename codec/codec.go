@@ -80,6 +80,9 @@ func (c *Codec) Close(ctx context.Context) error {
 func (c *Codec) closeLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "closeLocked")
 	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
+	if err := c.reset(ctx); err != nil {
+		logger.Errorf(ctx, "unable to reset the codec: %w", err)
+	}
 	if c.closer == nil {
 		return nil
 	}

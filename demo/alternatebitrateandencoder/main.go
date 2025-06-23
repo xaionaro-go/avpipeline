@@ -108,7 +108,7 @@ func main() {
 		encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, "copy", 0, hwDeviceName, nil, nil)
 		recoder, err := kernel.NewRecoder(
 			ctx,
-			codec.NewNaiveDecoderFactory(ctx, 0, hwDeviceName, nil, nil),
+			codec.NewNaiveDecoderFactory(ctx, 0, hwDeviceName, nil, nil, nil),
 			encoderFactory,
 			nil,
 		)

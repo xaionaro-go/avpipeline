@@ -79,7 +79,7 @@ func main() {
 	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
 	recoder, err := processor.NewRecoder(
 		ctx,
-		codec.NewNaiveDecoderFactory(ctx, 0, hwDevName, nil, nil),
+		codec.NewNaiveDecoderFactory(ctx, 0, hwDevName, nil, nil, nil),
 		codec.NewNaiveEncoderFactory(ctx, *videoCodec, "copy", 0, hwDevName, types.DictionaryItems{
 			{Key: "bf", Value: "0"}, // to disable B-frames
 		}, nil),

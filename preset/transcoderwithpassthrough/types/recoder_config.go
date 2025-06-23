@@ -6,7 +6,16 @@ import (
 	"time"
 )
 
-type TrackConfig struct {
+type AudioTrackConfig struct {
+	InputTrackIDs   []int           `yaml:"input_track_ids"`
+	OutputTrackIDs  []int           `yaml:"output_track_ids"`
+	CodecName       string          `yaml:"codec_name"`
+	AveragingPeriod time.Duration   `yaml:"averaging_period"`
+	AverageBitRate  uint64          `yaml:"average_bit_rate"`
+	CustomOptions   DictionaryItems `yaml:"custom_options"`
+}
+
+type VideoTrackConfig struct {
 	InputTrackIDs      []int              `yaml:"input_track_ids"`
 	OutputTrackIDs     []int              `yaml:"output_track_ids"`
 	CodecName          string             `yaml:"codec_name"`
@@ -15,11 +24,13 @@ type TrackConfig struct {
 	CustomOptions      DictionaryItems    `yaml:"custom_options"`
 	HardwareDeviceType HardwareDeviceType `yaml:"hardware_device_type"`
 	HardwareDeviceName HardwareDeviceName `yaml:"hardware_device_name"`
+	Width              uint32             `yaml:"width"`
+	Height             uint32             `yaml:"height"`
 }
 
 type RecoderConfig struct {
-	AudioTrackConfigs []TrackConfig `yaml:"audio_track_configs"`
-	VideoTrackConfigs []TrackConfig `yaml:"video_track_configs"`
+	AudioTrackConfigs []AudioTrackConfig `yaml:"audio_track_configs"`
+	VideoTrackConfigs []VideoTrackConfig `yaml:"video_track_configs"`
 }
 
 type DictionaryItem struct {
