@@ -25,7 +25,7 @@ func NewSwitch() *Switch {
 	return &Switch{}
 }
 
-var _ Condition = (*Switch)(nil).Condition(0)
+var _ Condition = (*Switch)(nil).PacketCondition(0)
 
 func (s *Switch) GetKeepUnless() Condition {
 	ptr := xatomic.LoadPointer(&s.KeepUnlessPacketCond)
@@ -70,19 +70,19 @@ func (s *Switch) SetValue(
 	return nil
 }
 
-type SwitchCondition struct {
+type SwitchPacketCondition struct {
 	*Switch
 	RequiredValue int32
 }
 
-func (s *Switch) Condition(requiredValue int32) *SwitchCondition {
-	return &SwitchCondition{
+func (s *Switch) PacketCondition(requiredValue int32) *SwitchPacketCondition {
+	return &SwitchPacketCondition{
 		Switch:        s,
 		RequiredValue: requiredValue,
 	}
 }
 
-func (s *SwitchCondition) Match(
+func (s *SwitchPacketCondition) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
@@ -117,7 +117,7 @@ func (s *SwitchCondition) Match(
 	return currentValue == s.RequiredValue
 }
 
-func (s *SwitchCondition) String() string {
+func (s *SwitchPacketCondition) String() string {
 	currentValue := s.CurrentValue.Load()
 	return fmt.Sprintf("SwitchCondition(%t: req:%d; cur:%d)", currentValue == s.RequiredValue, currentValue, s.RequiredValue)
 }

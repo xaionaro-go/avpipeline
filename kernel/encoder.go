@@ -298,7 +298,7 @@ func (e *Encoder[EF]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputFrame")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
@@ -306,13 +306,14 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh)
+	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
 func (e *Encoder[EF]) sendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
@@ -343,8 +344,19 @@ func (e *Encoder[EF]) sendInputFrame(
 		e.headerIsWritten = true
 	}
 
-	if encoder.Encoder == (codec.EncoderCopy{}) {
-		return fmt.Errorf("one should not call SendInputFrame for the 'copy' encoder")
+	switch encoder.Encoder.(type) {
+	case codec.EncoderCopy, codec.EncoderRaw:
+		outputFramesCh <- frame.BuildOutput(
+			frame.CloneAsReferenced(input.Frame),
+			input.CodecParameters,
+			input.StreamIndex,
+			input.StreamsCount,
+			input.StreamDuration,
+			input.TimeBase,
+			input.Pos,
+			input.Duration,
+		)
+		return nil
 	}
 
 	outputStream := e.outputStreams[input.GetStreamIndex()]

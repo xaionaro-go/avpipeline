@@ -11,7 +11,7 @@ import (
 // TODO: delete me
 type EncoderCopy struct{}
 
-var _ Encoder = (*EncoderCopy)(nil)
+var _ Encoder = EncoderCopy{}
 
 func (EncoderCopy) String() string {
 	return "Encoder(copy)"
@@ -71,7 +71,7 @@ func (EncoderCopy) GetResolution(ctx context.Context) (uint32, uint32) {
 	return 0, 0
 }
 func (EncoderCopy) SetResolution(context.Context, uint32, uint32, condition.Condition) error {
-	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
+	return fmt.Errorf("'copy' implies the resolution cannot be manipulated")
 }
 
 func (EncoderCopy) Reset(context.Context) error {

@@ -74,24 +74,32 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputPacket")
 	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
-	return xsync.DoA3R1(ctx, &r.locker, r.sendInputPacket, ctx, input, outputPacketsCh)
+	return xsync.DoA4R1(
+		ctx,
+		&r.locker,
+		r.sendInputPacket,
+		ctx,
+		input,
+		outputPacketsCh, outputFramesCh,
+	)
 }
 
 func (r *Recoder[DF, EF]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	if r.IsClosed() {
 		return io.ErrClosedPipe
 	}
 
 	if r.started {
-		return r.process(ctx, input, outputPacketCh)
+		return r.process(ctx, input, outputPacketCh, outputFramesCh)
 	}
 
 	resultCh := make(chan packet.Output, 1)
@@ -115,7 +123,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		}
 	})
 
-	err := r.process(ctx, input, resultCh)
+	err := r.process(ctx, input, resultCh, outputFramesCh)
 	close(resultCh)
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
@@ -139,9 +147,10 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 func (r *Recoder[DF, EF]) process(
 	ctx context.Context,
 	input packet.Input,
-	resultCh chan<- packet.Output,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	err := r.Encoder.SendInputPacket(ctx, input, resultCh, nil)
+	err := r.Encoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 	switch {
 	case err == nil:
 		return
@@ -177,7 +186,7 @@ func (r *Recoder[DF, EF]) process(
 					return
 				}
 
-				err := r.Encoder.SendInputFrame(ctx, frame.Input(f), resultCh, nil)
+				err := r.Encoder.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
 				if err != nil {
 					encoderError = err
 				}
@@ -185,7 +194,7 @@ func (r *Recoder[DF, EF]) process(
 		}
 	})
 
-	err = r.Decoder.SendInputPacket(ctx, input, resultCh, framesCh)
+	err = r.Decoder.SendInputPacket(ctx, input, outputPacketsCh, framesCh)
 	close(framesCh)
 	wg.Wait()
 	if encoderError != nil {
@@ -203,8 +212,10 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
-	return fmt.Errorf("not implemented, yet")
+) (_err error) {
+	logger.Tracef(ctx, "SendInputFrame")
+	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 }
 
 func (r *Recoder[DF, EF]) String() string {

@@ -178,10 +178,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 		}
 		return nil
 	}
-	if cfg.AudioTrackConfigs[0].CodecName != "copy" {
+	if cfg.AudioTrackConfigs[0].CodecName != codec.CodecNameCopy {
 		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTrackConfigs[0].CodecName)
 	}
-	if cfg.VideoTrackConfigs[0].CodecName == "copy" {
+	if cfg.VideoTrackConfigs[0].CodecName == codec.CodecNameCopy {
 		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -221,7 +221,7 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		),
 		codec.NewNaiveEncoderFactory(ctx,
 			cfg.VideoTrackConfigs[0].CodecName,
-			"copy",
+			codec.CodecNameCopy,
 			avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
 			avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
 			convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions),
@@ -427,8 +427,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			s.NodeRecoder,
 			packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(0),
-					s.SwitchPostFilter.Condition(0),
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
 				},
 			},
 		)
@@ -436,8 +436,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			nodeFilterThrottle,
 			packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(1),
-					s.SwitchPostFilter.Condition(1),
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
 				},
 			},
 		)
@@ -451,6 +451,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 	} else {
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
+		s.MapInputStreamIndicesNode.AddPushFramesTo(s.NodeRecoder)
 	}
 
 	s.NodeStreamFixerMain = autofix.New(
@@ -471,6 +472,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		)
 		if s.NodeStreamFixerPassthrough != nil {
 			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
+			nodeFilterThrottle.AddPushFramesTo(s.NodeStreamFixerPassthrough)
 		}
 
 		if startWithPassthrough {
@@ -499,14 +501,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		case types.PassthroughModeSameTracks:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(0),
-					s.SwitchPostFilter.Condition(0),
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
 				},
 			})
 			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(1),
-					s.SwitchPostFilter.Condition(1),
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
 				},
 			})
 			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
@@ -527,14 +529,14 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		case types.PassthroughModeNextOutput:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(0),
-					s.SwitchPostFilter.Condition(0),
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
 				},
 			})
 			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
-					s.SwitchPreFilter.Condition(1),
-					s.SwitchPostFilter.Condition(1),
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
 				},
 			})
 			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
@@ -555,9 +557,12 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	} else {
 		if s.NodeStreamFixerMain != nil {
 			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain)
+			s.NodeRecoder.AddPushFramesTo(s.NodeStreamFixerMain)
 			s.NodeStreamFixerMain.AddPushPacketsTo(outputMain)
+			s.NodeStreamFixerMain.AddPushFramesTo(outputMain)
 		} else {
 			s.NodeRecoder.AddPushPacketsTo(outputMain)
+			s.NodeRecoder.AddPushFramesTo(outputMain)
 		}
 	}
 

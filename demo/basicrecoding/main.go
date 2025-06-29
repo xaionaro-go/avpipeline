@@ -34,7 +34,7 @@ func main() {
 
 	loggerLevel := logger.LevelWarning
 	pflag.Var(&loggerLevel, "log-level", "Log level")
-	videoCodec := pflag.String("vcodec", "copy", "")
+	videoCodec := pflag.String("vcodec", codec.CodecNameCopy, "")
 	hwDeviceName := pflag.String("hwdevice", "", "")
 	frameDrop := pflag.Bool("framedrop", false, "")
 
@@ -80,7 +80,7 @@ func main() {
 	recoder, err := processor.NewRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, 0, hwDevName, nil, nil, nil),
-		codec.NewNaiveEncoderFactory(ctx, *videoCodec, "copy", 0, hwDevName, types.DictionaryItems{
+		codec.NewNaiveEncoderFactory(ctx, *videoCodec, codec.CodecNameCopy, 0, hwDevName, types.DictionaryItems{
 			{Key: "bf", Value: "0"}, // to disable B-frames
 		}, nil),
 		nil,

@@ -105,7 +105,7 @@ func main() {
 	var recoders []*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
-		encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, "copy", 0, hwDeviceName, nil, nil)
+		encoderFactory := codec.NewNaiveEncoderFactory(ctx, vcodec, codec.CodecNameCopy, 0, hwDeviceName, nil, nil)
 		recoder, err := kernel.NewRecoder(
 			ctx,
 			codec.NewNaiveDecoderFactory(ctx, 0, hwDeviceName, nil, nil, nil),

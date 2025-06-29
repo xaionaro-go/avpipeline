@@ -7,6 +7,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
@@ -65,13 +66,13 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
-								CodecName:      "copy",
+								CodecName:      codec.CodecNameCopy,
 							})
 						case astiav.MediaTypeAudio:
 							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
-								CodecName:      "copy",
+								CodecName:      codec.CodecNameCopy,
 							})
 						}
 					}
@@ -83,12 +84,12 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{0},
-				CodecName:      "copy",
+				CodecName:      codec.CodecNameCopy,
 			})
 			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{1},
-				CodecName:      "copy",
+				CodecName:      codec.CodecNameCopy,
 			})
 		}
 	}
@@ -134,6 +135,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 
 	fwd.ChainInput = &nodewrapper.NoServe[*chainInputNode]{Node: fwd.Chain.Input()}
 	fwd.Input.AddPushPacketsTo(fwd.ChainInput)
+	fwd.Input.AddPushFramesTo(fwd.ChainInput)
 
 	observability.Go(ctx, func(ctx context.Context) {
 		logger.Debugf(ctx, "waiter")

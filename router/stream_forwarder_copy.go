@@ -56,14 +56,14 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 func (fwd *StreamForwarderCopy[CS, PS]) Start(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
-	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.addPacketsPushing, ctx)
+	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.addPushingFurther, ctx)
 }
 
-func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
+func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "addPacketsPushing")
-	defer func() { logger.Debugf(ctx, "/addPacketsPushing: %v", _err) }()
+	logger.Debugf(ctx, "addPushingFurther")
+	defer func() { logger.Debugf(ctx, "/addPushingFurther: %v", _err) }()
 	if fwd.CancelFunc != nil {
 		return ErrAlreadyOpen{}
 	}
@@ -84,7 +84,9 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
 	fwd.AutoFixer.Output().AddPushPacketsTo(fwd.outputAsNode())
-	fwd.Input.AddPushPacketsTo(fwd.AutoFixerInput) // using a NoServe-wrapped value to make sure nobody accidentally started to serve it elsewhere
+	fwd.AutoFixer.Output().AddPushFramesTo(fwd.outputAsNode())
+	fwd.Input.AddPushPacketsTo(fwd.AutoFixerInput)
+	fwd.Input.AddPushFramesTo(fwd.AutoFixerInput)
 	errCh := make(chan node.Error, 100)
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range errCh {
@@ -106,11 +108,11 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPacketsPushing(
 	return nil
 }
 
-func (fwd *StreamForwarderCopy[CS, PS]) removePacketsPushing(
+func (fwd *StreamForwarderCopy[CS, PS]) removePushingFurther(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "removePacketsPushing")
-	defer func() { logger.Debugf(ctx, "/removePacketsPushing: %v", _err) }()
+	logger.Debugf(ctx, "removePushingFurther")
+	defer func() { logger.Debugf(ctx, "/removePushingFurther: %v", _err) }()
 	if fwd.CancelFunc == nil {
 		return ErrAlreadyClosed{}
 	}
@@ -124,10 +126,22 @@ func (fwd *StreamForwarderCopy[CS, PS]) removePacketsPushing(
 		if err != nil {
 			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.AutoFixer, fwd.Output))
 		}
+		err = node.RemovePushFramesTo(ctx, fwd.Input, fwd.AutoFixerInput)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.Input, fwd.AutoFixer))
+		}
+		err = node.RemovePushFramesTo(ctx, fwd.AutoFixer.Output(), fwd.outputAsNode())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.AutoFixer, fwd.Output))
+		}
 	} else {
 		err := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.outputAsNode())
 		if err != nil {
 			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.Output))
+		}
+		err = node.RemovePushFramesTo(ctx, fwd.Input, fwd.outputAsNode())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.Input, fwd.Output))
 		}
 	}
 	fwd.CancelFunc()
@@ -152,7 +166,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) Stop(
 ) (_err error) {
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
-	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.removePacketsPushing, ctx)
+	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.removePushingFurther, ctx)
 }
 
 func (fwd *StreamForwarderCopy[CS, PS]) outputAsNode() *forwarderCopyOutputAsNode[CS, PS] {

@@ -161,7 +161,7 @@ func main() {
 		outputNode,
 		packetfiltercondition.Packet{
 			Condition: condition.And{
-				sw.Condition(0),
+				sw.PacketCondition(0),
 				tsShifter,
 				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
 					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
@@ -185,7 +185,7 @@ func main() {
 		outputNode,
 		packetfiltercondition.Packet{
 			Condition: condition.And{
-				sw.Condition(1),
+				sw.PacketCondition(1),
 				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
 					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
 						return true

@@ -17,6 +17,7 @@ import (
 
 const (
 	CodecNameCopy = "copy"
+	CodecNameRaw  = "raw"
 )
 
 type Encoder interface {
@@ -65,8 +66,11 @@ func NewEncoder(
 ) (_ret Encoder, _err error) {
 	logger.Tracef(ctx, "NewEncoder")
 	defer func() { logger.Tracef(ctx, "/NewEncoder: %T %v", _ret, _err) }()
-	if params.CodecName == CodecNameCopy {
+	switch params.CodecName {
+	case CodecNameCopy:
 		return EncoderCopy{}, nil
+	case CodecNameRaw:
+		return EncoderRaw{}, nil
 	}
 	e, err := newEncoder(ctx, params, nil)
 	if err != nil {
