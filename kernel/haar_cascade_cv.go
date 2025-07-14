@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"io"
 	"os"
 
@@ -15,15 +16,22 @@ import (
 	"gocv.io/x/gocv"
 )
 
+type HaarCascadeProcessor interface {
+	fmt.Stringer
+	Process(context.Context, frame.Output, []image.Rectangle) error
+}
+
 type HaarCascade struct {
 	*closeChan
 	Classifier gocv.CascadeClassifier
+	Processor  HaarCascadeProcessor
 }
 
 var _ Abstract = (*HaarCascade)(nil)
 
 func NewHaarCascade(
 	classifierXML []byte,
+	processor HaarCascadeProcessor,
 ) (*HaarCascade, error) {
 	tempFile, err := os.CreateTemp("", "avpipeline-haar-cascade-classifier-*")
 	if err != nil {
@@ -44,6 +52,7 @@ func NewHaarCascade(
 	return &HaarCascade{
 		closeChan:  newCloseChan(),
 		Classifier: classifier,
+		Processor:  processor,
 	}, nil
 }
 
@@ -66,7 +75,7 @@ func (c *HaarCascade) SendInputFrame(
 }
 
 func (c *HaarCascade) String() string {
-	return "HaarCascade"
+	return fmt.Sprintf("HaarCascade(%s)", c.Processor)
 }
 
 func (c *HaarCascade) Close(ctx context.Context) error {
