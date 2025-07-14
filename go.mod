@@ -24,6 +24,7 @@ require (
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
 	github.com/xaionaro-go/xsync v0.0.0-20250511184922-deec5fb01a0f
+	gocv.io/x/gocv v0.41.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.5
 )

@@ -49,7 +49,7 @@ func serve[T node.Abstract](
 				ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", any(n)))
 				ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", any(n.GetProcessor())))
 			}
-			nodeKey := fmt.Sprintf("%s:%p", n, n)
+			nodeKey := fmt.Sprintf("%s:%p", any(n), any(n))
 			logger.Tracef(ctx, "Serve[%s]", nodeKey)
 			if _, ok := (*dstAlreadyVisited)[n]; ok {
 				logger.Tracef(ctx, "/Serve[%s]: already visited", nodeKey)
