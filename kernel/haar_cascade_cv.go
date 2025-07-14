@@ -18,7 +18,7 @@ import (
 
 type HaarCascadeProcessor interface {
 	fmt.Stringer
-	Process(context.Context, frame.Output, []image.Rectangle) error
+	Process(context.Context, *gocv.Mat, []image.Rectangle) error
 }
 
 type HaarCascade struct {
@@ -71,6 +71,14 @@ func (c *HaarCascade) SendInputFrame(
 	_ chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
+
+	//c.Classifier.DetectMultiScale(mat)
+	outputFrame := frame.BuildOutput(input.Frame, input.CodecParameters, input.StreamIndex, input.StreamsCount, input.StreamDuration, input.TimeBase, input.Pos, input.Duration)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case outputFramesCh <- outputFrame:
+	}
 	return fmt.Errorf("not implemented, yet")
 }
 

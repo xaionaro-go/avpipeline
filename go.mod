@@ -5,6 +5,7 @@ go 1.24.1
 replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250521203320-7402f3e25a7c
 
 require (
+	github.com/anthonynsimon/bild v0.14.0
 	github.com/asticode/go-astiav v0.36.0
 	github.com/asticode/go-astikit v0.54.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
@@ -24,6 +25,7 @@ require (
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
 	github.com/xaionaro-go/xsync v0.0.0-20250511184922-deec5fb01a0f
+	go.uber.org/atomic v1.11.0
 	gocv.io/x/gocv v0.41.0
 	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.5

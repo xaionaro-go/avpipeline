@@ -1,7 +1,4 @@
-//go:build with_cv
-// +build with_cv
-
-package haarcascadeprocessor
+package imageprocessor
 
 import (
 	"context"
@@ -9,7 +6,6 @@ import (
 	"image"
 
 	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/filter"
 )
 
@@ -17,7 +13,7 @@ type AVFilter[T filter.Kernel] struct {
 	*filter.Filter[T]
 }
 
-var _ kernel.HaarCascadeProcessor = (*AVFilter[filter.Kernel])(nil)
+var _ Abstract = (*AVFilter[filter.Kernel])(nil)
 
 func NewAVFilter[T filter.Kernel](
 	filter *filter.Filter[T],
@@ -28,13 +24,13 @@ func NewAVFilter[T filter.Kernel](
 }
 
 func (f *AVFilter[T]) String() string {
-	return fmt.Sprintf("AVFilter(%)", f.Filter)
+	return fmt.Sprintf("AVFilter(%s)", f.Filter)
 }
 
 func (f *AVFilter[T]) Process(
 	ctx context.Context,
 	frame frame.Output,
-	coords []image.Rectangle,
+	coords image.Rectangle,
 ) error {
 	var img image.RGBA
 	err := frame.Data().ToImage(&img)
