@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"slices"
 	"strings"
 
@@ -124,6 +125,8 @@ func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
+	ctx := context.TODO()
+	logger.Tracef(ctx, "SetPushPacketsTos: %s", debug.Stack())
 	n.Locker.Do(context.TODO(), func() {
 		n.PushPacketsTos = s
 	})
@@ -145,6 +148,7 @@ func RemovePushPacketsTo[C any, P processor.Abstract](
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushPacketsTo")
 	defer func() { defer logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
+	logger.Tracef(ctx, "RemovePushPacketsTo: %s", debug.Stack())
 
 	if !xsync.DoR1(ctx, &from.Locker, func() bool {
 		pushTos := from.PushPacketsTos
@@ -169,6 +173,7 @@ func RemovePushFramesTo[C any, P processor.Abstract](
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushFramesTo")
 	defer func() { defer logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
+	logger.Tracef(ctx, "RemovePushFramesTo: %s", debug.Stack())
 
 	return xsync.DoR1(ctx, &from.Locker, func() error {
 		pushTos := from.PushFramesTos
@@ -193,6 +198,8 @@ func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
 }
 
 func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
+	ctx := context.TODO()
+	logger.Tracef(ctx, "SetPushFramesTos: %s", debug.Stack())
 	n.Locker.Do(context.TODO(), func() {
 		n.PushFramesTos = s
 	})

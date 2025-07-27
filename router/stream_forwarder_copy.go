@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -54,6 +55,8 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 }
 
 func (fwd *StreamForwarderCopy[CS, PS]) Start(ctx context.Context) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "output", fwd.Output)
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.addPushingFurther, ctx)
@@ -164,6 +167,8 @@ func (fwd *StreamForwarderCopy[CS, PS]) Destination() node.Abstract {
 func (fwd *StreamForwarderCopy[CS, PS]) Stop(
 	ctx context.Context,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "route", fwd.Output)
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.removePushingFurther, ctx)

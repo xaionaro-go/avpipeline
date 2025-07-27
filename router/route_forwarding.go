@@ -27,22 +27,24 @@ type ForwardOutputFactory[T any] interface {
 }
 
 type RouteForwarding[T any] struct {
-	Router        *Router[T]
-	SrcPath       RoutePath
-	OutputFactory ForwardOutputFactory[T]
-	PublishMode   PublishMode
-	RecoderConfig *transcodertypes.RecoderConfig
-	Locker        xsync.Mutex
-	CancelFunc    context.CancelFunc
-	Input         *Route[T]
-	Output        NodeForwardingOutput[T]
-	WaitGroup     sync.WaitGroup
+	Router          *Router[T]
+	SrcPath         RoutePath
+	GetSrcRouteMode GetRouteMode
+	OutputFactory   ForwardOutputFactory[T]
+	PublishMode     PublishMode
+	RecoderConfig   *transcodertypes.RecoderConfig
+	Locker          xsync.Mutex
+	CancelFunc      context.CancelFunc
+	Input           *Route[T]
+	Output          NodeForwardingOutput[T]
+	WaitGroup       sync.WaitGroup
 	StreamForwarder[GoBug63285RouteInterface[T], *ProcessorRouting]
 }
 
 func (r *Router[T]) AddRouteForwarding(
 	ctx context.Context,
 	srcPath RoutePath,
+	getSrcRouteMode GetRouteMode,
 	outputFactory ForwardOutputFactory[T],
 	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
@@ -54,11 +56,12 @@ func (r *Router[T]) AddRouteForwarding(
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 
 	fwd := &RouteForwarding[T]{
-		Router:        r,
-		SrcPath:       srcPath,
-		OutputFactory: outputFactory,
-		PublishMode:   publishMode,
-		RecoderConfig: recoderConfig,
+		Router:          r,
+		SrcPath:         srcPath,
+		GetSrcRouteMode: getSrcRouteMode,
+		OutputFactory:   outputFactory,
+		PublishMode:     publishMode,
+		RecoderConfig:   recoderConfig,
 	}
 	if err := fwd.open(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize: %w", err)
@@ -117,7 +120,7 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 		}
 	}()
 
-	src, err := fwd.Router.GetRoute(ctx, fwd.SrcPath, GetRouteModeWaitForPublisher)
+	src, err := fwd.Router.GetRoute(ctx, fwd.SrcPath, fwd.GetSrcRouteMode)
 	if err != nil {
 		return fmt.Errorf("internal error: unable to get the source route by path '%s': %w", fwd.SrcPath, err)
 	}

@@ -61,6 +61,7 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
+		GetRouteModeCreateIfNotFound,
 		newForwardOutputFactoryLocalPath(r, dstPath),
 		publishMode,
 		recoderConfig,

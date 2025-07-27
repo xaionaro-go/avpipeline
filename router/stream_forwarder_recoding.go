@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -100,6 +101,8 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 }
 
 func (fwd *StreamForwarderRecoding[CS, PS]) Start(ctx context.Context) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "output", fwd.DestinationNode)
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.start, ctx)
@@ -178,6 +181,8 @@ func (fwd *StreamForwarderRecoding[CS, PS]) Destination() node.Abstract {
 func (fwd *StreamForwarderRecoding[CS, PS]) Stop(
 	ctx context.Context,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "route", fwd.DestinationNode)
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.stop, ctx)
@@ -193,18 +198,25 @@ func (fwd *StreamForwarderRecoding[CS, PS]) stop(
 	}
 	fwd.CancelFunc()
 	fwd.CancelFunc = nil
-	removePushErr := node.RemovePushPacketsTo(ctx, fwd.Input, fwd.ChainInput)
-	if removePushErr != nil {
-		if fwd.Input == nil {
-			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.Input == nil)", removePushErr)
+	for _, c := range []struct {
+		Name string
+		Err  error
+	}{
+		{Name: "packet", Err: node.RemovePushPacketsTo(ctx, fwd.Input, fwd.ChainInput)},
+		{Name: "frame", Err: node.RemovePushFramesTo(ctx, fwd.Input, fwd.ChainInput)},
+	} {
+		if c.Err != nil {
+			if fwd.Input == nil {
+				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.Input == nil)", c.Name, c.Err)
+			}
+			if fwd.ChainInput == nil {
+				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.ChainInput == nil)", c.Name, c.Err)
+			}
+			if fwd.ChainInput.Node == nil {
+				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.ChainInput.Node == nil)", c.Name, c.Err)
+			}
+			return fmt.Errorf("unable to remove pushing %ss from %s to %s: %w", c.Name, fwd.Input, fwd.ChainInput.Node, c.Err)
 		}
-		if fwd.ChainInput == nil {
-			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.ChainInput == nil)", removePushErr)
-		}
-		if fwd.ChainInput.Node == nil {
-			return fmt.Errorf("unable to remove pushing packets: %w (and fwd.ChainInput.Node == nil)", removePushErr)
-		}
-		return fmt.Errorf("unable to remove pushing packets from %s to %s: %w", fwd.Input, fwd.ChainInput.Node, removePushErr)
 	}
 	fwd.Chain.Wait(ctx)
 	return nil

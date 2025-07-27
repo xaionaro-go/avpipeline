@@ -24,9 +24,9 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	dst node.Abstract,
 	recoderConfig *transcodertypes.RecoderConfig,
 ) (_ret StreamForwarder[CS, PS], _err error) {
-	logger.Tracef(ctx, "NewForwarder(ctx, %s, %s, %#+v)", src, dst, recoderConfig)
+	logger.Tracef(ctx, "NewStreamForwarder(ctx, %s, %s, %#+v)", src, dst, recoderConfig)
 	defer func() {
-		logger.Tracef(ctx, "/NewForwarder(ctx, %s, %s, %#+v): %v %v", src, dst, recoderConfig, _ret, _err)
+		logger.Tracef(ctx, "/NewStreamForwarder(ctx, %s, %s, %#+v): %v %v", src, dst, recoderConfig, _ret, _err)
 	}()
 	var fwd StreamForwarder[CS, PS]
 	var err error

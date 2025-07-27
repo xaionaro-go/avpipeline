@@ -92,6 +92,8 @@ func (fwd *RouteSource[T, C, P]) GetPublishMode(
 func (fwd *RouteSource[T, C, P]) Start(
 	ctx context.Context,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "route", fwd.DstPath)
 	logger.Debugf(ctx, "Start")
 	defer func() { logger.Debugf(ctx, "/Start: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.startLocked, ctx)
@@ -148,6 +150,8 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 func (fwd *RouteSource[T, C, P]) Stop(
 	ctx context.Context,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "route", fwd.DstPath)
 	logger.Debugf(ctx, "Stop")
 	defer func() { logger.Debugf(ctx, "/Stop: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.stopLocked, ctx)
@@ -204,6 +208,8 @@ func (fwd *RouteSource[T, C, P]) doStopLocked(
 func (fwd *RouteSource[T, C, P]) Close(
 	ctx context.Context,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "input", fwd.Input.String())
+	ctx = belt.WithField(ctx, "route", fwd.DstPath)
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.closeLocked, ctx)
