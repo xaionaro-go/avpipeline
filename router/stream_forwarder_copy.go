@@ -47,7 +47,7 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 	dstAsPacketSink := asPacketSink(dst.GetProcessor())
 	if srcAsPacketSource != nil && dstAsPacketSink != nil {
 		logger.Debugf(ctx, "adding an autoheaders node to handle Source->Sink conversion")
-		fwd.AutoFixer = autofix.NewWithCustomData[CS](ctx, srcAsPacketSource, dstAsPacketSink, src.CustomData)
+		fwd.AutoFixer = autofix.NewWithCustomData(ctx, srcAsPacketSource, dstAsPacketSink, src.CustomData)
 		fwd.AutoFixerInput = &nodewrapper.NoServe[node.Abstract]{Node: fwd.AutoFixer.Input()}
 	}
 	return fwd, nil
@@ -176,12 +176,30 @@ func (fwd *StreamForwarderCopy[CS, PS]) outputAsNode() *forwarderCopyOutputAsNod
 type forwarderCopyOutputAsNode[CS any, PS processor.Abstract] StreamForwarderCopy[CS, PS]
 
 var _ node.Abstract = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
+var _ node.DotBlockContentStringWriteToer = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) Serve(
 	ctx context.Context,
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) DotBlockContentStringWriteTo(
+	w io.Writer,
+	alreadyPrinted map[processor.Abstract]struct{},
+) {
+	if writeToer, ok := any(fwd.Output).(node.DotBlockContentStringWriteToer); ok {
+		writeToer.DotBlockContentStringWriteTo(w, alreadyPrinted)
+	}
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) String() string {
+	stringer, ok := any(fwd.Output).(fmt.Stringer)
+	if !ok {
+		return "FwdCpyOutput"
+	}
+	return fmt.Sprintf("FwdCpyOutput(%s)", stringer)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushPacketsTos() node.PushPacketsTos {

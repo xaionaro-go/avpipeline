@@ -19,8 +19,9 @@ type RouteSource[T any, C any, P processor.Abstract] struct {
 	DstPath       RoutePath
 	PublishMode   PublishMode
 	RecoderConfig *transcodertypes.RecoderConfig
-	OnStart       func(context.Context, *RouteSource[T, C, P])
-	OnStop        func(context.Context, *RouteSource[T, C, P])
+	OnPostStart   func(context.Context, *RouteSource[T, C, P])
+	OnPreStop     func(context.Context, *RouteSource[T, C, P])
+	OnPostStop    func(context.Context, *RouteSource[T, C, P])
 	Locker        xsync.Mutex
 	CancelFunc    context.CancelFunc
 	Input         *node.NodeWithCustomData[C, P]
@@ -36,8 +37,9 @@ func AddRouteSource[T any, C any, P processor.Abstract](
 	dstPath RoutePath,
 	publishMode PublishMode,
 	recoderConfig *transcodertypes.RecoderConfig,
-	onStart func(context.Context, *RouteSource[T, C, P]),
-	onStop func(context.Context, *RouteSource[T, C, P]),
+	onPostStart func(context.Context, *RouteSource[T, C, P]),
+	onPreStop func(context.Context, *RouteSource[T, C, P]),
+	onPostStop func(context.Context, *RouteSource[T, C, P]),
 ) (_ret *RouteSource[T, C, P], _err error) {
 	logger.Debugf(ctx, "AddRouteSource(ctx, %#+v, '%s')", srcNode, dstPath)
 	defer func() {
@@ -51,8 +53,9 @@ func AddRouteSource[T any, C any, P processor.Abstract](
 		DstPath:       dstPath,
 		PublishMode:   publishMode,
 		RecoderConfig: recoderConfig,
-		OnStart:       onStart,
-		OnStop:        onStop,
+		OnPostStart:   onPostStart,
+		OnPreStop:     onPreStop,
+		OnPostStop:    onPostStop,
 	}
 	if err := fwd.open(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize: %w", err)
@@ -108,7 +111,9 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 	defer fwd.WaitGroup.Done()
 	defer func() {
 		if _err == nil {
-			fwd.OnStart(ctx, fwd)
+			if fwd.OnPostStart != nil {
+				fwd.OnPostStart(ctx, fwd)
+			}
 		} else {
 			logger.Tracef(ctx, "initiating doStopLocked because startLocked failed with %v", _err)
 			err := fwd.doStopLocked(ctx)
@@ -156,8 +161,15 @@ func (fwd *RouteSource[T, C, P]) stopLocked(
 
 	fwd.WaitGroup.Add(1)
 	defer fwd.WaitGroup.Done()
-	if fwd.OnStop != nil {
-		fwd.OnStop(ctx, fwd)
+
+	if fwd.OnPostStop != nil {
+		defer func() {
+			fwd.OnPostStop(ctx, fwd)
+		}()
+	}
+
+	if fwd.OnPreStop != nil {
+		fwd.OnPreStop(ctx, fwd)
 	}
 
 	return fwd.doStopLocked(ctx)

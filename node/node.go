@@ -50,6 +50,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 type Node[T processor.Abstract] = NodeWithCustomData[struct{}, T]
 
 var _ Abstract = (*Node[processor.Abstract])(nil)
+var _ DotBlockContentStringWriteToer = (*Node[processor.Abstract])(nil)
 
 func New[T processor.Abstract](processor T) *Node[T] {
 	return NewWithCustomData[struct{}](processor)
@@ -261,6 +262,12 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		return s
 	}
 
+	type connectionKey struct {
+		From processor.Abstract
+		To   processor.Abstract
+	}
+	connectionIsAlreadyPrint := map[connectionKey]struct{}{}
+
 	if _, ok := alreadyPrinted[n.Processor]; !ok {
 		fmt.Fprintf(
 			w,
@@ -271,6 +278,15 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
 	for _, pushTo := range n.PushPacketsTos {
+		key := connectionKey{
+			From: n.Processor,
+			To:   pushTo.Node.GetProcessor(),
+		}
+		if _, ok := connectionIsAlreadyPrint[key]; ok {
+			continue
+		}
+		connectionIsAlreadyPrint[key] = struct{}{}
+
 		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
@@ -280,6 +296,7 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
 			continue
 		}
+
 		fmt.Fprintf(
 			w,
 			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
@@ -289,6 +306,15 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		)
 	}
 	for _, pushTo := range n.PushFramesTos {
+		key := connectionKey{
+			From: n.Processor,
+			To:   pushTo.Node.GetProcessor(),
+		}
+		if _, ok := connectionIsAlreadyPrint[key]; ok {
+			continue
+		}
+		connectionIsAlreadyPrint[key] = struct{}{}
+
 		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
 		if !ok {
 			continue
@@ -298,6 +324,7 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
 			continue
 		}
+
 		fmt.Fprintf(
 			w,
 			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
