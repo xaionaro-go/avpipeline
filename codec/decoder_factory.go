@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type DecoderFactory interface {
@@ -16,6 +14,12 @@ type DecoderFactory interface {
 }
 
 type NaiveDecoderFactory struct {
+	NaiveDecoderFactoryParams
+}
+
+var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
+
+type NaiveDecoderFactoryParams struct {
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
@@ -23,40 +27,20 @@ type NaiveDecoderFactory struct {
 	PostInitFunc       func(context.Context, *Decoder)
 }
 
-var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
+func DefaultNaiveDecoderFactory() *NaiveDecoderFactoryParams {
+	return &NaiveDecoderFactoryParams{}
+}
 
 func NewNaiveDecoderFactory(
 	ctx context.Context,
-	hardwareDeviceType astiav.HardwareDeviceType,
-	hardwareDeviceName HardwareDeviceName,
-	videoCustomOptions types.DictionaryItems,
-	audioCustomOptions types.DictionaryItems,
-	postInit func(context.Context, *Decoder),
+	params *NaiveDecoderFactoryParams,
 ) *NaiveDecoderFactory {
-	f := &NaiveDecoderFactory{
-		HardwareDeviceType: hardwareDeviceType,
-		HardwareDeviceName: hardwareDeviceName,
-		PostInitFunc:       postInit,
+	if params == nil {
+		params = DefaultNaiveDecoderFactory()
 	}
-	if len(videoCustomOptions) > 0 {
-		f.VideoOptions = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.VideoOptions)
-
-		for _, opt := range videoCustomOptions {
-			logger.Debugf(ctx, "decoderFactory.VideoOptions['%s'] = '%s'", opt.Key, opt.Value)
-			f.VideoOptions.Set(opt.Key, opt.Value, 0)
-		}
+	return &NaiveDecoderFactory{
+		NaiveDecoderFactoryParams: *params,
 	}
-	if len(audioCustomOptions) > 0 {
-		f.AudioOptions = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.AudioOptions)
-
-		for _, opt := range audioCustomOptions {
-			logger.Debugf(ctx, "decoderFactory.AudioOptions['%s'] = '%s'", opt.Key, opt.Value)
-			f.AudioOptions.Set(opt.Key, opt.Value, 0)
-		}
-	}
-	return f
 }
 
 func (f *NaiveDecoderFactory) NewDecoder(

@@ -1,6 +1,8 @@
 package filter
 
 import (
+	"fmt"
+
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame/condition"
 )
@@ -18,6 +20,10 @@ type Kernel interface {
 	ConnectOutput(graph *astiav.FilterGraph, nodeName string) error
 	InputFilterContext() *astiav.FilterContext
 	OutputFilterContext() *astiav.FilterContext
+}
+
+func (k *Filter[T]) String() string {
+	return fmt.Sprintf("Filter(%v)", k.Kernel)
 }
 
 func (k *Filter[T]) FilterInput() *astiav.Filter {

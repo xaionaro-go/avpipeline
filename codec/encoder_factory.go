@@ -6,7 +6,6 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -16,53 +15,38 @@ type EncoderFactory interface {
 }
 
 type NaiveEncoderFactory struct {
+	NaiveEncoderFactoryParams
+
+	Locker        xsync.Mutex
+	VideoEncoders []Encoder
+	AudioEncoders []Encoder
+}
+
+type NaiveEncoderFactoryParams struct {
 	VideoCodec         string
 	AudioCodec         string
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
 	AudioOptions       *astiav.Dictionary
-	VideoEncoders      []Encoder
-	AudioEncoders      []Encoder
-	Locker             xsync.Mutex
+}
+
+func DefaultNaiveEncoderFactoryParams() *NaiveEncoderFactoryParams {
+	return &NaiveEncoderFactoryParams{}
 }
 
 var _ EncoderFactory = (*NaiveEncoderFactory)(nil)
 
 func NewNaiveEncoderFactory(
 	ctx context.Context,
-	videoCodec string,
-	audioCodec string,
-	hardwareDeviceType astiav.HardwareDeviceType,
-	hardwareDeviceName HardwareDeviceName,
-	videoCustomOptions types.DictionaryItems,
-	audioCustomOptions types.DictionaryItems,
+	params *NaiveEncoderFactoryParams,
 ) *NaiveEncoderFactory {
-	f := &NaiveEncoderFactory{
-		VideoCodec:         videoCodec,
-		AudioCodec:         audioCodec,
-		HardwareDeviceType: hardwareDeviceType,
-		HardwareDeviceName: hardwareDeviceName,
+	if params == nil {
+		params = DefaultNaiveEncoderFactoryParams()
 	}
-	if len(videoCustomOptions) > 0 {
-		f.VideoOptions = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.VideoOptions)
-
-		for _, opt := range videoCustomOptions {
-			logger.Debugf(ctx, "encoderFactory.VideoOptions['%s'] = '%s'", opt.Key, opt.Value)
-			f.VideoOptions.Set(opt.Key, opt.Value, 0)
-		}
+	return &NaiveEncoderFactory{
+		NaiveEncoderFactoryParams: *params,
 	}
-	if len(audioCustomOptions) > 0 {
-		f.AudioOptions = astiav.NewDictionary()
-		setFinalizerFree(ctx, f.AudioOptions)
-
-		for _, opt := range audioCustomOptions {
-			logger.Debugf(ctx, "encoderFactory.AudioOptions['%s'] = '%s'", opt.Key, opt.Value)
-			f.AudioOptions.Set(opt.Key, opt.Value, 0)
-		}
-	}
-	return f
 }
 
 func (f *NaiveEncoderFactory) String() string {

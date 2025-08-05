@@ -208,24 +208,26 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	s.Recoder, err = kernel.NewRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
-			avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-			avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-			nil,
-			nil,
-			func(ctx context.Context, d *codec.Decoder) {
-				err := d.SetLowLatency(ctx, true)
-				if err != nil {
-					logger.Warnf(ctx, "unable to enable the low latency mode on the decoder: %v", err)
-				}
+			&codec.NaiveDecoderFactoryParams{
+				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
+				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
+					err := d.SetLowLatency(ctx, true)
+					if err != nil {
+						logger.Warnf(ctx, "unable to enable the low latency mode on the decoder: %v", err)
+					}
+				},
 			},
 		),
 		codec.NewNaiveEncoderFactory(ctx,
-			cfg.VideoTrackConfigs[0].CodecName,
-			codec.CodecNameCopy,
-			avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-			avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-			convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions),
-			convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions),
+			&codec.NaiveEncoderFactoryParams{
+				VideoCodec:         cfg.VideoTrackConfigs[0].CodecName,
+				AudioCodec:         codec.CodecNameCopy,
+				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
+				VideoOptions:       convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
+				AudioOptions:       convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
+			},
 		),
 		nil,
 	)
