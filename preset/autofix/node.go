@@ -32,7 +32,7 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 		})
 	}
 	if a.MapStreamIndicesNode != nil {
-		defer wg.Add(1)
+		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
 			a.MapStreamIndicesNode.Serve(ctx, cfg, errCh)
