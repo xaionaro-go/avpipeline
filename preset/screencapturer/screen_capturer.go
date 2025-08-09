@@ -42,7 +42,7 @@ func NewWithCustomData[C any](
 
 	opts = append(opts, types.DictionaryItem{
 		Key:   "framerate",
-		Value: fmt.Sprintf("%f", params.FPS.Float64()),
+		Value: fmt.Sprintf("%f", 2*params.FPS.Float64()), // TODO: investigate why we need "2*" and get rid of this, if possible
 	})
 	opts = append(opts, inputOptions(params)...)
 
