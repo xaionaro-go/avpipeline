@@ -45,11 +45,17 @@ const (
 	outputWriteHeaders                  = true
 )
 
+type OutputConfigWaitForOutputStreams struct {
+	MinStreams uint
+}
+
 type OutputConfig struct {
 	CustomOptions  types.DictionaryItems
 	AsyncOpen      bool
 	OnOpened       func(context.Context, *Output) error
 	SendBufferSize uint
+
+	WaitForOutputStreams *OutputConfigWaitForOutputStreams
 
 	ErrorOnNSequentialInvalidDTS uint
 }
@@ -139,6 +145,13 @@ func NewOutputFromURL(
 			url.Host += ":1935"
 		case "rtmps":
 			url.Host += ":443"
+		}
+	}
+
+	if cfg.WaitForOutputStreams == nil {
+		cfg.WaitForOutputStreams = &OutputConfigWaitForOutputStreams{}
+		if outputWaitForStreams {
+			cfg.WaitForOutputStreams.MinStreams = 2
 		}
 	}
 
@@ -618,8 +631,10 @@ func (o *Output) send(
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		expectedStreamsCount = fmtCtx.NbStreams()
 	})
-	if expectedStreamsCount < 2 {
-		expectedStreamsCount = 2
+	if o.Config.WaitForOutputStreams != nil {
+		if expectedStreamsCount < int(o.Config.WaitForOutputStreams.MinStreams) {
+			expectedStreamsCount = int(o.Config.WaitForOutputStreams.MinStreams)
+		}
 	}
 
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() int {
@@ -659,7 +674,7 @@ func (o *Output) send(
 			o.pendingPackets = o.pendingPackets[1:]
 		}
 	}
-	if outputWaitForStreams && activeStreamCount < expectedStreamsCount {
+	if o.Config.WaitForOutputStreams != nil && activeStreamCount < expectedStreamsCount {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
 
 		return nil
