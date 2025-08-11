@@ -19,7 +19,17 @@ func NodeToGRPC(n node.Abstract) *avpipelinegrpc.Node {
 		Statistics:  NodeStatisticsToGRPC(n.GetStatistics()),
 	}
 
-	nextLayer, err := avpipeline.NextLayer(n)
+	var currentLayer []node.Abstract
+	for {
+		currentLayer = append(currentLayer, n)
+		origer, ok := n.(interface{ OriginalNodeAbstract() node.Abstract })
+		if !ok {
+			break
+		}
+		n = origer.OriginalNodeAbstract()
+	}
+
+	nextLayer, err := avpipeline.NextLayer(currentLayer...)
 	if err != nil {
 		panic(err)
 	}
