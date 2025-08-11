@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/go-ng/container/heap"
 	"github.com/go-ng/xsort"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/condition"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/sort"
 	"github.com/xaionaro-go/avpipeline/types"

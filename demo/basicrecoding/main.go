@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/facebookincubator/go-belt"
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"

@@ -3,7 +3,7 @@ package avpipeline
 import (
 	"github.com/asticode/go-astiav"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 func LogLevelToAstiav(level logger.Level) astiav.LogLevel {

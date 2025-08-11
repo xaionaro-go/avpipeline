@@ -8,9 +8,9 @@ import (
 
 	"github.com/asticode/go-astikit"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
 )

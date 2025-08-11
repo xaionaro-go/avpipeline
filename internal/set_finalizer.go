@@ -4,7 +4,7 @@ import (
 	"context"
 	"runtime"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 func SetFinalizerFree[T interface{ Free() }](

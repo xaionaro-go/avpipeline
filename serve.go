@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/facebookincubator/go-belt"
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/node/condition"
 	"github.com/xaionaro-go/observability"

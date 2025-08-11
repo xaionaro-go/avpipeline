@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"

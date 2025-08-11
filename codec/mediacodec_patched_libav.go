@@ -6,8 +6,8 @@ package codec
 import (
 	"context"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avmediacodec"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 func mediaCodecSetParameters(

@@ -7,7 +7,7 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/libsrt/extras/xastiav"
 	"github.com/xaionaro-go/libsrt/threadsafe"
 )

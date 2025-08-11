@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/observability"

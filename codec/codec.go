@@ -10,7 +10,7 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/unsafetools"
 	"github.com/xaionaro-go/xsync"
 )

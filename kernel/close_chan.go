@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 type closeChan struct {

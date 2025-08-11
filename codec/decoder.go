@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
 )

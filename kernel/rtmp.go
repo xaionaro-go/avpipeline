@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 func formatContextToRTMPFD(

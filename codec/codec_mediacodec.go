@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	"github.com/xaionaro-go/avmediacodec"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/xsync"
 )
 

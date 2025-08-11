@@ -3,7 +3,7 @@ package autoheaders
 import (
 	"context"
 
-	"github.com/facebookincubator/go-belt/tool/logger"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 func isOOBHeadersByFormatName(
