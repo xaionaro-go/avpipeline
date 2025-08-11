@@ -80,7 +80,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		observability.Go(ctx, func(ctx context.Context) {
 			defer swg.Done()
 			err := p.Kernel.Generate(ctx, p.OutputPacketCh, p.OutputFrameCh)
-			logger.Tracef(ctx, "p.Kernel.Generate: %v", err)
+			logger.Tracef(ctx, "p.Kernel[%T].Generate: %v", p, err)
 			if err != nil {
 				p.ErrorCh <- fmt.Errorf(
 					"kernel %T unable to generate traffic: %w",

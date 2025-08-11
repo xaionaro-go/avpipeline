@@ -32,6 +32,7 @@ type Input struct {
 	initialized chan struct{}
 
 	*astiav.FormatContext
+	*astiav.IOInterrupter
 	*astiav.Dictionary
 
 	ID  InputID
@@ -122,6 +123,11 @@ func (i *Input) doOpen(
 	if authKey.Get() != "" {
 		urlWithSecret += authKey.Get()
 	}
+
+	i.IOInterrupter = astiav.NewIOInterrupter()
+	setFinalizerFree(ctx, i.IOInterrupter)
+	i.FormatContext.SetIOInterrupter(i.IOInterrupter)
+
 	if err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary); err != nil {
 		i.FormatContext.Free()
 		if authKey.Get() != "" {
@@ -153,7 +159,9 @@ func (i *Input) doOpen(
 
 func (i *Input) Close(
 	ctx context.Context,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "Close[%s]", i)
+	defer func() { logger.Debugf(ctx, "/Close[%s]: %v", i, _err) }()
 	if i == nil {
 		return nil
 	}
@@ -194,6 +202,13 @@ func (i *Input) Generate(
 		return ctx.Err()
 	case <-i.initialized:
 	}
+
+	defer i.FormatContext.CloseInput()
+	observability.Go(ctx, func(ctx context.Context) {
+		<-ctx.Done()
+		logger.Debugf(ctx, "interrupting IO")
+		i.IOInterrupter.Interrupt()
+	})
 
 	for {
 		select {
