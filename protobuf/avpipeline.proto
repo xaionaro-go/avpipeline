@@ -3,6 +3,30 @@ package avpipeline;
 option go_package = "github.com/xaionaro-go/avpipeline/protobuf/avpipeline;avpipeline";
 import "libav.proto";
 
+message Node {
+    string id = 1;
+    string type = 2;
+    string description = 3;
+    NodeStatistics statistics = 4;
+    repeated Node TODO_publishingNodes = 5; // is not currently reported
+    repeated Node consumingNodes = 6;
+}
+
+message NodeStatistics {
+    uint64 bytesCountRead = 1;
+    uint64 bytesCountWrote = 2;
+    FramesStatistics framesRead = 3;
+    FramesStatistics framesMissed = 4;
+    FramesStatistics framesWrote = 5;
+}
+
+message FramesStatistics {
+    uint64 unknown = 1;
+    uint64 other = 2;
+    uint64 video = 3;
+    uint64 audio = 4;
+}
+
 message Object {
   uint32 type = 1;
   bytes data = 2;

@@ -11,5 +11,6 @@ type ProcessingStatistics struct {
 	BytesCountRead  uint64 `json:",omitempty"`
 	BytesCountWrote uint64 `json:",omitempty"`
 	FramesRead      ProcessingFramesStatistics
+	FramesMissed    ProcessingFramesStatistics
 	FramesWrote     ProcessingFramesStatistics
 }
