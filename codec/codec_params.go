@@ -24,10 +24,12 @@ func (p CodecParams) Clone(ctx context.Context) CodecParams {
 		p.CodecParameters = cp
 	}
 	if p.Options != nil {
-		opts := astiav.NewDictionary()
-		setFinalizerFree(ctx, opts)
-		opts.Unpack(p.Options.Pack())
-		p.Options = opts
+		if v := p.Options.Pack(); len(v) > 0 {
+			opts := astiav.NewDictionary()
+			setFinalizerFree(ctx, opts)
+			opts.Unpack(p.Options.Pack())
+			p.Options = opts
+		}
 	}
 	return p
 }

@@ -204,7 +204,11 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) String() string {
 	if !ok {
 		return "FwdCpyOutput"
 	}
-	return fmt.Sprintf("FwdCpyOutput(%s)", stringer)
+	return fmt.Sprintf("FwdCpyOutput(%s [%s])", stringer, (*StreamForwarderCopy[CS, PS])(fwd).String())
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) OriginalNodeAbstract() node.Abstract {
+	return fwd.Output
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushPacketsTos() node.PushPacketsTos {

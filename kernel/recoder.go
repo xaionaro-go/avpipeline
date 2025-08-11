@@ -55,7 +55,9 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	return r, nil
 }
 
-func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
+func (r *Recoder[DF, EF]) Close(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Close")
+	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
 	r.closeChan.Close(ctx)
 	r.Decoder.closeChan.Close(ctx)
 	r.Encoder.closeChan.Close(ctx)
@@ -63,10 +65,12 @@ func (r *Recoder[DF, EF]) Close(ctx context.Context) error {
 }
 
 func (r *Recoder[DF, EF]) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
-) error {
+	ctx context.Context,
+	_ chan<- packet.Output,
+	_ chan<- frame.Output,
+) (_err error) {
+	logger.Tracef(ctx, "Generate")
+	defer func() { logger.Tracef(ctx, "/Generate: %v", _err) }()
 	return nil
 }
 
@@ -94,6 +98,9 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	outputPacketCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	logger.Tracef(ctx, "sendInputPacket (started: %v)", r.started)
+	defer func() { logger.Tracef(ctx, "/sendInputPacket: %v (started: %v)", _err, r.started) }()
+
 	if r.IsClosed() {
 		return io.ErrClosedPipe
 	}
@@ -104,10 +111,14 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 
 	resultCh := make(chan packet.Output, 1)
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	defer func() {
+		logger.Tracef(ctx, "waiting for the result channel to be closed")
+		wg.Wait()
+	}()
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
+		defer logger.Tracef(ctx, "result channel closed")
 		for pkt := range resultCh {
 			r.pendingPackets = append(r.pendingPackets, pkt)
 			if len(r.pendingPackets) > pendingPacketsLimit {
@@ -123,7 +134,15 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		}
 	})
 
+	defer func() {
+		r := recover()
+		if r != nil {
+			close(resultCh)
+			panic(r)
+		}
+	}()
 	err := r.process(ctx, input, resultCh, outputFramesCh)
+	logger.Tracef(ctx, "closing the result channel")
 	close(resultCh)
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
@@ -150,6 +169,9 @@ func (r *Recoder[DF, EF]) process(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	logger.Tracef(ctx, "process")
+	defer func() { logger.Tracef(ctx, "/process: %v", _err) }()
+
 	err := r.Encoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 	switch {
 	case err == nil:
