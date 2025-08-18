@@ -13,6 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -29,11 +30,11 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Encoder[EF]
 	*closuresignaler.ClosureSignaler
 
-	locker             xsync.Mutex
-	started            bool
-	activeStreamsMap   map[int]struct{}
-	activeStreamsCount uint
-	pendingPackets     []packet.Output
+	locker                  xsync.Mutex
+	started                 bool
+	activeStreamsMap        map[int]struct{}
+	activeStreamsCount      uint
+	pendingPacketsAndFrames []types.AbstractPacketOrFrame
 }
 
 var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
@@ -110,7 +111,8 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		return r.process(ctx, input, outputPacketCh, outputFramesCh)
 	}
 
-	resultCh := make(chan packet.Output, 1)
+	resultPacketsCh := make(chan packet.Output, 1)
+	resultFramesCh := make(chan frame.Output, 1)
 	var wg sync.WaitGroup
 	defer func() {
 		logger.Tracef(ctx, "waiting for the result channel to be closed")
@@ -120,13 +122,31 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		defer logger.Tracef(ctx, "result channel closed")
-		for pkt := range resultCh {
-			r.pendingPackets = append(r.pendingPackets, pkt)
-			if len(r.pendingPackets) > pendingPacketsLimit {
-				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-				r.pendingPackets = r.pendingPackets[1:]
+		for {
+			var streamIdx int
+			select {
+			case pkt, ok := <-resultPacketsCh:
+				if !ok {
+					return
+				}
+				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, &pkt)
+				if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
+					logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+					r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
+				}
+				streamIdx = pkt.Stream.Index()
+			case frame, ok := <-resultFramesCh:
+				if !ok {
+					return
+				}
+				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, &frame)
+				if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
+					logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+					r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
+				}
+				streamIdx = frame.StreamIndex
 			}
-			streamIdx := pkt.Stream.Index()
+
 			if _, ok := r.activeStreamsMap[streamIdx]; ok {
 				continue
 			}
@@ -138,28 +158,41 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	defer func() {
 		r := recover()
 		if r != nil {
-			close(resultCh)
+			close(resultPacketsCh)
 			panic(r)
 		}
 	}()
-	err := r.process(ctx, input, resultCh, outputFramesCh)
-	logger.Tracef(ctx, "closing the result channel")
-	close(resultCh)
+	err := r.process(ctx, input, resultPacketsCh, resultFramesCh)
+	logger.Tracef(ctx, "closing the result channels")
+	close(resultPacketsCh)
+	close(resultFramesCh)
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
+	logger.Tracef(ctx, "input streams count: %d, active streams count: %d", inputStreamsCount, r.activeStreamsCount)
 	if int(r.activeStreamsCount) < inputStreamsCount {
 		return err
 	}
 
-	logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPackets), int(r.activeStreamsCount), inputStreamsCount)
-	for _, pkt := range r.pendingPackets {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case outputPacketCh <- pkt:
+	logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPacketsAndFrames), int(r.activeStreamsCount), inputStreamsCount)
+	for _, pktOrFrame := range r.pendingPacketsAndFrames {
+		switch pktOrFrame := pktOrFrame.(type) {
+		case *packet.Output:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case outputPacketCh <- *pktOrFrame:
+			}
+		case *frame.Output:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case outputFramesCh <- *pktOrFrame:
+			}
+		default:
+			return fmt.Errorf("unexpected type of pending packet/frame: %T", pktOrFrame)
 		}
 	}
-	r.pendingPackets = r.pendingPackets[:0]
+	r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[:0]
 	r.started = true
 	return err
 }
@@ -238,6 +271,17 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputFrame")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+	r.locker.Do(ctx, func() {
+		if r.started {
+			return
+		}
+		streamIdx := input.StreamIndex
+		if _, ok := r.activeStreamsMap[streamIdx]; ok {
+			return
+		}
+		r.activeStreamsCount++
+		r.activeStreamsMap[streamIdx] = struct{}{}
+	})
 	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 }
 

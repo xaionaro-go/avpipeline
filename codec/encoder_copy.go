@@ -77,3 +77,8 @@ func (EncoderCopy) SetResolution(context.Context, uint32, uint32, condition.Cond
 func (EncoderCopy) Reset(context.Context) error {
 	return nil
 }
+
+func IsEncoderCopy(encoder Encoder) bool {
+	_, ok := encoder.(EncoderCopy)
+	return ok
+}

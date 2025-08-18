@@ -9,6 +9,7 @@ type PassthroughMode int
 
 const (
 	UndefinedPassthroughMode = PassthroughMode(iota)
+	PassthroughModeNever
 	PassthroughModeSameTracks
 	PassthroughModeSameConnection
 	PassthroughModeNextOutput
@@ -19,6 +20,8 @@ func (m PassthroughMode) String() string {
 	switch m {
 	case UndefinedPassthroughMode:
 		return "<undefined>"
+	case PassthroughModeNever:
+		return "never"
 	case PassthroughModeSameTracks:
 		return "same_tracks"
 	case PassthroughModeSameConnection:

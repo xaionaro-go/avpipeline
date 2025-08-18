@@ -120,8 +120,8 @@ func (e *Encoder[EF]) initOutputStream(
 ) (_err error) {
 	logger.Tracef(ctx, "lazyInitOutputStream: streamIndex: %d", streamIndex)
 	defer func() {
-		if _err == nil {
-			assert(ctx, e.outputStreams[streamIndex] != nil)
+		if _err == nil && e.outputStreams[streamIndex] == nil {
+			_err = fmt.Errorf("internal error: output stream for stream index %d is somehow still nil after an explicit request for initialization", streamIndex)
 		}
 		logger.Tracef(ctx, "/lazyInitOutputStream: streamIndex: %d: %v", streamIndex, _err)
 	}()
@@ -152,7 +152,12 @@ func (e *Encoder[EF]) configureOutputStream(
 	outputStream *astiav.Stream,
 	streamIndex int,
 	timeBase astiav.Rational,
-) error {
+) (_err error) {
+	defer func() {
+		if _err == nil && e.outputStreams[streamIndex] == nil {
+			_err = fmt.Errorf("internal error: output stream for stream index %d is somehow still nil after an explicit request for initialization", streamIndex)
+		}
+	}()
 	outputStream.SetIndex(streamIndex)
 	outputStream.SetTimeBase(timeBase)
 	if e.StreamConfigurer != nil {
@@ -173,7 +178,6 @@ func (e *Encoder[EF]) configureOutputStream(
 		spew.Sdump(outputStream.CodecParameters()),
 	)
 	e.outputStreams[streamIndex] = outputStream
-	assert(ctx, outputStream != nil)
 
 	return nil
 }
@@ -197,9 +201,15 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	}
 
 	encoder := e.encoders[streamIndex]
-	if encoder.Encoder == (codec.EncoderCopy{}) {
+	if encoder == nil {
+		return fmt.Errorf("internal error: encoder for stream index %d is nil after an explicit request for initialization", streamIndex)
+	}
+	switch {
+	case codec.IsEncoderCopy(encoder.Encoder):
 		err = e.initOutputStreamCopy(ctx, streamIndex, params, timeBase)
-	} else {
+	case codec.IsEncoderRaw(encoder.Encoder):
+		return nil
+	default:
 		err = e.initOutputStream(ctx, streamIndex, encoder)
 	}
 	if err != nil {
@@ -224,6 +234,9 @@ func (e *Encoder[EF]) initEncoderFor(
 	encoderInstance, err := e.EncoderFactory.NewEncoder(ctx, params, timeBase)
 	if err != nil {
 		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", streamIndex, err)
+	}
+	if !codec.IsFakeEncoder(encoderInstance) && encoderInstance.CodecContext() == nil {
+		return fmt.Errorf("the encoder factory produced an encoder %T with nil CodecContext", encoderInstance)
 	}
 
 	encoder := &streamEncoder{Encoder: encoderInstance}
@@ -255,8 +268,8 @@ func (e *Encoder[EF]) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
+	logger.Tracef(ctx, "SendInputPacket: %s", input.GetMediaType())
+	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input.GetMediaType(), _err) }()
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
@@ -281,7 +294,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	}
 	assert(ctx, encoder != nil)
 
-	if encoder.Encoder != (codec.EncoderCopy{}) {
+	if !codec.IsEncoderCopy(encoder.Encoder) {
 		return ErrNotCopyEncoder{}
 	}
 
@@ -346,8 +359,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		e.headerIsWritten = true
 	}
 
-	switch encoder.Encoder.(type) {
-	case codec.EncoderCopy, codec.EncoderRaw:
+	if codec.IsEncoderRaw(encoder.Encoder) {
 		outputFramesCh <- frame.BuildOutput(
 			frame.CloneAsReferenced(input.Frame),
 			input.CodecParameters,
@@ -429,7 +441,8 @@ func (e *Encoder[EF]) send(
 	outPkt *astiav.Packet,
 	outputStream *astiav.Stream,
 	out chan<- packet.Output,
-) error {
+) (_err error) {
+
 	outPktWrapped := packet.BuildOutput(
 		outPkt,
 		outputStream,
@@ -437,6 +450,7 @@ func (e *Encoder[EF]) send(
 	)
 
 	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.CodecParameters().MediaType(), outPktWrapped.Dts(), outPktWrapped.Pts())
+	defer func() { logger.Tracef(ctx, "/send: %v %v", outPktWrapped.CodecParameters().MediaType(), _err) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

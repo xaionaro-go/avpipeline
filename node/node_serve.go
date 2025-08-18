@@ -22,7 +22,7 @@ import (
 )
 
 func incrementCounters(
-	s *FramesStatistics,
+	s *FramesOrPacketsStatisticsSection,
 	mediaType astiav.MediaType,
 ) {
 	switch mediaType {
@@ -113,7 +113,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 				sendErr(io.EOF)
 				return
 			}
-			logger.Tracef(ctx, "pulled from %s a packet with stream index %d", n.Processor, pkt.Packet.StreamIndex())
+			logger.Tracef(ctx, "pulled from %s a %s packet with stream index %d", n.Processor, pkt.GetMediaType(), pkt.Packet.StreamIndex())
 			n.Locker.Do(ctx, func() {
 				pushFurther(
 					ctx, n, pkt, n.PushPacketsTos, serveConfig,
@@ -130,6 +130,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
+					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Packets },
 				)
 			})
 		case f, ok := <-n.Processor.OutputFrameChan():
@@ -157,6 +158,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
+					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Frames },
 				)
 			})
 		}
@@ -179,6 +181,7 @@ func pushFurther[
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
 	poolPutOutput func(O),
+	getFramesOrPacketsStats func(*Statistics) *FramesOrPacketsStatistics,
 ) {
 	defer poolPutOutput(outputObj)
 	outputObjPtr := OP(ptr(outputObj))
@@ -189,7 +192,7 @@ func pushFurther[
 	n.BytesCountWrote.Add(objSize)
 
 	mediaType := outputObjPtr.GetMediaType()
-	incrementCounters(&n.FramesWrote, mediaType)
+	incrementCounters(&getFramesOrPacketsStats(n.Statistics).Wrote, mediaType)
 
 	if len(pushTos) == 0 {
 		var zeroValue O
@@ -219,23 +222,34 @@ func pushFurther[
 				return
 			}
 
+			dstStats := dst.GetStatistics()
+			dstPacketsOrFramesStats := getFramesOrPacketsStats(dstStats)
+			isPushed := false
+			defer func() {
+				if isPushed {
+					dstStats.BytesCountRead.Add(objSize)
+					incrementCounters(&dstPacketsOrFramesStats.Read, mediaType)
+				} else {
+					incrementCounters(&dstPacketsOrFramesStats.Missed, mediaType)
+				}
+			}()
+
 			inputCond := getInputCondition(dst)
 			if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
 				logger.Tracef(ctx, "input condition %s was not met", inputCond)
 				return
 			}
-			dstStats := dst.GetStatistics()
 
 			pushChan := getPushChan(dst.GetProcessor())
-			logger.Tracef(ctx, "pushing to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+			logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", dst.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 			if serveConfig.FrameDrop {
 				select {
 				case <-ctx.Done():
 					return
 				case pushChan <- inputObj:
+					isPushed = true
 				default:
 					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst)
-					incrementCounters(&dstStats.FramesMissed, mediaType)
 					poolPutInput(inputObj)
 					return
 				}
@@ -244,10 +258,9 @@ func pushFurther[
 				case <-ctx.Done():
 					return
 				case pushChan <- inputObj:
+					isPushed = true
 				}
 			}
-			dstStats.BytesCountRead.Add(objSize)
-			incrementCounters(&dstStats.FramesRead, mediaType)
 			logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 		})
 	}

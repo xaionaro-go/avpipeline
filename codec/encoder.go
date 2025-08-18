@@ -190,3 +190,7 @@ func (e *EncoderFull) closeLocked(ctx context.Context) error {
 	e.InitParams.CodecParameters = nil
 	return errors.Join(result...)
 }
+
+func IsFakeEncoder(encoder Encoder) bool {
+	return IsEncoderCopy(encoder) || IsEncoderRaw(encoder)
+}

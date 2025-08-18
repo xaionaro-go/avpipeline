@@ -16,8 +16,7 @@ func ProcessingStatisticsToGRPC(s *node.ProcessingStatistics) *avpipelinegrpc.No
 	return &avpipelinegrpc.NodeStatistics{
 		BytesCountRead:  s.BytesCountRead,
 		BytesCountWrote: s.BytesCountWrote,
-		FramesRead:      FramesStatisticsToGRPC(&s.FramesRead),
-		FramesMissed:    FramesStatisticsToGRPC(&s.FramesMissed),
-		FramesWrote:     FramesStatisticsToGRPC(&s.FramesWrote),
+		Packets:         FramesStatisticsToGRPC(&s.Packets),
+		Frames:          FramesStatisticsToGRPC(&s.Frames),
 	}
 }

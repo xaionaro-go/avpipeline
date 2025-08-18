@@ -10,12 +10,12 @@ type Frame struct {
 	Condition framecondition.Condition
 }
 
-var _ Condition = (*Frame)(nil)
+var _ Condition = Frame{}
 
-func (v *Frame) String() string {
+func (v Frame) String() string {
 	return v.Condition.String()
 }
 
-func (v *Frame) Match(ctx context.Context, in Input) bool {
+func (v Frame) Match(ctx context.Context, in Input) bool {
 	return v.Condition.Match(ctx, in.Input)
 }

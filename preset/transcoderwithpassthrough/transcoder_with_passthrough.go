@@ -33,7 +33,6 @@ const (
 	passthroughRescaleTS     = false
 	notifyAboutPacketSources = true
 	startWithPassthrough     = false
-	passthroughSupport       = true
 )
 
 type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
@@ -424,7 +423,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		processor.DefaultOptionsOutput()...,
 	)
 
-	if passthroughSupport {
+	if passthroughMode != types.PassthroughModeNever {
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			s.NodeRecoder,
 			packetfiltercondition.Packet{
@@ -462,7 +461,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		outputAsPacketSink,
 	)
 
-	if passthroughSupport {
+	if passthroughMode != types.PassthroughModeNever {
 		var passthroughOutputReference packet.Sink = s.Recoder.Decoder
 		if passthroughMode == types.PassthroughModeNextOutput {
 			passthroughOutputReference = asPacketSink(s.Outputs[1].GetProcessor())

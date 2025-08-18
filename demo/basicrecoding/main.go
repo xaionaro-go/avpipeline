@@ -140,11 +140,11 @@ func main() {
 			}
 		case <-statusTicker.C:
 			inputStats := inputNode.GetStats()
-			inputStatsJSON, err := json.Marshal(inputStats.FramesWrote)
+			inputStatsJSON, err := json.Marshal(inputStats.Packets.Wrote)
 			assert(ctx, err == nil, err)
 
 			outputStats := outputNode.GetStats()
-			outputStatsJSON, err := json.Marshal(outputStats.FramesRead)
+			outputStatsJSON, err := json.Marshal(outputStats.Packets.Read)
 			assert(ctx, err == nil, err)
 
 			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)

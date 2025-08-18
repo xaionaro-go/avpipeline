@@ -11,6 +11,7 @@ import (
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -102,8 +103,14 @@ func (a *AutoFixerWithCustomData[T]) GetStatistics() *node.Statistics {
 	return node.FromProcessingStatistics(&node.ProcessingStatistics{
 		BytesCountRead:  inputStats.BytesCountRead,
 		BytesCountWrote: outputStats.BytesCountWrote,
-		FramesRead:      inputStats.FramesRead,
-		FramesWrote:     outputStats.FramesWrote,
+		Packets: types.ProcessingFramesOrPacketsStatistics{
+			Read:  inputStats.Packets.Read,
+			Wrote: outputStats.Packets.Wrote,
+		},
+		Frames: types.ProcessingFramesOrPacketsStatistics{
+			Read:  inputStats.Frames.Read,
+			Wrote: outputStats.Frames.Wrote,
+		},
 	})
 }
 

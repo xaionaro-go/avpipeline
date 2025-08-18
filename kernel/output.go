@@ -32,7 +32,7 @@ import (
 
 const (
 	unwrapTLSViaProxy                   = false
-	pendingPacketsLimit                 = 10000
+	pendingPacketsAndFramesLimit        = 10000
 	outputWaitForKeyFrames              = false
 	outputWaitForStreams                = true
 	outputCopyStreamIndex               = false
@@ -670,7 +670,7 @@ func (o *Output) send(
 			Source:      source,
 			InputStream: inputStream,
 		})
-		if len(o.pendingPackets) > pendingPacketsLimit {
+		if len(o.pendingPackets) > pendingPacketsAndFramesLimit {
 			logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 			o.pendingPackets = o.pendingPackets[1:]
 		}

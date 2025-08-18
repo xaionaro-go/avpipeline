@@ -15,12 +15,17 @@ message Node {
 message NodeStatistics {
     uint64 bytesCountRead = 1;
     uint64 bytesCountWrote = 2;
-    FramesStatistics framesRead = 3;
-    FramesStatistics framesMissed = 4;
-    FramesStatistics framesWrote = 5;
+    FramesOrPacketsStatistics packets = 3;
+    FramesOrPacketsStatistics frames = 4;
 }
 
-message FramesStatistics {
+message FramesOrPacketsStatistics {
+    FramesOrPacketsStatisticsSection read = 3;
+    FramesOrPacketsStatisticsSection missed = 4;
+    FramesOrPacketsStatisticsSection wrote = 5;
+}
+
+message FramesOrPacketsStatisticsSection {
     uint64 unknown = 1;
     uint64 other = 2;
     uint64 video = 3;

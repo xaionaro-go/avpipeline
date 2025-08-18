@@ -6,45 +6,60 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type ProcessingFramesStatistics = types.ProcessingFramesStatistics
+type ProcessingFramesOrPacketsStatisticsSection = types.ProcessingFramesOrPacketsStatisticsSection
+type ProcessingFramesOrPacketsStatistics = types.ProcessingFramesOrPacketsStatistics
 type ProcessingStatistics = types.ProcessingStatistics
 
-type FramesStatistics struct {
+type FramesOrPacketsStatisticsSection struct {
 	Unknown atomic.Uint64
 	Other   atomic.Uint64
 	Video   atomic.Uint64
 	Audio   atomic.Uint64
 }
 
+func (s *FramesOrPacketsStatisticsSection) Convert() ProcessingFramesOrPacketsStatisticsSection {
+	return ProcessingFramesOrPacketsStatisticsSection{
+		Unknown: s.Unknown.Load(),
+		Other:   s.Other.Load(),
+		Video:   s.Video.Load(),
+		Audio:   s.Audio.Load(),
+	}
+}
+
+type FramesOrPacketsStatistics struct {
+	Read   FramesOrPacketsStatisticsSection
+	Missed FramesOrPacketsStatisticsSection
+	Wrote  FramesOrPacketsStatisticsSection
+}
+
+func (s *FramesOrPacketsStatistics) Convert() ProcessingFramesOrPacketsStatistics {
+	return ProcessingFramesOrPacketsStatistics{
+		Read:   s.Read.Convert(),
+		Missed: s.Missed.Convert(),
+		Wrote:  s.Wrote.Convert(),
+	}
+}
+
 func (stats *Statistics) Convert() ProcessingStatistics {
 	return ProcessingStatistics{
 		BytesCountRead:  stats.BytesCountRead.Load(),
 		BytesCountWrote: stats.BytesCountWrote.Load(),
-		FramesRead: ProcessingFramesStatistics{
-			Unknown: stats.FramesRead.Unknown.Load(),
-			Other:   stats.FramesRead.Other.Load(),
-			Video:   stats.FramesRead.Video.Load(),
-			Audio:   stats.FramesRead.Audio.Load(),
-		},
-		FramesWrote: ProcessingFramesStatistics{
-			Unknown: stats.FramesWrote.Unknown.Load(),
-			Other:   stats.FramesWrote.Other.Load(),
-			Video:   stats.FramesWrote.Video.Load(),
-			Audio:   stats.FramesWrote.Audio.Load(),
-		},
+		Packets:         stats.Packets.Convert(),
+		Frames:          stats.Frames.Convert(),
 	}
 }
 
 type Statistics struct {
 	BytesCountRead  atomic.Uint64
 	BytesCountWrote atomic.Uint64
-	FramesRead      FramesStatistics
-	FramesMissed    FramesStatistics
-	FramesWrote     FramesStatistics
+	Packets         FramesOrPacketsStatistics
+	Frames          FramesOrPacketsStatistics
 }
 
-func fromProcessingFramesStats(s ProcessingFramesStatistics) *FramesStatistics {
-	stats := &FramesStatistics{}
+func fromProcessingFramesOrPacketsStatsSection(
+	s ProcessingFramesOrPacketsStatisticsSection,
+) *FramesOrPacketsStatisticsSection {
+	stats := &FramesOrPacketsStatisticsSection{}
 	stats.Audio.Store(s.Audio)
 	stats.Video.Store(s.Video)
 	stats.Other.Store(s.Other)
@@ -52,12 +67,22 @@ func fromProcessingFramesStats(s ProcessingFramesStatistics) *FramesStatistics {
 	return stats
 }
 
+func fromProcessingFramesOrPacketsStats(
+	s ProcessingFramesOrPacketsStatistics,
+) *FramesOrPacketsStatistics {
+	stats := &FramesOrPacketsStatistics{}
+	stats.Read = *fromProcessingFramesOrPacketsStatsSection(s.Read)
+	stats.Wrote = *fromProcessingFramesOrPacketsStatsSection(s.Wrote)
+	stats.Missed = *fromProcessingFramesOrPacketsStatsSection(s.Missed)
+	return stats
+}
+
 func FromProcessingStatistics(s *ProcessingStatistics) *Statistics {
 	stats := &Statistics{}
 	stats.BytesCountRead.Store(s.BytesCountRead)
 	stats.BytesCountWrote.Store(s.BytesCountWrote)
-	stats.FramesRead = *fromProcessingFramesStats(s.FramesRead)
-	stats.FramesWrote = *fromProcessingFramesStats(s.FramesWrote)
+	stats.Packets = *fromProcessingFramesOrPacketsStats(s.Packets)
+	stats.Frames = *fromProcessingFramesOrPacketsStats(s.Frames)
 	return stats
 }
 

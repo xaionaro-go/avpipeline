@@ -76,3 +76,8 @@ func (EncoderRaw) SetResolution(context.Context, uint32, uint32, condition.Condi
 func (EncoderRaw) Reset(context.Context) error {
 	return nil
 }
+
+func IsEncoderRaw(encoder Encoder) bool {
+	_, ok := encoder.(EncoderRaw)
+	return ok
+}

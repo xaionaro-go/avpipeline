@@ -132,7 +132,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 		return fmt.Errorf("unable to set the RecoderConfig to %#+v: %w", fwd.RecoderConfig, err)
 	}
 
-	if err := chain.Start(ctx, transcodertypes.PassthroughModeSameTracks, avpipeline.ServeConfig{}); err != nil {
+	if err := chain.Start(ctx, transcodertypes.PassthroughModeNever, avpipeline.ServeConfig{}); err != nil {
 		return fmt.Errorf("unable to start the StreamForward: %w", err)
 	}
 
