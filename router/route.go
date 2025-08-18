@@ -70,7 +70,7 @@ func newRoute[T any](
 		PublishersChangeChan: make(chan struct{}),
 		CancelFunc:           cancelFn,
 	}
-	close(r.PublishersChangeChan)
+	close(r.PublishersChangeChan) // this line is just for local consistency: initially the route is closed until openNodeLocked is called
 	r.Node = node.NewWithCustomDataFromKernel[GoBug63285RouteInterface[T]](
 		ctx,
 		kernel.NewMapStreamIndices(ctx, nil),
@@ -304,6 +304,14 @@ func (r *Route[T]) RemovePublisherLocked(
 		}
 	}
 	return nil, ErrPublisherNotFound{}
+}
+
+func (r *Route[T]) IsOpen(ctx context.Context) (_ret bool) {
+	logger.Debugf(ctx, "IsOpen")
+	defer func() { logger.Debugf(ctx, "/IsOpen: %v", _ret) }()
+	return xsync.DoR1(ctx, &r.Node.Locker, func() bool {
+		return r.IsNodeOpen
+	})
 }
 
 func (r *Route[T]) WaitForPublisher(

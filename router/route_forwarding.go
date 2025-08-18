@@ -143,9 +143,10 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 					logger.Errorf(ctx, "unable to stop: %v", err)
 				}
 				return
-			case _, ok := <-src.PublishersChangeChan:
-				logger.Debugf(ctx, "<-src[%s].PublishersChangeChan: %t", src, ok)
-				if ok {
+			case <-src.PublishersChangeChan:
+				isStillOpen := src.IsOpen(ctx)
+				logger.Debugf(ctx, "<-src[%s].PublishersChangeChan: %t", src, isStillOpen)
+				if isStillOpen {
 					continue
 				}
 				logger.Debugf(ctx, "the route instance %p is closed, restarting the forwarder to get a new route node (for the same route path)", src)
