@@ -19,6 +19,8 @@ import (
 type Abstract interface {
 	Serve(context.Context, ServeConfig, chan<- Error)
 
+	IsServing() bool
+
 	GetPushPacketsTos() PushPacketsTos
 	AddPushPacketsTo(dst Abstract, conds ...packetfiltercondition.Condition)
 	SetPushPacketsTos(PushPacketsTos)
@@ -43,7 +45,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputPacketFilter packetfiltercondition.Condition
 	InputFrameFilter  framefiltercondition.Condition
 	Locker            xsync.Mutex
-	IsServing         bool
+	IsServingValue    bool
 
 	CustomData C
 }
@@ -86,6 +88,15 @@ func NewWithCustomDataFromKernel[C any, T kernel.Abstract](
 			opts...,
 		),
 	)
+}
+
+func (n *NodeWithCustomData[C, T]) IsServing() bool {
+	if n == nil {
+		return false
+	}
+	return xsync.DoR1(context.TODO(), &n.Locker, func() bool {
+		return n.IsServingValue
+	})
 }
 
 func (n *NodeWithCustomData[C, T]) GetStatistics() *Statistics {

@@ -7,9 +7,10 @@ message Node {
     string id = 1;
     string type = 2;
     string description = 3;
-    NodeStatistics statistics = 4;
-    repeated Node TODO_publishingNodes = 5; // is not currently reported
-    repeated Node consumingNodes = 6;
+    bool isServing = 4;
+    NodeStatistics statistics = 5;
+    repeated Node TODO_publishingNodes = 6; // is not currently reported
+    repeated Node consumingNodes = 7;
 }
 
 message NodeStatistics {

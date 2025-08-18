@@ -16,6 +16,7 @@ func NodeToGRPC(n node.Abstract) *avpipelinegrpc.Node {
 		Id:          fmt.Sprintf("%p", n),
 		Type:        fmt.Sprintf("%T", n),
 		Description: fmt.Sprintf("%s", n),
+		IsServing:   n.IsServing(),
 		Statistics:  NodeStatisticsToGRPC(n.GetStatistics()),
 	}
 

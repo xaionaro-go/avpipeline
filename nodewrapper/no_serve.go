@@ -76,6 +76,10 @@ func (n *NoServe[T]) SetPushFramesTos(pushTos node.PushFramesTos) {
 	n.Node.SetPushFramesTos(pushTos)
 }
 
+func (n *NoServe[T]) IsServing() bool {
+	return n.Node.IsServing()
+}
+
 func (n *NoServe[T]) GetStatistics() *node.Statistics {
 	return n.Node.GetStatistics()
 }

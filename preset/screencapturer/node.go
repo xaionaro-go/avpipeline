@@ -94,6 +94,13 @@ func (a *ScreenCapturer[C]) SetPushFramesTos(pushTos node.PushFramesTos) {
 	a.Output().SetPushFramesTos(pushTos)
 }
 
+func (a *ScreenCapturer[C]) IsServing() bool {
+	if a == nil {
+		return false
+	}
+	return a.Input().IsServing() && a.Output().IsServing()
+}
+
 func (a *ScreenCapturer[C]) GetStatistics() *node.Statistics {
 	inputStats := a.Input().GetStatistics().Convert()
 	outputStats := a.Output().GetStatistics().Convert()

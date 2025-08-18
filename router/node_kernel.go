@@ -100,7 +100,7 @@ func (k *NodeKernel) sendInputPacket(
 		k.PreviousSource[input.StreamIndex()] = input.Source
 	}
 	if err := k.handleCorrections(ctx, &input, isNewSource); err != nil {
-		return fmt.Errorf("unable to handle corrections for stream %d: %w", input.Stream, err)
+		return fmt.Errorf("unable to handle corrections for stream %v: %w", input.Stream, err)
 	}
 
 	outPkt := packet.BuildOutput(

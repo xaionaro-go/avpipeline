@@ -73,18 +73,18 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	}()
 
 	if err := xsync.DoR1(ctx, &n.Locker, func() error {
-		if n.IsServing {
+		if n.IsServingValue {
 			logger.Debugf(ctx, "double-start: %T: %s", n.CustomData, nodeKey)
 			return ErrAlreadyStarted{}
 		}
-		n.IsServing = true
+		n.IsServingValue = true
 		return nil
 	}); err != nil {
 		sendErr(err)
 		return
 	}
 	defer func() {
-		n.IsServing = false
+		n.IsServingValue = false
 	}()
 
 	procNodeEndCtx := ctx

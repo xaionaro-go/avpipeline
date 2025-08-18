@@ -240,6 +240,10 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetPushFramesTos(pushTos node.Push
 	fwd.Output.SetPushFramesTos(pushTos)
 }
 
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsServing() bool {
+	return fwd.Output.IsServing()
+}
+
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetStatistics() *node.Statistics {
 	return fwd.Output.GetStatistics()
 }
