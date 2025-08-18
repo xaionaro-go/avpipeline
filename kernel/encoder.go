@@ -15,6 +15,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/scaler"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -45,7 +46,9 @@ var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
 type streamEncoder struct {
 	codec.Encoder
-	LastInitTS time.Time
+	Scaler      scaler.Scaler
+	ScaledFrame *astiav.Frame
+	LastInitTS  time.Time
 }
 
 func NewEncoder[EF codec.EncoderFactory](
@@ -390,7 +393,20 @@ func (e *Encoder[EF]) sendInputFrame(
 	encoderMediaType := encoder.MediaType()
 	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
-	err := encoder.SendFrame(ctx, input.Frame)
+	scaledFrame := input.Frame
+	width, height := encoder.GetResolution(ctx)
+	if input.Frame.Width() != int(width) || input.Frame.Height() != int(height) {
+		var err error
+		scaledFrame, err = encoder.getScaledFrame(ctx, input.Frame, codec.Resolution{
+			Width:  width,
+			Height: height,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to scale the frame: %w", err)
+		}
+	}
+
+	err := encoder.SendFrame(ctx, scaledFrame)
 	if err != nil {
 		return fmt.Errorf("unable to send a frame to the encoder: %w", err)
 	}
@@ -433,6 +449,79 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 
+	return nil
+}
+
+func (e *streamEncoder) getScaledFrame(
+	ctx context.Context,
+	inputFrame *astiav.Frame,
+	resolution codec.Resolution,
+) (_ret *astiav.Frame, _err error) {
+	logger.Tracef(ctx, "getScaledFrame: %dx%d", resolution.Width, resolution.Height)
+	defer func() { logger.Tracef(ctx, "/getScaledFrame: %dx%d: %v", resolution.Width, resolution.Height, _err) }()
+
+	err := e.prepareScaler(ctx, inputFrame, resolution)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get a scaler: %w", err)
+	}
+
+	e.Scaler.ScaleFrame(ctx, inputFrame, e.ScaledFrame)
+	return e.ScaledFrame, nil
+}
+
+func getResolutionFromAstiavFrame(
+	frame *astiav.Frame,
+) codec.Resolution {
+	if frame == nil {
+		return codec.Resolution{}
+	}
+	return codec.Resolution{
+		Width:  uint32(frame.Width()),
+		Height: uint32(frame.Height()),
+	}
+}
+
+func (e *streamEncoder) prepareScaler(
+	ctx context.Context,
+	inputFrame *astiav.Frame,
+	outputResolution codec.Resolution,
+) (_err error) {
+	logger.Tracef(ctx, "getScaler: %dx%d", outputResolution.Width, outputResolution.Height)
+	defer func() {
+		logger.Tracef(ctx, "/getScaler: %dx%d: %v", outputResolution.Width, outputResolution.Height, _err)
+	}()
+
+	inputResolution := getResolutionFromAstiavFrame(inputFrame)
+	if e.Scaler != nil {
+		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == outputResolution {
+			logger.Tracef(ctx, "reusing the scaler")
+			return nil
+		}
+		if err := e.Scaler.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close the scaler: %v", err)
+		}
+	}
+
+	e.ScaledFrame = astiav.AllocFrame()
+	setFinalizerFree(ctx, e.ScaledFrame)
+	e.ScaledFrame.SetWidth(int(outputResolution.Width))
+	e.ScaledFrame.SetHeight(int(outputResolution.Height))
+	e.ScaledFrame.SetPixelFormat(inputFrame.PixelFormat())
+	if err := e.ScaledFrame.AllocBuffer(0); err != nil { // TODO(memleak): make sure the buffer is not already allocated, otherwise it may lead to a memleak
+		return fmt.Errorf("unable to allocate a buffer for the scaled frame: %w", err)
+	}
+
+	s, err := scaler.NewSoftware(
+		ctx,
+		inputResolution, inputFrame.PixelFormat(),
+		outputResolution, e.ScaledFrame.PixelFormat(),
+		astiav.SoftwareScaleContextFlagLanczos,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create a scaler: %w", err)
+	}
+
+	e.Scaler = s
 	return nil
 }
 

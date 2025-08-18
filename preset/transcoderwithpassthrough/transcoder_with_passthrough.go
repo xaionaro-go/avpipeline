@@ -203,6 +203,22 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		return fmt.Errorf("internal error: an encoder is already initialized")
 	}
 
+	var (
+		videoQuality    codec.Quality
+		videoResolution *codec.Resolution
+	)
+
+	if bitRate := cfg.VideoTrackConfigs[0].AverageBitRate; bitRate > 0 {
+		videoQuality = quality.ConstantBitrate(bitRate)
+	}
+
+	if width, height := cfg.VideoTrackConfigs[0].Width, cfg.VideoTrackConfigs[0].Height; width > 0 && height > 0 {
+		videoResolution = &codec.Resolution{
+			Width:  width,
+			Height: height,
+		}
+	}
+
 	var err error
 	s.Recoder, err = kernel.NewRecoder(
 		ctx,
@@ -226,6 +242,8 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
 				VideoOptions:       convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
 				AudioOptions:       convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
+				VideoQuality:       videoQuality,
+				VideoResolution:    videoResolution,
 			},
 		),
 		nil,

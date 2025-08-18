@@ -2,6 +2,7 @@ package codec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/asticode/go-astiav"
@@ -29,6 +30,8 @@ type NaiveEncoderFactoryParams struct {
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
 	AudioOptions       *astiav.Dictionary
+	VideoQuality       Quality
+	VideoResolution    *Resolution
 }
 
 func DefaultNaiveEncoderFactoryParams() *NaiveEncoderFactoryParams {
@@ -104,6 +107,9 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 	var encParams *CodecParams
 	switch codecParams.MediaType() {
 	case astiav.MediaTypeVideo:
+		if err := f.amendVideoCodecParams(ctx, codecParams); err != nil {
+			return nil, fmt.Errorf("unable to amend video codec parameters: %w", err)
+		}
 		encParams = &CodecParams{
 			CodecName:          f.VideoCodec,
 			CodecParameters:    codecParams,
@@ -123,4 +129,24 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
 	}
 	return NewEncoder(ctx, *encParams)
+}
+
+func (f *NaiveEncoderFactory) amendVideoCodecParams(
+	ctx context.Context,
+	codecParams *astiav.CodecParameters,
+) (_err error) {
+	logger.Tracef(ctx, "amendVideoCodecParams")
+	defer func() { logger.Tracef(ctx, "/amendVideoCodecParams: %v", _err) }()
+
+	var errs []error
+	if f.VideoQuality != nil {
+		if err := f.VideoQuality.Apply(codecParams); err != nil {
+			errs = append(errs, fmt.Errorf("unable to apply video quality %#+v: %w", f.VideoQuality, err))
+		}
+	}
+	if f.VideoResolution != nil {
+		codecParams.SetWidth(int(f.VideoResolution.Width))
+		codecParams.SetHeight(int(f.VideoResolution.Height))
+	}
+	return errors.Join(errs...)
 }
