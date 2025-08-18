@@ -283,6 +283,9 @@ func newCodec(
 		return nil, fmt.Errorf("unable to allocate codec context")
 	}
 	c.closer.Add(c.codecContext.Free)
+	c.closer.Add(func() {
+		logger.Tracef(ctx, "CodecContext.Free()")
+	})
 
 	if doFullCopyOfParameters {
 		err := codecParameters.ToCodecContext(c.codecContext)

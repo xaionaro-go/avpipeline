@@ -122,7 +122,9 @@ func (e *EncoderFull) GetInitTS() time.Time {
 func (e *EncoderFull) SendFrame(
 	ctx context.Context,
 	f *astiav.Frame,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "SendFrame")
+	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() error {
 		return e.sendFrameLocked(ctx, f)
 	})
