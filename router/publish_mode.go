@@ -7,7 +7,8 @@ import (
 type PublishMode int
 
 const (
-	PublishModeExclusiveTakeover = PublishMode(iota)
+	UndefinedPublishMode PublishMode = PublishMode(iota)
+	PublishModeExclusiveTakeover
 	PublishModeExclusiveFail
 	PublishModeSharedTakeover
 	PublishModeSharedFail
@@ -16,6 +17,8 @@ const (
 
 func (m PublishMode) String() string {
 	switch m {
+	case UndefinedPublishMode:
+		return "<undefined>"
 	case PublishModeExclusiveTakeover:
 		return "exclusive-takeover"
 	case PublishModeExclusiveFail:

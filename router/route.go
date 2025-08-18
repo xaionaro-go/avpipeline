@@ -142,6 +142,8 @@ func (r *Route[T]) closeLocked(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 ) (_err error) {
+	logger.Tracef(ctx, "closeLocked: %s", r.Path)
+	defer func() { logger.Tracef(ctx, "/closeLocked: %s: %v", r.Path, _err) }()
 	if r.IsNodeOpen {
 		_err = r.closeNodeLocked(ctx, wg)
 	}
@@ -150,8 +152,9 @@ func (r *Route[T]) closeLocked(
 }
 
 func (r *Route[T]) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "Close")
-	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
+	var sample T
+	logger.Debugf(ctx, "Route[%T].Close", sample)
+	defer func() { logger.Debugf(ctx, "/Route[%T].Close: %v", sample, _err) }()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	return xsync.DoA2R1(ctx, &r.Node.Locker, r.closeLocked, ctx, &wg)
@@ -207,6 +210,7 @@ func (r *Route[T]) AddPublisherLocked(
 	publisher Publisher[T],
 	wg *sync.WaitGroup,
 ) (_ret Publishers[T], _err error) {
+	ctx = belt.WithField(ctx, "publish_mode", publisher.GetPublishMode(ctx))
 	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %s)", r, publisher)
 	defer func() {
 		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %s): len(ret):%d, %v", r, publisher, len(_ret), _err)
@@ -224,16 +228,21 @@ func (r *Route[T]) AddPublisherLocked(
 	}
 
 	if len(r.Publishers) > 0 {
+		removePublisher := func(ctx context.Context, publisher Publisher[T]) {
+			logger.Debugf(ctx, "removing publisher %s from route %s", publisher, r)
+			err := publisher.Close(ctx)
+			if err != nil {
+				logger.Errorf(ctx, "unable to close publisher %s: %v", publisher, err)
+			}
+		}
+
 		removePublishers := func() {
 			for _, publisher := range r.Publishers {
 				publisher := publisher
 				wg.Add(1)
 				observability.Go(ctx, func(ctx context.Context) {
 					defer wg.Done()
-					err := publisher.Close(ctx)
-					if err != nil {
-						logger.Errorf(ctx, "unable to close publisher %s: %v", publisher, err)
-					}
+					removePublisher(ctx, publisher)
 				})
 			}
 			r.Publishers = r.Publishers[:0]
@@ -245,16 +254,23 @@ func (r *Route[T]) AddPublisherLocked(
 		case PublishModeExclusiveFail:
 			return nil, ErrAlreadyHasPublisher{}
 		case PublishModeSharedTakeover, PublishModeSharedFail:
+			newPublishers := make([]Publisher[T], 0, len(r.Publishers))
+			var publishersToRemove Publishers[T]
 			for _, publisher := range r.Publishers {
 				if !publisher.GetPublishMode(ctx).IsExclusive() {
+					newPublishers = append(newPublishers, publisher)
 					continue
 				}
 				if mode.FailOnConflict() {
 					return nil, ErrAlreadyHasPublisher{}
 				}
-				removePublishers()
-				break
+				logger.Debugf(ctx, "conflicting with publisher %s on route %s, requesting to remove it (if it won't be aborted)", publisher, r)
+				publishersToRemove = append(publishersToRemove, publisher)
 			}
+			for _, publisher := range publishersToRemove {
+				removePublisher(ctx, publisher)
+			}
+			r.Publishers = newPublishers
 		default:
 			return nil, fmt.Errorf("internal error: unknown publishing mode: %s", mode)
 		}
