@@ -13,6 +13,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
@@ -28,7 +29,7 @@ type InputConfig struct {
 }
 
 type Input struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	initialized chan struct{}
 
 	*astiav.FormatContext
@@ -61,8 +62,8 @@ func NewInputFromURL(
 		ID:  InputID(nextInputID.Add(1)),
 		URL: urlString,
 
-		initialized: make(chan struct{}),
-		closeChan:   newCloseChan(),
+		initialized:     make(chan struct{}),
+		ClosureSignaler: closuresignaler.New(),
 	}
 
 	var formatName string
@@ -165,7 +166,7 @@ func (i *Input) Close(
 	if i == nil {
 		return nil
 	}
-	i.closeChan.Close(ctx)
+	i.ClosureSignaler.Close(ctx)
 	return nil
 }
 
@@ -194,7 +195,7 @@ func (i *Input) Generate(
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
 	defer func() {
-		i.closeChan.Close(ctx)
+		i.ClosureSignaler.Close(ctx)
 	}()
 
 	select {

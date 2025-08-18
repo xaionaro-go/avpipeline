@@ -8,6 +8,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
@@ -15,7 +16,7 @@ import (
 )
 
 type Retry[T Abstract] struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Factory      func(context.Context) (T, error)
 	OnStart      func(context.Context, T) error
 	OnError      func(context.Context, T, error) error
@@ -32,10 +33,10 @@ func NewRetry[T Abstract](
 	onError func(context.Context, T, error) error,
 ) *Retry[T] {
 	r := &Retry[T]{
-		closeChan: newCloseChan(),
-		Factory:   factory,
-		OnStart:   onStart,
-		OnError:   onError,
+		ClosureSignaler: closuresignaler.New(),
+		Factory:         factory,
+		OnStart:         onStart,
+		OnError:         onError,
 	}
 	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
@@ -106,7 +107,7 @@ func (r *Retry[T]) checkStatus(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-r.closeChan.CloseChan():
+	case <-r.ClosureSignaler.CloseChan():
 		return io.EOF
 	default:
 		return nil
@@ -198,7 +199,7 @@ func (r *Retry[T]) String() string {
 }
 
 func (r *Retry[T]) Close(ctx context.Context) error {
-	r.closeChan.Close(ctx)
+	r.ClosureSignaler.Close(ctx)
 	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(ctx, func() {
 			if !r.KernelIsSet {

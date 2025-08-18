@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/xsync"
@@ -25,7 +26,8 @@ const (
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
+
 	EncoderFactory EF
 	Locker         xsync.Mutex
 	PTSDurDiff     *time.Duration
@@ -54,7 +56,7 @@ func NewEncoder[EF codec.EncoderFactory](
 	logger.Tracef(ctx, "NewEncoder")
 	defer func() { logger.Tracef(ctx, "/NewEncoder") }()
 	e := &Encoder[EF]{
-		closeChan:           newCloseChan(),
+		ClosureSignaler:     closuresignaler.New(),
 		EncoderFactory:      encoderFactory,
 		encoders:            map[int]*streamEncoder{},
 		StreamConfigurer:    streamConfigurer,
@@ -66,7 +68,7 @@ func NewEncoder[EF codec.EncoderFactory](
 }
 
 func (e *Encoder[EF]) Close(ctx context.Context) error {
-	e.closeChan.Close(ctx)
+	e.ClosureSignaler.Close(ctx)
 	for key, encoder := range e.encoders {
 		err := encoder.Close(ctx)
 		logger.Debugf(ctx, "encoder closed: %v", err)

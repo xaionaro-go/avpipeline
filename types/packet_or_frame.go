@@ -36,6 +36,9 @@ type AbstractPacketOrFrame interface {
 	GetStreamIndex() int
 	GetMediaType() astiav.MediaType
 	GetPTS() int64
+	GetDTS() int64
+	SetPTS(v int64)
+	SetDTS(v int64)
 }
 
 type InputPacketOrFrameUnion struct {
@@ -65,4 +68,13 @@ func (u *InputPacketOrFrameUnion) GetMediaType() astiav.MediaType {
 }
 func (u *InputPacketOrFrameUnion) GetPTS() int64 {
 	return u.Get().GetPTS()
+}
+func (u *InputPacketOrFrameUnion) GetDTS() int64 {
+	return u.Get().GetDTS()
+}
+func (u *InputPacketOrFrameUnion) SetPTS(v int64) {
+	u.Get().SetPTS(v)
+}
+func (u *InputPacketOrFrameUnion) SetDTS(v int64) {
+	u.Get().SetDTS(v)
 }

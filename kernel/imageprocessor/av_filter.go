@@ -6,25 +6,25 @@ import (
 	"image"
 
 	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/kernel/filter"
+	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 )
 
-type AVFilter[T filter.Kernel] struct {
-	*filter.Filter[T]
+type AVFilter[T avfilter.Kernel] struct {
+	*avfilter.AVFilter[T]
 }
 
-var _ Abstract = (*AVFilter[filter.Kernel])(nil)
+var _ Abstract = (*AVFilter[avfilter.Kernel])(nil)
 
-func NewAVFilter[T filter.Kernel](
-	filter *filter.Filter[T],
+func NewAVFilter[T avfilter.Kernel](
+	filter *avfilter.AVFilter[T],
 ) *AVFilter[T] {
 	return &AVFilter[T]{
-		Filter: filter,
+		AVFilter: filter,
 	}
 }
 
 func (f *AVFilter[T]) String() string {
-	return fmt.Sprintf("AVFilter(%s)", f.Filter)
+	return fmt.Sprintf("AVFilter(%s)", f.AVFilter)
 }
 
 func (f *AVFilter[T]) Process(

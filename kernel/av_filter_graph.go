@@ -6,30 +6,31 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/kernel/filter"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type FilterGraph[T filter.Kernel] struct {
-	*closeChan
+type AVFilterGraph[T avfilter.Kernel] struct {
+	*closuresignaler.ClosureSignaler
 	*astiav.FilterGraph
 	Inputs  *astiav.FilterInOut
 	Outputs *astiav.FilterInOut
-	Filters []filter.Filter[T]
+	Filters []avfilter.AVFilter[T]
 }
 
-var _ Abstract = (*FilterGraph[filter.Kernel])(nil)
+var _ Abstract = (*AVFilterGraph[avfilter.Kernel])(nil)
 
 // experimental: API will change in the future
-func NewFilterGraph[T filter.Kernel](
+func NewAVFilterGraph[T avfilter.Kernel](
 	ctx context.Context,
-	filters ...filter.Filter[T],
-) (*FilterGraph[T], error) {
-	f := &FilterGraph[T]{
-		closeChan:   newCloseChan(),
-		FilterGraph: astiav.AllocFilterGraph(),
-		Inputs:      astiav.AllocFilterInOut(),
-		Outputs:     astiav.AllocFilterInOut(),
+	filters ...avfilter.AVFilter[T],
+) (*AVFilterGraph[T], error) {
+	f := &AVFilterGraph[T]{
+		ClosureSignaler: closuresignaler.New(),
+		FilterGraph:     astiav.AllocFilterGraph(),
+		Inputs:          astiav.AllocFilterInOut(),
+		Outputs:         astiav.AllocFilterInOut(),
 	}
 	setFinalizerFree(ctx, f.FilterGraph)
 	setFinalizerFree(ctx, f.Inputs)
@@ -71,7 +72,7 @@ func NewFilterGraph[T filter.Kernel](
 	return f, nil
 }
 
-func (f *FilterGraph[T]) SendInputPacket(
+func (f *AVFilterGraph[T]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -80,7 +81,7 @@ func (f *FilterGraph[T]) SendInputPacket(
 	return fmt.Errorf("a Filter is supposed to be used only for Frame-s, not Packet-s")
 }
 
-func (f *FilterGraph[T]) SendInputFrame(
+func (f *AVFilterGraph[T]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -93,16 +94,16 @@ func (f *FilterGraph[T]) SendInputFrame(
 	return nil
 }
 
-func (f *FilterGraph[T]) String() string {
+func (f *AVFilterGraph[T]) String() string {
 	return "Filter"
 }
 
-func (f *FilterGraph[T]) Close(ctx context.Context) error {
-	f.closeChan.Close(ctx)
+func (f *AVFilterGraph[T]) Close(ctx context.Context) error {
+	f.ClosureSignaler.Close(ctx)
 	return nil
 }
 
-func (f *FilterGraph[T]) Generate(
+func (f *AVFilterGraph[T]) Generate(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,

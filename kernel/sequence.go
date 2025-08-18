@@ -10,6 +10,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
@@ -19,7 +20,7 @@ import (
 // Note: Sequence is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel.
 type Sequence[T Abstract] struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Locker  xsync.Mutex
 	Kernels []T
 }
@@ -30,8 +31,8 @@ var _ packet.Sink = (*Sequence[Abstract])(nil)
 
 func NewSequence[T Abstract](kernels ...T) *Sequence[T] {
 	return &Sequence[T]{
-		closeChan: newCloseChan(),
-		Kernels:   kernels,
+		ClosureSignaler: closuresignaler.New(),
+		Kernels:         kernels,
 	}
 }
 
@@ -186,7 +187,7 @@ func (s *Sequence[T]) String() string {
 }
 
 func (s *Sequence[T]) Close(ctx context.Context) error {
-	s.closeChan.Close(ctx)
+	s.ClosureSignaler.Close(ctx)
 	var result []error
 	for idx, node := range s.Kernels {
 		err := node.Close(ctx)

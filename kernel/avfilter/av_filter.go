@@ -1,4 +1,4 @@
-package filter
+package avfilter
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame/condition"
 )
 
-type Filter[T Kernel] struct {
+type AVFilter[T Kernel] struct {
 	Condition condition.Condition
 	Kernel    T
 	Content   string
@@ -22,30 +22,30 @@ type Kernel interface {
 	OutputFilterContext() *astiav.FilterContext
 }
 
-func (k *Filter[T]) String() string {
+func (k *AVFilter[T]) String() string {
 	return fmt.Sprintf("Filter(%v)", k.Kernel)
 }
 
-func (k *Filter[T]) FilterInput() *astiav.Filter {
+func (k *AVFilter[T]) FilterInput() *astiav.Filter {
 	return k.Kernel.FilterInput()
 }
 
-func (k *Filter[T]) FilterOutput() *astiav.Filter {
+func (k *AVFilter[T]) FilterOutput() *astiav.Filter {
 	return k.Kernel.FilterOutput()
 }
 
-func (k *Filter[T]) ConnectInput(graph *astiav.FilterGraph, nodeName string) {
+func (k *AVFilter[T]) ConnectInput(graph *astiav.FilterGraph, nodeName string) {
 	k.Kernel.ConnectInput(graph, nodeName)
 }
 
-func (k *Filter[T]) ConnectOutput(graph *astiav.FilterGraph, nodeName string) {
+func (k *AVFilter[T]) ConnectOutput(graph *astiav.FilterGraph, nodeName string) {
 	k.Kernel.ConnectOutput(graph, nodeName)
 }
 
-func (k *Filter[T]) InputFilterContext() *astiav.FilterContext {
+func (k *AVFilter[T]) InputFilterContext() *astiav.FilterContext {
 	return k.Kernel.InputFilterContext()
 }
 
-func (k *Filter[T]) OutputFilterContext() *astiav.FilterContext {
+func (k *AVFilter[T]) OutputFilterContext() *astiav.FilterContext {
 	return k.Kernel.OutputFilterContext()
 }

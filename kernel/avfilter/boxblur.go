@@ -1,4 +1,4 @@
-package filter
+package avfilter
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func NewBoxBlur(
 	ctx context.Context,
 	codecParams *astiav.CodecParameters,
 	params BoxBlurParams,
-) (*Filter[*BoxBlur], error) {
+) (*AVFilter[*BoxBlur], error) {
 	b := &BoxBlur{}
 
 	var content string
@@ -83,7 +83,7 @@ func NewBoxBlur(
 		content = strings.Join(values, ":")
 	}
 
-	return &Filter[*BoxBlur]{
+	return &AVFilter[*BoxBlur]{
 		Kernel:  b,
 		Content: content,
 	}, nil

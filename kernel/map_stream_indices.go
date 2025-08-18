@@ -9,6 +9,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
@@ -16,7 +17,7 @@ import (
 )
 
 type MapStreamIndices struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Locker          xsync.Mutex
 	PacketStreamMap map[InternalStreamKey][]int
 	FrameStreamMap  map[int][]int
@@ -39,7 +40,7 @@ func NewMapStreamIndices(
 	assigner StreamIndexAssigner,
 ) *MapStreamIndices {
 	m := &MapStreamIndices{
-		closeChan:       newCloseChan(),
+		ClosureSignaler: closuresignaler.New(),
 		PacketStreamMap: make(map[InternalStreamKey][]int),
 		FrameStreamMap:  make(map[int][]int),
 		Assigner:        assigner,
@@ -364,7 +365,7 @@ func (m *MapStreamIndices) String() string {
 }
 
 func (m *MapStreamIndices) Close(ctx context.Context) error {
-	m.closeChan.Close(ctx)
+	m.ClosureSignaler.Close(ctx)
 	return nil
 }
 

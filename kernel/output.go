@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
@@ -99,7 +100,7 @@ type Output struct {
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
 
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	*astiav.FormatContext
 	*astiav.Dictionary
 }
@@ -156,13 +157,13 @@ func NewOutputFromURL(
 	}
 
 	o := &Output{
-		ID:            OutputID(nextOutputID.Add(1)),
-		URL:           url.String(),
-		StreamKey:     streamKey,
-		InputStreams:  make(map[int]OutputInputStream),
-		OutputStreams: make(map[int]*OutputStream),
-		Config:        cfg,
-		closeChan:     newCloseChan(),
+		ID:              OutputID(nextOutputID.Add(1)),
+		URL:             url.String(),
+		StreamKey:       streamKey,
+		InputStreams:    make(map[int]OutputInputStream),
+		OutputStreams:   make(map[int]*OutputStream),
+		Config:          cfg,
+		ClosureSignaler: closuresignaler.New(),
 
 		waitingKeyFrames: make(map[int]struct{}),
 	}
@@ -368,7 +369,7 @@ func (o *Output) Close(
 ) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
-	o.closeChan.Close(ctx)
+	o.ClosureSignaler.Close(ctx)
 
 	var result []error
 	o.formatContextLocker.Do(ctx, func() {

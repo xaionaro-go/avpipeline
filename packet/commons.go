@@ -72,5 +72,17 @@ func (pkt *Commons) PtsAsDuration() time.Duration {
 }
 
 func (pkt *Commons) GetPTS() int64 {
-	return pkt.Pts()
+	return pkt.Packet.Pts()
+}
+
+func (pkt *Commons) GetDTS() int64 {
+	return pkt.Packet.Dts()
+}
+
+func (pkt *Commons) SetPTS(v int64) {
+	pkt.Packet.SetPts(v)
+}
+
+func (pkt *Commons) SetDTS(v int64) {
+	pkt.Packet.SetDts(v)
 }

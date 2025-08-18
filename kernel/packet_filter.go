@@ -6,12 +6,13 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
 type PacketFilter struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	PacketFilter packetcondition.Condition
 	FrameFilter  framecondition.Condition
 }
@@ -23,9 +24,9 @@ func NewPacketFilter(
 	frameFilter framecondition.Condition,
 ) *PacketFilter {
 	return &PacketFilter{
-		closeChan:    newCloseChan(),
-		PacketFilter: packetFilter,
-		FrameFilter:  frameFilter,
+		ClosureSignaler: closuresignaler.New(),
+		PacketFilter:    packetFilter,
+		FrameFilter:     frameFilter,
 	}
 }
 
@@ -82,12 +83,12 @@ func (f *PacketFilter) String() string {
 }
 
 func (f *PacketFilter) Close(ctx context.Context) error {
-	f.closeChan.Close(ctx)
+	f.ClosureSignaler.Close(ctx)
 	return nil
 }
 
 func (f *PacketFilter) CloseChan() <-chan struct{} {
-	return f.closeChan.CloseChan()
+	return f.ClosureSignaler.CloseChan()
 }
 
 func (f *PacketFilter) Generate(

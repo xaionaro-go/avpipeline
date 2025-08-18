@@ -86,10 +86,16 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 	if err != nil {
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
-	fwd.AutoFixer.Output().AddPushPacketsTo(fwd.outputAsNode())
-	fwd.AutoFixer.Output().AddPushFramesTo(fwd.outputAsNode())
+	if fwd.AutoFixer == nil {
+		fwd.Input.AddPushPacketsTo(dstNode)
+		fwd.Input.AddPushFramesTo(dstNode)
+		return nil
+	}
+
 	fwd.Input.AddPushPacketsTo(fwd.AutoFixerInput)
 	fwd.Input.AddPushFramesTo(fwd.AutoFixerInput)
+	fwd.AutoFixer.Output().AddPushPacketsTo(dstNode)
+	fwd.AutoFixer.Output().AddPushFramesTo(dstNode)
 	errCh := make(chan node.Error, 100)
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range errCh {
@@ -107,7 +113,6 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 	observability.Go(ctx, func(ctx context.Context) {
 		fwd.AutoFixer.Serve(ctx, node.ServeConfig{}, errCh)
 	})
-
 	return nil
 }
 

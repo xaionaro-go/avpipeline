@@ -10,6 +10,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/observability"
@@ -26,7 +27,7 @@ const (
 type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
-	*closeChan
+	*closuresignaler.ClosureSignaler
 
 	locker             xsync.Mutex
 	started            bool
@@ -46,9 +47,9 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	streamConfigurer StreamConfigurer,
 ) (*Recoder[DF, EF], error) {
 	r := &Recoder[DF, EF]{
-		closeChan: newCloseChan(),
-		Decoder:   NewDecoder(ctx, decoderFactory),
-		Encoder:   NewEncoder(ctx, encoderFactory, streamConfigurer),
+		ClosureSignaler: closuresignaler.New(),
+		Decoder:         NewDecoder(ctx, decoderFactory),
+		Encoder:         NewEncoder(ctx, encoderFactory, streamConfigurer),
 
 		activeStreamsMap: make(map[int]struct{}),
 	}
@@ -58,9 +59,9 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 func (r *Recoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Close")
 	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
-	r.closeChan.Close(ctx)
-	r.Decoder.closeChan.Close(ctx)
-	r.Encoder.closeChan.Close(ctx)
+	r.ClosureSignaler.Close(ctx)
+	r.Decoder.ClosureSignaler.Close(ctx)
+	r.Encoder.ClosureSignaler.Close(ctx)
 	return nil
 }
 

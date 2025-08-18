@@ -1,4 +1,4 @@
-package kernel
+package closuresignaler
 
 import (
 	"context"
@@ -7,22 +7,22 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
-type closeChan struct {
+type ClosureSignaler struct {
 	closeOnce sync.Once
 	c         chan struct{}
 }
 
-func newCloseChan() *closeChan {
-	return &closeChan{
+func New() *ClosureSignaler {
+	return &ClosureSignaler{
 		c: make(chan struct{}),
 	}
 }
 
-func (c *closeChan) CloseChan() <-chan struct{} {
+func (c *ClosureSignaler) CloseChan() <-chan struct{} {
 	return c.c
 }
 
-func (c *closeChan) Close(ctx context.Context) {
+func (c *ClosureSignaler) Close(ctx context.Context) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close") }()
 	c.closeOnce.Do(func() {
@@ -30,7 +30,7 @@ func (c *closeChan) Close(ctx context.Context) {
 	})
 }
 
-func (c *closeChan) IsClosed() bool {
+func (c *ClosureSignaler) IsClosed() bool {
 	select {
 	case <-c.c:
 		return true

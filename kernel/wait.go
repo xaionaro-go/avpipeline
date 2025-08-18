@@ -6,6 +6,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -13,7 +14,7 @@ import (
 )
 
 type Wait struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Locker             xsync.Mutex
 	PacketCondition    packetcondition.Condition
 	FrameCondition     framecondition.Condition
@@ -32,7 +33,7 @@ func NewWait(
 	maxFrameQueueSize uint,
 ) *Wait {
 	m := &Wait{
-		closeChan:          newCloseChan(),
+		ClosureSignaler:    closuresignaler.New(),
 		PacketCondition:    packetCondition,
 		FrameCondition:     frameCondition,
 		MaxPacketQueueSize: maxPacketQueueSize,
@@ -132,7 +133,7 @@ func (w *Wait) String() string {
 }
 
 func (w *Wait) Close(ctx context.Context) error {
-	w.closeChan.Close(ctx)
+	w.ClosureSignaler.Close(ctx)
 	return nil
 }
 

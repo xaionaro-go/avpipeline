@@ -7,6 +7,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -20,7 +21,7 @@ type InternalBitstreamFilterInstance struct {
 }
 
 type BitstreamFilter struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	xsync.Mutex
 	GetChainParamser bitstreamfilter.GetChainParamser
 	FilterChains     map[int][]*InternalBitstreamFilterInstance
@@ -33,7 +34,7 @@ func NewBitstreamFilter(
 	paramsGetter bitstreamfilter.GetChainParamser,
 ) (*BitstreamFilter, error) {
 	bsf := &BitstreamFilter{
-		closeChan:        newCloseChan(),
+		ClosureSignaler:  closuresignaler.New(),
 		GetChainParamser: paramsGetter,
 		FilterChains:     make(map[int][]*InternalBitstreamFilterInstance),
 	}
@@ -101,7 +102,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
-) error {
+) (_err error) {
 	filterChain, err := bsf.getFilterChain(ctx, input)
 	if err != nil {
 		return fmt.Errorf("unable to get a filter for stream #%d: %w", input.StreamIndex(), err)
@@ -178,7 +179,7 @@ func (bsf *BitstreamFilter) String() string {
 }
 
 func (bsf *BitstreamFilter) Close(ctx context.Context) error {
-	bsf.closeChan.Close(ctx)
+	bsf.ClosureSignaler.Close(ctx)
 	return nil
 }
 

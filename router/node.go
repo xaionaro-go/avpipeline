@@ -26,7 +26,7 @@ type GoBug63285RouteInterface[T any] interface {
 	) Publishers[T]
 }
 
-type ProcessorRouting = processor.FromKernel[*kernel.MapStreamIndices]
+type ProcessorRouting = processor.FromKernel[*NodeKernel]
 type NodeRouting[T any] = node.NodeWithCustomData[GoBug63285RouteInterface[T], *ProcessorRouting]
 
 type Sender interface {
@@ -42,8 +42,8 @@ func newRetryOutputNode(
 	streamKey secret.String,
 	cfg kernel.OutputConfig,
 ) *NodeRetryOutput {
-	logger.Tracef(ctx, "newOutputNode")
-	defer func() { logger.Tracef(ctx, "/newOutputNode") }()
+	logger.Tracef(ctx, "newRetryOutputNode")
+	defer func() { logger.Tracef(ctx, "/newRetryOutputNode") }()
 
 	outputKernel := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Output, error) {

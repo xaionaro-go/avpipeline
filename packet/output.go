@@ -33,6 +33,18 @@ func (o *Output) GetPTS() int64 {
 	return (*Commons)(o).GetPTS()
 }
 
+func (o *Output) GetDTS() int64 {
+	return (*Commons)(o).GetDTS()
+}
+
+func (o *Output) SetPTS(v int64) {
+	(*Commons)(o).SetPTS(v)
+}
+
+func (o *Output) SetDTS(v int64) {
+	(*Commons)(o).SetDTS(v)
+}
+
 func (o *Output) GetSize() int {
 	return o.Packet.Size()
 }

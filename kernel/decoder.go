@@ -9,13 +9,14 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/xsync"
 )
 
 type Decoder[DF codec.DecoderFactory] struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 
 	DecoderFactory        DF
 	Locker                xsync.Mutex
@@ -33,7 +34,7 @@ func NewDecoder[DF codec.DecoderFactory](
 	decoderFactory DF,
 ) *Decoder[DF] {
 	d := &Decoder[DF]{
-		closeChan:             newCloseChan(),
+		ClosureSignaler:       closuresignaler.New(),
 		DecoderFactory:        decoderFactory,
 		Decoders:              map[int]*codec.Decoder{},
 		FormatContext:         astiav.AllocFormatContext(),
@@ -50,7 +51,7 @@ func (d *Decoder[DF]) Close(ctx context.Context) error {
 func (d *Decoder[DF]) close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "close()")
 	defer func() { logger.Debugf(ctx, "/close(): %v", _err) }()
-	d.closeChan.Close(ctx)
+	d.ClosureSignaler.Close(ctx)
 	for key, decoder := range d.Decoders {
 		err := decoder.Close(ctx)
 		logger.Tracef(ctx, "decoder for stream #%d closed: %v", key, err)

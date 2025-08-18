@@ -47,6 +47,18 @@ func (f *Commons) GetPTS() int64 {
 	return f.Frame.Pts()
 }
 
+func (f *Commons) GetDTS() int64 {
+	return f.Frame.PktDts()
+}
+
+func (f *Commons) SetPTS(v int64) {
+	f.Frame.SetPts(v)
+}
+
+func (f *Commons) SetDTS(v int64) {
+	f.Frame.SetPktDts(v)
+}
+
 func (f *Commons) GetPTSAsDuration() time.Duration {
 	return avconv.Duration(f.Frame.Pts(), f.TimeBase)
 }

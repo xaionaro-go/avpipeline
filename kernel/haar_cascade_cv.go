@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"gocv.io/x/gocv"
 )
@@ -22,7 +23,7 @@ type HaarCascadeProcessor interface {
 }
 
 type HaarCascade struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Classifier gocv.CascadeClassifier
 	Processor  HaarCascadeProcessor
 }
@@ -50,9 +51,9 @@ func NewHaarCascade(
 	}
 
 	return &HaarCascade{
-		closeChan:  newCloseChan(),
-		Classifier: classifier,
-		Processor:  processor,
+		ClosureSignaler: closuresignaler.New(),
+		Classifier:      classifier,
+		Processor:       processor,
 	}, nil
 }
 
@@ -87,7 +88,7 @@ func (c *HaarCascade) String() string {
 }
 
 func (c *HaarCascade) Close(ctx context.Context) error {
-	c.closeChan.Close(ctx)
+	c.ClosureSignaler.Close(ctx)
 	return nil
 }
 

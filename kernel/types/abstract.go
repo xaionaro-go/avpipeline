@@ -23,7 +23,7 @@ func () SendInputPacket(
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
 }
 
 func () SendInputFrame(
@@ -31,13 +31,13 @@ func () SendInputFrame(
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
 }
 
 func () String() string {
 }
 
-func () Close(ctx context.Context) error {
+func () Close(ctx context.Context) (_err error) {
 }
 
 func () CloseChan() <-chan struct{} {
@@ -47,7 +47,7 @@ func () Generate(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
 }
 
 == for a packet source also: ==
@@ -71,7 +71,7 @@ func () WithInputFormatContext(
 func () NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
-) error {
+) (_err error) {
 
 }
 

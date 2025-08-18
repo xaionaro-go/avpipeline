@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/facebookincubator/go-belt"
-	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -73,7 +72,7 @@ func newRoute[T any](
 	close(r.PublishersChangeChan) // this line is just for local consistency: initially the route is closed until openNodeLocked is called
 	r.Node = node.NewWithCustomDataFromKernel[GoBug63285RouteInterface[T]](
 		ctx,
-		kernel.NewMapStreamIndices(ctx, nil),
+		must(NewNodeKernel(ctx)),
 		processor.DefaultOptionsRecoder()...,
 	)
 	r.Node.CustomData = r
@@ -99,7 +98,7 @@ func (r *Route[T]) openNodeLocked(
 	if routeCloseProcessor {
 		r.Node.Processor = processor.NewFromKernel(
 			ctx,
-			kernel.NewMapStreamIndices(ctx, nil),
+			must(NewNodeKernel(ctx)),
 			processor.DefaultOptionsRecoder()...,
 		)
 	}

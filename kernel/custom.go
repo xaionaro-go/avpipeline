@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
 type Custom struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	GenerateFunc func(
 		ctx context.Context,
 		outputPacketsCh chan<- packet.Output,
@@ -53,7 +54,7 @@ func NewCustom(
 	close func(context.Context) error,
 ) *Custom {
 	m := &Custom{
-		closeChan:           newCloseChan(),
+		ClosureSignaler:     closuresignaler.New(),
 		GenerateFunc:        generate,
 		SendInputPacketFunc: sendInputPacket,
 		SendInputFrameFunc:  sendInputFrame,
@@ -91,7 +92,7 @@ func (m *Custom) String() string {
 }
 
 func (m *Custom) Close(ctx context.Context) error {
-	m.closeChan.Close(ctx)
+	m.ClosureSignaler.Close(ctx)
 	if m.CloseFunc == nil {
 		return nil
 	}

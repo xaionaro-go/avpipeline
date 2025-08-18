@@ -11,6 +11,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -21,7 +22,7 @@ import (
 // should be handled by pipeline, not by a Kernel. You may use
 // condition.Switch if you need similar functionality.
 type Switch[T Abstract] struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 
 	Kernels []T
 
@@ -40,8 +41,8 @@ func NewSwitch[T Abstract](
 	kernels ...T,
 ) *Switch[T] {
 	sw := &Switch[T]{
-		closeChan: newCloseChan(),
-		Kernels:   kernels,
+		ClosureSignaler: closuresignaler.New(),
+		Kernels:         kernels,
 	}
 	sw.NextKernelIndex.Store(-1)
 	return sw
@@ -293,7 +294,7 @@ func (sw *Switch[T]) SendInputFrame(
 func (sw *Switch[T]) Close(
 	ctx context.Context,
 ) error {
-	sw.closeChan.Close(ctx)
+	sw.ClosureSignaler.Close(ctx)
 	var result []error
 	for idx, node := range sw.Kernels {
 		err := node.Close(ctx)

@@ -1,4 +1,4 @@
-package filter
+package avfilter
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func NewBuffer(
 	ctx context.Context,
 	codecParams *astiav.CodecParameters,
 	timeBase astiav.Rational,
-) (*Filter[*Buffer], error) {
+) (*AVFilter[*Buffer], error) {
 	b := &Buffer{}
 
 	buffersrcContextParameters := astiav.AllocBuffersrcFilterContextParameters()
@@ -60,7 +60,7 @@ func NewBuffer(
 		return nil, fmt.Errorf("unable to find the filter sink by name")
 	}
 
-	return &Filter[*Buffer]{
+	return &AVFilter[*Buffer]{
 		Kernel:  b,
 		Content: content,
 	}, nil

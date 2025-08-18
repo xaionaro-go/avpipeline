@@ -7,6 +7,7 @@ import (
 	"github.com/go-ng/container/heap"
 	"github.com/go-ng/xsort"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/condition"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -36,7 +37,7 @@ type InternalStreamKey struct {
 //
 // NOT TESTED
 type SyncStreams struct {
-	*closeChan
+	*closuresignaler.ClosureSignaler
 	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
 	ItemQueue        sort.InputPacketOrFrameUnions
 	StreamsDTSs      map[InternalStreamKey]*xsort.OrderedAsc[int64]
@@ -57,7 +58,7 @@ func NewSyncStreams(
 	maxDTSDifference uint64,
 ) *SyncStreams {
 	return &SyncStreams{
-		closeChan:        newCloseChan(),
+		ClosureSignaler:  closuresignaler.New(),
 		ItemQueue:        make(sort.InputPacketOrFrameUnions, 0, maxBufferSize),
 		StreamsDTSs:      make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
 		MaxDTSDifference: maxDTSDifference,
@@ -278,10 +279,10 @@ func (s *SyncStreams) doSendItem(
 
 func (s *SyncStreams) Close(ctx context.Context) error {
 	return xsync.DoR1(ctx, &s.Locker, func() error {
-		if s.closeChan.IsClosed() {
+		if s.ClosureSignaler.IsClosed() {
 			return nil
 		}
-		s.closeChan.Close(ctx)
+		s.ClosureSignaler.Close(ctx)
 		return nil
 	})
 }
@@ -295,7 +296,7 @@ func (s *SyncStreams) Generate(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	<-s.closeChan.CloseChan()
+	<-s.ClosureSignaler.CloseChan()
 	// flush what's left in the queue
 	for len(s.ItemQueue) > 0 {
 		if err := s.sendOneItemFromQueue(ctx, outputPacketsCh, outputFramesCh); err != nil {
