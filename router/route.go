@@ -39,9 +39,9 @@ type Route[T any] struct {
 	OnOpen     func(context.Context, *Route[T])
 	OnClose    func(context.Context, *Route[T])
 	IsNodeOpen bool
+	Node       *NodeRouting[T]
 
 	// access only when Locker is locked:
-	Node                 *NodeRouting[T]
 	Publishers           Publishers[T]
 	PublishersChangeChan chan struct{}
 
