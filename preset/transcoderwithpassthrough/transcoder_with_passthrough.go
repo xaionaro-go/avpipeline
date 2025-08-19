@@ -387,7 +387,7 @@ func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 }
 
 func asPacketSource(proc processor.Abstract) packet.Source {
-	if getPacketSourcer, ok := proc.(interface{ GetPacketSource() packet.Source }); ok {
+	if getPacketSourcer, ok := proc.(processor.GetPacketSourcer); ok {
 		if packetSource := getPacketSourcer.GetPacketSource(); packetSource != nil {
 			return packetSource
 		}
@@ -396,7 +396,7 @@ func asPacketSource(proc processor.Abstract) packet.Source {
 }
 
 func asPacketSink(proc processor.Abstract) packet.Sink {
-	if getPacketSinker, ok := proc.(interface{ GetPacketSink() packet.Sink }); ok {
+	if getPacketSinker, ok := proc.(processor.GetPacketSinker); ok {
 		if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
 			return packetSink
 		}

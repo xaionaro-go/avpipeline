@@ -24,7 +24,17 @@ type FromKernel[T kernel.Abstract] struct {
 	OnClosed  func(context.Context) error
 }
 
+type GetPacketSourcer interface {
+	GetPacketSource() packet.Source
+}
+
+type GetPacketSinker interface {
+	GetPacketSink() packet.Sink
+}
+
 var _ Abstract = (*FromKernel[kernel.Abstract])(nil)
+var _ GetPacketSourcer = (*FromKernel[kernel.Abstract])(nil)
+var _ GetPacketSinker = (*FromKernel[kernel.Abstract])(nil)
 
 func NewFromKernel[T kernel.Abstract](
 	ctx context.Context,

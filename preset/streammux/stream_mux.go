@@ -7,20 +7,25 @@ import (
 	"io"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
+	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -41,14 +46,14 @@ type InputNode[C any] = node.NodeWithCustomData[
 ]
 
 type StreamMux[C any] struct {
-	InputNode        *InputNode[C]
-	MuxMode          types.MuxMode
-	Outputs          []*Output
-	OutputsMap       map[OutputKey]*Output
-	OutputFactory    OutputFactory
-	InputSyncFilter  *packetcondition.Switch
-	OutputSyncFilter *packetcondition.Switch
-	Locker           xsync.Mutex
+	InputNode     *InputNode[C]
+	MuxMode       types.MuxMode
+	Outputs       []*Output[C]
+	OutputsMap    map[OutputKey]*Output[C]
+	OutputFactory OutputFactory
+	InputSyncer   *barrierstategetter.Switch
+	OutputSyncer  *barrierstategetter.Switch
+	Locker        xsync.Mutex
 
 	waitGroup sync.WaitGroup
 }
@@ -65,24 +70,75 @@ func New(
 	muxMode types.MuxMode,
 	outputFactory OutputFactory,
 ) (*StreamMux[struct{}], error) {
-	s := &StreamMux[struct{}]{
-		InputSyncFilter:  packetcondition.NewSwitch(),
-		OutputSyncFilter: packetcondition.NewSwitch(),
-		OutputFactory:    outputFactory,
-		OutputsMap:       map[OutputKey]*Output{},
+	return NewWithCustomData[struct{}](
+		ctx,
+		muxMode,
+		outputFactory,
+	)
+}
+
+func NewWithCustomData[C any](
+	ctx context.Context,
+	muxMode types.MuxMode,
+	outputFactory OutputFactory,
+) (*StreamMux[C], error) {
+	s := &StreamMux[C]{
+		InputSyncer:   barrierstategetter.NewSwitch(),
+		OutputSyncer:  barrierstategetter.NewSwitch(),
+		OutputFactory: outputFactory,
+		OutputsMap:    map[OutputKey]*Output[C]{},
 	}
-	s.InputSyncFilter.SetKeepUnless(packetcondition.And{
-		packetcondition.MediaType(astiav.MediaTypeVideo),
-		packetcondition.IsKeyFrame(true),
+	s.InputSyncer.SetKeepUnless(packetorframecondition.And{
+		packetorframecondition.MediaType(astiav.MediaTypeVideo),
+		packetorframecondition.IsKeyFrame(true),
 	})
-	s.InputSyncFilter.SetOnAfterSwitch(func(ctx context.Context, pkt packet.Input, from, to int32) {
+	var (
+		prevDataLocker             sync.Mutex
+		prevOutput                 *Output[C]
+		prevSource                 packet.Source
+		switchPTS                  int64
+		outputSyncerSwitchDeadline time.Time
+	)
+	s.InputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+		prevDataLocker.Lock()
+		switchPTS = in.Packet.Pts()
+		prevSource = in.Packet.Source
+		prevOutput = s.Outputs[from]
 		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d)", to)
-		err := s.OutputSyncFilter.SetValue(ctx, to)
+		err := s.OutputSyncer.SetValue(ctx, to)
 		logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): %v", to, err)
+		if err := prevOutput.Flush(ctx); err != nil {
+			logger.Errorf(ctx, "unable to flush the previous output: %v", err)
+		}
+		outputSyncerSwitchDeadline = time.Now().Add(10 * time.Second)
 	})
-	s.OutputSyncFilter.SetKeepUnless(packetcondition.And{
-		packetcondition.MediaType(astiav.MediaTypeVideo),
-		packetcondition.IsKeyFrame(true),
+
+	// waiting for the last packet to reach the OutputSyncer
+	s.OutputSyncer.SetKeepUnless(
+		packetorframecondition.And{
+			packetorframecondition.Or{
+				packetorframecondition.And{
+					packetorframecondition.PacketSource(prevSource),
+					packetorframecondition.MediaType(astiav.MediaTypeVideo),
+					packetorframecondition.IsKeyFrame(true),
+					packetorframecondition.PTS(mathcondition.GreaterOrEqual(switchPTS)),
+				},
+				packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
+					if time.Since(outputSyncerSwitchDeadline) <= 0 {
+						return false
+					}
+					logger.Errorf(ctx, "OutputSyncer: timeout waiting for the last packet to reach the OutputSyncer")
+					return true
+				}),
+			},
+			packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
+				prevDataLocker.Unlock()
+				return true
+			}),
+		},
+	)
+	s.OutputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+		s.OutputSyncer.Release()
 	})
 	return s, nil
 }
@@ -91,7 +147,7 @@ func (s *StreamMux[C]) InitOutput(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts ...InitOutputOption,
-) (output *Output, _err error) {
+) (output *Output[C], _err error) {
 	logger.Tracef(ctx, "InitOutput(%#+v)", outputKey)
 	defer func() { logger.Tracef(ctx, "/InitOutput(%#+v): %v", outputKey, _err) }()
 	return xsync.DoA3R2(ctx, &s.Locker, s.initOutputLocked, ctx, outputKey, opts)
@@ -101,28 +157,27 @@ func (s *StreamMux[C]) initOutputLocked(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts []InitOutputOption,
-) (_ret *Output, _err error) {
+) (_ret *Output[C], _err error) {
 	if _, ok := s.OutputsMap[outputKey]; ok {
 		return
 	}
 
-	outputNode, err := s.OutputFactory.NewOutput(ctx, outputKey)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create an output node: %w", err)
-	}
-
-	output, err := NewOutput(
+	output, err := newOutput(
 		ctx,
-		outputNode,
-		s.InputSyncFilter.PacketCondition(int32(len(s.Outputs))),
-		s.OutputSyncFilter.PacketCondition(int32(len(s.Outputs))),
+		s.Input(),
+		s.OutputFactory, outputKey,
+		s.InputSyncer.Condition(int32(len(s.Outputs))),
+		s.OutputSyncer.Condition(int32(len(s.Outputs))),
+		s.newStreamIndexAssigner(s.MuxMode, len(s.Outputs)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output: %w", err)
 	}
 	s.Outputs = append(s.Outputs, output)
 	s.OutputsMap[outputKey] = output
-
+	s.Input().AddPushPacketsTo(
+		output.Input(),
+	)
 	return output, nil
 }
 
@@ -404,7 +459,7 @@ func (s *StreamMux[C]) GetAllStats(
 }
 
 func asPacketSource(proc processor.Abstract) packet.Source {
-	if getPacketSourcer, ok := proc.(interface{ GetPacketSource() packet.Source }); ok {
+	if getPacketSourcer, ok := proc.(processor.GetPacketSourcer); ok {
 		if packetSource := getPacketSourcer.GetPacketSource(); packetSource != nil {
 			return packetSource
 		}
@@ -413,7 +468,7 @@ func asPacketSource(proc processor.Abstract) packet.Source {
 }
 
 func asPacketSink(proc processor.Abstract) packet.Sink {
-	if getPacketSinker, ok := proc.(interface{ GetPacketSink() packet.Sink }); ok {
+	if getPacketSinker, ok := proc.(processor.GetPacketSinker); ok {
 		if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
 			return packetSink
 		}

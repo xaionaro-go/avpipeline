@@ -23,7 +23,7 @@ type Switch struct {
 
 	ChangeSignal         *chan struct{}
 	KeepUnlessPacketCond *packetorframecondition.Condition
-	AutoRelease          *packetorframecondition.Condition
+	AutoReleaseCond      *packetorframecondition.Condition
 	OnAfterSwitch        *FuncOnAfterSwitch
 
 	CommitMutex xsync.Mutex
@@ -50,7 +50,7 @@ func (s *Switch) SetKeepUnless(cond packetorframecondition.Condition) {
 }
 
 func (s *Switch) GetAutoRelease() packetorframecondition.Condition {
-	ptr := xatomic.LoadPointer(&s.KeepUnlessPacketCond)
+	ptr := xatomic.LoadPointer(&s.AutoReleaseCond)
 	if ptr == nil {
 		return nil
 	}
@@ -58,7 +58,7 @@ func (s *Switch) GetAutoRelease() packetorframecondition.Condition {
 }
 
 func (s *Switch) SetAutoRelease(cond packetorframecondition.Condition) {
-	xatomic.StorePointer(&s.KeepUnlessPacketCond, ptr(cond))
+	xatomic.StorePointer(&s.AutoReleaseCond, ptr(cond))
 }
 
 func (s *Switch) GetOnAfterSwitch() FuncOnAfterSwitch {
@@ -132,6 +132,9 @@ func (s *SwitchCondition) GetState(
 			s.Release()
 		}
 		if currentValue != s.RequiredValue {
+			if !isReleased && currentValue == nextValue {
+				return types.StateBlock, s.GetChangeChan()
+			}
 			return types.StateDrop, s.GetChangeChan()
 		}
 		if isReleased {
