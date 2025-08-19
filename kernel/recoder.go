@@ -13,7 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -34,7 +34,7 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	started                 bool
 	activeStreamsMap        map[int]struct{}
 	activeStreamsCount      uint
-	pendingPacketsAndFrames []types.AbstractPacketOrFrame
+	pendingPacketsAndFrames []packetorframe.Abstract
 }
 
 var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)

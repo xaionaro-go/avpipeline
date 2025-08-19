@@ -1,4 +1,4 @@
-package transcoderwithpassthrough
+package streammux
 
 import (
 	"context"
@@ -6,19 +6,18 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/xsync"
 )
 
 type streamIndexAssignerOutput[C any, P processor.Abstract] struct {
-	StreamForward      *TranscoderWithPassthrough[C, P]
+	StreamForward      *StreamMux[C, P]
 	PreviousResultsMap map[int]int
 	AlreadyAssignedMap map[int]struct{}
 	Locker             xsync.Mutex
 }
 
-func newStreamIndexAssignerOutput[C any, P processor.Abstract](s *TranscoderWithPassthrough[C, P]) *streamIndexAssignerOutput[C, P] {
+func newStreamIndexAssignerOutput[C any, P processor.Abstract](s *StreamMux[C, P]) *streamIndexAssignerOutput[C, P] {
 	return &streamIndexAssignerOutput[C, P]{
 		StreamForward:      s,
 		PreviousResultsMap: make(map[int]int),
@@ -28,14 +27,14 @@ func newStreamIndexAssignerOutput[C any, P processor.Abstract](s *TranscoderWith
 
 func (s *streamIndexAssignerOutput[C, P]) StreamIndexAssign(
 	ctx context.Context,
-	input packetorframe.InputUnion,
+	input avppacketorframe.InputUnion,
 ) ([]int, error) {
 	return xsync.DoA2R2(ctx, &s.Locker, s.streamIndexAssign, ctx, input)
 }
 
 func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	ctx context.Context,
-	input packetorframe.InputUnion,
+	input avppacketorframe.InputUnion,
 ) ([]int, error) {
 	switch input.Packet.Source {
 	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource, s.StreamForward.MapInputStreamIndicesNode.Processor.Kernel, s.StreamForward.PacketSource, s.StreamForward.NodeStreamFixerPassthrough.MapStreamIndicesNode.Processor.Kernel:

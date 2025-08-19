@@ -5,14 +5,14 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 type streamIndexAssignerFLV struct{}
 
 func (streamIndexAssignerFLV) StreamIndexAssign(
 	ctx context.Context,
-	input types.InputPacketOrFrameUnion,
+	input packetorframe.InputUnion,
 ) (_ret []int, _err error) {
 	logger.Debugf(ctx, "StreamIndexAssign(): %d %s", input.GetStreamIndex(), input.GetMediaType())
 	defer func() { logger.Debugf(ctx, "/StreamIndexAssign(): %v %v", _ret, _err) }()

@@ -1,4 +1,4 @@
-package transcoderwithpassthrough
+package streammux
 
 import (
 	"context"
@@ -6,13 +6,12 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/xsync"
 )
 
 type streamIndexAssignerInput[C any, P processor.Abstract] struct {
-	StreamForward *TranscoderWithPassthrough[C, P]
+	StreamForward *StreamMux[C, P]
 	AudioIndexMap map[int][]int
 	VideoIndexMap map[int][]int
 	Locker        xsync.Mutex
@@ -20,7 +19,7 @@ type streamIndexAssignerInput[C any, P processor.Abstract] struct {
 
 func newStreamIndexAssignerInput[C any, P processor.Abstract](
 	ctx context.Context,
-	t *TranscoderWithPassthrough[C, P],
+	t *StreamMux[C, P],
 ) *streamIndexAssignerInput[C, P] {
 	s := &streamIndexAssignerInput[C, P]{
 		StreamForward: t,
@@ -81,7 +80,7 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 
 func (s *streamIndexAssignerInput[C, P]) StreamIndexAssign(
 	ctx context.Context,
-	input packetorframe.InputUnion,
+	input avppacketorframe.InputUnion,
 ) (_ret []int, _err error) {
 	defer func() { logger.Tracef(ctx, "StreamIndexAssign: %v, %v", _ret, _err) }()
 	return xsync.DoA2R2(ctx, &s.Locker, s.streamIndexAssign, ctx, input)
@@ -89,7 +88,7 @@ func (s *streamIndexAssignerInput[C, P]) StreamIndexAssign(
 
 func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
 	ctx context.Context,
-	input packetorframe.InputUnion,
+	input avppacketorframe.InputUnion,
 ) ([]int, error) {
 	if len(s.VideoIndexMap) == 0 && len(s.AudioIndexMap) == 0 {
 		return []int{input.GetStreamIndex()}, nil

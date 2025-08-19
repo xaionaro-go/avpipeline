@@ -11,8 +11,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel/condition"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/sort"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
@@ -46,12 +46,12 @@ type SyncStreams struct {
 	Started          bool
 
 	emptyQueuesCount         int
-	ConditionArgumentNewItem *types.InputPacketOrFrameUnion
+	ConditionArgumentNewItem *packetorframe.InputUnion
 }
 
 var _ Abstract = (*SyncStreams)(nil)
 
-func NewSyncStreams(
+func NewMonotonicDTS(
 	ctx context.Context,
 	startCondition condition.Condition[*SyncStreams],
 	maxBufferSize uint,
@@ -76,7 +76,7 @@ func (s *SyncStreams) SendInputPacket(
 	return xsync.DoA4R1(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
-		types.InputPacketOrFrameUnion{Packet: &packet.Input{
+		packetorframe.InputUnion{Packet: &packet.Input{
 			Packet: packet.CloneAsReferenced(input.Packet),
 			Stream: input.Stream,
 			Source: input.Source,
@@ -94,7 +94,7 @@ func (s *SyncStreams) SendInputFrame(
 	return xsync.DoA4R1(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
-		types.InputPacketOrFrameUnion{Frame: ptr(frame.BuildInput(
+		packetorframe.InputUnion{Frame: ptr(frame.BuildInput(
 			frame.CloneAsReferenced(input.Frame),
 			input.CodecParameters,
 			input.StreamIndex, input.StreamsCount,
@@ -117,7 +117,7 @@ func (s *SyncStreams) CurrentDTS() typing.Optional[int64] {
 
 func (s *SyncStreams) pushToQueue(
 	ctx context.Context,
-	item types.InputPacketOrFrameUnion,
+	item packetorframe.InputUnion,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
@@ -264,7 +264,7 @@ func (s *SyncStreams) pullAndSendPendingItems(
 
 func (s *SyncStreams) doSendItem(
 	ctx context.Context,
-	item types.InputPacketOrFrameUnion,
+	item packetorframe.InputUnion,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {

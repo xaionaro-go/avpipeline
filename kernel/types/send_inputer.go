@@ -8,12 +8,20 @@ import (
 )
 
 type SendInputer interface {
+	SendInputPacketer
+	SendInputFramer
+}
+
+type SendInputPacketer interface {
 	SendInputPacket(
 		ctx context.Context,
 		input packet.Input,
 		outputPacketsCh chan<- packet.Output,
 		outputFramesCh chan<- frame.Output,
 	) error
+}
+
+type SendInputFramer interface {
 	SendInputFrame(
 		ctx context.Context,
 		input frame.Input,

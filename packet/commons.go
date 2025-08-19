@@ -24,7 +24,15 @@ func () WithOutputFormatContext(
 */
 
 type Sink interface {
+	WithInputFormatContexter
+	NotifyAboutPacketSourcer
+}
+
+type WithInputFormatContexter interface {
 	WithInputFormatContext(context.Context, func(*astiav.FormatContext))
+}
+
+type NotifyAboutPacketSourcer interface {
 	NotifyAboutPacketSource(context.Context, Source) error
 }
 

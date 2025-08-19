@@ -15,8 +15,8 @@ import (
 	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -167,8 +167,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 func pushFurther[
 	P processor.Abstract,
-	I types.InputPacketOrFrame, C filter.Condition[I],
-	O types.OutputPacketOrFrame, OP types.PacketOrFramePointer[O],
+	I packetorframe.Input, C filter.Condition[I],
+	O packetorframe.Output, OP packetorframe.Pointer[O],
 	CD any,
 ](
 	ctx context.Context,

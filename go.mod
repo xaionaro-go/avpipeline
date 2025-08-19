@@ -10,7 +10,7 @@ require (
 	github.com/asticode/go-astikit v0.54.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250308011339-62fb7027b11f
-	github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f
+	github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0

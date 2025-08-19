@@ -12,7 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -32,7 +32,7 @@ var _ packet.Source = (*MapStreamIndices)(nil)
 var _ packet.Sink = (*MapStreamIndices)(nil)
 
 type StreamIndexAssigner interface {
-	StreamIndexAssign(context.Context, types.InputPacketOrFrameUnion) ([]int, error)
+	StreamIndexAssign(context.Context, packetorframe.InputUnion) ([]int, error)
 }
 
 func NewMapStreamIndices(
@@ -55,7 +55,7 @@ func NewMapStreamIndices(
 func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	ctx context.Context,
 	inputStreamIndex int,
-	input types.InputPacketOrFrameUnion,
+	input packetorframe.InputUnion,
 ) (_ret []int, _err error) {
 	streamKey := InternalStreamKey{
 		StreamIndex: inputStreamIndex,
@@ -83,7 +83,7 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 
 func (m *MapStreamIndices) getOutputFrameStreamIndex(
 	ctx context.Context,
-	input types.InputPacketOrFrameUnion,
+	input packetorframe.InputUnion,
 ) (_ret []int, _err error) {
 	inputStreamIndex := input.Frame.StreamIndex
 	if v, ok := m.FrameStreamMap[inputStreamIndex]; ok {
@@ -195,7 +195,7 @@ func (m *MapStreamIndices) sendInputPacket(
 	outputStreamIndexes, err := m.getOutputPacketStreamIndex(
 		ctx,
 		input.Stream.Index(),
-		types.InputPacketOrFrameUnion{Packet: &input},
+		packetorframe.InputUnion{Packet: &input},
 	)
 	if err != nil {
 		return fmt.Errorf("unable to obtain the output stream indexes (on packet: %#+v): %w", input, err)
@@ -260,7 +260,7 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 				outputStreamIndexes, err := m.getOutputPacketStreamIndex(
 					ctx,
 					inputStream.Index(),
-					types.InputPacketOrFrameUnion{
+					packetorframe.InputUnion{
 						Packet: &packet.Input{
 							Stream: inputStream,
 							Source: source,
@@ -317,7 +317,7 @@ func (m *MapStreamIndices) sendInputFrame(
 ) error {
 	outputStreamIndexes, err := m.getOutputFrameStreamIndex(
 		ctx,
-		types.InputPacketOrFrameUnion{Frame: &input},
+		packetorframe.InputUnion{Frame: &input},
 	)
 	if err != nil {
 		return fmt.Errorf("unable to obtain the output stream index (on frame: %#+v): %w", input, err)

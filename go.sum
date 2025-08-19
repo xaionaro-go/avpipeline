@@ -22,6 +22,8 @@ github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7 h1:Ng6QMSlQSB+goG6430/F
 github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7/go.mod h1:QUXmOopthsqLYJ+rAybuCf16J7qQm60TLVdQR0w1Nus=
 github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f h1:lifmuIc/S/hzVoStbEAsdryJ6qBSNeXXb9NseP0vlfs=
 github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f/go.mod h1:+3P6aQ4zDVR6jGPnXq3g/7kHnKLB73EsnGBhM0adWhA=
+github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10 h1:7hbi8e5YN1YF7kLHMJPRuxExGskIx8/LUs4z/BP5JwE=
+github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10/go.mod h1:+3P6aQ4zDVR6jGPnXq3g/7kHnKLB73EsnGBhM0adWhA=
 github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c h1:HJxoDBw4gpvxB+hR8qe44GPrDbOw8q2jR5W9yr3toxo=
 github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c/go.mod h1:FJRei/3HqH6XVzwo61JwfpKT0rDulBRh1YOq3yWS0Cs=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=

@@ -1,10 +1,10 @@
 package sort
 
 import (
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
-type AbstractPacketOrFrames []types.AbstractPacketOrFrame
+type AbstractPacketOrFrames []packetorframe.Abstract
 
 func (s AbstractPacketOrFrames) Len() int {
 	return len(s)
@@ -18,7 +18,7 @@ func (s AbstractPacketOrFrames) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-type PacketOrFrames[T types.PacketOrFrame, TP types.PacketOrFramePointer[T]] []T
+type PacketOrFrames[T packetorframe.Any, TP packetorframe.Pointer[T]] []T
 
 func (s PacketOrFrames[T, TP]) Len() int {
 	return len(s)
@@ -32,7 +32,7 @@ func (s PacketOrFrames[T, TP]) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-type InputPacketOrFrameUnions []types.InputPacketOrFrameUnion
+type InputPacketOrFrameUnions []packetorframe.InputUnion
 
 func (s InputPacketOrFrameUnions) Len() int {
 	return len(s)

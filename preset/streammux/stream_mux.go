@@ -1,4 +1,4 @@
-package transcoderwithpassthrough
+package streammux
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
@@ -21,7 +22,7 @@ import (
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
-	"github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
+	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
@@ -35,85 +36,101 @@ const (
 	startWithPassthrough     = false
 )
 
-// TODO: delete me after `streammux` is productionized.
-type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
-	PacketSource              packet.Source
-	Outputs                   []node.Abstract
-	FilterThrottle            *packetcondition.VideoAverageBitrateLower
-	SwitchPreFilter           *packetcondition.Switch
-	SwitchPostFilter          *packetcondition.Switch
-	Recoder                   *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
-	MapInputStreamIndicesNode *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
-	MapOutputStreamIndices    *kernel.MapStreamIndices
-	NodeRecoder               *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+type InputNode[C any] = node.NodeWithCustomData[
+	C, *processor.FromKernel[*boilerplate.BaseWithFormatContext[*InputHandler]],
+]
 
-	NodeStreamFixerMain        *autofix.AutoFixer
-	NodeStreamFixerPassthrough *autofix.AutoFixer
+type StreamMux[C any] struct {
+	InputNode        *InputNode[C]
+	MuxMode          types.MuxMode
+	Outputs          []*Output
+	OutputsMap       map[OutputKey]*Output
+	OutputFactory    OutputFactory
+	InputSyncFilter  *packetcondition.Switch
+	OutputSyncFilter *packetcondition.Switch
+	Locker           xsync.Mutex
 
-	RecodingConfig types.RecoderConfig
-
-	inputStreamMapIndicesAsPacketSource packet.Source
-
-	locker    xsync.Mutex
 	waitGroup sync.WaitGroup
 }
 
-/*
-// 1 output (same_tracks, same_connection)
-//
-//                           +--> THROTTLE --> AutoFixer ->--+
-// INPUT --> MAP INDICES ->--+               (passthrough)   +-> AutoFixer (--> MAP INDICES) --> OUTPUT-main
-//                           +--> RECODER -------------------+    (main)   [same_connection]
-*/
+type OutputFactory interface {
+	NewOutput(
+		ctx context.Context,
+		outputKey OutputKey,
+	) (node.Abstract, error)
+}
 
-/*
-// 2 outputs (next_output):
-//
-//                           +--> THROTTLE ---> AutoFixer --> OUTPUT-passthrough
-// INPUT --> MAP INDICES ->--+                (passthrough)
-//                           +--> RECODER ----> AutoFixer --> OUTPUT-main
-//                                               (main)
-*/
-func New[C any, P processor.Abstract](
+func New(
 	ctx context.Context,
-	input packet.Source,
-	outputs ...node.Abstract,
-) (*TranscoderWithPassthrough[C, P], error) {
-	s := &TranscoderWithPassthrough[C, P]{
-		PacketSource:     input,
-		Outputs:          outputs,
-		FilterThrottle:   packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		SwitchPreFilter:  packetcondition.NewSwitch(),
-		SwitchPostFilter: packetcondition.NewSwitch(),
+	muxMode types.MuxMode,
+	outputFactory OutputFactory,
+) (*StreamMux[struct{}], error) {
+	s := &StreamMux[struct{}]{
+		InputSyncFilter:  packetcondition.NewSwitch(),
+		OutputSyncFilter: packetcondition.NewSwitch(),
+		OutputFactory:    outputFactory,
+		OutputsMap:       map[OutputKey]*Output{},
 	}
-	s.SwitchPreFilter.SetKeepUnless(packetcondition.And{
+	s.InputSyncFilter.SetKeepUnless(packetcondition.And{
 		packetcondition.MediaType(astiav.MediaTypeVideo),
 		packetcondition.IsKeyFrame(true),
 	})
-	s.SwitchPreFilter.SetOnAfterSwitch(func(ctx context.Context, pkt packet.Input, from, to int32) {
-		logger.Debugf(ctx, "s.PostSwitchFilter.SetValue(ctx, %d)", to)
-		err := s.SwitchPostFilter.SetValue(ctx, to)
-		logger.Debugf(ctx, "/s.PostSwitchFilter.SetValue(ctx, %d): %v", to, err)
+	s.InputSyncFilter.SetOnAfterSwitch(func(ctx context.Context, pkt packet.Input, from, to int32) {
+		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d)", to)
+		err := s.OutputSyncFilter.SetValue(ctx, to)
+		logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): %v", to, err)
 	})
-	s.SwitchPostFilter.SetKeepUnless(packetcondition.And{
+	s.OutputSyncFilter.SetKeepUnless(packetcondition.And{
 		packetcondition.MediaType(astiav.MediaTypeVideo),
 		packetcondition.IsKeyFrame(true),
 	})
-	s.MapInputStreamIndicesNode = node.NewFromKernel(
-		ctx,
-		kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s)),
-		processor.DefaultOptionsRecoder()...,
-	)
-	s.inputStreamMapIndicesAsPacketSource = asPacketSource(s.MapInputStreamIndicesNode.Processor)
-	s.MapOutputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerOutput(s))
 	return s, nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) Input() *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]] {
-	return s.MapInputStreamIndicesNode
+func (s *StreamMux[C]) InitOutput(
+	ctx context.Context,
+	outputKey types.OutputKey,
+	opts ...InitOutputOption,
+) (output *Output, _err error) {
+	logger.Tracef(ctx, "InitOutput(%#+v)", outputKey)
+	defer func() { logger.Tracef(ctx, "/InitOutput(%#+v): %v", outputKey, _err) }()
+	return xsync.DoA3R2(ctx, &s.Locker, s.initOutputLocked, ctx, outputKey, opts)
 }
 
-func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
+func (s *StreamMux[C]) initOutputLocked(
+	ctx context.Context,
+	outputKey types.OutputKey,
+	opts []InitOutputOption,
+) (_ret *Output, _err error) {
+	if _, ok := s.OutputsMap[outputKey]; ok {
+		return
+	}
+
+	outputNode, err := s.OutputFactory.NewOutput(ctx, outputKey)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create an output node: %w", err)
+	}
+
+	output, err := NewOutput(
+		ctx,
+		outputNode,
+		s.InputSyncFilter.PacketCondition(int32(len(s.Outputs))),
+		s.OutputSyncFilter.PacketCondition(int32(len(s.Outputs))),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create an output: %w", err)
+	}
+	s.Outputs = append(s.Outputs, output)
+	s.OutputsMap[outputKey] = output
+
+	return output, nil
+}
+
+func (s *StreamMux[C]) Input() *InputNode[C] {
+	return s.InputNode
+}
+
+func (s *StreamMux[C]) GetRecoderConfig(
 	ctx context.Context,
 ) (_ret types.RecoderConfig) {
 	logger.Tracef(ctx, "GetRecoderConfig")
@@ -121,10 +138,10 @@ func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
 	if s == nil {
 		return types.RecoderConfig{}
 	}
-	return xsync.DoA1R1(ctx, &s.locker, s.getRecoderConfigLocked, ctx)
+	return xsync.DoA1R1(ctx, &s.Locker, s.getRecoderConfigLocked, ctx)
 }
 
-func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
+func (s *StreamMux[C]) getRecoderConfigLocked(
 	ctx context.Context,
 ) (_ret types.RecoderConfig) {
 	switchValue := s.SwitchPreFilter.GetValue(ctx)
@@ -138,16 +155,16 @@ func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
 	return cpy
 }
 
-func (s *TranscoderWithPassthrough[C, P]) SetRecoderConfig(
+func (s *StreamMux[C]) SetRecoderConfig(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
 	logger.Tracef(ctx, "SetRecoderConfig(ctx, %#+v)", cfg)
 	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
-	return xsync.DoA2R1(ctx, &s.locker, s.setRecoderConfigLocked, ctx, cfg)
+	return xsync.DoA2R1(ctx, &s.Locker, s.setRecoderConfigLocked, ctx, cfg)
 }
 
-func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
+func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -156,11 +173,11 @@ func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
 		return fmt.Errorf("unable to configure the recoder: %w", err)
 	}
 	s.RecodingConfig = cfg
-	s.MapInputStreamIndicesNode.Processor.Kernel.Assigner.(*streamIndexAssignerInput[C, P]).reload(ctx)
+	s.MapInputStreamIndicesNode.Processor.Kernel.Assigner.(*streamIndexAssignerInput[C]).reload(ctx)
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
+func (s *StreamMux[C]) configureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -193,7 +210,7 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) initRecoder(
+func (s *StreamMux[C]) initRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -256,7 +273,7 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
+func (s *StreamMux[C]) reconfigureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -338,7 +355,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
+func (s *StreamMux[C]) reconfigureRecoderCopy(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -364,7 +381,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
+func (s *StreamMux[C]) GetAllStats(
 	ctx context.Context,
 ) map[string]*node.ProcessingStatistics {
 	m := map[string]*node.ProcessingStatistics{
@@ -380,7 +397,7 @@ func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 		m[key] = getter.GetStats()
 	}
 	tryGetStats("Input", s.MapInputStreamIndicesNode)
-	for idx, output := range s.Outputs {
+	for idx, output := range s.OutputsMap {
 		tryGetStats(fmt.Sprintf("Output%d", idx), output)
 	}
 	return m
@@ -404,9 +421,9 @@ func asPacketSink(proc processor.Abstract) packet.Sink {
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) Start(
+func (s *StreamMux[C]) Start(
 	ctx context.Context,
-	passthroughMode types.PassthroughMode,
+	passthroughMode types.MuxMode,
 	serveCfg avpipeline.ServeConfig,
 ) (_err error) {
 	logger.Debugf(ctx, "Start(ctx, %s)", passthroughMode)
@@ -414,7 +431,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	if s.Recoder == nil {
 		return fmt.Errorf("s.Recoder is not configured")
 	}
-	outputMain := &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[0]}
+	outputMain := &nodewrapper.NoServe[node.Abstract]{Node: s.OutputsMap[0]}
 	outputAsPacketSink := asPacketSink(outputMain.GetProcessor())
 	if outputAsPacketSink == nil {
 		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
@@ -442,7 +459,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		processor.DefaultOptionsOutput()...,
 	)
 
-	if passthroughMode != types.PassthroughModeNever {
+	if passthroughMode != types.MuxModeForbid {
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(
 			s.NodeRecoder,
 			packetfiltercondition.Packet{
@@ -480,10 +497,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		outputAsPacketSink,
 	)
 
-	if passthroughMode != types.PassthroughModeNever {
+	if passthroughMode != types.MuxModeForbid {
 		var passthroughOutputReference packet.Sink = s.Recoder.Decoder
-		if passthroughMode == types.PassthroughModeNextOutput {
-			passthroughOutputReference = asPacketSink(s.Outputs[1].GetProcessor())
+		if passthroughMode == types.MuxModeDifferentOutputsSameTracks {
+			passthroughOutputReference = asPacketSink(s.OutputsMap[1].GetProcessor())
 		}
 		s.NodeStreamFixerPassthrough = autofix.New(
 			belt.WithField(ctx, "branch", "passthrough"),
@@ -518,7 +535,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		var condRecoder, condPassthrough packetfiltercondition.And
 		var sinkMain, sinkPassthrough node.Abstract
 		switch passthroughMode {
-		case types.PassthroughModeSameTracks:
+		case types.MuxModeSameOutputSameTracks:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
 					s.SwitchPreFilter.PacketCondition(0),
@@ -535,7 +552,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = outputMain
 			}
-		case types.PassthroughModeSameConnection:
+		case types.MuxModeSameOutputDifferentTracks:
 			nodeMapStreamIndices := node.NewFromKernel(
 				ctx,
 				s.MapOutputStreamIndices,
@@ -546,7 +563,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = nodeMapStreamIndices
 			}
-		case types.PassthroughModeNextOutput:
+		case types.MuxModeDifferentOutputsSameTracks:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
 				Condition: packetcondition.And{
 					s.SwitchPreFilter.PacketCondition(0),
@@ -559,7 +576,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 					s.SwitchPostFilter.PacketCondition(1),
 				},
 			})
-			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
+			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.OutputsMap[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
@@ -650,7 +667,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) Wait(
+func (s *StreamMux[C]) Wait(
 	ctx context.Context,
 ) error {
 	s.waitGroup.Wait()

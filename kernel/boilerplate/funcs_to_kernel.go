@@ -1,14 +1,15 @@
-package kernel
+package boilerplate
 
 import (
 	"context"
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type Custom struct {
+type FuncsToKernel struct {
 	*closuresignaler.ClosureSignaler
 	GenerateFunc func(
 		ctx context.Context,
@@ -30,9 +31,9 @@ type Custom struct {
 	CloseFunc func(context.Context) error
 }
 
-var _ Abstract = (*Custom)(nil)
+var _ types.Abstract = (*FuncsToKernel)(nil)
 
-func NewCustom(
+func NewFuncsToKernel(
 	ctx context.Context,
 	generate func(
 		ctx context.Context,
@@ -52,60 +53,60 @@ func NewCustom(
 		outputFramesCh chan<- frame.Output,
 	) error,
 	close func(context.Context) error,
-) *Custom {
-	m := &Custom{
+) *FuncsToKernel {
+	f := &FuncsToKernel{
 		ClosureSignaler:     closuresignaler.New(),
 		GenerateFunc:        generate,
 		SendInputPacketFunc: sendInputPacket,
 		SendInputFrameFunc:  sendInputFrame,
 		CloseFunc:           close,
 	}
-	return m
+	return f
 }
 
-func (m *Custom) SendInputPacket(
+func (f *FuncsToKernel) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFrameCh chan<- frame.Output,
 ) error {
-	if m.SendInputPacketFunc == nil {
+	if f.SendInputPacketFunc == nil {
 		return nil
 	}
-	return m.SendInputPacketFunc(ctx, input, outputPacketsCh, outputFrameCh)
+	return f.SendInputPacketFunc(ctx, input, outputPacketsCh, outputFrameCh)
 }
 
-func (m *Custom) SendInputFrame(
+func (f *FuncsToKernel) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	if m.SendInputFrameFunc == nil {
+	if f.SendInputFrameFunc == nil {
 		return nil
 	}
-	return m.SendInputFrameFunc(ctx, input, outputPacketsCh, outputFramesCh)
+	return f.SendInputFrameFunc(ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (m *Custom) String() string {
+func (f *FuncsToKernel) String() string {
 	return "Custom"
 }
 
-func (m *Custom) Close(ctx context.Context) error {
-	m.ClosureSignaler.Close(ctx)
-	if m.CloseFunc == nil {
+func (f *FuncsToKernel) Close(ctx context.Context) error {
+	f.ClosureSignaler.Close(ctx)
+	if f.CloseFunc == nil {
 		return nil
 	}
-	return m.CloseFunc(ctx)
+	return f.CloseFunc(ctx)
 }
 
-func (m *Custom) Generate(
+func (f *FuncsToKernel) Generate(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	if m.GenerateFunc == nil {
+	if f.GenerateFunc == nil {
 		return nil
 	}
-	return m.GenerateFunc(ctx, outputPacketsCh, outputFramesCh)
+	return f.GenerateFunc(ctx, outputPacketsCh, outputFramesCh)
 }

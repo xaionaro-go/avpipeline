@@ -12,7 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/rpn"
 	rpntypes "github.com/xaionaro-go/rpn/types"
 	"github.com/xaionaro-go/xsync"
@@ -159,7 +159,7 @@ func (k *NodeKernel) sendInputFrame(
 
 func (k *NodeKernel) handleCorrections(
 	ctx context.Context,
-	input types.AbstractPacketOrFrame,
+	input packetorframe.Abstract,
 	isNewStream bool,
 ) (_err error) {
 	logger.Tracef(ctx, "NodeKernel.handleCorrections()")
