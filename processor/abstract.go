@@ -18,3 +18,26 @@ type Abstract interface {
 	OutputFrameChan() <-chan frame.Output
 	ErrorChan() <-chan error
 }
+
+/* for easier copy&paste:
+
+func (p *MyFancyProcessorPlaceholder) Close(ctx context.Context) error {
+
+}
+func (p *MyFancyProcessorPlaceholder) SendInputPacketChan() chan<- packet.Input {
+
+}
+func (p *MyFancyProcessorPlaceholder) OutputPacketChan() <-chan packet.Output {
+
+}
+func (p *MyFancyProcessorPlaceholder) SendInputFrameChan() chan<- frame.Input {
+
+}
+func (p *MyFancyProcessorPlaceholder) OutputFrameChan() <-chan frame.Output {
+
+}
+func (p *MyFancyProcessorPlaceholder) ErrorChan() <-chan error {
+
+}
+
+*/

@@ -2,6 +2,7 @@ package streammux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -168,6 +169,38 @@ func newOutput[C any](
 	o.OutputSyncFilter.AddPushPacketsTo(o.OutputNode)
 
 	return o, nil
+}
+
+func (o *Output[C]) Close(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Output.Close()")
+	defer func() { logger.Tracef(ctx, "/Output.Close(): %v", _err) }()
+	var errs []error
+
+	if err := o.Flush(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
+	}
+	if err := o.InputFilter.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close input filter for output %d: %w", o.ID, err))
+	}
+	if err := o.InputFixer.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close input fixer for output %d: %w", o.ID, err))
+	}
+	if err := o.RecoderNode.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close recoder node for output %d: %w", o.ID, err))
+	}
+	if err := o.MapIndices.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close map indices for output %d: %w", o.ID, err))
+	}
+	if err := o.OutputFixer.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close output fixer for output %d: %w", o.ID, err))
+	}
+	if err := o.OutputSyncFilter.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close output sync filter for output %d: %w", o.ID, err))
+	}
+	if err := o.OutputNode.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close output node for output %d: %w", o.ID, err))
+	}
+	return errors.Join(errs...)
 }
 
 func (o *Output[C]) Input() node.Abstract {

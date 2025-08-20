@@ -9,38 +9,20 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
-	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
-	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
-	"github.com/xaionaro-go/avpipeline/nodewrapper"
+	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
 	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
-	"github.com/xaionaro-go/avpipeline/packet/filter"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
-	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
-	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
-
-const (
-	passthroughRescaleTS     = false
-	notifyAboutPacketSources = true
-	startWithPassthrough     = false
-)
-
-type NodeInput[C any] = node.NodeWithCustomData[
-	C, *processor.FromKernel[*boilerplate.BaseWithFormatContext[*InputHandler]],
-]
 
 type StreamMux[C any] struct {
 	MuxMode        types.MuxMode
@@ -56,6 +38,13 @@ type StreamMux[C any] struct {
 	Outputs       []*Output[C]
 	OutputsMap    map[OutputKey]*Output[C]
 	OutputFactory OutputFactory
+
+	// aux
+	InputNodeAsPacketSource packet.Source
+
+	// to become a fake node myself:
+	nodeboilerplate.Statistics
+	nodeboilerplate.InputFilter
 
 	waitGroup sync.WaitGroup
 }
@@ -85,16 +74,23 @@ func NewWithCustomData[C any](
 	outputFactory OutputFactory,
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
+		InputNode:     newInputNode[C](ctx),
 		OutputSwitch:  barrierstategetter.NewSwitch(),
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output[C]{},
 	}
+	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
+	s.initSwitches()
+	return s, nil
+}
 
+func (s *StreamMux[C]) initSwitches() {
 	s.OutputSwitch.SetKeepUnless(packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.IsKeyFrame(true),
 	})
+
 	var (
 		prevDataLocker             sync.Mutex
 		prevOutputID               int32
@@ -152,7 +148,22 @@ func NewWithCustomData[C any](
 	)
 	// keep/hold the traffic flowing to the next output if the OutputSyncer is not switched yet
 	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagNextOutputStateBlock)
-	return s, nil
+}
+
+func (p *StreamMux[C]) Close(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "StreamMux.Close()")
+	defer func() { logger.Debugf(ctx, "/StreamMux.Close(): %v", _err) }()
+	var errs []error
+
+	if err := p.InputNode.GetProcessor().Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close the input node: %w", err))
+	}
+	for _, output := range p.Outputs {
+		if err := output.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close the output chain %d: %w", output.ID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *StreamMux[C]) setPreferredOutput(
@@ -188,6 +199,11 @@ func (s *StreamMux[C]) initOutputLocked(
 ) (_ret *Output[C], _err error) {
 	if _, ok := s.OutputsMap[outputKey]; ok {
 		return
+	}
+
+	cfg := InitOutputOptions(opts).config()
+	if cfg.RetryParameters != nil {
+		return nil, fmt.Errorf("retry parameters are not supported in the StreamMux preset, yet")
 	}
 
 	outputID := len(s.Outputs)
@@ -258,6 +274,15 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	err := s.reconfigureOutput(ctx, output, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
+	}
+
+	logger.Debugf(ctx, "notifying about the sources")
+	err = avpipeline.NotifyAboutPacketSources(ctx,
+		s.InputNodeAsPacketSource,
+		output.InputFilter,
+	)
+	if err != nil {
+		return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.InputNodeAsPacketSource, output.InputFilter, err)
 	}
 
 	err = s.setPreferredOutput(ctx, outputKey)
@@ -382,205 +407,14 @@ func (s *StreamMux[C]) getAllStatsLocked(
 	return m
 }
 
-func asPacketSource(proc processor.Abstract) packet.Source {
-	if getPacketSourcer, ok := proc.(processor.GetPacketSourcer); ok {
-		if packetSource := getPacketSourcer.GetPacketSource(); packetSource != nil {
-			return packetSource
-		}
-	}
-	return nil
-}
-
-func asPacketSink(proc processor.Abstract) packet.Sink {
-	if getPacketSinker, ok := proc.(processor.GetPacketSinker); ok {
-		if packetSink := getPacketSinker.GetPacketSink(); packetSink != nil {
-			return packetSink
-		}
-	}
-	return nil
-}
-
 func (s *StreamMux[C]) Start(
 	ctx context.Context,
-	passthroughMode types.MuxMode,
-	serveCfg avpipeline.ServeConfig,
+	serveCfg node.ServeConfig,
 ) (_err error) {
-	logger.Debugf(ctx, "Start(ctx, %s)", passthroughMode)
-	defer logger.Debugf(ctx, "/Start(ctx, %s): %v", passthroughMode, _err)
-	if s.Recoder == nil {
-		return fmt.Errorf("s.Recoder is not configured")
-	}
-	outputMain := &nodewrapper.NoServe[node.Abstract]{Node: s.OutputsMap[0]}
-	outputAsPacketSink := asPacketSink(outputMain.GetProcessor())
-	if outputAsPacketSink == nil {
-		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
-	}
+	logger.Debugf(ctx, "Start(ctx)")
+	defer logger.Debugf(ctx, "/Start(ctx): %v", _err)
 
-	// == configure ==
-
-	ctx, cancelFnOrig := context.WithCancel(ctx)
-	var cancelOnce sync.Once
-	cancelFn := func() {
-		cancelOnce.Do(func() {
-			logger.Debugf(ctx, "Serve: cancel")
-		})
-		cancelFnOrig()
-	}
-
-	s.NodeRecoder = node.NewFromKernel(
-		ctx,
-		s.Recoder,
-		processor.DefaultOptionsRecoder()...,
-	)
-	nodeFilterThrottle := node.NewFromKernel(
-		ctx,
-		kernel.NewPacketFilter(s.FilterThrottle, nil),
-		processor.DefaultOptionsOutput()...,
-	)
-
-	if passthroughMode != types.MuxModeForbid {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
-			s.NodeRecoder,
-			packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
-			},
-		)
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
-			nodeFilterThrottle,
-			packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
-			},
-		)
-
-		if notifyAboutPacketSources {
-			logger.Debugf(ctx, "notifying about the sources (the first time)")
-			err := avpipeline.NotifyAboutPacketSources(ctx, s.PacketSource, s.MapInputStreamIndicesNode)
-			if err != nil {
-				return fmt.Errorf("received an error while notifying nodes about packet sources the first time (%s -> %s): %w", s.PacketSource, s.MapInputStreamIndicesNode, err)
-			}
-		}
-	} else {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
-		s.MapInputStreamIndicesNode.AddPushFramesTo(s.NodeRecoder)
-	}
-
-	s.NodeStreamFixerMain = autofix.New(
-		belt.WithField(ctx, "branch", "output-main"),
-		s.Recoder.Encoder,
-		outputAsPacketSink,
-	)
-
-	if passthroughMode != types.MuxModeForbid {
-		var passthroughOutputReference packet.Sink = s.Recoder.Decoder
-		if passthroughMode == types.MuxModeDifferentOutputsSameTracks {
-			passthroughOutputReference = asPacketSink(s.OutputsMap[1].GetProcessor())
-		}
-		s.NodeStreamFixerPassthrough = autofix.New(
-			belt.WithField(ctx, "branch", "passthrough"),
-			s.PacketSource,
-			passthroughOutputReference,
-		)
-		if s.NodeStreamFixerPassthrough != nil {
-			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
-			nodeFilterThrottle.AddPushFramesTo(s.NodeStreamFixerPassthrough)
-		}
-
-		if startWithPassthrough {
-			s.SwitchPreFilter.CurrentValue.Store(1)
-			s.SwitchPostFilter.CurrentValue.Store(1)
-			s.SwitchPreFilter.NextValue.Store(1)
-			s.SwitchPostFilter.NextValue.Store(1)
-		}
-
-		if passthroughRescaleTS {
-			if !startWithPassthrough || notifyAboutPacketSources {
-				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
-					Condition: filter.NewRescaleTSBetweenKernels(
-						s.PacketSource,
-						s.NodeRecoder.Processor.Kernel.Encoder,
-					),
-				}
-			} else {
-				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
-			}
-		}
-
-		var condRecoder, condPassthrough packetfiltercondition.And
-		var sinkMain, sinkPassthrough node.Abstract
-		switch passthroughMode {
-		case types.MuxModeSameOutputSameTracks:
-			condRecoder = append(condRecoder, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
-			})
-			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
-			})
-			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
-			if s.NodeStreamFixerMain == nil {
-				sinkPassthrough = outputMain
-			}
-		case types.MuxModeSameOutputDifferentTracks:
-			nodeMapStreamIndices := node.NewFromKernel(
-				ctx,
-				s.MapOutputStreamIndices,
-				processor.DefaultOptionsOutput()...,
-			)
-			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
-			sinkMain, sinkPassthrough = nodeMapStreamIndices, s.NodeStreamFixerMain
-			if s.NodeStreamFixerMain == nil {
-				sinkPassthrough = nodeMapStreamIndices
-			}
-		case types.MuxModeDifferentOutputsSameTracks:
-			condRecoder = append(condRecoder, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
-			})
-			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
-			})
-			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.OutputsMap[1]}
-		default:
-			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
-		}
-		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain, condRecoder...)
-			s.NodeStreamFixerMain.AddPushPacketsTo(sinkMain)
-		} else {
-			s.NodeRecoder.AddPushPacketsTo(sinkMain, condRecoder...)
-		}
-		if s.NodeStreamFixerPassthrough != nil {
-			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
-		} else {
-			nodeFilterThrottle.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
-		}
-	} else {
-		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain)
-			s.NodeRecoder.AddPushFramesTo(s.NodeStreamFixerMain)
-			s.NodeStreamFixerMain.AddPushPacketsTo(outputMain)
-			s.NodeStreamFixerMain.AddPushFramesTo(outputMain)
-		} else {
-			s.NodeRecoder.AddPushPacketsTo(outputMain)
-			s.NodeRecoder.AddPushFramesTo(outputMain)
-		}
-	}
+	ctx, cancelFn := context.WithCancel(ctx)
 
 	// == spawn an observer ==
 
@@ -622,15 +456,8 @@ func (s *StreamMux[C]) Start(
 
 	// == prepare ==
 
-	if notifyAboutPacketSources {
-		logger.Debugf(ctx, "notifying about the sources")
-		err := avpipeline.NotifyAboutPacketSources(ctx, s.PacketSource, s.MapInputStreamIndicesNode)
-		if err != nil {
-			return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.PacketSource, s.MapInputStreamIndicesNode, err)
-		}
-	}
-	logger.Debugf(ctx, "resulting graph: %s", node.Nodes[node.Abstract]{s.MapInputStreamIndicesNode}.StringRecursive())
-	logger.Debugf(ctx, "resulting graph (graphviz): %s", node.Nodes[node.Abstract]{s.MapInputStreamIndicesNode}.DotString(false))
+	logger.Debugf(ctx, "resulting graph: %s", node.Nodes[node.Abstract]{s.InputNode}.StringRecursive())
+	logger.Debugf(ctx, "resulting graph (graphviz): %s", node.Nodes[node.Abstract]{s.InputNode}.DotString(false))
 
 	// == launch ==
 
@@ -640,7 +467,7 @@ func (s *StreamMux[C]) Start(
 		defer cancelFn()
 		defer logger.Debugf(ctx, "finished the serving routine")
 
-		avpipeline.Serve(ctx, serveCfg, errCh, s.MapInputStreamIndicesNode)
+		s.Serve(ctx, serveCfg, errCh)
 	})
 
 	return nil

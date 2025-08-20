@@ -37,6 +37,88 @@ type Abstract interface {
 	SetInputFrameFilter(framefiltercondition.Condition)
 }
 
+/* for easy copy-paste
+
+func (n *MyFancyNodePlaceholder) Serve(
+	ctx context.Context,
+	cfg node.ServeConfig,
+	errCh chan<- node.Error,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) String() string {
+	return "MyFancyNodePlaceholder"
+}
+
+func (n *MyFancyNodePlaceholder) IsServing() bool {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetPushPacketsTos() node.PushPacketsTos {
+
+}
+
+func (n *MyFancyNodePlaceholder) AddPushPacketsTo(
+	dst node.Abstract,
+	conds ...packetfiltercondition.Condition,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) SetPushPacketsTos(
+	v node.PushPacketsTos,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetPushFramesTos() node.PushFramesTos {
+
+}
+
+func (n *MyFancyNodePlaceholder) AddPushFramesTo(
+	dst node.Abstract,
+	conds ...framefiltercondition.Condition,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) SetPushFramesTos(
+	v node.PushFramesTos,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetStatistics() *node.Statistics {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetProcessor() processor.Abstract {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetInputPacketFilter() packetfiltercondition.Condition {
+
+}
+
+func (n *MyFancyNodePlaceholder) SetInputPacketFilter(
+	cond packetfiltercondition.Condition,
+) {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetInputFrameFilter() framefiltercondition.Condition {
+
+}
+
+func (n *MyFancyNodePlaceholder) SetInputFrameFilter(
+	cond framefiltercondition.Condition,
+) {
+
+}
+
+*/
+
 type NodeWithCustomData[C any, T processor.Abstract] struct {
 	*Statistics
 	Processor         T
