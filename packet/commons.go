@@ -112,3 +112,7 @@ func (pkt *Commons) SetPTS(v int64) {
 func (pkt *Commons) SetDTS(v int64) {
 	pkt.Packet.SetDts(v)
 }
+
+func (pkt *Commons) GetPipelineSideData() types.PipelineSideData {
+	return pkt.StreamInfo.PipelineSideData
+}

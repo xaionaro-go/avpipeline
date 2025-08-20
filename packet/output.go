@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Output Commons
@@ -63,4 +64,8 @@ func (o *Output) GetStream(ctx context.Context) *astiav.Stream {
 		}
 	})
 	return result
+}
+
+func (o *Output) GetPipelineSideData() types.PipelineSideData {
+	return o.PipelineSideData
 }

@@ -4,6 +4,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Any interface {
@@ -31,6 +32,7 @@ type Abstract interface {
 	GetDTS() int64
 	SetPTS(v int64)
 	SetDTS(v int64)
+	GetPipelineSideData() types.PipelineSideData
 }
 
 type InputUnion struct {
@@ -70,6 +72,9 @@ func (u *InputUnion) SetPTS(v int64) {
 func (u *InputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
 }
+func (u *InputUnion) GetPipelineSideData() types.PipelineSideData {
+	return u.Get().GetPipelineSideData()
+}
 
 type OutputUnion struct {
 	Frame  *frame.Output
@@ -107,4 +112,7 @@ func (u *OutputUnion) SetPTS(v int64) {
 }
 func (u *OutputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
+}
+func (u *OutputUnion) GetPipelineSideData() types.PipelineSideData {
+	return u.Get().GetPipelineSideData()
 }

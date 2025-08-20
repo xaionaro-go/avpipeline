@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Input Commons
@@ -66,4 +67,8 @@ func (f *Input) GetPTSAsDuration() time.Duration {
 
 func (f *Input) GetStreamDurationAsDuration() time.Duration {
 	return (*Commons)(f).GetStreamDurationAsDuration()
+}
+
+func (f *Input) GetPipelineSideData() types.PipelineSideData {
+	return f.PipelineSideData
 }

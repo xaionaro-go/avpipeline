@@ -183,8 +183,8 @@ func (s *StreamMux[C]) initOutputLocked(
 		outputID,
 		s.Input(),
 		s.OutputFactory, outputKey,
-		s.InputSyncer.Condition(int32(outputID)),
-		s.OutputSyncer.Condition(int32(outputID)),
+		s.InputSyncer.Output(int32(outputID)),
+		s.OutputSyncer.Output(int32(outputID)),
 		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
 	)
 	if err != nil {
