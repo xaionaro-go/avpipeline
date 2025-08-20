@@ -7,28 +7,16 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/types"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 )
-
-type fakeCond bool
-
-func (f fakeCond) String() string {
-	if f {
-		return "fakeCond(true)"
-	}
-	return "fakeCond(false)"
-}
-
-func (f fakeCond) Match(ctx context.Context, pkt packetorframe.InputUnion) bool {
-	return bool(f)
-}
 
 func TestSwitchInitialStateAndChannels(t *testing.T) {
 	sw := NewSwitch()
 	out0 := sw.Output(0)
 	// initial current value is 0 (atomic.Int32 default)
 	state, ch := out0.GetState(context.Background(), packetorframe.InputUnion{})
-	if state != types.StateBlock {
-		t.Fatalf("expected block for current output, got %v", state)
+	if state != types.StatePass {
+		t.Fatalf("expected pass for current output, got %v", state)
 	}
 	if ch == nil {
 		t.Fatalf("expected non-nil change channel")
@@ -62,7 +50,7 @@ func TestSetValueWithKeepUnlessAndCommitTriggersOnGetState(t *testing.T) {
 	sw := NewSwitch()
 	sw.CurrentValue.Store(0)
 	// set keep-unless so SetValue does not immediately change current value
-	sw.SetKeepUnless(fakeCond(true))
+	sw.SetKeepUnless(packetorframecondition.Static(true))
 	// set an onAfter switch hook to observe commit
 	called := false
 	sw.SetOnAfterSwitch(func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32) {
@@ -104,7 +92,7 @@ func TestFlagSwitchFirstPacketAfterSwitchPassBothOutputs(t *testing.T) {
 	sw := NewSwitch()
 	sw.CurrentValue.Store(0)
 	// set keep-unless so SetValue does not immediately change current value
-	sw.SetKeepUnless(fakeCond(true))
+	sw.SetKeepUnless(packetorframecondition.Static(true))
 	if err := sw.SetValue(context.Background(), 3); err != nil {
 		t.Fatalf("SetValue returned error: %v", err)
 	}
@@ -145,7 +133,7 @@ func TestFlagSwitchForbidTakeoverInKeepUnless(t *testing.T) {
 	sw := NewSwitch()
 	sw.CurrentValue.Store(0)
 	// set keep-unless so SetValue does not immediately change current value
-	sw.SetKeepUnless(fakeCond(true))
+	sw.SetKeepUnless(packetorframecondition.Static(true))
 	if err := sw.SetValue(context.Background(), 2); err != nil {
 		t.Fatalf("SetValue returned error: %v", err)
 	}
@@ -198,7 +186,7 @@ func TestSetValueNoSwitchOnSameValue(t *testing.T) {
 func TestSetValueKeepUnlessMultiplePending(t *testing.T) {
 	sw := NewSwitch()
 	sw.CurrentValue.Store(0)
-	sw.SetKeepUnless(fakeCond(true))
+	sw.SetKeepUnless(packetorframecondition.Static(true))
 	if err := sw.SetValue(context.Background(), 2); err != nil {
 		t.Fatalf("SetValue returned error: %v", err)
 	}
@@ -222,8 +210,10 @@ func TestSetValueKeepUnlessMultiplePending(t *testing.T) {
 
 func TestReleaseAndChangeChan(t *testing.T) {
 	sw := NewSwitch()
-	out0 := sw.Output(0)
-	_, ch := out0.GetState(context.Background(), packetorframe.InputUnion{})
+	sw.SetReleaseCond(packetorframecondition.Static(false))
+	out1 := sw.Output(1)
+	sw.SetValue(context.Background(), 1)
+	_, ch := out1.GetState(context.Background(), packetorframe.InputUnion{})
 	if ch == nil {
 		t.Fatalf("expected non-nil change channel")
 	}
@@ -242,7 +232,7 @@ func TestReleaseCondBlocksWhenFalse(t *testing.T) {
 	sw := NewSwitch()
 	sw.CurrentValue.Store(0)
 	// set release cond to false so switch becomes not released after SetValue
-	sw.SetReleaseCond(fakeCond(false))
+	sw.SetReleaseCond(packetorframecondition.Static(false))
 	if err := sw.SetValue(context.Background(), 1); err != nil {
 		t.Fatalf("SetValue returned error: %v", err)
 	}

@@ -43,6 +43,7 @@ func NewSwitch() *Switch {
 	sw := &Switch{
 		ChangeSignal: ptr(make(chan struct{})),
 	}
+	sw.IsReleased.Store(true)
 	sw.NextValue.Store(math.MinInt32)
 	sw.PreviousValue.Store(math.MinInt32)
 	return sw
