@@ -28,7 +28,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
-	avptypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -39,20 +38,24 @@ const (
 	startWithPassthrough     = false
 )
 
-type InputNode[C any] = node.NodeWithCustomData[
+type NodeInput[C any] = node.NodeWithCustomData[
 	C, *processor.FromKernel[*boilerplate.BaseWithFormatContext[*InputHandler]],
 ]
 
 type StreamMux[C any] struct {
-	InputNode      *InputNode[C]
 	MuxMode        types.MuxMode
-	Outputs        []*Output[C]
-	OutputsMap     map[OutputKey]*Output[C]
-	OutputFactory  OutputFactory
-	InputSyncer    *barrierstategetter.Switch
-	OutputSyncer   *barrierstategetter.Switch
 	RecodingConfig types.RecoderConfig
 	Locker         xsync.Mutex
+
+	// switches:
+	OutputSwitch *barrierstategetter.Switch
+	OutputSyncer *barrierstategetter.Switch
+
+	// nodes:
+	InputNode     *NodeInput[C]
+	Outputs       []*Output[C]
+	OutputsMap    map[OutputKey]*Output[C]
+	OutputFactory OutputFactory
 
 	waitGroup sync.WaitGroup
 }
@@ -82,13 +85,13 @@ func NewWithCustomData[C any](
 	outputFactory OutputFactory,
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
-		InputSyncer:   barrierstategetter.NewSwitch(),
+		OutputSwitch:  barrierstategetter.NewSwitch(),
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output[C]{},
 	}
 
-	s.InputSyncer.SetKeepUnless(packetorframecondition.And{
+	s.OutputSwitch.SetKeepUnless(packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.IsKeyFrame(true),
 	})
@@ -104,8 +107,8 @@ func NewWithCustomData[C any](
 
 	// We want to notify the OutputSyncer that it needs to switch to the next output, and
 	// send a packet that would notify that there are no packets left in the previous chain.
-	s.InputSyncer.Flags.Set(barrierstategetter.SwitchFlagFirstPacketAfterSwitchPassBothOutputs)
-	s.InputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+	s.OutputSwitch.Flags.Set(barrierstategetter.SwitchFlagFirstPacketAfterSwitchPassBothOutputs)
+	s.OutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		prevDataLocker.Lock()
 		prevOutputID = from
 		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d)", to)
@@ -118,8 +121,9 @@ func NewWithCustomData[C any](
 		})
 	})
 
-	// Waiting for the "last packet" notification to reach the OutputSyncer, since
-	// we want to make the switch only after the last packet in the chain is processed.
+	// Waiting for the "last packet" notification to reach the OutputSyncer on the active
+	// output chain, since we want to make the switch only after the last packet in the
+	// chain is processed.
 	//
 	// But just in case we also have a 10 seconds timeout (in case the packet was
 	// consumed by something in the chain somehow) -- this is the last resort thing,
@@ -128,11 +132,9 @@ func NewWithCustomData[C any](
 	s.OutputSyncer.SetKeepUnless(
 		packetorframecondition.And{
 			packetorframecondition.Or{
-				packetorframecondition.And{
-					packetorframecondition.HasPipelineSideData(switchNotifierPacket{
-						SwitchFromOutputID: prevOutputID,
-					}),
-				},
+				packetorframecondition.HasPipelineSideData(switchNotifierPacket{
+					SwitchFromOutputID: prevOutputID,
+				}),
 				packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
 					if time.Since(outputSyncerSwitchDeadline) <= 0 {
 						return false
@@ -148,9 +150,25 @@ func NewWithCustomData[C any](
 			}),
 		},
 	)
-	// keep the traffic flowing to the next output if the OutputSyncer is not switched yet
+	// keep/hold the traffic flowing to the next output if the OutputSyncer is not switched yet
 	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagNextOutputStateBlock)
 	return s, nil
+}
+
+func (s *StreamMux[C]) setPreferredOutput(
+	ctx context.Context,
+	outputKey OutputKey,
+) (_err error) {
+	logger.Tracef(ctx, "setPreferredOutput(ctx, %s)", outputKey)
+	defer func() { logger.Tracef(ctx, "/setPreferredOutput(ctx, %s): %v", outputKey, _err) }()
+
+	output := s.OutputsMap[outputKey]
+	err := s.OutputSwitch.SetValue(ctx, int32(output.ID))
+	if err != nil {
+		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
+	}
+
+	return nil
 }
 
 func (s *StreamMux[C]) InitOutput(
@@ -178,7 +196,7 @@ func (s *StreamMux[C]) initOutputLocked(
 		outputID,
 		s.Input(),
 		s.OutputFactory, outputKey,
-		s.InputSyncer.Output(int32(outputID)),
+		s.OutputSwitch.Output(int32(outputID)),
 		s.OutputSyncer.Output(int32(outputID)),
 		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
 	)
@@ -187,13 +205,11 @@ func (s *StreamMux[C]) initOutputLocked(
 	}
 	s.Outputs = append(s.Outputs, output)
 	s.OutputsMap[outputKey] = output
-	s.Input().AddPushPacketsTo(
-		output.Input(),
-	)
+	s.Input().AddPushPacketsTo(output.Input())
 	return output, nil
 }
 
-func (s *StreamMux[C]) Input() *InputNode[C] {
+func (s *StreamMux[C]) Input() *NodeInput[C] {
 	return s.InputNode
 }
 
@@ -239,137 +255,66 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
-	return s.reconfigureOutput(ctx, output, cfg)
+	err := s.reconfigureOutput(ctx, output, cfg)
+	if err != nil {
+		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
+	}
+
+	err = s.setPreferredOutput(ctx, outputKey)
+	if err != nil {
+		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
+	}
+
+	return nil
 }
 
-func (s *StreamMux[C]) configureRecoder(
+func (s *StreamMux[C]) reconfigureOutput(
 	ctx context.Context,
+	output *Output[C],
 	cfg types.RecoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "configureRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/configureRecoder(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "reconfigureOutput(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureOutput(ctx, %#+v): %v", cfg, _err) }()
+
 	if len(cfg.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
 	}
+	videoCfg := cfg.VideoTrackConfigs[0]
+
 	if len(cfg.AudioTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
 	}
-	if s.Recoder == nil {
-		if err := s.initRecoder(ctx, cfg); err != nil {
-			return fmt.Errorf("unable to initialize the recoder: %w", err)
-		}
-		return nil
-	}
-	if cfg.AudioTrackConfigs[0].CodecName != codec.CodecNameCopy {
-		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTrackConfigs[0].CodecName)
-	}
-	if cfg.VideoTrackConfigs[0].CodecName == codec.CodecNameCopy {
-		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
-			return fmt.Errorf("unable to reconfigure to copying: %w", err)
-		}
-		return nil
-	}
-	if err := s.reconfigureRecoder(ctx, cfg); err != nil {
-		return fmt.Errorf("unable to reconfigure the recoder: %w", err)
-	}
-	return nil
-}
+	audioCfg := cfg.VideoTrackConfigs[0]
 
-func (s *StreamMux[C]) initRecoder(
-	ctx context.Context,
-	cfg types.RecoderConfig,
-) (_err error) {
-	logger.Tracef(ctx, "initRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/initRecoder(ctx, %#+v): %v", cfg, _err) }()
-
-	if s.Recoder != nil {
-		return fmt.Errorf("internal error: an encoder is already initialized")
+	encoderFactory := output.RecoderNode.Processor.Kernel.EncoderFactory
+	if videoCfg.CodecName != encoderFactory.VideoCodec {
+		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
 	}
 
-	var (
-		videoQuality    codec.Quality
-		videoResolution *codec.Resolution
-	)
-
-	if bitRate := cfg.VideoTrackConfigs[0].AverageBitRate; bitRate > 0 {
-		videoQuality = quality.ConstantBitrate(bitRate)
-	}
-
-	if width, height := cfg.VideoTrackConfigs[0].Width, cfg.VideoTrackConfigs[0].Height; width > 0 && height > 0 {
-		videoResolution = &codec.Resolution{
-			Width:  width,
-			Height: height,
-		}
-	}
-
-	var err error
-	s.Recoder, err = kernel.NewRecoder(
-		ctx,
-		codec.NewNaiveDecoderFactory(ctx,
-			&codec.NaiveDecoderFactoryParams{
-				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
-					err := d.SetLowLatency(ctx, true)
-					if err != nil {
-						logger.Warnf(ctx, "unable to enable the low latency mode on the decoder: %v", err)
-					}
-				},
-			},
-		),
-		codec.NewNaiveEncoderFactory(ctx,
-			&codec.NaiveEncoderFactoryParams{
-				VideoCodec:         cfg.VideoTrackConfigs[0].CodecName,
-				AudioCodec:         codec.CodecNameCopy,
-				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-				VideoOptions:       convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
-				AudioOptions:       convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
-				VideoQuality:       videoQuality,
-				VideoResolution:    videoResolution,
-			},
-		),
-		nil,
-	)
-
-	if err != nil {
-		return fmt.Errorf("unable to initialize a recoder: %w", err)
-	}
-	return nil
-}
-
-func (s *StreamMux[C]) reconfigureRecoder(
-	ctx context.Context,
-	cfg types.RecoderConfig,
-) (_err error) {
-	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
-
-	encoderFactory := s.Recoder.EncoderFactory
-	if cfg.VideoTrackConfigs[0].CodecName != encoderFactory.VideoCodec {
-		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
-	}
-
-	err := xsync.DoR1(ctx, &s.Recoder.EncoderFactory.Locker, func() error {
-		videoCfg := cfg.VideoTrackConfigs[0]
-		if len(s.Recoder.EncoderFactory.VideoEncoders) == 0 {
+	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
+		if len(encoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
-			if s.Recoder.EncoderFactory.VideoOptions == nil {
-				s.Recoder.EncoderFactory.VideoOptions = astiav.NewDictionary()
-				setFinalizerFree(ctx, s.Recoder.EncoderFactory.VideoOptions)
-			}
-
-			if videoCfg.AverageBitRate == 0 {
-				s.Recoder.EncoderFactory.VideoOptions.Unset("b")
-			} else {
-				s.Recoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", videoCfg.AverageBitRate), 0)
+			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
+			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
+			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
+			encoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.HardwareDeviceType)
+			if videoCfg.AverageBitRate != 0 {
+				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}
 			return nil
 		}
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
-		encoder := s.Recoder.EncoderFactory.VideoEncoders[0]
+		encoder := encoderFactory.VideoEncoders[0]
+
+		if videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
+			return fmt.Errorf("unable to change the hardware device type on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceType, encoderFactory.HardwareDeviceType)
+		}
+
+		if videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
+			return fmt.Errorf("unable to change the hardware device name on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceName, encoderFactory.HardwareDeviceName)
+		}
 
 		{
 			q := encoder.GetQuality(ctx)
@@ -377,7 +322,10 @@ func (s *StreamMux[C]) reconfigureRecoder(
 				logger.Errorf(ctx, "unable to get the current encoding quality")
 				q = quality.ConstantBitrate(0)
 			}
-			logger.Debugf(ctx, "current quality: %#+v; requested quality: %#+v", q, quality.ConstantBitrate(videoCfg.AverageBitRate))
+			logger.Debugf(ctx,
+				"current quality: %#+v; requested quality: %#+v",
+				q, quality.ConstantBitrate(videoCfg.AverageBitRate),
+			)
 
 			needsChangingBitrate := true
 			if q, ok := q.(quality.ConstantBitrate); ok {
@@ -394,53 +342,10 @@ func (s *StreamMux[C]) reconfigureRecoder(
 				}
 			}
 		}
-
-		{
-			w, h := encoder.GetResolution(ctx)
-			logger.Debugf(ctx, "current resolution: %dx%d; requested resolution: %dx%d", w, h)
-			if w != videoCfg.Width && h != videoCfg.Height {
-				logger.Debugf(ctx, "resolution needs changing...")
-				err := encoder.SetResolution(ctx, videoCfg.Width, videoCfg.Height, nil)
-				if err != nil {
-					return fmt.Errorf("unable to set resolution to %d%x: %w", videoCfg.Width, videoCfg.Height, err)
-				}
-			}
-		}
 		return nil
 	})
 	if err != nil {
 		return err
-	}
-
-	err = s.SwitchPreFilter.SetValue(ctx, 0)
-	if err != nil {
-		return fmt.Errorf("unable to switch the pre-filter to recoding: %w", err)
-	}
-
-	return nil
-}
-
-func (s *StreamMux[C]) reconfigureRecoderCopy(
-	ctx context.Context,
-	cfg types.RecoderConfig,
-) (_err error) {
-	logger.Tracef(ctx, "reconfigureRecoderCopy(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureRecoderCopy(ctx, %#+v): %v", cfg, _err) }()
-
-	switchState := s.SwitchPreFilter.CurrentValue.Load()
-
-	err := s.SwitchPreFilter.SetValue(ctx, 1)
-	if err != nil {
-		return fmt.Errorf("unable to switch the pre-filter to passthrough: %w", err)
-	}
-	s.FilterThrottle.BitrateAveragingPeriod = cfg.VideoTrackConfigs[0].AveragingPeriod
-	s.FilterThrottle.AverageBitRate = cfg.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
-
-	if switchState == 0 { // was in the recoding state
-		// to avoid the recoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.
-		if err := s.Recoder.Reset(ctx); err != nil {
-			logger.Errorf(ctx, "unable to reset the recoder: %v", err)
-		}
 	}
 
 	return nil
@@ -449,9 +354,13 @@ func (s *StreamMux[C]) reconfigureRecoderCopy(
 func (s *StreamMux[C]) GetAllStats(
 	ctx context.Context,
 ) map[string]*node.ProcessingStatistics {
-	m := map[string]*node.ProcessingStatistics{
-		"Recoder": s.NodeRecoder.GetStats(),
-	}
+	return xsync.DoA1R1(ctx, &s.Locker, s.getAllStatsLocked, ctx)
+}
+
+func (s *StreamMux[C]) getAllStatsLocked(
+	ctx context.Context,
+) map[string]*node.ProcessingStatistics {
+	m := map[string]*node.ProcessingStatistics{}
 	tryGetStats := func(key string, n node.Abstract) {
 		getter, ok := n.(interface {
 			GetStats() *node.ProcessingStatistics
@@ -461,9 +370,14 @@ func (s *StreamMux[C]) GetAllStats(
 		}
 		m[key] = getter.GetStats()
 	}
-	tryGetStats("Input", s.MapInputStreamIndicesNode)
-	for idx, output := range s.OutputsMap {
-		tryGetStats(fmt.Sprintf("Output%d", idx), output)
+	tryGetStats("Input", s.InputNode)
+	for outputKey, output := range s.OutputsMap {
+		tryGetStats(fmt.Sprintf("Output(%s):InputFilter", outputKey), output.InputFilter)
+		tryGetStats(fmt.Sprintf("Output(%s):InputFixer", outputKey), output.InputFixer)
+		tryGetStats(fmt.Sprintf("Output(%s):RecoderNode", outputKey), output.RecoderNode)
+		tryGetStats(fmt.Sprintf("Output(%s):MapIndexes", outputKey), output.MapIndices)
+		tryGetStats(fmt.Sprintf("Output(%s):OutputFixer", outputKey), output.OutputFixer)
+		tryGetStats(fmt.Sprintf("Output(%s):OutputSyncFilter", outputKey), output.OutputSyncFilter)
 	}
 	return m
 }

@@ -16,18 +16,21 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
+type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
+type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
+type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 type OutputKey = types.OutputKey
 
 type Output[C any] struct {
 	ID               int
-	InputSyncFilter  *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
+	InputFilter      *NodeBarrier[C]
 	InputThrottler   *packetcondition.VideoAverageBitrateLower
 	InputFixer       *autofix.AutoFixer
-	RecoderNode      *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+	RecoderNode      *NodeRecoder[C]
 	OutputThrottler  *packetcondition.VideoAverageBitrateLower
-	OutputMapIndices *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
+	MapIndices       *NodeMapStreamIndexes[C]
 	OutputFixer      *autofix.AutoFixer
-	OutputSyncFilter *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
+	OutputSyncFilter *NodeBarrier[C]
 	OutputNode       node.Abstract
 }
 
@@ -63,11 +66,12 @@ type InitOutputOptionRetry *RetryParameters
 //                 Input
 //                   |
 //                   v
-// InputSyncFilter-· | ·-InputSyncFilter
 //	  +------<-------+------->-------+
 //	  |                              |
 //	  v                              v
-//	InputThrottler                InputThrottler
+//	InputFilter(OutputSwitch)    InputFilter(OutputSwitch)
+//	  |                              |
+//	  v InputThrottler               v InputThrottler
 //	  |                              |
 //	  v                              v
 //	InputFixer                   InputFixer
@@ -75,8 +79,7 @@ type InitOutputOptionRetry *RetryParameters
 //	  v                              v
 //	dyn(RecoderNode)             dyn(RecoderNode)
 //	  |                              |
-//	  v                              v
-//	OutputThrottler              OutputThrottler
+//	  v OutputThrottler              v OutputThrottler
 //	  |                              |
 //	  v                              v
 //	OutputMapIndices             OutputMapIndices
@@ -84,7 +87,7 @@ type InitOutputOptionRetry *RetryParameters
 //	  v                              v
 //	OutputFixer                  OutputFixer
 //	  |                              |
-//	  v OutputSyncFilter-· · · · · · v ·-OutputSyncFilter
+//	  v OutputSyncer-· · · · · · · · v ·-OutputSyncer
 //	  |                              |
 //	  v                              v
 //	OutputNode                   OutputNode
@@ -92,10 +95,10 @@ type InitOutputOptionRetry *RetryParameters
 func newOutput[C any](
 	ctx context.Context,
 	outputID int,
-	inputNode *InputNode[C],
+	inputNode *NodeInput[C],
 	outputFactory OutputFactory,
 	outputKey OutputKey,
-	inputSyncer barrierstategetter.StateGetter,
+	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 ) (_ret *Output[C], _err error) {
@@ -110,7 +113,11 @@ func newOutput[C any](
 	recoderKernel, err := kernel.NewRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, nil),
-		codec.NewNaiveEncoderFactory(ctx, nil),
+		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
+			VideoCodec:      outputKey.VideoCodec,
+			AudioCodec:      outputKey.AudioCodec,
+			VideoResolution: &outputKey.Resolution,
+		}),
 		nil,
 	)
 	if err != nil {
@@ -122,23 +129,22 @@ func newOutput[C any](
 		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", outputNode)
 	}
 
-	recoder := node.NewWithCustomDataFromKernel[C](
-		ctx,
-		recoderKernel,
-		processor.DefaultOptionsRecoder()...,
-	)
 	o := &Output[C]{
-		ID:              outputID,
-		InputSyncFilter: node.NewWithCustomData[C](processor.NewFromKernel(ctx, kernel.NewBarrier(ctx, inputSyncer))),
-		InputThrottler:  packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		ID:             outputID,
+		InputFilter:    node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, outputSwitch)),
+		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		InputFixer: autofix.New(
 			ctx,
 			inputNode.Processor.GetPacketSource(),
 			recoderKernel.Decoder,
 		),
-		RecoderNode:      recoder,
-		OutputThrottler:  packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		OutputMapIndices: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
+		RecoderNode: node.NewWithCustomDataFromKernel[C](
+			ctx,
+			recoderKernel,
+			processor.DefaultOptionsRecoder()...,
+		),
+		OutputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		MapIndices:      node.NewWithCustomDataFromKernel[C](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
 		OutputFixer: autofix.New(
 			ctx,
 			recoderKernel.Encoder,
@@ -148,16 +154,16 @@ func newOutput[C any](
 		OutputNode:       outputNode,
 	}
 
-	o.InputSyncFilter.AddPushPacketsTo(
+	o.InputFilter.AddPushPacketsTo(
 		o.InputFixer,
 		packetfiltercondition.Packet{Condition: o.InputThrottler},
 	)
 	o.InputFixer.AddPushPacketsTo(o.RecoderNode)
 	o.RecoderNode.AddPushPacketsTo(
-		o.OutputMapIndices,
+		o.MapIndices,
 		packetfiltercondition.Packet{Condition: o.OutputThrottler},
 	)
-	o.OutputMapIndices.AddPushPacketsTo(o.OutputFixer)
+	o.MapIndices.AddPushPacketsTo(o.OutputFixer)
 	o.OutputFixer.AddPushPacketsTo(o.OutputSyncFilter)
 	o.OutputSyncFilter.AddPushPacketsTo(o.OutputNode)
 
@@ -165,7 +171,7 @@ func newOutput[C any](
 }
 
 func (o *Output[C]) Input() node.Abstract {
-	return o.InputSyncFilter
+	return o.InputFilter
 }
 
 func (o *Output[C]) Output() node.Abstract {
