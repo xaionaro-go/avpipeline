@@ -168,7 +168,7 @@ func (s *StreamMux[C]) initOutputLocked(
 		s.OutputFactory, outputKey,
 		s.InputSyncer.Condition(int32(len(s.Outputs))),
 		s.OutputSyncer.Condition(int32(len(s.Outputs))),
-		s.newStreamIndexAssigner(s.MuxMode, len(s.Outputs)),
+		newStreamIndexAssigner(s.MuxMode, len(s.Outputs), s.InputNode.Processor.Kernel),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output: %w", err)
