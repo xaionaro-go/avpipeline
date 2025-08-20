@@ -19,19 +19,26 @@ type FuncOnAfterSwitch func(ctx context.Context, pkt packetorframe.InputUnion, f
 type SwitchFlags = types.SwitchFlags
 
 const (
-	FlagSwitchFirstPacketAfterSwitchPassBothOutputs = types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs
-	FlagSwitchForbidTakeoverInKeepUnless            = types.FlagSwitchForbidTakeoverInKeepUnless
+	SwitchFlagFirstPacketAfterSwitchPassBothOutputs = types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs
+	SwitchFlagForbidTakeoverInKeepUnless            = types.SwitchFlagForbidTakeoverInKeepUnless
+	SwitchFlagNextOutputStateBlock                  = types.SwitchFlagNextOutputStateBlock
+)
+
+type State = types.State
+
+const (
+	StatePass  State = types.StatePass
+	StateDrop  State = types.StateDrop
+	StateBlock State = types.StateBlock
 )
 
 type Switch struct {
 	CurrentValue  atomic.Int32
 	NextValue     atomic.Int32
 	PreviousValue atomic.Int32
-	IsReleased    atomic.Bool
 
 	ChangeSignal                  *chan struct{}
 	KeepUnlessPacketCond          *packetorframecondition.Condition
-	ReleaseCond                   *packetorframecondition.Condition
 	OnAfterSwitch                 *FuncOnAfterSwitch
 	Flags                         SwitchFlags
 	FirstPacketOrFrameAfterSwitch packetorframe.Abstract
@@ -43,7 +50,6 @@ func NewSwitch() *Switch {
 	sw := &Switch{
 		ChangeSignal: ptr(make(chan struct{})),
 	}
-	sw.IsReleased.Store(true)
 	sw.NextValue.Store(math.MinInt32)
 	sw.PreviousValue.Store(math.MinInt32)
 	return sw
@@ -61,19 +67,6 @@ func (s *Switch) GetKeepUnless() packetorframecondition.Condition {
 
 func (s *Switch) SetKeepUnless(cond packetorframecondition.Condition) {
 	xatomic.StorePointer(&s.KeepUnlessPacketCond, ptr(cond))
-}
-
-func (s *Switch) GetReleaseCond() packetorframecondition.Condition {
-	ptr := xatomic.LoadPointer(&s.ReleaseCond)
-	if ptr == nil {
-		return nil
-	}
-	return *ptr
-}
-
-// If unset then the switch is always released.
-func (s *Switch) SetReleaseCond(cond packetorframecondition.Condition) {
-	xatomic.StorePointer(&s.ReleaseCond, ptr(cond))
 }
 
 func (s *Switch) GetOnAfterSwitch() FuncOnAfterSwitch {
@@ -101,41 +94,51 @@ func (s *Switch) SetValue(
 	logger.Tracef(ctx, "Switch.SetValue(ctx, %d)", idx)
 	defer func() { logger.Tracef(ctx, "/Switch.SetValue(ctx, %d): %v", idx, _err) }()
 
-	if s.GetKeepUnless() != nil {
-		old := s.NextValue.Swap(int32(idx))
-		logger.Debugf(ctx, "setting the next value: %d -> %d", old, idx)
-		return nil
+	if s.GetKeepUnless() == nil {
+		return s.setValueNow(ctx, idx)
 	}
 
-	return s.setValueNow(ctx, idx)
+	return s.setNextValueNow(ctx, idx)
 }
 
 func (s *Switch) setValueNow(
 	ctx context.Context,
 	idx int32,
 ) (_err error) {
-	old := s.CurrentValue.Swap(int32(idx))
-	logger.Debugf(ctx, "switch to the current value: %d -> %d", old, idx)
-	if old == idx {
-		return nil
-	}
+	s.CommitMutex.Do(ctx, func() {
+		old := s.CurrentValue.Swap(int32(idx))
+		logger.Debugf(ctx, "switch to the current value: %d -> %d", old, idx)
+		if old == idx {
+			return
+		}
 
-	if s.Flags.HasAny(types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs) {
-		s.PreviousValue.Store(old)
-		s.FirstPacketOrFrameAfterSwitch = nil
-	}
+		if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
+			s.PreviousValue.Store(old)
+			s.FirstPacketOrFrameAfterSwitch = nil
+		}
 
-	if releaseCond := s.GetReleaseCond(); releaseCond != nil {
-		s.IsReleased.Store(releaseCond.Match(ctx, packetorframe.InputUnion{}))
-	} else {
-		s.IsReleased.Store(true)
-	}
-	s.rotateChangeChan()
+		s.rotateChangeChan()
 
-	onAfter := s.GetOnAfterSwitch()
-	if onAfter != nil {
-		onAfter(ctx, packetorframe.InputUnion{}, old, idx)
-	}
+		onAfter := s.GetOnAfterSwitch()
+		if onAfter != nil {
+			onAfter(ctx, packetorframe.InputUnion{}, old, idx)
+		}
+	})
+	return nil
+}
+
+func (s *Switch) setNextValueNow(
+	ctx context.Context,
+	idx int32,
+) (_err error) {
+	s.CommitMutex.Do(ctx, func() {
+		old := s.NextValue.Swap(int32(idx))
+		logger.Debugf(ctx, "setting the next value: %d -> %d", old, idx)
+		if old == idx {
+			return
+		}
+		s.rotateChangeChan()
+	})
 	return nil
 }
 
@@ -159,13 +162,6 @@ func (s *Switch) rotateChangeChan() {
 	close(*xatomic.SwapPointer(&s.ChangeSignal, ptr(make(chan struct{}))))
 }
 
-func (s *Switch) Release() {
-	if !s.IsReleased.CompareAndSwap(false, true) {
-		return
-	}
-	s.rotateChangeChan()
-}
-
 func (s *SwitchOutput) GetState(
 	ctx context.Context,
 	pkt packetorframe.InputUnion,
@@ -178,17 +174,10 @@ func (s *SwitchOutput) GetState(
 	previousValue := s.PreviousValue.Load()
 
 	constructState := func() (types.State, <-chan struct{}) {
-		isReleased := s.IsReleased.Load()
-		if !isReleased && s.GetReleaseCond() != nil && s.GetReleaseCond().Match(ctx, pkt) {
-			s.Release()
-		}
 		if currentValue == s.OutputID {
-			if isReleased {
-				return types.StatePass, s.GetChangeChan()
-			}
-			return types.StateBlock, s.GetChangeChan()
+			return types.StatePass, s.GetChangeChan()
 		}
-		if s.Flags.HasAny(types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs) {
+		if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
 			// allow the previous output (the one that used to be current) to pass the first packet after a switch
 			if previousValue == s.OutputID && pkt.Get() == s.FirstPacketOrFrameAfterSwitch {
 				s.CommitMutex.Do(ctx, func() {
@@ -198,8 +187,10 @@ func (s *SwitchOutput) GetState(
 				return types.StatePass, s.GetChangeChan()
 			}
 		}
-		if !isReleased && currentValue == nextValue {
-			return types.StateBlock, s.GetChangeChan()
+		if currentValue == nextValue {
+			if s.Flags.HasAny(types.SwitchFlagNextOutputStateBlock) {
+				return types.StateBlock, s.GetChangeChan()
+			}
 		}
 		return types.StateDrop, s.GetChangeChan()
 	}
@@ -211,14 +202,9 @@ func (s *SwitchOutput) GetState(
 			if !s.NextValue.CompareAndSwap(nextValue, math.MinInt32) {
 				return
 			}
-			if s.Flags.HasAny(types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs) {
+			if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
 				s.PreviousValue.Store(currentValue)
 				s.FirstPacketOrFrameAfterSwitch = pkt.Get()
-			}
-			if releaseCond := s.GetReleaseCond(); releaseCond != nil {
-				s.IsReleased.Store(releaseCond.Match(ctx, pkt))
-			} else {
-				s.IsReleased.Store(true)
 			}
 			s.rotateChangeChan()
 			currentValue, previousValue = nextValue, currentValue
@@ -229,13 +215,13 @@ func (s *SwitchOutput) GetState(
 		})
 	}
 
-	if s.Flags.HasAny(types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs) {
+	if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
 		if previousValue != math.MinInt32 && s.FirstPacketOrFrameAfterSwitch == nil {
 			s.FirstPacketOrFrameAfterSwitch = pkt.Get()
 		}
 	}
 
-	if s.Flags.HasAny(types.FlagSwitchForbidTakeoverInKeepUnless) {
+	if s.Flags.HasAny(types.SwitchFlagForbidTakeoverInKeepUnless) {
 		if currentValue != s.OutputID {
 			return constructState()
 		}

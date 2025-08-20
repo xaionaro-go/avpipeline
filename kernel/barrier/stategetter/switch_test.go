@@ -97,7 +97,7 @@ func TestFlagSwitchFirstPacketAfterSwitchPassBothOutputs(t *testing.T) {
 		t.Fatalf("SetValue returned error: %v", err)
 	}
 	// enable first-packet-pass-both: the first packet after commit should pass previous output too
-	sw.Flags = types.FlagSwitchFirstPacketAfterSwitchPassBothOutputs
+	sw.Flags = types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs
 
 	// calling GetState on output 3 should trigger commit
 	out3 := sw.Output(3)
@@ -138,7 +138,7 @@ func TestFlagSwitchForbidTakeoverInKeepUnless(t *testing.T) {
 		t.Fatalf("SetValue returned error: %v", err)
 	}
 	// enable forbid-takeover: outputs other than current must not commit the next value
-	sw.Flags = types.FlagSwitchForbidTakeoverInKeepUnless
+	sw.Flags = types.SwitchFlagForbidTakeoverInKeepUnless
 
 	out2 := sw.Output(2)
 	state, _ := out2.GetState(context.Background(), packetorframe.InputUnion{})
@@ -205,44 +205,5 @@ func TestSetValueKeepUnlessMultiplePending(t *testing.T) {
 	}
 	if cur := sw.CurrentValue.Load(); cur != 3 {
 		t.Fatalf("expected CurrentValue to be 3 after commit, got %d", cur)
-	}
-}
-
-func TestReleaseAndChangeChan(t *testing.T) {
-	sw := NewSwitch()
-	sw.SetReleaseCond(packetorframecondition.Static(false))
-	out1 := sw.Output(1)
-	sw.SetValue(context.Background(), 1)
-	_, ch := out1.GetState(context.Background(), packetorframe.InputUnion{})
-	if ch == nil {
-		t.Fatalf("expected non-nil change channel")
-	}
-	// old channel should be closed after Release (rotateChangeChan)
-	sw.Release()
-	// receiving from a closed channel is non-blocking
-	select {
-	case <-ch:
-		// ok: closed
-	default:
-		t.Fatalf("expected change channel to be closed after Release")
-	}
-}
-
-func TestReleaseCondBlocksWhenFalse(t *testing.T) {
-	sw := NewSwitch()
-	sw.CurrentValue.Store(0)
-	// set release cond to false so switch becomes not released after SetValue
-	sw.SetReleaseCond(packetorframecondition.Static(false))
-	if err := sw.SetValue(context.Background(), 1); err != nil {
-		t.Fatalf("SetValue returned error: %v", err)
-	}
-	// after immediate switch, IsReleased should be false
-	if sw.IsReleased.Load() {
-		t.Fatalf("expected IsReleased to be false due to release condition")
-	}
-	out1 := sw.Output(1)
-	state, _ := out1.GetState(context.Background(), packetorframe.InputUnion{})
-	if state != types.StateBlock {
-		t.Fatalf("expected StateBlock for current output when not released, got %v", state)
 	}
 }

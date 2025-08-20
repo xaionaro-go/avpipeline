@@ -4,10 +4,13 @@ type SwitchFlags uint64
 
 const (
 	// If set then it will pass the first packet after a switch to both directions (old and new ones).
-	FlagSwitchFirstPacketAfterSwitchPassBothOutputs SwitchFlags = 1 << iota
+	SwitchFlagFirstPacketAfterSwitchPassBothOutputs SwitchFlags = 1 << iota
 
 	// If set then the KeepUnless will not switch due a packet received to a non-active SwitchOutput
-	FlagSwitchForbidTakeoverInKeepUnless
+	SwitchFlagForbidTakeoverInKeepUnless
+
+	// If set then the state of the next output will be "block".
+	SwitchFlagNextOutputStateBlock
 )
 
 func (f SwitchFlags) HasAll(flag SwitchFlags) bool {

@@ -94,7 +94,6 @@ func NewWithCustomData[C any](
 	})
 	var (
 		prevDataLocker             sync.Mutex
-		prevSource                 packet.Source
 		prevOutputID               int32
 		outputSyncerSwitchDeadline time.Time
 	)
@@ -105,10 +104,9 @@ func NewWithCustomData[C any](
 
 	// We want to notify the OutputSyncer that it needs to switch to the next output, and
 	// send a packet that would notify that there are no packets left in the previous chain.
-	s.InputSyncer.Flags.Set(barrierstategetter.FlagSwitchFirstPacketAfterSwitchPassBothOutputs)
+	s.InputSyncer.Flags.Set(barrierstategetter.SwitchFlagFirstPacketAfterSwitchPassBothOutputs)
 	s.InputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		prevDataLocker.Lock()
-		prevSource = in.Packet.Source
 		prevOutputID = from
 		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d)", to)
 		err := s.OutputSyncer.SetValue(ctx, to)
@@ -126,12 +124,11 @@ func NewWithCustomData[C any](
 	// But just in case we also have a 10 seconds timeout (in case the packet was
 	// consumed by something in the chain somehow) -- this is the last resort thing,
 	// it theoretically should never happen.
-	s.OutputSyncer.Flags.Set(barrierstategetter.FlagSwitchForbidTakeoverInKeepUnless)
+	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagForbidTakeoverInKeepUnless)
 	s.OutputSyncer.SetKeepUnless(
 		packetorframecondition.And{
 			packetorframecondition.Or{
 				packetorframecondition.And{
-					packetorframecondition.PacketSource(prevSource),
 					packetorframecondition.HasPipelineSideData(switchNotifierPacket{
 						SwitchFromOutputID: prevOutputID,
 					}),
@@ -151,10 +148,8 @@ func NewWithCustomData[C any](
 			}),
 		},
 	)
-	s.OutputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
-		logger.Debugf(ctx, "releasing OutputSyncer")
-		s.OutputSyncer.Release()
-	})
+	// keep the traffic flowing to the next output if the OutputSyncer is not switched yet
+	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagNextOutputStateBlock)
 	return s, nil
 }
 
