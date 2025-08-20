@@ -189,16 +189,26 @@ func (s *StreamMux[C]) InitOutput(
 ) (output *Output[C], _err error) {
 	logger.Tracef(ctx, "InitOutput(%#+v)", outputKey)
 	defer func() { logger.Tracef(ctx, "/InitOutput(%#+v): %v", outputKey, _err) }()
-	return xsync.DoA3R2(ctx, &s.Locker, s.initOutputLocked, ctx, outputKey, opts)
+	return xsync.DoA3R2(ctx, &s.Locker, s.getOrInitOutputLocked, ctx, outputKey, opts)
 }
 
-func (s *StreamMux[C]) initOutputLocked(
+func (s *StreamMux[C]) getOrInitOutputLocked(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts []InitOutputOption,
 ) (_ret *Output[C], _err error) {
-	if _, ok := s.OutputsMap[outputKey]; ok {
-		return
+	if output, ok := s.OutputsMap[outputKey]; ok {
+		return output, nil
+	}
+	switch s.MuxMode {
+	case types.MuxModeForbid:
+		if len(s.Outputs) > 0 {
+			return nil, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, len(s.Outputs))
+		}
+	case types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
+		if len(s.Outputs) > 0 {
+			return s.Outputs[0], nil
+		}
 	}
 
 	cfg := InitOutputOptions(opts).config()
@@ -260,18 +270,14 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	cfg types.RecoderConfig,
 ) (_err error) {
 	outputKey := cfg.OutputKey()
-	output := s.OutputsMap[outputKey]
-	if output == nil {
-		logger.Warnf(ctx, "no output with key %s found, initializing it; but please call InitOutput, instead of relying on this automation", outputKey)
-		var err error
-		output, err = s.initOutputLocked(ctx, outputKey, nil)
-		if err != nil {
-			return fmt.Errorf("unable to initialize the output %s: %w", outputKey, err)
-		}
+	var err error
+	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
+	if err != nil {
+		return fmt.Errorf("unable to get-or-initialize the output %s: %w", outputKey, err)
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
-	err := s.reconfigureOutput(ctx, output, cfg)
+	err = s.reconfigureOutput(ctx, output, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
 	}
