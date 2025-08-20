@@ -19,8 +19,7 @@ func (Passthrough) SendInputPacket(
 ) error {
 	outputPacketsCh <- packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
-		input.Stream,
-		input.Source,
+		input.StreamInfo,
 	)
 	return nil
 }

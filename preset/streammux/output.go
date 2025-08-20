@@ -19,6 +19,7 @@ import (
 type OutputKey = types.OutputKey
 
 type Output[C any] struct {
+	ID               int
 	InputSyncFilter  *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
 	InputThrottler   *packetcondition.VideoAverageBitrateLower
 	InputFixer       *autofix.AutoFixer
@@ -90,6 +91,7 @@ type InitOutputOptionRetry *RetryParameters
 
 func newOutput[C any](
 	ctx context.Context,
+	outputID int,
 	inputNode *InputNode[C],
 	outputFactory OutputFactory,
 	outputKey OutputKey,
@@ -126,6 +128,7 @@ func newOutput[C any](
 		processor.DefaultOptionsRecoder()...,
 	)
 	o := &Output[C]{
+		ID:              outputID,
 		InputSyncFilter: node.NewWithCustomData[C](processor.NewFromKernel(ctx, kernel.NewBarrier(ctx, inputSyncer))),
 		InputThrottler:  packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		InputFixer: autofix.New(

@@ -306,7 +306,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {
+	if err := e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh); err != nil {
 		return fmt.Errorf("unable to send a packet: %w", err)
 	}
 	return nil
@@ -365,13 +365,8 @@ func (e *Encoder[EF]) sendInputFrame(
 	if codec.IsEncoderRaw(encoder.Encoder) {
 		outputFramesCh <- frame.BuildOutput(
 			frame.CloneAsReferenced(input.Frame),
-			input.CodecParameters,
-			input.StreamIndex,
-			input.StreamsCount,
-			input.StreamDuration,
-			input.TimeBase,
 			input.Pos,
-			input.Duration,
+			input.StreamInfo,
 		)
 		return nil
 	}
@@ -444,7 +439,7 @@ func (e *Encoder[EF]) sendInputFrame(
 			}
 		}
 
-		if err := e.send(ctx, pkt, outputStream, outputPacketsCh); err != nil {
+		if err := e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh); err != nil {
 			return fmt.Errorf("unable to send a packet: %w", err)
 		}
 	}
@@ -528,14 +523,18 @@ func (e *streamEncoder) prepareScaler(
 func (e *Encoder[EF]) send(
 	ctx context.Context,
 	outPkt *astiav.Packet,
+	pipelineSideData []any,
 	outputStream *astiav.Stream,
 	out chan<- packet.Output,
 ) (_err error) {
 
 	outPktWrapped := packet.BuildOutput(
 		outPkt,
-		outputStream,
-		e,
+		packet.BuildStreamInfo(
+			outputStream,
+			e,
+			pipelineSideData,
+		),
 	)
 
 	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.CodecParameters().MediaType(), outPktWrapped.Dts(), outPktWrapped.Pts())

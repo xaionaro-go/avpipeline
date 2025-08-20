@@ -5,17 +5,42 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
+	"github.com/xaionaro-go/avpipeline/types"
 )
+
+type StreamInfo struct {
+	CodecParameters  *astiav.CodecParameters // TODO: remove this from here
+	StreamIndex      int
+	StreamsCount     int
+	StreamDuration   int64
+	TimeBase         astiav.Rational // TODO: reuse the time_base from the frame
+	Duration         int64           // TODO: reuse duration from the frame
+	PipelineSideData types.PipelineSideData
+}
+
+func BuildStreamInfo(
+	codecParameters *astiav.CodecParameters,
+	streamIndex, streamsCount int,
+	streamDuration int64,
+	timeBase astiav.Rational,
+	duration int64,
+	pipelineSideData types.PipelineSideData,
+) *StreamInfo {
+	return &StreamInfo{
+		CodecParameters:  codecParameters,
+		StreamIndex:      streamIndex,
+		StreamsCount:     streamsCount,
+		StreamDuration:   streamDuration,
+		TimeBase:         timeBase,
+		Duration:         duration,
+		PipelineSideData: pipelineSideData,
+	}
+}
 
 type Commons struct {
 	*astiav.Frame
-	CodecParameters *astiav.CodecParameters // TODO: remove this from here
-	StreamIndex     int
-	StreamsCount    int
-	StreamDuration  int64
-	TimeBase        astiav.Rational // TODO: reuse the time_base from the frame
-	Pos             int64           // TODO: reuse pkt_pos from the frame
-	Duration        int64           // TODO: reuse duration from the frame
+	Pos int64 // TODO: reuse pkt_pos from the frame
+	*StreamInfo
 }
 
 func (f *Commons) GetMediaType() astiav.MediaType {
@@ -35,7 +60,7 @@ func (f *Commons) GetStreamIndex() int {
 }
 
 func (f *Commons) GetDurationAsDuration() time.Duration {
-	return avconv.Duration(f.Duration, f.TimeBase)
+	return avconv.Duration(f.StreamInfo.Duration, f.TimeBase)
 }
 
 func (f *Commons) GetDTSAsDuration() time.Duration {

@@ -41,8 +41,7 @@ func (f *PacketFilter) SendInputPacket(
 	}
 	outputPacketsCh <- packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
-		input.Stream,
-		input.Source,
+		input.StreamInfo,
 	)
 	return nil
 }
@@ -58,13 +57,8 @@ func (f *PacketFilter) SendInputFrame(
 	}
 	outputFramesCh <- frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.CodecParameters,
-		input.StreamIndex,
-		input.StreamsCount,
-		input.StreamDuration,
-		input.TimeBase,
 		input.Pos,
-		input.Duration,
+		input.StreamInfo,
 	)
 	return nil
 }

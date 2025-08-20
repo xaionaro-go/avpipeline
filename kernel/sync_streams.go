@@ -77,9 +77,8 @@ func (s *SyncStreams) SendInputPacket(
 		ctx, &s.Locker, s.pushToQueue,
 		ctx,
 		packetorframe.InputUnion{Packet: &packet.Input{
-			Packet: packet.CloneAsReferenced(input.Packet),
-			Stream: input.Stream,
-			Source: input.Source,
+			Packet:     packet.CloneAsReferenced(input.Packet),
+			StreamInfo: input.StreamInfo,
 		}},
 		outputPacketsCh, outputFramesCh,
 	)
@@ -96,12 +95,8 @@ func (s *SyncStreams) SendInputFrame(
 		ctx,
 		packetorframe.InputUnion{Frame: ptr(frame.BuildInput(
 			frame.CloneAsReferenced(input.Frame),
-			input.CodecParameters,
-			input.StreamIndex, input.StreamsCount,
-			input.StreamDuration,
-			input.TimeBase,
 			input.Pos,
-			input.Duration,
+			input.StreamInfo,
 		))},
 		outputPacketsCh, outputFramesCh,
 	)

@@ -152,8 +152,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 		for _, pkt := range pkts {
 			pkt := packet.BuildOutput(
 				pkt,
-				input.Stream,
-				input.Source,
+				input.StreamInfo,
 			)
 			select {
 			case <-ctx.Done():

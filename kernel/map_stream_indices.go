@@ -215,8 +215,11 @@ func (m *MapStreamIndices) sendInputPacket(
 		pkt.SetStreamIndex(outputStream.Index())
 		outPkt := packet.BuildOutput(
 			pkt,
-			outputStream,
-			m,
+			packet.BuildStreamInfo(
+				outputStream,
+				m,
+				input.PipelineSideData,
+			),
 		)
 		m.Locker.UDo(ctx, func() {
 			select {
@@ -261,10 +264,14 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 					ctx,
 					inputStream.Index(),
 					packetorframe.InputUnion{
-						Packet: &packet.Input{
-							Stream: inputStream,
-							Source: source,
-						},
+						Packet: ptr(packet.BuildInput(
+							nil,
+							packet.BuildStreamInfo(
+								inputStream,
+								source,
+								nil,
+							),
+						)),
 					},
 				)
 				if err != nil {
@@ -335,13 +342,16 @@ func (m *MapStreamIndices) sendInputFrame(
 
 		outFrame := frame.BuildOutput(
 			frame.CloneAsReferenced(input.Frame),
-			input.CodecParameters,
-			outputStream.Index(),
-			len(m.outputStreams),
-			input.StreamDuration,
-			input.TimeBase,
 			input.Pos,
-			input.Duration,
+			frame.BuildStreamInfo(
+				input.CodecParameters,
+				outputStream.Index(),
+				len(m.outputStreams),
+				input.StreamDuration,
+				input.TimeBase,
+				input.StreamInfo.Duration,
+				input.PipelineSideData,
+			),
 		)
 		m.Locker.UDo(ctx, func() {
 			select {

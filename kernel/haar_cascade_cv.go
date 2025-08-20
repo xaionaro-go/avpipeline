@@ -74,7 +74,7 @@ func (c *HaarCascade) SendInputFrame(
 ) error {
 
 	//c.Classifier.DetectMultiScale(mat)
-	outputFrame := frame.BuildOutput(input.Frame, input.CodecParameters, input.StreamIndex, input.StreamsCount, input.StreamDuration, input.TimeBase, input.Pos, input.Duration)
+	outputFrame := frame.BuildOutput(input.Frame, input.Pos, input.StreamInfo)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

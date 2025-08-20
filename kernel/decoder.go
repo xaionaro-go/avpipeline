@@ -157,11 +157,15 @@ func (d *Decoder[DF]) sendInputPacket(
 			f.SetPictureType(astiav.PictureTypeNone)
 			frameToSend := frame.BuildOutput(
 				f,
-				d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
-				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
-				input.Stream.Duration(),
-				timeBase,
-				input.Packet.Pos(), input.Packet.Duration(),
+				input.Packet.Pos(),
+				frame.BuildStreamInfo(
+					d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
+					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
+					input.Stream.Duration(),
+					timeBase,
+					input.Packet.Duration(),
+					input.PipelineSideData,
+				),
 			)
 			ret, err := true, nil
 			d.Locker.UDo(ctx, func() {

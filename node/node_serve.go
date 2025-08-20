@@ -122,8 +122,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					) packet.Input {
 						return packet.BuildInput(
 							packet.CloneAsReferenced(pkt.Packet),
-							pkt.Stream,
-							pkt.Source,
+							pkt.StreamInfo,
 						)
 					},
 					func(n Abstract) packetcondition.Condition { return n.GetInputPacketFilter() },
@@ -146,12 +145,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					) frame.Input {
 						return frame.BuildInput(
 							frame.CloneAsReferenced(f.Frame),
-							f.CodecParameters,
-							f.StreamIndex, f.StreamsCount,
-							f.StreamDuration,
-							f.TimeBase,
 							f.Pos,
-							f.Duration,
+							f.StreamInfo,
 						)
 					},
 					func(n Abstract) framecondition.Condition { return n.GetInputFrameFilter() },

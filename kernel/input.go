@@ -233,8 +233,11 @@ func (i *Input) Generate(
 			select {
 			case outputPacketsCh <- packet.BuildOutput(
 				pkt,
-				avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
-				i,
+				packet.BuildStreamInfo(
+					avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
+					i,
+					nil,
+				),
 			):
 			case <-ctx.Done():
 				return ctx.Err()

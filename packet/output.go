@@ -10,13 +10,11 @@ type Output Commons
 
 func BuildOutput(
 	pkt *astiav.Packet,
-	s *astiav.Stream,
-	fmt Source,
+	streamInfo *StreamInfo,
 ) Output {
 	return Output{
-		Packet: pkt,
-		Stream: s,
-		Source: fmt,
+		Packet:     pkt,
+		StreamInfo: streamInfo,
 	}
 }
 

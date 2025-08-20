@@ -86,8 +86,7 @@ func (k *Base[H]) SendInputPacket(
 
 	outPkt := packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
-		input.Stream,
-		input.Source,
+		input.StreamInfo,
 	)
 
 	if sender, ok := any(k.Handler).(AmendOutputPacketer); ok {
@@ -125,13 +124,8 @@ func (k *Base[H]) SendInputFrame(
 
 	outFrame := frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.CodecParameters,
-		input.StreamIndex,
-		input.StreamsCount,
-		input.StreamDuration,
-		input.TimeBase,
 		input.Pos,
-		input.Duration,
+		input.StreamInfo,
 	)
 
 	if amender, ok := any(k.Handler).(AmendOutputFramer); ok {

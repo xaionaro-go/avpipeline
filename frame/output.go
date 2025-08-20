@@ -10,22 +10,13 @@ type Output Commons
 
 func BuildOutput(
 	f *astiav.Frame,
-	codecParameters *astiav.CodecParameters,
-	streamIndex, streamsCount int,
-	streamDuration int64,
-	timeBase astiav.Rational,
 	pos int64,
-	duration int64,
+	streamInfo *StreamInfo,
 ) Output {
 	return Output{
-		Frame:           f,
-		CodecParameters: codecParameters,
-		StreamIndex:     streamIndex,
-		StreamsCount:    streamsCount,
-		StreamDuration:  streamDuration,
-		TimeBase:        timeBase,
-		Pos:             pos,
-		Duration:        duration,
+		Frame:      f,
+		Pos:        pos,
+		StreamInfo: streamInfo,
 	}
 }
 

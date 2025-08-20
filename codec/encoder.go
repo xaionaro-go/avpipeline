@@ -156,7 +156,7 @@ func (e *EncoderFull) receivePacketLocked(
 	}
 
 	next := e.Next.Get()
-	if next.When == nil || next.When.Match(ctx, packet.BuildInput(p, nil, nil)) {
+	if next.When == nil || next.When.Match(ctx, packet.BuildInput(p, nil)) {
 		e.Next.Unset()
 		if q := next.Quality; q != nil {
 			qErr := e.setQualityNow(ctx, q)

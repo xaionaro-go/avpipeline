@@ -6,6 +6,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
+	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type Source interface {
@@ -53,10 +54,27 @@ func () NotifyAboutPacketSource(
 }
 */
 
-type Commons struct {
-	*astiav.Packet
+type StreamInfo struct {
 	*astiav.Stream
 	Source
+	PipelineSideData types.PipelineSideData
+}
+
+func BuildStreamInfo(
+	stream *astiav.Stream,
+	source Source,
+	pipelineSideData types.PipelineSideData,
+) *StreamInfo {
+	return &StreamInfo{
+		Stream:           stream,
+		Source:           source,
+		PipelineSideData: pipelineSideData,
+	}
+}
+
+type Commons struct {
+	*astiav.Packet
+	*StreamInfo
 }
 
 func (pkt *Commons) GetSize() int {

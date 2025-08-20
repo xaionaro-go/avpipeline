@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"sync"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
-	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
@@ -46,14 +44,15 @@ type InputNode[C any] = node.NodeWithCustomData[
 ]
 
 type StreamMux[C any] struct {
-	InputNode     *InputNode[C]
-	MuxMode       types.MuxMode
-	Outputs       []*Output[C]
-	OutputsMap    map[OutputKey]*Output[C]
-	OutputFactory OutputFactory
-	InputSyncer   *barrierstategetter.Switch
-	OutputSyncer  *barrierstategetter.Switch
-	Locker        xsync.Mutex
+	InputNode      *InputNode[C]
+	MuxMode        types.MuxMode
+	Outputs        []*Output[C]
+	OutputsMap     map[OutputKey]*Output[C]
+	OutputFactory  OutputFactory
+	InputSyncer    *barrierstategetter.Switch
+	OutputSyncer   *barrierstategetter.Switch
+	RecodingConfig types.RecoderConfig
+	Locker         xsync.Mutex
 
 	waitGroup sync.WaitGroup
 }
@@ -88,40 +87,54 @@ func NewWithCustomData[C any](
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output[C]{},
 	}
+
 	s.InputSyncer.SetKeepUnless(packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.IsKeyFrame(true),
 	})
 	var (
 		prevDataLocker             sync.Mutex
-		prevOutput                 *Output[C]
 		prevSource                 packet.Source
-		switchPTS                  int64
+		prevOutputID               int32
 		outputSyncerSwitchDeadline time.Time
 	)
+
+	type switchNotifierPacket struct {
+		SwitchFromOutputID int32
+	}
+
+	// We want to notify the OutputSyncer that it needs to switch to the next output, and
+	// send a packet that would notify that there are no packets left in the previous chain.
+	s.InputSyncer.Flags.Set(barrierstategetter.FlagSwitchFirstPacketAfterSwitchPassBothOutputs)
 	s.InputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		prevDataLocker.Lock()
-		switchPTS = in.Packet.Pts()
 		prevSource = in.Packet.Source
-		prevOutput = s.Outputs[from]
+		prevOutputID = from
 		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d)", to)
 		err := s.OutputSyncer.SetValue(ctx, to)
 		logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): %v", to, err)
-		if err := prevOutput.Flush(ctx); err != nil {
-			logger.Errorf(ctx, "unable to flush the previous output: %v", err)
-		}
 		outputSyncerSwitchDeadline = time.Now().Add(10 * time.Second)
+		// this will be our notification packet (that nothing is left in the previous chain):
+		in.Packet.PipelineSideData = append(in.Packet.PipelineSideData, switchNotifierPacket{
+			SwitchFromOutputID: from,
+		})
 	})
 
-	// waiting for the last packet to reach the OutputSyncer
+	// Waiting for the "last packet" notification to reach the OutputSyncer, since
+	// we want to make the switch only after the last packet in the chain is processed.
+	//
+	// But just in case we also have a 10 seconds timeout (in case the packet was
+	// consumed by something in the chain somehow) -- this is the last resort thing,
+	// it theoretically should never happen.
+	s.OutputSyncer.Flags.Set(barrierstategetter.FlagSwitchForbidTakeoverInKeepUnless)
 	s.OutputSyncer.SetKeepUnless(
 		packetorframecondition.And{
 			packetorframecondition.Or{
 				packetorframecondition.And{
 					packetorframecondition.PacketSource(prevSource),
-					packetorframecondition.MediaType(astiav.MediaTypeVideo),
-					packetorframecondition.IsKeyFrame(true),
-					packetorframecondition.PTS(mathcondition.GreaterOrEqual(switchPTS)),
+					packetorframecondition.HasPipelineSideData(switchNotifierPacket{
+						SwitchFromOutputID: prevOutputID,
+					}),
 				},
 				packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
 					if time.Since(outputSyncerSwitchDeadline) <= 0 {
@@ -132,12 +145,14 @@ func NewWithCustomData[C any](
 				}),
 			},
 			packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
+				logger.Debugf(ctx, "unlocking prevDataLocker")
 				prevDataLocker.Unlock()
 				return true
 			}),
 		},
 	)
 	s.OutputSyncer.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+		logger.Debugf(ctx, "releasing OutputSyncer")
 		s.OutputSyncer.Release()
 	})
 	return s, nil
@@ -162,13 +177,15 @@ func (s *StreamMux[C]) initOutputLocked(
 		return
 	}
 
+	outputID := len(s.Outputs)
 	output, err := newOutput(
 		ctx,
+		outputID,
 		s.Input(),
 		s.OutputFactory, outputKey,
-		s.InputSyncer.Condition(int32(len(s.Outputs))),
-		s.OutputSyncer.Condition(int32(len(s.Outputs))),
-		newStreamIndexAssigner(s.MuxMode, len(s.Outputs), s.InputNode.Processor.Kernel),
+		s.InputSyncer.Condition(int32(outputID)),
+		s.OutputSyncer.Condition(int32(outputID)),
+		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output: %w", err)
@@ -199,15 +216,7 @@ func (s *StreamMux[C]) GetRecoderConfig(
 func (s *StreamMux[C]) getRecoderConfigLocked(
 	ctx context.Context,
 ) (_ret types.RecoderConfig) {
-	switchValue := s.SwitchPreFilter.GetValue(ctx)
-	logger.Tracef(ctx, "switchValue: %v", switchValue)
-	if switchValue == 0 {
-		return s.RecodingConfig
-	}
-	cpy := s.RecodingConfig
-	cpy.VideoTrackConfigs = slices.Clone(cpy.VideoTrackConfigs)
-	cpy.VideoTrackConfigs[0].CodecName = codec.CodecNameCopy
-	return cpy
+	return s.RecodingConfig
 }
 
 func (s *StreamMux[C]) SetRecoderConfig(
@@ -223,13 +232,19 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
-	err := s.configureRecoder(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("unable to configure the recoder: %w", err)
+	outputKey := cfg.OutputKey()
+	output := s.OutputsMap[outputKey]
+	if output == nil {
+		logger.Warnf(ctx, "no output with key %s found, initializing it; but please call InitOutput, instead of relying on this automation", outputKey)
+		var err error
+		output, err = s.initOutputLocked(ctx, outputKey, nil)
+		if err != nil {
+			return fmt.Errorf("unable to initialize the output %s: %w", outputKey, err)
+		}
 	}
-	s.RecodingConfig = cfg
-	s.MapInputStreamIndicesNode.Processor.Kernel.Assigner.(*streamIndexAssignerInput[C]).reload(ctx)
-	return nil
+
+	logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
+	return s.reconfigureOutput(ctx, output, cfg)
 }
 
 func (s *StreamMux[C]) configureRecoder(

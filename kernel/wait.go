@@ -58,8 +58,7 @@ func (w *Wait) sendInputPacket(
 ) error {
 	output := packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
-		input.Stream,
-		input.Source,
+		input.StreamInfo,
 	)
 	shouldWait := w.PacketCondition != nil && w.PacketCondition.Match(ctx, input)
 	logger.Tracef(ctx, "shouldWait: %t", shouldWait)
@@ -99,13 +98,8 @@ func (w *Wait) sendInputFrame(
 ) error {
 	output := frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.CodecParameters,
-		input.StreamIndex,
-		input.StreamsCount,
-		input.StreamDuration,
-		input.TimeBase,
 		input.Pos,
-		input.Duration,
+		input.StreamInfo,
 	)
 	shouldWait := w.FrameCondition != nil && w.FrameCondition.Match(ctx, input)
 	logger.Tracef(ctx, "shouldWait: %t", shouldWait)

@@ -802,7 +802,7 @@ func (o *Output) doWritePacket(
 	o.SequentialInvalidPacketsCount = 0
 
 	pkt.SetStreamIndex(outputStream.Index())
-	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, outputStream.Stream, source)) {
+	if o.Filter != nil && !o.Filter.Match(ctx, packet.BuildInput(pkt, packet.BuildStreamInfo(outputStream.Stream, source, nil))) {
 		return nil
 	}
 
