@@ -140,3 +140,11 @@ func (a *AutoFixerWithCustomData[T]) GetInputFrameFilter() framefiltercondition.
 func (a *AutoFixerWithCustomData[T]) SetInputFrameFilter(cond framefiltercondition.Condition) {
 	a.Input().SetInputFrameFilter(cond)
 }
+
+func (a *AutoFixerWithCustomData[T]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushPacketsTo()
+}
+
+func (a *AutoFixerWithCustomData[T]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushFramesTo()
+}

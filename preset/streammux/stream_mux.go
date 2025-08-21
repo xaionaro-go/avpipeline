@@ -47,7 +47,7 @@ type StreamMux[C any] struct {
 	nodeboilerplate.Statistics
 	nodeboilerplate.InputFilter
 
-	startCh   *chan struct{}
+	startedCh *chan struct{}
 	waitGroup sync.WaitGroup
 }
 
@@ -83,7 +83,7 @@ func NewWithCustomData[C any](
 		OutputsMap:    map[OutputKey]*Output[C]{},
 		MuxMode:       muxMode,
 
-		startCh: ptr(make(chan struct{})),
+		startedCh: ptr(make(chan struct{})),
 	}
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
 	s.initSwitches()
@@ -496,7 +496,7 @@ func (s *StreamMux[C]) Start(
 }
 
 func (s *StreamMux[C]) WaitForStartChan() <-chan struct{} {
-	return *xatomic.LoadPointer(&s.startCh)
+	return *xatomic.LoadPointer(&s.startedCh)
 }
 
 func (s *StreamMux[C]) WaitForStart(

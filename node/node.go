@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
@@ -35,6 +36,9 @@ type Abstract interface {
 	SetInputPacketFilter(packetfiltercondition.Condition)
 	GetInputFrameFilter() framefiltercondition.Condition
 	SetInputFrameFilter(framefiltercondition.Condition)
+
+	GetChangeChanPushPacketsTo() <-chan struct{}
+	GetChangeChanPushFramesTo() <-chan struct{}
 }
 
 /* for easy copy-paste
@@ -117,6 +121,14 @@ func (n *MyFancyNodePlaceholder) SetInputFrameFilter(
 
 }
 
+func (n *MyFancyNodePlaceholder) GetChangeChanPushPacketsTo() <-chan struct{} {
+
+}
+
+func (n *MyFancyNodePlaceholder) GetChangeChanPushFramesTo() <-chan struct{} {
+
+}
+
 */
 
 type NodeWithCustomData[C any, T processor.Abstract] struct {
@@ -128,6 +140,9 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputFrameFilter  framefiltercondition.Condition
 	Locker            xsync.Mutex
 	IsServingValue    bool
+
+	ChangeChanPushPacketsTo *chan struct{}
+	ChangeChanPushFramesTo  *chan struct{}
 
 	CustomData C
 }
@@ -153,8 +168,10 @@ func NewWithCustomData[C any, T processor.Abstract](
 	processor T,
 ) *NodeWithCustomData[C, T] {
 	return &NodeWithCustomData[C, T]{
-		Statistics: &Statistics{},
-		Processor:  processor,
+		Statistics:              &Statistics{},
+		Processor:               processor,
+		ChangeChanPushPacketsTo: ptr(make(chan struct{})),
+		ChangeChanPushFramesTo:  ptr(make(chan struct{})),
 	}
 }
 
@@ -214,6 +231,7 @@ func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
 	defer logger.Debugf(ctx, "/AddPushPacketsTo")
 	n.Locker.Do(ctx, func() {
 		n.PushPacketsTos.Add(dst, conds...)
+		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
 	})
 }
 
@@ -222,6 +240,7 @@ func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(s PushPacketsTos) {
 	logger.Tracef(ctx, "SetPushPacketsTos: %s", debug.Stack())
 	n.Locker.Do(context.TODO(), func() {
 		n.PushPacketsTos = s
+		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
 	})
 }
 
@@ -249,6 +268,7 @@ func RemovePushPacketsTo[C any, P processor.Abstract](
 			if pushTo.Node == to {
 				pushTos = slices.Delete(pushTos, idx, idx+1)
 				from.PushPacketsTos = pushTos
+				close(*xatomic.SwapPointer(&from.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
 				return true
 			}
 		}
@@ -274,6 +294,7 @@ func RemovePushFramesTo[C any, P processor.Abstract](
 			if pushTo.Node == to {
 				pushTos = slices.Delete(pushTos, idx, idx+1)
 				from.PushFramesTos = pushTos
+				close(*xatomic.SwapPointer(&from.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
 				return nil
 			}
 		}
@@ -287,6 +308,7 @@ func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
 ) {
 	n.Locker.Do(context.TODO(), func() {
 		n.PushFramesTos.Add(dst, conds...)
+		close(*xatomic.SwapPointer(&n.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
 	})
 }
 
@@ -295,6 +317,7 @@ func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 	logger.Tracef(ctx, "SetPushFramesTos: %s", debug.Stack())
 	n.Locker.Do(context.TODO(), func() {
 		n.PushFramesTos = s
+		close(*xatomic.SwapPointer(&n.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
 	})
 }
 
@@ -433,4 +456,12 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 			sanitizeString(n.Processor.String()),
 		)
 	}
+}
+
+func (n *NodeWithCustomData[C, T]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return *xatomic.LoadPointer(&n.ChangeChanPushPacketsTo)
+}
+
+func (n *NodeWithCustomData[C, T]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return *xatomic.LoadPointer(&n.ChangeChanPushFramesTo)
 }

@@ -103,3 +103,11 @@ func (n *NoServe[T]) GetInputFrameFilter() framecondition.Condition {
 func (n *NoServe[T]) SetInputFrameFilter(cond framecondition.Condition) {
 	n.Node.SetInputFrameFilter(cond)
 }
+
+func (n *NoServe[T]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return n.Node.GetChangeChanPushPacketsTo()
+}
+
+func (n *NoServe[T]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return n.Node.GetChangeChanPushFramesTo()
+}

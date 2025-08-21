@@ -267,3 +267,11 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameFilter() framefilterc
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameFilter(cond framefiltercondition.Condition) {
 	fwd.Output.SetInputFrameFilter(cond)
 }
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return fwd.Output.GetChangeChanPushPacketsTo()
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return fwd.Output.GetChangeChanPushFramesTo()
+}

@@ -133,12 +133,10 @@ func main() {
 
 	nodeBSFMain := autoheaders.NewNode(
 		ctx,
-		inputMainNode.Processor.GetPacketSource(),
 		outputNode.Processor.GetPacketSink(),
 	)
 	nodeBSFFallback := autoheaders.NewNode(
 		ctx,
-		inputFallbackNode.Processor.GetPacketSource(),
 		outputNode.Processor.GetPacketSink(),
 	)
 

@@ -23,7 +23,7 @@ func (n *StreamMux[C]) Serve(
 	defer logger.Tracef(ctx, "/StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
 	n.waitGroup.Add(1)
 	defer n.waitGroup.Done()
-	startCh := *xatomic.LoadPointer(&n.startCh)
+	startCh := *xatomic.LoadPointer(&n.startedCh)
 	select {
 	case <-startCh:
 		panic("this StreamMux is already serving")
@@ -31,7 +31,7 @@ func (n *StreamMux[C]) Serve(
 	}
 	close(startCh)
 	defer func() {
-		xatomic.StorePointer(&n.startCh, ptr(make(chan struct{})))
+		xatomic.StorePointer(&n.startedCh, ptr(make(chan struct{})))
 	}()
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{EachNode: cfg}, errCh, n.InputNode)
 }
@@ -76,4 +76,12 @@ func (n *StreamMux[C]) SetPushFramesTos(
 
 func (n *StreamMux[C]) GetProcessor() processor.Abstract {
 	return n
+}
+
+func (n *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return nil
+}
+
+func (n *StreamMux[C]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return nil
 }

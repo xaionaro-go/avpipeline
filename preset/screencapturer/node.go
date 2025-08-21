@@ -137,3 +137,11 @@ func (a *ScreenCapturer[C]) GetInputFrameFilter() framefiltercondition.Condition
 func (a *ScreenCapturer[C]) SetInputFrameFilter(cond framefiltercondition.Condition) {
 	a.Input().SetInputFrameFilter(cond)
 }
+
+func (a *ScreenCapturer[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushPacketsTo()
+}
+
+func (a *ScreenCapturer[C]) GetChangeChanPushFramesTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushFramesTo()
+}
