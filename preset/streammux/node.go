@@ -33,7 +33,10 @@ func (n *StreamMux[C]) Serve(
 	defer func() {
 		xatomic.StorePointer(&n.startedCh, ptr(make(chan struct{})))
 	}()
-	avpipeline.Serve(ctx, avpipeline.ServeConfig{EachNode: cfg}, errCh, n.InputNode)
+	avpipeline.Serve(ctx, avpipeline.ServeConfig{
+		EachNode:             cfg,
+		AutoServeNewBranches: true,
+	}, errCh, n.InputNode)
 }
 
 func (n *StreamMux[C]) String() string {

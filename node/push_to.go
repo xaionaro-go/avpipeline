@@ -34,6 +34,14 @@ func (s *PushFramesTos) Add(dst Abstract, conds ...framefiltercondition.Conditio
 	return s
 }
 
+func (s PushFramesTos) Nodes() Nodes[Abstract] {
+	var result Nodes[Abstract]
+	for _, item := range s {
+		result = append(result, item.Node)
+	}
+	return result
+}
+
 type PushPacketsTo = PushTo[packet.Input, packetfiltercondition.Condition]
 
 type PushPacketsTos []PushPacketsTo
@@ -53,4 +61,12 @@ func (s *PushPacketsTos) Add(dst Abstract, conds ...packetfiltercondition.Condit
 		Condition: cond,
 	})
 	return s
+}
+
+func (s PushPacketsTos) Nodes() Nodes[Abstract] {
+	var result Nodes[Abstract]
+	for _, item := range s {
+		result = append(result, item.Node)
+	}
+	return result
 }

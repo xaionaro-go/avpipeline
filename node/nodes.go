@@ -95,3 +95,20 @@ type DotBlockContentStringWriteToer interface {
 		alreadyPrinted map[processor.Abstract]struct{},
 	)
 }
+
+func (s Nodes[T]) Without(in Nodes[T]) Nodes[T] {
+	var result Nodes[T]
+	for _, n := range s {
+		found := false
+		for _, i := range in {
+			if any(n) == any(i) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, n)
+		}
+	}
+	return result
+}
