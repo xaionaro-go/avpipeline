@@ -267,6 +267,26 @@ func (r *Retry[T]) NotifyAboutPacketSource(
 	})
 }
 
+var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
+
+func (r *Retry[T]) GetInternalQueueSize(
+	ctx context.Context,
+) *uint64 {
+	if _, ok := any(r.Kernel).(GetInternalQueueSizer); !ok {
+		return nil
+	}
+	kernel := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() *T {
+		if r.KernelIsSet {
+			return &r.Kernel
+		}
+		return nil
+	})
+	if kernel == nil {
+		return nil
+	}
+	return any(*kernel).(GetInternalQueueSizer).GetInternalQueueSize(ctx)
+}
+
 type ErrRetry struct {
 	Err error
 }

@@ -17,7 +17,6 @@ type VideoAverageBitrateLower struct {
 	skippedVideoFrame           bool
 	videoAveragerBufferConsumed int64
 	prevEncodeTS                time.Time
-	isClosed                    bool
 	lastSeenFormatAccessor      packet.Source
 }
 
@@ -75,21 +74,20 @@ func (f *VideoAverageBitrateLower) sendInputVideo(
 		f.videoAveragerBufferConsumed = 0
 	}
 
+	isKeyFrame := input.Packet.Flags().Has(astiav.PacketFlagKey)
+
 	pktSize := input.Packet.Size()
 	averagingBuffer := int64(f.BitrateAveragingPeriod.Seconds() * float64(f.AverageBitRate))
 	consumedWithPacket := f.videoAveragerBufferConsumed + int64(pktSize)*8
-	if consumedWithPacket > averagingBuffer {
+	if consumedWithPacket > averagingBuffer && (!isKeyFrame || f.videoAveragerBufferConsumed != 0) {
 		f.skippedVideoFrame = true
 		logger.Tracef(ctx, "skipping a frame to reduce the bitrate: %d > %d", consumedWithPacket, averagingBuffer)
 		return false
 	}
 
-	if f.skippedVideoFrame {
-		isKeyFrame := input.Packet.Flags().Has(astiav.PacketFlagKey)
-		if !isKeyFrame {
-			logger.Tracef(ctx, "skipping a non-key frame (BTW, the consumedWithPacket is %d/%d)", consumedWithPacket, averagingBuffer)
-			return false
-		}
+	if f.skippedVideoFrame && !isKeyFrame {
+		logger.Tracef(ctx, "skipping a non-key frame (BTW, the consumedWithPacket is %d/%d)", consumedWithPacket, averagingBuffer)
+		return false
 	}
 
 	f.skippedVideoFrame = false

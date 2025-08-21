@@ -225,6 +225,7 @@ func pushFurther[
 					dstStats.BytesCountRead.Add(objSize)
 					incrementCounters(&dstPacketsOrFramesStats.Read, mediaType)
 				} else {
+					dstStats.BytesCountMissed.Add(objSize)
 					incrementCounters(&dstPacketsOrFramesStats.Missed, mediaType)
 				}
 			}()

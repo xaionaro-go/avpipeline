@@ -50,10 +50,11 @@ func (stats *Statistics) Convert() ProcessingStatistics {
 }
 
 type Statistics struct {
-	BytesCountRead  atomic.Uint64
-	BytesCountWrote atomic.Uint64
-	Packets         FramesOrPacketsStatistics
-	Frames          FramesOrPacketsStatistics
+	BytesCountRead   atomic.Uint64
+	BytesCountMissed atomic.Uint64
+	BytesCountWrote  atomic.Uint64
+	Packets          FramesOrPacketsStatistics
+	Frames           FramesOrPacketsStatistics
 }
 
 func fromProcessingFramesOrPacketsStatsSection(

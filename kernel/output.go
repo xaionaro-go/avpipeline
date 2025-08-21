@@ -882,3 +882,11 @@ func (o *Output) NotifyAboutPacketSource(
 	}
 	return errors.Join(errs...)
 }
+
+var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
+
+func (r *Output) GetInternalQueueSize(
+	ctx context.Context,
+) *uint64 {
+	return nil // not implemented, yet
+}

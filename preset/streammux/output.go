@@ -9,9 +9,12 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
+	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	extrapacketcondition "github.com/xaionaro-go/avpipeline/packet/condition/extra"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -33,6 +36,11 @@ type Output[C any] struct {
 	OutputFixer      *autofix.AutoFixer
 	OutputSyncFilter *NodeBarrier[C]
 	OutputNode       node.Abstract
+	OutputNodeConfig OutputConfig
+}
+
+type OutputConfig struct {
+	OutputThrottlerMaxQueueSizeBytes uint64
 }
 
 type RetryParameters struct {
@@ -106,7 +114,7 @@ func newOutput[C any](
 	logger.Tracef(ctx, "NewOutput: %#+v", outputKey)
 	defer func() { logger.Tracef(ctx, "/NewOutput: %#+v", outputKey, _err) }()
 
-	outputNode, err := outputFactory.NewOutput(ctx, outputKey)
+	outputNode, outputConfig, err := outputFactory.NewOutput(ctx, outputKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output node: %w", err)
 	}
@@ -153,6 +161,7 @@ func newOutput[C any](
 		),
 		OutputSyncFilter: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, outputSyncer)),
 		OutputNode:       outputNode,
+		OutputNodeConfig: outputConfig,
 	}
 
 	o.InputFilter.AddPushPacketsTo(
@@ -162,11 +171,27 @@ func newOutput[C any](
 	o.InputFixer.AddPushPacketsTo(o.RecoderNode)
 	o.RecoderNode.AddPushPacketsTo(
 		o.MapIndices,
-		packetfiltercondition.Packet{Condition: o.OutputThrottler},
 	)
 	o.MapIndices.AddPushPacketsTo(o.OutputFixer)
 	o.OutputFixer.AddPushPacketsTo(o.OutputSyncFilter)
-	o.OutputSyncFilter.AddPushPacketsTo(o.OutputNode)
+	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
+		return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes
+	})
+	o.OutputSyncFilter.AddPushPacketsTo(o.OutputNode,
+		packetfiltercondition.Packet{Condition: packetcondition.And{
+			o.OutputThrottler,
+			packetcondition.Or{
+				packetcondition.Function(func(context.Context, packet.Input) bool {
+					return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes <= 0
+				}),
+				extrapacketcondition.PushQueueSize(
+					o.RecoderNode,
+					o.OutputNode,
+					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
+				),
+			},
+		}},
+	)
 
 	return o, nil
 }

@@ -1,24 +1,23 @@
 package condition
 
 import (
+	"cmp"
 	"fmt"
-
-	"golang.org/x/exp/constraints"
 )
 
-type GreaterOrEqualT[T constraints.Ordered] struct {
+type GreaterOrEqualT[T cmp.Ordered] struct {
 	Getter Getter[T]
 }
 
 var _ Condition[int] = GreaterOrEqualT[int]{}
 
-func GreaterOrEqualVariable[T constraints.Ordered](getter Getter[T]) GreaterOrEqualT[T] {
+func GreaterOrEqualVariable[T cmp.Ordered](getter Getter[T]) GreaterOrEqualT[T] {
 	return GreaterOrEqualT[T]{
 		Getter: getter,
 	}
 }
 
-func GreaterOrEqual[T constraints.Ordered](ref T) GreaterOrEqualT[T] {
+func GreaterOrEqual[T cmp.Ordered](ref T) GreaterOrEqualT[T] {
 	return GreaterOrEqualT[T]{
 		Getter: GetterStatic[T]{ref},
 	}

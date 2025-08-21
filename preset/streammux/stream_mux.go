@@ -49,11 +49,12 @@ type StreamMux[C any] struct {
 	waitGroup sync.WaitGroup
 }
 
+
 type OutputFactory interface {
 	NewOutput(
 		ctx context.Context,
 		outputKey OutputKey,
-	) (node.Abstract, error)
+	) (node.Abstract, OutputConfig, error)
 }
 
 func New(

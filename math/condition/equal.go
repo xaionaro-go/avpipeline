@@ -1,24 +1,23 @@
 package condition
 
 import (
+	"cmp"
 	"fmt"
-
-	"golang.org/x/exp/constraints"
 )
 
-type EqualT[T constraints.Ordered] struct {
+type EqualT[T cmp.Ordered] struct {
 	Getter Getter[T]
 }
 
 var _ Condition[int] = EqualT[int]{}
 
-func EqualVariable[T constraints.Ordered](getter Getter[T]) EqualT[T] {
+func EqualVariable[T cmp.Ordered](getter Getter[T]) EqualT[T] {
 	return EqualT[T]{
 		Getter: getter,
 	}
 }
 
-func Equal[T constraints.Ordered](ref T) EqualT[T] {
+func Equal[T cmp.Ordered](ref T) EqualT[T] {
 	return EqualT[T]{
 		Getter: GetterStatic[T]{ref},
 	}

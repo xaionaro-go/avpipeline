@@ -203,3 +203,15 @@ func (p *FromKernel[T]) GetPacketSink() packet.Sink {
 	}
 	return sink
 }
+
+type GetInternalQueueSizer = kernel.GetInternalQueueSizer
+
+func (p *FromKernel[T]) GetInternalQueueSize(
+	ctx context.Context,
+) *uint64 {
+	queuer, ok := any(p.Kernel).(GetInternalQueueSizer)
+	if !ok {
+		return nil
+	}
+	return queuer.GetInternalQueueSize(ctx)
+}

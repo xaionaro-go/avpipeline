@@ -1,12 +1,11 @@
 package condition
 
 import (
+	"cmp"
 	"fmt"
-
-	"golang.org/x/exp/constraints"
 )
 
-type Condition[T constraints.Ordered] interface {
+type Condition[T cmp.Ordered] interface {
 	fmt.Stringer
 	Match(T) bool
 }
