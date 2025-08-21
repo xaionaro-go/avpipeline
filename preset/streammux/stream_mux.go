@@ -328,7 +328,7 @@ func (s *StreamMux[C]) reconfigureOutput(
 	if len(cfg.AudioTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
 	}
-	audioCfg := cfg.VideoTrackConfigs[0]
+	audioCfg := cfg.AudioTrackConfigs[0]
 
 	encoderFactory := output.RecoderNode.Processor.Kernel.EncoderFactory
 

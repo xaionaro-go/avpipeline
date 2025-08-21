@@ -88,6 +88,7 @@ func serve[T node.Abstract](
 						logger.Tracef(ctx, "/Serve[%s]: context done", nodeKey)
 						return
 					case <-pushPacketsChangeChan:
+						pushPacketsChangeChan = n.GetChangeChanPushPacketsTo()
 						newPushPacketsTos := n.GetPushPacketsTos()
 						newNodes := newPushPacketsTos.Nodes().Without(currentPushPacketsTos.Nodes())
 						logger.Tracef(ctx, "Serve[%s]: push packets change; new nodes count: %d", nodeKey, len(newNodes))
@@ -96,6 +97,7 @@ func serve[T node.Abstract](
 						}
 						currentPushPacketsTos = newPushPacketsTos
 					case <-pushFramesChangeChan:
+						pushFramesChangeChan = n.GetChangeChanPushFramesTo()
 						newPushFramesTos := n.GetPushFramesTos()
 						newNodes := newPushFramesTos.Nodes().Without(currentPushFramesTos.Nodes())
 						logger.Tracef(ctx, "Serve[%s]: push frames change; new nodes count: %d", nodeKey, len(newNodes))

@@ -373,6 +373,7 @@ func newCodec(
 		c.codecContext.SetExtraData(codecParameters.ExtraData())
 	}
 
+	logger.Tracef(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, options)
 	if err := c.codecContext.Open(c.codec, options); err != nil {
 		return nil, fmt.Errorf("unable to open codec context: %w", err)
 	}

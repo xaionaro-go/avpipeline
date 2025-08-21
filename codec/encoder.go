@@ -64,8 +64,8 @@ func NewEncoder(
 	ctx context.Context,
 	params CodecParams,
 ) (_ret Encoder, _err error) {
-	logger.Tracef(ctx, "NewEncoder")
-	defer func() { logger.Tracef(ctx, "/NewEncoder: %T %v", _ret, _err) }()
+	logger.Tracef(ctx, "NewEncoder(%#+v)", params)
+	defer func() { logger.Tracef(ctx, "/NewEncoder(%#+v): %T %v", params, _ret, _err) }()
 	switch params.CodecName {
 	case NameCopy:
 		return EncoderCopy{}, nil
@@ -84,8 +84,8 @@ func newEncoder(
 	params CodecParams,
 	overrideQuality Quality,
 ) (_ret *EncoderFull, _err error) {
-	logger.Tracef(ctx, "newEncoder")
-	defer func() { logger.Tracef(ctx, "/newEncoder: %p %v", _ret, _err) }()
+	logger.Tracef(ctx, "newEncoder(ctx, %#+v, %#+v)", params, overrideQuality)
+	defer func() { logger.Tracef(ctx, "/newEncoder(ctx, %#+v, %#+v): %p %v", params, overrideQuality, _ret, _err) }()
 	params = params.Clone(ctx)
 	if overrideQuality != nil {
 		if params.CodecParameters == nil {
