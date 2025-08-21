@@ -81,6 +81,7 @@ func NewWithCustomData[C any](
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output[C]{},
+		MuxMode:       muxMode,
 
 		startCh: ptr(make(chan struct{})),
 	}
@@ -206,6 +207,8 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		return output, nil
 	}
 	switch s.MuxMode {
+	case types.UndefinedMuxMode:
+		return nil, fmt.Errorf("mux mode is not defined")
 	case types.MuxModeForbid:
 		if len(s.Outputs) > 0 {
 			return nil, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, len(s.Outputs))
