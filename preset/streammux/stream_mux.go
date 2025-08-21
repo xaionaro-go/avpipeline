@@ -240,6 +240,10 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	s.Outputs = append(s.Outputs, output)
 	s.OutputsMap[outputKey] = output
 	s.Input().AddPushPacketsTo(output.Input())
+	err = avpipeline.NotifyAboutPacketSources(ctx, s.InputNodeAsPacketSource, output.Input())
+	if err != nil {
+		logger.Errorf(ctx, "received an error while notifying about packet sources (%s -> %s): %v", s.InputNodeAsPacketSource, output.Input(), err)
+	}
 	return output, nil
 }
 
