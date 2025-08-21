@@ -5,3 +5,4 @@ import (
 )
 
 type GetInternalQueueSizer = types.GetInternalQueueSizer
+type GetKerneler = types.GetKerneler

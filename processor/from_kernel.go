@@ -206,6 +206,8 @@ func (p *FromKernel[T]) GetPacketSink() packet.Sink {
 
 type GetInternalQueueSizer = kernel.GetInternalQueueSizer
 
+var _ GetInternalQueueSizer = (*FromKernel[kernel.Abstract])(nil)
+
 func (p *FromKernel[T]) GetInternalQueueSize(
 	ctx context.Context,
 ) *uint64 {
@@ -214,4 +216,12 @@ func (p *FromKernel[T]) GetInternalQueueSize(
 		return nil
 	}
 	return queuer.GetInternalQueueSize(ctx)
+}
+
+type GetKerneler = kernel.GetKerneler
+
+var _ GetKerneler = (*FromKernel[kernel.Abstract])(nil)
+
+func (p *FromKernel[T]) GetKernel() kernel.Abstract {
+	return p.Kernel
 }

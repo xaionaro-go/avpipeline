@@ -49,7 +49,6 @@ type StreamMux[C any] struct {
 	waitGroup sync.WaitGroup
 }
 
-
 type OutputFactory interface {
 	NewOutput(
 		ctx context.Context,
@@ -390,7 +389,7 @@ func (s *StreamMux[C]) GetAllStats(
 }
 
 func (s *StreamMux[C]) getAllStatsLocked(
-	ctx context.Context,
+	_ context.Context,
 ) map[string]*node.ProcessingStatistics {
 	m := map[string]*node.ProcessingStatistics{}
 	tryGetStats := func(key string, n node.Abstract) {
