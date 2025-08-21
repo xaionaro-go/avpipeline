@@ -30,7 +30,11 @@ func (Passthrough) SendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	outputFramesCh <- frame.Output(input)
+	outputFramesCh <- frame.BuildOutput(
+		frame.CloneAsReferenced(input.Frame),
+		input.Pos,
+		input.StreamInfo,
+	)
 	return nil
 }
 

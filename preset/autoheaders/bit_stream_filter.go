@@ -7,13 +7,11 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-func tryNewBSFForInBandHeaders[T any](
+func tryNewBSFForInBandHeaders(
 	ctx context.Context,
-) (_ret *NodeWithCustomData[T]) {
+) (_ret *kernel.BitstreamFilter) {
 	logger.Debugf(ctx, "tryNewBSFForInBandHeaders(ctx)")
 	defer func() {
 		logger.Debugf(ctx, "/tryNewBSFForInBandHeaders(ctx): %s", spew.Sdump(_ret))
@@ -25,16 +23,12 @@ func tryNewBSFForInBandHeaders[T any](
 		return nil
 	}
 
-	return node.NewWithCustomDataFromKernel[T](
-		ctx,
-		bitstreamFilter,
-		processor.DefaultOptionsOutput()...,
-	)
+	return bitstreamFilter
 }
 
-func tryNewBSFForOOBHeaders[T any](
+func tryNewBSFForOOBHeaders(
 	ctx context.Context,
-) (_ret *NodeWithCustomData[T]) {
+) (_ret *kernel.BitstreamFilter) {
 	logger.Debugf(ctx, "tryNewBSFForOOBHeaders(ctx)")
 	defer func() {
 		logger.Debugf(ctx, "/tryNewBSFForOOBHeaders(ctx): %s", spew.Sdump(_ret))
@@ -46,16 +40,12 @@ func tryNewBSFForOOBHeaders[T any](
 		return nil
 	}
 
-	return node.NewWithCustomDataFromKernel[T](
-		ctx,
-		bitstreamFilter,
-		processor.DefaultOptionsOutput()...,
-	)
+	return bitstreamFilter
 }
 
-func tryNewBSFForCorrectedOOBHeaders[T any](
+func tryNewBSFForCorrectedOOBHeaders(
 	ctx context.Context,
-) (_ret *NodeWithCustomData[T]) {
+) (_ret *kernel.BitstreamFilter) {
 	logger.Debugf(ctx, "tryNewBSFForCorrectedOOBHeaders(ctx)")
 	defer func() {
 		logger.Debugf(ctx, "/tryNewBSFForCorrectedOOBHeaders(ctx): %s", spew.Sdump(_ret))
@@ -67,9 +57,5 @@ func tryNewBSFForCorrectedOOBHeaders[T any](
 		return nil
 	}
 
-	return node.NewWithCustomDataFromKernel[T](
-		ctx,
-		bitstreamFilter,
-		processor.DefaultOptionsOutput()...,
-	)
+	return bitstreamFilter
 }

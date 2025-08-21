@@ -166,8 +166,8 @@ func (s *SwitchOutput) GetState(
 	ctx context.Context,
 	pkt packetorframe.InputUnion,
 ) (_ret0 types.State, _ret1 <-chan struct{}) {
-	logger.Tracef(ctx, "SwitchOutput.GetState(ctx, %s)", pkt)
-	defer func() { logger.Tracef(ctx, "/SwitchOutput.GetState(ctx, %s): %v, %p", pkt, _ret0, _ret1) }()
+	logger.Tracef(ctx, "GetState(ctx, %v)", pkt)
+	defer func() { logger.Tracef(ctx, "/GetState(ctx, %v): %v, %p", pkt, _ret0, _ret1) }()
 
 	currentValue := s.CurrentValue.Load()
 	nextValue := s.NextValue.Load()

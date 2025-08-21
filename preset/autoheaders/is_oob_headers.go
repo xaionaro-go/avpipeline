@@ -12,7 +12,7 @@ func isOOBHeadersByFormatName(
 ) bool {
 	switch formatName {
 	default:
-		logger.Debugf(ctx, "the output format is unknown, so defaulting to in-band headers")
+		logger.Debugf(ctx, "the format '%s' is unknown, so defaulting to in-band headers", formatName)
 		fallthrough
 	case "mpegts", "rtsp":
 		return false

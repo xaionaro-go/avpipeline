@@ -25,28 +25,28 @@ type DefaultCustomData struct{}
 
 func New(
 	ctx context.Context,
-	forInput packet.Source,
-	forOutput packet.Sink,
+	source packet.Source,
+	sink packet.Sink,
 ) *AutoFixer {
 	return NewWithCustomData[DefaultCustomData](
 		ctx,
-		forInput,
-		forOutput,
+		source,
+		sink,
 		struct{}{},
 	)
 }
 
 func NewWithCustomData[T any](
 	ctx context.Context,
-	forInput packet.Source,
-	forOutput packet.Sink,
+	source packet.Source,
+	sink packet.Sink,
 	customData T,
 ) *AutoFixerWithCustomData[T] {
 	var zeroT T
-	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, forInput, forOutput)
+	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, source, sink)
 
 	var outputFormatName string
-	forOutput.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	sink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		if fmtCtx == nil {
 			logger.Errorf(ctx, "the output has no format context")
 			return
@@ -67,7 +67,7 @@ func NewWithCustomData[T any](
 	}
 
 	a := &AutoFixerWithCustomData[T]{
-		AutoHeadersNode: autoheaders.NewNodeWithCustomData[T](ctx, forInput, forOutput),
+		AutoHeadersNode: autoheaders.NewNodeWithCustomData[T](ctx, sink),
 		MapStreamIndicesNode: node.NewWithCustomData[T](
 			processor.NewFromKernel(
 				ctx,
@@ -77,7 +77,7 @@ func NewWithCustomData[T any](
 		),
 	}
 	a.MapStreamIndicesNode.CustomData = customData
-	if a.AutoHeadersNode != nil {
+	if a.AutoHeadersNode != nil { // TODO: make a.AutoHeadersNode always non-nil
 		a.AutoHeadersNode.AddPushPacketsTo(a.MapStreamIndicesNode)
 		a.AutoHeadersNode.CustomData = customData
 	}
