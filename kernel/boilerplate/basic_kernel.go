@@ -80,7 +80,7 @@ func (k *Base[H]) SendInputPacket(
 
 	if visitor, ok := any(k.Handler).(VisitInputPacketer); ok {
 		if err := visitor.VisitInputPacket(ctx, &input); err != nil {
-			return fmt.Errorf("unable to amend output frame: %w", err)
+			return prepareError(ctx, err, "visit input packet")
 		}
 	}
 
@@ -91,7 +91,7 @@ func (k *Base[H]) SendInputPacket(
 
 	if sender, ok := any(k.Handler).(AmendOutputPacketer); ok {
 		if err := sender.AmendOutputPacket(ctx, &outPkt); err != nil {
-			return fmt.Errorf("unable to amend output packet: %w", err)
+			return prepareError(ctx, err, "amend output packet")
 		}
 	}
 
@@ -118,7 +118,7 @@ func (k *Base[H]) SendInputFrame(
 
 	if visitor, ok := any(k.Handler).(VisitInputFramer); ok {
 		if err := visitor.VisitInputFrame(ctx, &input); err != nil {
-			return fmt.Errorf("unable to amend output frame: %w", err)
+			return prepareError(ctx, err, "visit input frame")
 		}
 	}
 
@@ -130,7 +130,7 @@ func (k *Base[H]) SendInputFrame(
 
 	if amender, ok := any(k.Handler).(AmendOutputFramer); ok {
 		if err := amender.AmendOutputFrame(ctx, &outFrame); err != nil {
-			return fmt.Errorf("unable to amend output frame: %w", err)
+			return prepareError(ctx, err, "amend output frame")
 		}
 	}
 
@@ -140,6 +140,19 @@ func (k *Base[H]) SendInputFrame(
 		return ctx.Err()
 	}
 	return nil
+}
+
+func prepareError(ctx context.Context, err error, action string) error {
+	if err == nil {
+		return nil
+	}
+	switch err := err.(type) {
+	case ErrSkip:
+		logger.Debugf(ctx, "skipped %s: %v", action, err)
+		return nil
+	default:
+		return fmt.Errorf("unable to %s: %w", action, err)
+	}
 }
 
 func (k *Base[H]) String() string {
