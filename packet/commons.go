@@ -82,7 +82,14 @@ func (pkt *Commons) GetSize() int {
 }
 
 func (pkt *Commons) GetMediaType() astiav.MediaType {
-	return pkt.Stream.CodecParameters().MediaType()
+	if pkt.Stream == nil {
+		return astiav.MediaTypeUnknown
+	}
+	codecParams := pkt.Stream.CodecParameters()
+	if codecParams == nil {
+		return astiav.MediaTypeUnknown
+	}
+	return codecParams.MediaType()
 }
 
 func (pkt *Commons) GetStreamIndex() int {
