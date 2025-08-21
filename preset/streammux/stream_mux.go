@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -46,6 +47,7 @@ type StreamMux[C any] struct {
 	nodeboilerplate.Statistics
 	nodeboilerplate.InputFilter
 
+	startCh   *chan struct{}
 	waitGroup sync.WaitGroup
 }
 
@@ -79,6 +81,8 @@ func NewWithCustomData[C any](
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output[C]{},
+
+		startCh: ptr(make(chan struct{})),
 	}
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
 	s.initSwitches()
@@ -480,9 +484,28 @@ func (s *StreamMux[C]) Start(
 	return nil
 }
 
-func (s *StreamMux[C]) Wait(
+func (s *StreamMux[C]) WaitForStartChan() <-chan struct{} {
+	return *xatomic.LoadPointer(&s.startCh)
+}
+
+func (s *StreamMux[C]) WaitForStart(
 	ctx context.Context,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "WaitForStart")
+	defer func() { logger.Tracef(ctx, "/WaitForStart: %v", _err) }()
+	select {
+	case <-s.WaitForStartChan():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *StreamMux[C]) WaitForStop(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "WaitForStop")
+	defer func() { logger.Tracef(ctx, "/WaitForStop: %v", _err) }()
 	s.waitGroup.Wait()
 	return nil
 }

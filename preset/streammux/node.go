@@ -3,7 +3,9 @@ package streammux
 import (
 	"context"
 
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
@@ -17,6 +19,20 @@ func (n *StreamMux[C]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+	logger.Tracef(ctx, "StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
+	defer logger.Tracef(ctx, "/StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
+	n.waitGroup.Add(1)
+	defer n.waitGroup.Done()
+	startCh := *xatomic.LoadPointer(&n.startCh)
+	select {
+	case <-startCh:
+		panic("this StreamMux is already serving")
+	default:
+	}
+	close(startCh)
+	defer func() {
+		xatomic.StorePointer(&n.startCh, ptr(make(chan struct{})))
+	}()
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{EachNode: cfg}, errCh, n.InputNode)
 }
 
