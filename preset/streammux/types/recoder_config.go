@@ -1,26 +1,32 @@
 package types
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 )
 
 type AudioTrackConfig struct {
 	InputTrackIDs   []int           `yaml:"input_track_ids"`
 	OutputTrackIDs  []int           `yaml:"output_track_ids"`
-	CodecName       string          `yaml:"codec_name"`
+	CodecName       codec.Name      `yaml:"codec_name"`
 	AveragingPeriod time.Duration   `yaml:"averaging_period"`
 	AverageBitRate  uint64          `yaml:"average_bit_rate"`
 	CustomOptions   DictionaryItems `yaml:"custom_options"`
 }
 
+func (c *AudioTrackConfig) Codec(ctx context.Context) *astiav.Codec {
+	return c.CodecName.Codec(ctx, true)
+}
+
 type VideoTrackConfig struct {
 	InputTrackIDs      []int              `yaml:"input_track_ids"`
 	OutputTrackIDs     []int              `yaml:"output_track_ids"`
-	CodecName          string             `yaml:"codec_name"`
+	CodecName          codec.Name         `yaml:"codec_name"`
 	AveragingPeriod    time.Duration      `yaml:"averaging_period"`
 	AverageBitRate     uint64             `yaml:"average_bit_rate"`
 	CustomOptions      DictionaryItems    `yaml:"custom_options"`
@@ -30,19 +36,25 @@ type VideoTrackConfig struct {
 	Height             uint32             `yaml:"height"`
 }
 
+func (c *VideoTrackConfig) Codec(ctx context.Context) *astiav.Codec {
+	return c.CodecName.Codec(ctx, true)
+}
+
 type RecoderConfig struct {
 	AudioTrackConfigs []AudioTrackConfig `yaml:"audio_track_configs"`
 	VideoTrackConfigs []VideoTrackConfig `yaml:"video_track_configs"`
 }
 
-func (c *RecoderConfig) OutputKey() OutputKey {
-	var audioCodec string
+func (c *RecoderConfig) OutputKey(
+	ctx context.Context,
+) OutputKey {
+	var audioCodec codec.Name
 	if len(c.AudioTrackConfigs) > 0 {
-		audioCodec = c.AudioTrackConfigs[0].CodecName
+		audioCodec = c.AudioTrackConfigs[0].CodecName.Canonicalize(ctx, true)
 	}
-	var videoCodec string
+	var videoCodec codec.Name
 	if len(c.VideoTrackConfigs) > 0 {
-		videoCodec = c.VideoTrackConfigs[0].CodecName
+		videoCodec = c.VideoTrackConfigs[0].CodecName.Canonicalize(ctx, true)
 	}
 	resolution := codec.Resolution{
 		Width:  c.VideoTrackConfigs[0].Width,

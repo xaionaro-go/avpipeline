@@ -34,7 +34,7 @@ func main() {
 
 	loggerLevel := logger.LevelWarning
 	pflag.Var(&loggerLevel, "log-level", "Log level")
-	videoCodec := pflag.String("vcodec", codec.CodecNameCopy, "")
+	videoCodec := pflag.String("vcodec", string(codec.NameCopy), "")
 	hwDeviceName := pflag.String("hwdevice", "", "")
 	frameDrop := pflag.Bool("framedrop", false, "")
 
@@ -83,8 +83,8 @@ func main() {
 			HardwareDeviceName: hwDevName,
 		}),
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
-			VideoCodec:         *videoCodec,
-			AudioCodec:         codec.CodecNameCopy,
+			VideoCodec:         codec.Name(*videoCodec),
+			AudioCodec:         codec.NameCopy,
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDevName,
 			VideoOptions:       types.DictionaryItems{{Key: "bf", Value: "0"}}.ToAstiav(),

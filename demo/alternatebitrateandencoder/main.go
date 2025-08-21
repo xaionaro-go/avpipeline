@@ -106,8 +106,8 @@ func main() {
 	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
 		encoderFactory := codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
-			VideoCodec:         vcodec,
-			AudioCodec:         codec.CodecNameCopy,
+			VideoCodec:         codec.Name(vcodec),
+			AudioCodec:         codec.NameCopy,
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDeviceName,
 		})

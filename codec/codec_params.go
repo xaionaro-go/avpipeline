@@ -7,7 +7,7 @@ import (
 )
 
 type CodecParams struct {
-	CodecName          string
+	CodecName          Name
 	CodecParameters    *astiav.CodecParameters
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName

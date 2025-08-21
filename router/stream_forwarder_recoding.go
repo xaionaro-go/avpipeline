@@ -67,13 +67,13 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
-								CodecName:      codec.CodecNameCopy,
+								CodecName:      codec.NameCopy,
 							})
 						case astiav.MediaTypeAudio:
 							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
-								CodecName:      codec.CodecNameCopy,
+								CodecName:      codec.NameCopy,
 							})
 						}
 					}
@@ -85,12 +85,12 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{0},
-				CodecName:      codec.CodecNameCopy,
+				CodecName:      codec.NameCopy,
 			})
 			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{1},
-				CodecName:      codec.CodecNameCopy,
+				CodecName:      codec.NameCopy,
 			})
 		}
 	}

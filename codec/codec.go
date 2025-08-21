@@ -113,7 +113,7 @@ func (c *Codec) reset(ctx context.Context) (_err error) {
 
 func findEncoderCodec(
 	codecID astiav.CodecID,
-	codecName string,
+	codecName Name,
 ) *astiav.Codec {
 	if codecName != "" {
 		r := astiav.FindEncoderByName(string(codecName))
@@ -126,7 +126,7 @@ func findEncoderCodec(
 
 func findDecoderCodec(
 	codecID astiav.CodecID,
-	codecName string,
+	codecName Name,
 ) *astiav.Codec {
 	if codecName != "" {
 		r := astiav.FindDecoderByName(string(codecName))
@@ -141,7 +141,7 @@ func findCodec(
 	ctx context.Context,
 	isEncoder bool,
 	codecID astiav.CodecID,
-	codecName string,
+	codecName Name,
 ) (_ret *astiav.Codec) {
 	logger.Tracef(ctx, "findCodec(ctx, %t, %s, '%s')", isEncoder, codecID, codecName)
 	defer func() {
@@ -151,43 +151,6 @@ func findCodec(
 		return findEncoderCodec(codecID, codecName)
 	}
 	return findDecoderCodec(codecID, codecName)
-}
-
-func findCodecByName(
-	ctx context.Context,
-	isEncoder bool,
-	codecName string,
-) (_ret *astiav.Codec) {
-	logger.Tracef(ctx, "findCodecByName(ctx, %t, '%s')", isEncoder, codecName)
-	defer func() {
-		logger.Tracef(ctx, "/findCodecByName(ctx, %t, '%s'): %v", isEncoder, codecName, _ret)
-	}()
-	if isEncoder {
-		return astiav.FindEncoderByName(string(codecName))
-	}
-	return astiav.FindDecoderByName(string(codecName))
-}
-
-func hwCodecName(
-	ctx context.Context,
-	isEncoder bool,
-	codecName string,
-	hwDeviceType HardwareDeviceType,
-) (_ret string) {
-	logger.Tracef(ctx, "hwCodecName(ctx, %t, '%s', %v)", isEncoder, codecName, hwDeviceType)
-	defer func() {
-		logger.Tracef(ctx, "/hwCodecName(ctx, %t, '%s', %v): %v", isEncoder, codecName, hwDeviceType, _ret)
-	}()
-	switch hwDeviceType {
-	case astiav.HardwareDeviceTypeCUDA:
-		if isEncoder {
-			return codecName + "_nvenc"
-		} else {
-			return codecName + "_cuvid"
-		}
-	default:
-		return codecName + "_" + hwDeviceType.String()
-	}
 }
 
 func newCodec(
@@ -240,11 +203,7 @@ func newCodec(
 	isHW := false
 	c.codec = nil
 	if codecName != "" && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
-		hwCodec := findCodecByName(
-			ctx,
-			isEncoder,
-			hwCodecName(ctx, isEncoder, codecName, hardwareDeviceType),
-		)
+		hwCodec := codecName.hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
 		if c.codec != nil {
 			isHW = true
 			c.codec = hwCodec
@@ -265,11 +224,7 @@ func newCodec(
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
 	if !isHW && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
-		hwCodec := findCodecByName(
-			ctx,
-			isEncoder,
-			hwCodecName(ctx, isEncoder, c.codec.Name(), hardwareDeviceType),
-		)
+		hwCodec := Name(c.codec.Name()).hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
 		if hwCodec != nil {
 			isHW = true
 			c.codec = hwCodec

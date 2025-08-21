@@ -24,8 +24,8 @@ type NaiveEncoderFactory struct {
 }
 
 type NaiveEncoderFactoryParams struct {
-	VideoCodec         string
-	AudioCodec         string
+	VideoCodec         Name
+	AudioCodec         Name
 	HardwareDeviceType astiav.HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
@@ -57,14 +57,14 @@ func (f *NaiveEncoderFactory) String() string {
 }
 
 func (f *NaiveEncoderFactory) VideoCodecID() astiav.CodecID {
-	if f.VideoCodec == CodecNameCopy {
+	if f.VideoCodec == NameCopy {
 		return 0
 	}
 	return findEncoderCodec(0, f.VideoCodec).ID()
 }
 
 func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
-	if f.AudioCodec == CodecNameCopy {
+	if f.AudioCodec == NameCopy {
 		return 0
 	}
 	return findEncoderCodec(0, f.AudioCodec).ID()

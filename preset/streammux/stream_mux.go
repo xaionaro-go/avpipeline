@@ -270,7 +270,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
-	outputKey := cfg.OutputKey()
+	outputKey := cfg.OutputKey(ctx)
 	var err error
 	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
 	if err != nil {

@@ -134,7 +134,7 @@ func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
 	}
 	cpy := s.RecodingConfig
 	cpy.VideoTrackConfigs = slices.Clone(cpy.VideoTrackConfigs)
-	cpy.VideoTrackConfigs[0].CodecName = codec.CodecNameCopy
+	cpy.VideoTrackConfigs[0].CodecName = codec.NameCopy
 	return cpy
 }
 
@@ -178,10 +178,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 		}
 		return nil
 	}
-	if cfg.AudioTrackConfigs[0].CodecName != codec.CodecNameCopy {
+	if cfg.AudioTrackConfigs[0].CodecName != codec.NameCopy {
 		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTrackConfigs[0].CodecName)
 	}
-	if cfg.VideoTrackConfigs[0].CodecName == codec.CodecNameCopy {
+	if cfg.VideoTrackConfigs[0].CodecName == codec.NameCopy {
 		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -238,7 +238,7 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		codec.NewNaiveEncoderFactory(ctx,
 			&codec.NaiveEncoderFactoryParams{
 				VideoCodec:         cfg.VideoTrackConfigs[0].CodecName,
-				AudioCodec:         codec.CodecNameCopy,
+				AudioCodec:         codec.NameCopy,
 				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
 				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
 				VideoOptions:       convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),

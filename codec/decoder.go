@@ -17,7 +17,7 @@ type Decoder struct {
 
 func NewDecoder(
 	ctx context.Context,
-	codecName string,
+	codecName Name,
 	codecParameters *astiav.CodecParameters,
 	hardwareDeviceType astiav.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,

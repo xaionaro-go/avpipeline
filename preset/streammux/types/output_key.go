@@ -7,8 +7,8 @@ import (
 )
 
 type OutputKey struct {
-	AudioCodec string
-	VideoCodec string
+	AudioCodec codec.Name
+	VideoCodec codec.Name
 	Resolution codec.Resolution
 }
 

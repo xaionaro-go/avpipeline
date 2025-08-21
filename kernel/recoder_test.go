@@ -25,7 +25,7 @@ import (
 
 func TestRecoderNoFailure(t *testing.T) {
 	const vcodec = "libx264"
-	const acodec = codec.CodecNameCopy
+	const acodec = codec.NameCopy
 	loggerLevel := logger.LevelTrace
 
 	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
