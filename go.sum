@@ -20,8 +20,6 @@ github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 h1:UkoycH6lT7QfBw3LqH
 github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2/go.mod h1:bVEceuoz83G4yjq9Os7lCYe+lf46uY8EFEHkxSCywvM=
 github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7 h1:Ng6QMSlQSB+goG6430/Fp7O4YO2BJZXZJaldtg+7kEc=
 github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7/go.mod h1:QUXmOopthsqLYJ+rAybuCf16J7qQm60TLVdQR0w1Nus=
-github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f h1:lifmuIc/S/hzVoStbEAsdryJ6qBSNeXXb9NseP0vlfs=
-github.com/go-ng/xatomic v0.0.0-20230519181013-85c0ec87e55f/go.mod h1:+3P6aQ4zDVR6jGPnXq3g/7kHnKLB73EsnGBhM0adWhA=
 github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10 h1:7hbi8e5YN1YF7kLHMJPRuxExGskIx8/LUs4z/BP5JwE=
 github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10/go.mod h1:+3P6aQ4zDVR6jGPnXq3g/7kHnKLB73EsnGBhM0adWhA=
 github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c h1:HJxoDBw4gpvxB+hR8qe44GPrDbOw8q2jR5W9yr3toxo=

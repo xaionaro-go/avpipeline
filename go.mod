@@ -56,7 +56,7 @@ require (
 	github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
-	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
+	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	lukechampine.com/blake3 v1.4.0 // indirect
 )

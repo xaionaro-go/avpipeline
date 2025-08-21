@@ -118,7 +118,7 @@ func (s *StreamMux[C]) initSwitches() {
 	})
 
 	// Waiting for the "last packet" notification to reach the OutputSyncer on the active
-	// output chain, since we want to make the switch only after the last packet in the
+	// output chain, since we want to make the final switch only after the last packet in the
 	// chain is processed.
 	//
 	// But just in case we also have a 10 seconds timeout (in case the packet was
@@ -139,6 +139,7 @@ func (s *StreamMux[C]) initSwitches() {
 					return true
 				}),
 			},
+			// unlocking prevDataLocker if ready to switch to the next output
 			packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
 				logger.Debugf(ctx, "unlocking prevDataLocker")
 				prevDataLocker.Unlock()
