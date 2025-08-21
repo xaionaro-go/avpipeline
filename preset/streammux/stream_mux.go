@@ -308,6 +308,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
 	}
 
+	s.RecodingConfig = cfg
 	return nil
 }
 
@@ -330,14 +331,13 @@ func (s *StreamMux[C]) reconfigureOutput(
 	audioCfg := cfg.VideoTrackConfigs[0]
 
 	encoderFactory := output.RecoderNode.Processor.Kernel.EncoderFactory
-	if videoCfg.CodecName != encoderFactory.VideoCodec {
-		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
-	}
 
 	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
 		if len(encoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
+			encoderFactory.VideoCodec = videoCfg.CodecName
+			encoderFactory.AudioCodec = audioCfg.CodecName
 			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
 			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
@@ -346,6 +346,10 @@ func (s *StreamMux[C]) reconfigureOutput(
 				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}
 			return nil
+		}
+
+		if videoCfg.CodecName != encoderFactory.VideoCodec {
+			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
 		}
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")

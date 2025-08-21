@@ -19,6 +19,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/xcontext"
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -113,8 +114,16 @@ func newOutput[C any](
 	streamIndexAssigner kernel.StreamIndexAssigner,
 ) (_ret *Output[C], _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
-	logger.Tracef(ctx, "NewOutput: %#+v", outputKey)
-	defer func() { logger.Tracef(ctx, "/NewOutput: %#+v", outputKey, _err) }()
+	ctx = xcontext.DetachDone(ctx)
+	ctx, cancelFn := context.WithCancel(ctx)
+	logger.Debugf(ctx, "newOutput: %#+v", outputKey)
+	defer func() { logger.Debugf(ctx, "/newOutput: %#+v %v", outputKey, _err) }()
+
+	defer func() {
+		if _err != nil {
+			cancelFn()
+		}
+	}()
 
 	outputNode, outputConfig, err := outputFactory.NewOutput(ctx, outputKey)
 	if err != nil {

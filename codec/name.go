@@ -26,7 +26,7 @@ func (n Name) Canonicalize(
 	isEncoder bool,
 ) (_ret Name) {
 	logger.Tracef(ctx, "Canonicalize(ctx, '%s')", n)
-	defer func() { logger.Tracef(ctx, "/Canonicalize(ctx, '%s'): %v", n, _ret) }()
+	defer func() { logger.Tracef(ctx, "/Canonicalize(ctx, '%s'): '%v'", n, _ret) }()
 	switch n {
 	case NameCopy:
 		return NameCopy
@@ -34,10 +34,12 @@ func (n Name) Canonicalize(
 		return NameRaw
 	}
 	codec := n.Codec(ctx, isEncoder)
-	if codec == nil {
-		return ""
+	if codec != nil {
+		return Name(codec.ID().Name())
 	}
-	return Name(codec.ID().Name())
+
+	// TODO: use avcodec_descriptor_get_by_name to validate if the name is correct
+	return n
 }
 
 func (n Name) hwName(
