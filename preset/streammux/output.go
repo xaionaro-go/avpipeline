@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -34,7 +35,7 @@ type Output[C any] struct {
 	OutputThrottler  *packetcondition.VideoAverageBitrateLower
 	MapIndices       *NodeMapStreamIndexes[C]
 	OutputFixer      *autofix.AutoFixer
-	OutputSyncFilter *NodeBarrier[C]
+	OutputSyncer     *NodeBarrier[C]
 	OutputNode       node.Abstract
 	OutputNodeConfig OutputConfig
 }
@@ -111,6 +112,7 @@ func newOutput[C any](
 	outputSyncer barrierstategetter.StateGetter,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 ) (_ret *Output[C], _err error) {
+	ctx = belt.WithField(ctx, "output_id", outputID)
 	logger.Tracef(ctx, "NewOutput: %#+v", outputKey)
 	defer func() { logger.Tracef(ctx, "/NewOutput: %#+v", outputKey, _err) }()
 
@@ -139,11 +141,14 @@ func newOutput[C any](
 	}
 
 	o := &Output[C]{
-		ID:             outputID,
-		InputFilter:    node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, outputSwitch)),
+		ID: outputID,
+		InputFilter: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(
+			belt.WithField(ctx, "output_chain_step", "InputFilter"),
+			outputSwitch,
+		)),
 		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		InputFixer: autofix.New(
-			ctx,
+			belt.WithField(ctx, "output_chain_step", "InputFixer"),
 			inputNode.Processor.GetPacketSource(),
 			recoderKernel.Decoder,
 		),
@@ -155,11 +160,14 @@ func newOutput[C any](
 		OutputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		MapIndices:      node.NewWithCustomDataFromKernel[C](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
 		OutputFixer: autofix.New(
-			ctx,
+			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			outputProcessor.GetPacketSink(),
 		),
-		OutputSyncFilter: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, outputSyncer)),
+		OutputSyncer: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(
+			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
+			outputSyncer,
+		)),
 		OutputNode:       outputNode,
 		OutputNodeConfig: outputConfig,
 	}
@@ -173,11 +181,11 @@ func newOutput[C any](
 		o.MapIndices,
 	)
 	o.MapIndices.AddPushPacketsTo(o.OutputFixer)
-	o.OutputFixer.AddPushPacketsTo(o.OutputSyncFilter)
+	o.OutputFixer.AddPushPacketsTo(o.OutputSyncer)
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
 		return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes
 	})
-	o.OutputSyncFilter.AddPushPacketsTo(o.OutputNode,
+	o.OutputSyncer.AddPushPacketsTo(o.OutputNode,
 		packetfiltercondition.Packet{Condition: packetcondition.And{
 			o.OutputThrottler,
 			packetcondition.Or{
@@ -219,7 +227,7 @@ func (o *Output[C]) Close(ctx context.Context) (_err error) {
 	if err := o.OutputFixer.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output fixer for output %d: %w", o.ID, err))
 	}
-	if err := o.OutputSyncFilter.GetProcessor().Close(ctx); err != nil {
+	if err := o.OutputSyncer.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output sync filter for output %d: %w", o.ID, err))
 	}
 	if err := o.OutputNode.GetProcessor().Close(ctx); err != nil {
