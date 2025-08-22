@@ -276,8 +276,13 @@ func (i *Input) Generate(
 				),
 			))
 			if prevPkt != nil {
-				prevPkt.Packet.SetDuration(curPkt.Pts() - prevPkt.Pts())
-				logger.Debugf(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
+				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
+				if stream.TimeBase().Float64()*float64(suggestedDuration) > 0 { // implies less than 1 FPS
+					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it")
+				} else {
+					prevPkt.Packet.SetDuration(suggestedDuration)
+					logger.Debugf(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
+				}
 
 				if err := sendPkt(prevPkt); err != nil {
 					return err

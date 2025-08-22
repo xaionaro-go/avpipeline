@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -13,6 +14,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
+)
+
+const (
+	encoderDebug = false
 )
 
 const (
@@ -112,6 +117,11 @@ func newEncoder(
 }
 
 func (e *EncoderFull) String() string {
+	ctx := context.TODO()
+	if !e.locker.ManualTryRLock(ctx) {
+		return "Encoder(<locked>)"
+	}
+	defer e.locker.ManualRUnlock(ctx)
 	return fmt.Sprintf("Encoder(%s)", e.codec.Name())
 }
 
@@ -131,10 +141,58 @@ func (e *EncoderFull) SendFrame(
 }
 
 func (e *EncoderFull) sendFrameLocked(
-	_ context.Context,
+	ctx context.Context,
 	f *astiav.Frame,
 ) error {
+	if encoderDebug {
+		if e.codecContext.Framerate().Float64() == 0 && f.Duration() == 0 {
+			logger.Errorf(ctx, "it is impossible to calculate the framerate, since it is not set on the encoder and the frame has no duration")
+		}
+	}
+	if strings.HasSuffix(e.codec.Name(), "_nvenc") {
+		// NVENC has a bug that they ignore timestamps on frames,
+		// thus if we have variadic framerates, which somehow leads
+		// to abysmally small bitrate (at least in my case).
+		//
+		// See also https://video.stackexchange.com/questions/38096/vfr-input-h264-nvenc-output-bitrate-is-based-on-initial-frame-rate-when-i-wa
+		e.setFrameRateFromDuration(ctx, f)
+	}
 	return e.codecContext.SendFrame(f)
+}
+
+func (e *EncoderFull) setFrameRateFromDuration(
+	ctx context.Context,
+	f *astiav.Frame,
+) {
+	dur := f.Duration()
+	if dur <= 0 {
+		logger.Debugf(ctx, "cannot set framerate from frame duration: frame has no duration")
+		return
+	}
+	timeBase := e.codecContext.TimeBase()
+	fps := timeBase.Invert()
+	fps.SetNum(fps.Num() / int(dur))
+	oldFPS := e.InitParams.CodecParameters.FrameRate()
+	if oldFPS == fps {
+		if encoderDebug {
+			logger.Tracef(ctx, "FPS have not changed: %v", fps)
+		}
+		return
+	}
+
+	logger.Debugf(ctx, "setting FPS to %v (codec: '%s')", fps, e.codec.Name())
+	e.InitParams.CodecParameters.SetFrameRate(fps)
+	switch {
+	case strings.HasSuffix(e.codec.Name(), "_nvenc"):
+		// NVENC seems to ignore codec context framerate
+		// so we just need to reinit the encoder
+		err := e.reinitEncoder(ctx)
+		if err != nil {
+			logger.Errorf(ctx, "unable to reinit the encoder after framerate (%v -> %v) change: %v", oldFPS, fps, err)
+		}
+	default:
+		e.codecContext.SetFramerate(fps)
+	}
 }
 
 func (e *EncoderFull) ReceivePacket(
@@ -203,12 +261,28 @@ func (e *EncoderFull) reinitEncoder(
 	logger.Tracef(ctx, "reinitEncoder")
 	defer func() { logger.Tracef(ctx, "/reinitEncoder: %v", _err) }()
 
+	oldInternals := e.codecInternals
+	// We'd prefer to close the old encoder after the new one is created,
+	// but there is a bug in NVENC that sometimes leads to segfaults:
+	//#0  runtime.raise () at /usr/lib/go-1.24/src/runtime/sys_linux_amd64.s:154
+	//#1  0x0000000000460017 in runtime.raisebadsignal (sig=11, c=0x7da2d17e5510) at /usr/lib/go-1.24/src/runtime/signal_unix.go:1038
+	//#2  0x0000000000460285 in runtime.badsignal (sig=11, c=0x7da2d17e5510) at /usr/lib/go-1.24/src/runtime/signal_unix.go:1147
+	//#3  0x000000000045ef2b in runtime.sigtrampgo (sig=11, info=0x7da2d17e56b0, ctx=0x7da2d17e5580) at /usr/lib/go-1.24/src/runtime/signal_unix.go:468
+	//#4  0x0000000000487f46 in runtime.sigtramp () at /usr/lib/go-1.24/src/runtime/sys_linux_amd64.s:352
+	//#5  0x00007da478445810 in <signal handler called> () at /lib/x86_64-linux-gnu/libc.so.6
+	//#6  0x00007da3062199d1 in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
+	//#7  0x00007da306219b0a in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
+	//#8  0x00007da3062979a6 in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
+	//#9  0x00007da30629810d in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
+	//#10 0x00007da4784a2ef1 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:448
+	//#11 0x00007da47853445c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+	if err := oldInternals.closeLocked(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
+	}
+
 	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
-	}
-	if err := e.closeLocked(ctx); err != nil {
-		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
 	}
 
 	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was is closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
@@ -217,10 +291,11 @@ func (e *EncoderFull) reinitEncoder(
 	// will get relevant stuff when it will get unlocked
 	oldCodec := e.EncoderFullBackend
 	oldCodec.codecInternals = newEncoder.codecInternals
+	newEncoder.EncoderFullBackend = oldCodec
 	*e = *newEncoder
-	e.EncoderFullBackend = oldCodec
 	return nil
 }
+
 func (e *EncoderFull) SanityCheck(
 	ctx context.Context,
 ) (_err error) {

@@ -100,7 +100,9 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	if c.closer == nil {
 		return nil
 	}
-	return c.closer.Close()
+	err := c.closer.Close()
+	c.closer = nil
+	return err
 }
 
 func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
