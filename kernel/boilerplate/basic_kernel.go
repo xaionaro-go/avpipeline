@@ -148,10 +148,10 @@ func prepareError(ctx context.Context, err error, action string) error {
 	}
 	switch err := err.(type) {
 	case ErrSkip:
-		logger.Debugf(ctx, "skipped %s: %v", action, err)
+		logger.Debugf(ctx, "got a skip signal from '%s': %v", action, err)
 		return nil
 	default:
-		return fmt.Errorf("unable to %s: %w", action, err)
+		return fmt.Errorf("unable to '%s': %w", action, err)
 	}
 }
 

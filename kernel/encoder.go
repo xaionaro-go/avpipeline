@@ -25,6 +25,7 @@ const (
 	encoderWriteHeaderOnNotifyPacketSources    = false
 	encoderCopyDTSPTS                          = true
 	encoderDTSHigherPTSCorrect                 = false
+	encoderDebug                               = false
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -410,6 +411,16 @@ func (e *Encoder[EF]) sendInputFrame(
 				logger.Debugf(ctx, "updating the codec parameters")
 				encoder.ToCodecParameters(outputStream.CodecParameters())
 				encoder.LastInitTS = initTS
+			}
+		}
+	}
+
+	if encoderDebug {
+		if encoder, ok := encoder.Encoder.(interface {
+			SanityCheck(ctx context.Context) error
+		}); ok {
+			if err := encoder.SanityCheck(ctx); err != nil {
+				return fmt.Errorf("encoder sanity check failed: %w", err)
 			}
 		}
 	}

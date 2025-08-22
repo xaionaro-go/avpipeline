@@ -68,19 +68,13 @@ func (e *EncoderFull) setResolutionGeneric(
 	logger.Infof(ctx, "SetResolution (generic): %dx%d", width, height)
 	e.InitParams.CodecParameters.SetWidth(int(width))
 	e.InitParams.CodecParameters.SetHeight(int(height))
+	e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", width, height), 0)
 	defer func() {
 		if _err != nil {
 			e.InitParams.CodecParameters.SetWidth(int(curW))
 			e.InitParams.CodecParameters.SetHeight(int(curH))
+			e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", curW, curH), 0)
 		}
 	}()
-	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality)
-	if err != nil {
-		return fmt.Errorf("unable to initialize new encoder for resolution %dx%d: %w", width, height, err)
-	}
-	if err := e.closeLocked(ctx); err != nil {
-		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
-	}
-	*e = *newEncoder
-	return nil
+	return e.reinitEncoder(ctx)
 }

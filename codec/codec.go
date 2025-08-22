@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"runtime/debug"
 	"strings"
 
 	"github.com/asticode/go-astiav"
@@ -20,7 +21,7 @@ const (
 	manuallySetHardwareContext = false
 )
 
-type Codec struct {
+type codecInternals struct {
 	InitParams            CodecParams
 	IsEncoder             bool
 	codec                 *astiav.Codec
@@ -28,7 +29,11 @@ type Codec struct {
 	hardwareDeviceContext *astiav.HardwareDeviceContext
 	hardwarePixelFormat   astiav.PixelFormat
 	closer                *astikit.Closer
-	locker                xsync.RWMutex
+}
+
+type Codec struct {
+	*codecInternals
+	locker xsync.RWMutex
 }
 
 func (c *Codec) Codec() *astiav.Codec {
@@ -46,6 +51,7 @@ func (c *Codec) CodecContext() *astiav.CodecContext {
 func (c *Codec) MediaType() astiav.MediaType {
 	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.MediaType {
 		if c.codecContext == nil {
+			logger.Errorf(context.TODO(), "codecContext == nil")
 			return astiav.MediaTypeUnknown
 		}
 		return c.codecContext.MediaType()
@@ -55,6 +61,7 @@ func (c *Codec) MediaType() astiav.MediaType {
 func (c *Codec) TimeBase() astiav.Rational {
 	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.Rational {
 		if c.codecContext == nil {
+			logger.Errorf(context.TODO(), "codecContext == nil")
 			return astiav.Rational{}
 		}
 		return c.codecContext.TimeBase()
@@ -77,12 +84,17 @@ func (c *Codec) Close(ctx context.Context) error {
 	return xsync.DoA1R1(ctx, &c.locker, c.closeLocked, ctx)
 }
 
-func (c *Codec) closeLocked(ctx context.Context) (_err error) {
+func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "closeLocked")
 	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
+	logger.Tracef(ctx, "closing the codec, due to: %s", debug.Stack())
 	if err := c.reset(ctx); err != nil {
 		logger.Errorf(ctx, "unable to reset the codec: %w", err)
 	}
+	defer func() {
+		c.codec = nil
+		c.codecContext = nil
+	}()
 	if c.closer == nil {
 		return nil
 	}
@@ -104,9 +116,12 @@ func (c *Codec) Reset(ctx context.Context) (_err error) {
 	return xsync.DoA1R1(ctx, &c.locker, c.reset, ctx)
 }
 
-func (c *Codec) reset(ctx context.Context) (_err error) {
+func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "reset")
 	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+	if c.codecContext == nil {
+		return fmt.Errorf("codec is closed")
+	}
 	c.codecContext.FlushBuffers()
 	return nil
 }
@@ -176,12 +191,15 @@ func newCodec(
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 	c := &Codec{
-		InitParams: params,
-		IsEncoder:  isEncoder,
-		closer:     astikit.NewCloser(),
+		codecInternals: &codecInternals{
+			InitParams: params,
+			IsEncoder:  isEncoder,
+			closer:     astikit.NewCloser(),
+		},
 	}
 	defer func() {
 		if _err != nil {
+			logger.Debugf(ctx, "got an error, closing the codec: %v", _err)
 			_ = c.Close(ctx)
 		}
 	}()
@@ -256,6 +274,7 @@ func newCodec(
 		lazyInitOptions()
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 		if isEncoder {
+			options.Set("gpu", "0", 0)
 			if options.Get("g", nil, 0) == nil {
 				fps := codecParameters.FrameRate().Float64()
 				if fps < 1 {
@@ -338,6 +357,7 @@ func newCodec(
 			logger.Tracef(ctx, "setting frame rate to %s", v)
 			c.codecContext.SetFramerate(v)
 		}
+		logger.Tracef(ctx, "resolution: %dx%d", codecParameters.Width(), codecParameters.Height())
 		c.codecContext.SetWidth(codecParameters.Width())
 		c.codecContext.SetHeight(codecParameters.Height())
 		if forcePixelFormat != astiav.PixelFormatNone {
@@ -383,6 +403,6 @@ func newCodec(
 		return nil, fmt.Errorf("unable to open codec context: %w", err)
 	}
 
-	setFinalizer(ctx, c, func(c *Codec) { c.Close(ctx) })
+	setFinalizer(ctx, c.codecInternals, func(c *codecInternals) { c.closeLocked(ctx) })
 	return c, nil
 }

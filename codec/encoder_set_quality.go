@@ -7,6 +7,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -51,37 +52,64 @@ func (e *EncoderFull) setQualityNow(
 		}
 	}()
 
+	if q == e.Quality {
+		logger.Debugf(ctx, "the quality is already %T(%v)", q, q)
+		return nil
+	}
+
 	codecWords := strings.Split(codecName, "_")
 	if len(codecWords) != 2 {
-		return e.setQualityGeneric(ctx, q)
+		return e.setQualityCodecReinit(ctx, q)
 	}
 	codecModifier := codecWords[1]
 	switch strings.ToLower(codecModifier) {
 	case "mediacodec":
 		return e.setQualityMediacodec(ctx, q)
 	}
-	return e.setQualityGeneric(ctx, q)
+	return e.setQualityCodecReinit(ctx, q)
 }
 
 func (e *EncoderFull) setQualityGeneric(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {
-	if q == e.Quality {
-		logger.Debugf(ctx, "the quality is already %T(%v)", q, q)
-		return nil
-	}
-	logger.Infof(ctx, "SetQuality (generic): %T(%v)", q, q)
-	e.InitParams.CodecParameters.SetBitRate(0)
-	// TODO: consider user Reset() instead of reimplementing the same logic
-	newEncoder, err := newEncoder(ctx, e.InitParams, q)
-	if err != nil {
-		return fmt.Errorf("unable to initialize new encoder for quality %#+v: %w", q, err)
-	}
-	if err := e.closeLocked(ctx); err != nil {
-		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
-	}
-	*e = *newEncoder
+	logger.Tracef(ctx, "setQualityGeneric: %T(%v)", q, q)
+	defer func() { logger.Tracef(ctx, "/setQualityGeneric: %T(%v): %v", q, q, _err) }()
+
+	oldQ := e.Quality
+	defer func() {
+		if _err != nil {
+			e.Quality = oldQ
+		}
+	}()
 	e.Quality = q
-	return nil
+
+	switch q := q.(type) {
+	case quality.ConstantBitrate:
+		e.codecContext.SetBitRate(int64(q))
+		return nil
+	case quality.ConstantQuality:
+		e.codecContext.PrivateData().Options().Set("crf", fmt.Sprintf("%d", int(q)), 0)
+		return nil
+	default:
+		return fmt.Errorf("quality type %T is not supported, yet", q)
+	}
+}
+
+func (e *EncoderFull) setQualityCodecReinit(
+	ctx context.Context,
+	q Quality,
+) (_err error) {
+	logger.Tracef(ctx, "setQualityGeneric: %T(%v)", q, q)
+	defer func() { logger.Tracef(ctx, "/setQualityGeneric: %T(%v): %v", q, q, _err) }()
+	oldQ := e.Quality
+	defer func() {
+		if _err != nil {
+			e.Quality = oldQ
+		}
+	}()
+	e.Quality = q
+	logger.Infof(ctx, "SetQuality (generic): %T(%v)", q, q)
+	e.InitParams.CodecParameters.SetBitRate(0) // TODO: explain why it's needed
+	return e.reinitEncoder(ctx)
 }

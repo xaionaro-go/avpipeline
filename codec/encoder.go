@@ -140,7 +140,9 @@ func (e *EncoderFull) sendFrameLocked(
 func (e *EncoderFull) ReceivePacket(
 	ctx context.Context,
 	p *astiav.Packet,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "ReceivePacket")
+	defer func() { logger.Tracef(ctx, "/ReceivePacket: %v", _err) }()
 	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() error {
 		return e.receivePacketLocked(ctx, p)
 	})
@@ -193,4 +195,49 @@ func (e *EncoderFull) closeLocked(ctx context.Context) error {
 
 func IsFakeEncoder(encoder Encoder) bool {
 	return IsEncoderCopy(encoder) || IsEncoderRaw(encoder)
+}
+
+func (e *EncoderFull) reinitEncoder(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "reinitEncoder")
+	defer func() { logger.Tracef(ctx, "/reinitEncoder: %v", _err) }()
+
+	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality)
+	if err != nil {
+		return fmt.Errorf("unable to initialize new encoder: %w", err)
+	}
+	if err := e.closeLocked(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
+	}
+
+	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was is closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
+
+	// keeping the locker from the old codec to make sure everybody who is already locked
+	// will get relevant stuff when it will get unlocked
+	oldCodec := e.EncoderFullBackend
+	oldCodec.codecInternals = newEncoder.codecInternals
+	*e = *newEncoder
+	e.EncoderFullBackend = oldCodec
+	return nil
+}
+func (e *EncoderFull) SanityCheck(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "SanityCheck")
+	defer func() { logger.Tracef(ctx, "/SanityCheck: %v", _err) }()
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.sanityCheckLocked, ctx)
+}
+
+func (e *EncoderFull) sanityCheckLocked(
+	ctx context.Context,
+) error {
+	logger.Tracef(ctx, "sanityCheck[%p]", e.EncoderFullBackend)
+	if e.codec == nil {
+		return errors.New("codec == nil")
+	}
+	if e.codecContext == nil {
+		return errors.New("codecContext == nil")
+	}
+	return nil
 }
