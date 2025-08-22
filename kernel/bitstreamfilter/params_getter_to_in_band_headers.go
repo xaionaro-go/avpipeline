@@ -21,3 +21,7 @@ func (ParamsGetterToInBandHeaders) GetChainParams(
 	logger.Debugf(ctx, "stream #%d: codec: %s: filters: %#+v", stream.Index(), codecID, params)
 	return params
 }
+
+func (ParamsGetterToInBandHeaders) String() string {
+	return "ToInBandHeaders"
+}

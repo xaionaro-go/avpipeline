@@ -2,6 +2,7 @@ package bitstreamfilter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
@@ -14,6 +15,8 @@ type Params struct {
 }
 
 type GetChainParamser interface {
+	fmt.Stringer
+
 	// Note: "nil" skips initialization of bitstream filter for this stream on this packet,
 	//       if you need to just not create filters for a stream at all, then return an empty slice instead.
 	GetChainParams(context.Context, packet.Input) []Params

@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
@@ -93,6 +94,7 @@ func (d *Decoder[DF]) getStreamDecoder(
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
 	assert(ctx, decoder != nil)
+	logger.Tracef(ctx, "initialized a decoder: %s", decoder)
 	d.Decoders[stream.Index()] = decoder
 	return decoder, nil
 }
@@ -121,6 +123,7 @@ func (d *Decoder[DF]) sendInputPacket(
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
+	ctx = belt.WithField(ctx, "decoder", decoder)
 
 	if !encoderCopyDTSPTS {
 		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())

@@ -174,7 +174,7 @@ func (bsf *BitstreamFilter) SendInputFrame(
 }
 
 func (bsf *BitstreamFilter) String() string {
-	return "BitstreamFilter"
+	return fmt.Sprintf("BitstreamFilter(%s)", bsf.GetChainParamser)
 }
 
 func (bsf *BitstreamFilter) Close(ctx context.Context) error {

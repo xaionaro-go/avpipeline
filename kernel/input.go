@@ -260,7 +260,12 @@ func (i *Input) WithOutputFormatContext(
 ) {
 	logger.Tracef(ctx, "WithFormatContext")
 	defer func() { logger.Tracef(ctx, "/WithFormatContext") }()
-	<-i.initialized
+	select {
+	case <-ctx.Done():
+		logger.Debugf(ctx, "context is closed")
+		return
+	case <-i.initialized:
+	}
 	callback(i.FormatContext)
 }
 

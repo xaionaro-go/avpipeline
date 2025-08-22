@@ -81,8 +81,8 @@ func (k *NodeKernel) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	_ chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.SendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.SendInputPacket(): %v", _err) }()
+	logger.Tracef(ctx, "SendInputPacket()")
+	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
 	return xsync.DoA3R1(ctx, &k.Locker, k.sendInputPacket, ctx, input, outputPacketsCh)
 }
 
@@ -91,8 +91,8 @@ func (k *NodeKernel) sendInputPacket(
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.sendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.sendInputPacket(): %v", _err) }()
+	logger.Tracef(ctx, "sendInputPacket()")
+	defer func() { logger.Tracef(ctx, "/sendInputPacket(): %v", _err) }()
 
 	isNewSource := input.Source != k.PreviousSource[input.StreamIndex()]
 	if isNewSource {

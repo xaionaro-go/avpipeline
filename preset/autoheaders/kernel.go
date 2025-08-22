@@ -107,7 +107,7 @@ func (h *AutoHeaders) detectAppropriateFixerKernel(
 	input packet.Input,
 ) (_ret kerneltypes.Abstract, _err error) {
 	logger.Debugf(ctx, "detectAppropriateFixerKernel: %v", input.Source)
-	defer func() { logger.Debugf(ctx, "/detectAppropriateFixerKernel: %v %v", _ret, _err) }()
+	defer func() { logger.Debugf(ctx, "/detectAppropriateFixerKernel: %s: %v %v", input.Source, _ret, _err) }()
 
 	logger.Debugf(ctx, "detecting for: %s %s", input.Source, h.Sink)
 	var inputFormatName string

@@ -30,7 +30,7 @@ func NewNodeWithCustomData[C any](
 	sink packet.Sink,
 ) *NodeWithCustomData[C] {
 	k := NewKernel(ctx, sink)
-	n := node.NewWithCustomDataFromKernel[C](ctx, kerneltypes.Abstract(k))
+	n := node.NewWithCustomDataFromKernel[C](ctx, kerneltypes.Abstract(k), processor.DefaultOptionsRecoder()...)
 	k.Handler.SetProcessor(n.Processor)
 	return n
 }

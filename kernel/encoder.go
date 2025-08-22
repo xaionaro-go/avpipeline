@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -296,6 +297,7 @@ func (e *Encoder[EF]) sendInputPacket(
 		encoder = e.encoders[input.GetStreamIndex()]
 	}
 	assert(ctx, encoder != nil)
+	ctx = belt.WithField(ctx, "encoder", encoder)
 
 	if !codec.IsEncoderCopy(encoder.Encoder) {
 		return ErrNotCopyEncoder{}
@@ -352,6 +354,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 	assert(ctx, encoder != nil)
+	ctx = belt.WithField(ctx, "encoder", encoder)
 
 	if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
 		logger.Debugf(ctx, "writing the header")
