@@ -136,10 +136,9 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 ) (_err error) {
 	logger.Tracef(ctx, "makeTimeMoveOnlyForward")
 	defer func() { logger.Tracef(ctx, "/makeTimeMoveOnlyForward: %v", _err) }()
-	streamIndex := input.GetStreamIndex()
 
 	if input.GetDTS() > input.GetPTS() {
-		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for stream %d", input.GetDTS(), input.GetPTS(), streamIndex)
+		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for source %v", input.GetDTS(), input.GetPTS(), packetSource)
 	}
 
 	sourceInfo := k.SourceInfo[packetSource]
@@ -158,7 +157,7 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 
 	if !setNewTimeShift {
 		timeShift := avconv.FromDuration(sourceInfo.TimeShift, timeBase)
-		logger.Tracef(ctx, "Applying PTS offset %v (%d) to stream %d", sourceInfo.TimeShift, timeShift, streamIndex)
+		logger.Tracef(ctx, "Applying PTS offset %v (%d) to source %v", sourceInfo.TimeShift, timeShift, packetSource)
 		input.SetDTS(input.GetDTS() + timeShift)
 		input.SetPTS(input.GetPTS() + timeShift)
 		return nil
