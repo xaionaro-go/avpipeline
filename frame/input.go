@@ -61,6 +61,18 @@ func (f *Input) SetDTS(v int64) {
 	(*Commons)(f).SetDTS(v)
 }
 
+func (f *Input) SetTimeBase(v astiav.Rational) {
+	(*Commons)(f).SetTimeBase(v)
+}
+
+func (f *Input) GetDuration() int64 {
+	return (*Commons)(f).GetDuration()
+}
+
+func (f *Input) SetDuration(v int64) {
+	(*Commons)(f).SetDuration(v)
+}
+
 func (f *Input) GetPTSAsDuration() time.Duration {
 	return (*Commons)(f).GetPTSAsDuration()
 }

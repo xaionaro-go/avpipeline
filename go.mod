@@ -53,7 +53,6 @@ require (
 	github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d // indirect
 	github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f // indirect
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect
-	github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6 // indirect

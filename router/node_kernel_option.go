@@ -1,7 +1,6 @@
 package router
 
 type nodeKernelConfig struct {
-	PTSInitFunc string
 }
 
 type NodeKernelOption interface {
@@ -17,15 +16,7 @@ func (opts NodeKernelOptions) apply(cfg *nodeKernelConfig) {
 }
 
 func (opts NodeKernelOptions) config() nodeKernelConfig {
-	cfg := nodeKernelConfig{
-		PTSInitFunc: DefaultPTSInitFunc,
-	}
+	cfg := nodeKernelConfig{}
 	opts.apply(&cfg)
 	return cfg
-}
-
-type NodeKernelOptionPTSInitFunc string
-
-func (o NodeKernelOptionPTSInitFunc) apply(cfg *nodeKernelConfig) {
-	cfg.PTSInitFunc = string(o)
 }

@@ -28,6 +28,22 @@ func (o *Output) GetMediaType() astiav.MediaType {
 	return (*Commons)(o).GetMediaType()
 }
 
+func (o *Output) GetTimeBase() astiav.Rational {
+	return (*Commons)(o).GetTimeBase()
+}
+
+func (o *Output) SetTimeBase(v astiav.Rational) {
+	(*Commons)(o).SetTimeBase(v)
+}
+
+func (o *Output) GetDuration() int64 {
+	return (*Commons)(o).GetDuration()
+}
+
+func (o *Output) SetDuration(v int64) {
+	(*Commons)(o).SetDuration(v)
+}
+
 func (o *Output) GetPTS() int64 {
 	return (*Commons)(o).GetPTS()
 }

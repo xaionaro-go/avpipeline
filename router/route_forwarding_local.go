@@ -61,7 +61,7 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
-		GetRouteModeCreateIfNotFound,
+		GetRouteModeCreateTemporaryIfNotFound,
 		newForwardOutputFactoryLocalPath(r, dstPath),
 		publishMode,
 		recoderConfig,
@@ -74,7 +74,7 @@ func (f *forwardOutputFactoryLocalPath[T]) NewOutput(
 ) (_ret NodeForwardingOutput[T], _err error) {
 	logger.Tracef(ctx, "NewOutput(ctx, %s)", fwd)
 	defer func() { logger.Tracef(ctx, "/NewOutput(ctx, %s): %v %v", fwd, _ret, _err) }()
-	outputRoute, err := f.Router.GetRoute(ctx, f.RoutePath, GetRouteModeCreateIfNotFound)
+	outputRoute, err := f.Router.GetRoute(ctx, f.RoutePath, GetRouteModeCreateTemporaryIfNotFound)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the source route by path '%s': %w", f.RoutePath, err)
 	}

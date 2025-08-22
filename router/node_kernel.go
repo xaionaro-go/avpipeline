@@ -4,40 +4,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
-	"github.com/xaionaro-go/rpn"
-	rpntypes "github.com/xaionaro-go/rpn/types"
 	"github.com/xaionaro-go/xsync"
 )
 
-type StreamInfo struct {
-	PreviousPTS      int64 // previous PTS of the stream
-	CurrentPTSOffset int64 // offset to apply to the PTS
+type SourceInfo struct {
+	TimeShift time.Duration
 }
 
 type NodeKernel struct {
 	*closuresignaler.ClosureSignaler
-	PTSInitFunc    rpn.Expr[*StreamInfo, int64]
 	Locker         xsync.Mutex
 	PreviousSource map[int]packet.Source // map[streamID]Source
-	StreamInfo     map[int]*StreamInfo   // map[streamID]StreamInfo
+	SourceInfo     map[packet.Source]*SourceInfo
 	FormatContext  *astiav.FormatContext
 	OutputStreams  map[int]*astiav.Stream
+	LatestPTS      time.Duration
 }
 
 var _ kernel.Abstract = (*NodeKernel)(nil)
-
-const (
-	DefaultPTSInitFunc = "pts_latest 1 +" // which means: "pts_latest + 1"
-)
 
 func NewNodeKernel(
 	ctx context.Context,
@@ -45,34 +40,16 @@ func NewNodeKernel(
 ) (_ *NodeKernel, _err error) {
 	logger.Tracef(ctx, "NewNodeKernel")
 	defer func() { logger.Tracef(ctx, "/NewNodeKernel: %v", _err) }()
-	cfg := NodeKernelOptions(opts).config()
+	_ = NodeKernelOptions(opts).config() // not used, yet
 	k := &NodeKernel{
 		ClosureSignaler: closuresignaler.New(),
 		PreviousSource:  map[int]packet.Source{},
-		StreamInfo:      map[int]*StreamInfo{},
+		SourceInfo:      map[packet.Source]*SourceInfo{},
 		FormatContext:   astiav.AllocFormatContext(),
 		OutputStreams:   map[int]*astiav.Stream{},
 	}
 	setFinalizerFree(ctx, k.FormatContext)
-
-	var err error
-	k.PTSInitFunc, err = rpn.Parse[*StreamInfo, int64](cfg.PTSInitFunc, streamInfoSymResolver{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse PTSInitFunc expression '%s': %w", cfg.PTSInitFunc, err)
-	}
 	return k, nil
-}
-
-type streamInfoSymResolver struct{}
-
-func (streamInfoSymResolver) Resolve(sym string) (rpntypes.ValueLoader[*StreamInfo, int64], error) {
-	switch sym {
-	case "pts_latest":
-		return rpntypes.FuncValue[*StreamInfo, int64](func(streamInfo *StreamInfo) int64 {
-			return streamInfo.PreviousPTS
-		}), nil
-	}
-	return nil, fmt.Errorf("unknown symbol: %s", sym)
 }
 
 func (k *NodeKernel) SendInputPacket(
@@ -99,7 +76,7 @@ func (k *NodeKernel) sendInputPacket(
 		logger.Tracef(ctx, "New source for stream %d: %s", input.Stream, input.Source)
 		k.PreviousSource[input.StreamIndex()] = input.Source
 	}
-	if err := k.handleCorrections(ctx, &input, isNewSource); err != nil {
+	if err := k.makeTimeMoveOnlyForward(ctx, &input, input.Source, isNewSource); err != nil {
 		return fmt.Errorf("unable to handle corrections for stream %v: %w", input.Stream, err)
 	}
 
@@ -134,7 +111,7 @@ func (k *NodeKernel) sendInputFrame(
 	logger.Tracef(ctx, "NodeKernel.sendInputFrame()")
 	defer func() { logger.Tracef(ctx, "/NodeKernel.sendInputFrame(): %v", _err) }()
 
-	if err := k.handleCorrections(ctx, &input, input.GetDTS() == 0); err != nil {
+	if err := k.makeTimeMoveOnlyForward(ctx, &input, nil, input.GetDTS() == 0); err != nil {
 		return fmt.Errorf("unable to handle corrections for stream %d: %w", input.GetStreamIndex(), err)
 	}
 
@@ -151,51 +128,61 @@ func (k *NodeKernel) sendInputFrame(
 	return nil
 }
 
-func (k *NodeKernel) handleCorrections(
+func (k *NodeKernel) makeTimeMoveOnlyForward(
 	ctx context.Context,
 	input packetorframe.Abstract,
-	isNewStream bool,
+	packetSource packet.Source,
+	setNewTimeShift bool,
 ) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.handleCorrections()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.handleCorrections(): %v", _err) }()
+	logger.Tracef(ctx, "makeTimeMoveOnlyForward")
+	defer func() { logger.Tracef(ctx, "/makeTimeMoveOnlyForward: %v", _err) }()
 	streamIndex := input.GetStreamIndex()
-
-	streamInfo := k.StreamInfo[streamIndex]
-	if streamInfo == nil {
-		streamInfo = &StreamInfo{
-			PreviousPTS: -1,
-		}
-		k.StreamInfo[streamIndex] = streamInfo
-	}
 
 	if input.GetDTS() > input.GetPTS() {
 		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for stream %d", input.GetDTS(), input.GetPTS(), streamIndex)
 	}
 
-	if !isNewStream {
-		if ptsOffset := streamInfo.CurrentPTSOffset; ptsOffset != 0 {
-			logger.Tracef(ctx, "Applying PTS offset %d to stream %d", ptsOffset, streamIndex)
-			input.SetDTS(input.GetDTS() + ptsOffset)
-			input.SetPTS(input.GetPTS() + ptsOffset)
-		}
-	} else {
-		if streamInfo.PreviousPTS == -1 {
-			logger.Tracef(ctx, "New stream %d", streamIndex)
-		} else {
-			logger.Tracef(ctx, "Renewed stream %d", streamIndex)
-
-			newPTS := k.PTSInitFunc.Eval(streamInfo)
-			ptsOffset := newPTS - input.GetPTS()
-			streamInfo.CurrentPTSOffset = ptsOffset
-			logger.Tracef(ctx, "Setting PTS to %d (offset %d) from %d for stream %d", newPTS, ptsOffset, input.GetPTS(), streamIndex)
-
-			input.SetPTS(newPTS)
-			input.SetDTS(input.GetDTS() + ptsOffset)
-		}
+	sourceInfo := k.SourceInfo[packetSource]
+	if sourceInfo == nil {
+		sourceInfo = &SourceInfo{}
+		k.SourceInfo[packetSource] = sourceInfo
 	}
 
-	streamInfo.PreviousPTS = input.GetPTS()
-	return
+	timeBase := input.GetTimeBase()
+	defer func() {
+		if _err == nil {
+			k.LatestPTS = avconv.Duration(input.GetPTS(), timeBase)
+			logger.Tracef(ctx, "Updated the latest PTS to %v [%p]", k.LatestPTS, k)
+		}
+	}()
+
+	if !setNewTimeShift {
+		timeShift := avconv.FromDuration(sourceInfo.TimeShift, timeBase)
+		logger.Tracef(ctx, "Applying PTS offset %v (%d) to stream %d", sourceInfo.TimeShift, timeShift, streamIndex)
+		input.SetDTS(input.GetDTS() + timeShift)
+		input.SetPTS(input.GetPTS() + timeShift)
+		return nil
+	}
+
+	if k.LatestPTS == -1 {
+		return nil
+	}
+
+	previousPTSBased := avconv.FromDuration(k.LatestPTS, timeBase)
+	newPTS := previousPTSBased + 2 // +1 to ensure PTS is always increasing and +1 for any rounding errors (due to invoking float64)
+	ptsOffset := newPTS - input.GetPTS()
+	newTimeShift := avconv.Duration(ptsOffset, timeBase)
+	logger.Tracef(ctx, "Calculating a new time shift for source %v: ~: %v-%v (time_base:%v): %v [%p]", packetSource, k.LatestPTS, avconv.Duration(input.GetPTS(), timeBase), timeBase.Float64(), newTimeShift, k)
+	if newTimeShift < sourceInfo.TimeShift {
+		logger.Tracef(ctx, "New time shift %v is less than the previous one %v, keeping the previous one", newTimeShift, sourceInfo.TimeShift)
+		return nil
+	}
+	logger.Tracef(ctx, "Setting PTS to %d (offset %d) from %d for source %v", newPTS, ptsOffset, input.GetPTS(), packetSource)
+	sourceInfo.TimeShift = newTimeShift
+
+	input.SetPTS(newPTS)
+	input.SetDTS(input.GetDTS() + ptsOffset)
+	return nil
 }
 
 func (k *NodeKernel) String() string {

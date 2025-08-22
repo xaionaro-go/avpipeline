@@ -71,6 +71,18 @@ func (f *Commons) GetDTSAsDuration() time.Duration {
 
 }
 
+func (f *Commons) SetTimeBase(v astiav.Rational) {
+	f.TimeBase = v
+}
+
+func (f *Commons) GetDuration() int64 {
+	return (*Commons)(f).Frame.Duration()
+}
+
+func (f *Commons) SetDuration(v int64) {
+	(*Commons)(f).Frame.SetDuration(v)
+}
+
 func (f *Commons) GetPTS() int64 {
 	return f.Frame.Pts()
 }

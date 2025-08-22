@@ -28,6 +28,10 @@ type Abstract interface {
 	GetSize() int
 	GetStreamIndex() int
 	GetMediaType() astiav.MediaType
+	GetTimeBase() astiav.Rational
+	SetTimeBase(v astiav.Rational)
+	GetDuration() int64
+	SetDuration(v int64)
 	GetPTS() int64
 	GetDTS() int64
 	SetPTS(v int64)
@@ -72,6 +76,18 @@ func (u *InputUnion) SetPTS(v int64) {
 func (u *InputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
 }
+func (u *InputUnion) GetTimeBase() astiav.Rational {
+	return u.Get().GetTimeBase()
+}
+func (u *InputUnion) SetTimeBase(v astiav.Rational) {
+	u.Get().SetTimeBase(v)
+}
+func (u *InputUnion) GetDuration() int64 {
+	return u.Get().GetDuration()
+}
+func (u *InputUnion) SetDuration(v int64) {
+	u.Get().SetDuration(v)
+}
 func (u *InputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()
 }
@@ -112,6 +128,18 @@ func (u *OutputUnion) SetPTS(v int64) {
 }
 func (u *OutputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
+}
+func (u *OutputUnion) GetTimeBase() astiav.Rational {
+	return u.Get().GetTimeBase()
+}
+func (u *OutputUnion) SetTimeBase(v astiav.Rational) {
+	u.Get().SetTimeBase(v)
+}
+func (u *OutputUnion) GetDuration() int64 {
+	return u.Get().GetDuration()
+}
+func (u *OutputUnion) SetDuration(v int64) {
+	u.Get().SetDuration(v)
 }
 func (u *OutputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()

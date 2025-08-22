@@ -57,8 +57,10 @@ func newRoute[T any](
 	onClose func(context.Context, *Route[T]),
 	onPublisherAdded func(context.Context, *Route[T], Publisher[T]),
 	onPublisherRemoved func(context.Context, *Route[T], Publisher[T]),
-) *Route[T] {
+) (_ret *Route[T]) {
 	ctx = belt.WithField(ctx, "path", path)
+	logger.Tracef(ctx, "newRoute")
+	defer func() { logger.Tracef(ctx, "/newRoute: %v", _ret) }()
 	ctx, cancelFn := context.WithCancel(ctx)
 	r := &Route[T]{
 		Path:                 path,

@@ -123,7 +123,7 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 		}
 	}()
 
-	dst, err := fwd.Router.GetRoute(ctx, fwd.DstPath, GetRouteModeCreateIfNotFound)
+	dst, err := fwd.Router.GetRoute(ctx, fwd.DstPath, GetRouteModeCreateTemporaryIfNotFound)
 	if err != nil {
 		return fmt.Errorf("unable to get the destination route by path '%s': %w", fwd.DstPath, err)
 	}

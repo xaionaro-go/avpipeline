@@ -104,6 +104,22 @@ func (pkt *Commons) PtsAsDuration() time.Duration {
 	return avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
 }
 
+func (pkt *Commons) GetTimeBase() astiav.Rational {
+	return pkt.Stream.TimeBase()
+}
+
+func (pkt *Commons) SetTimeBase(v astiav.Rational) {
+	pkt.Stream.SetTimeBase(v)
+}
+
+func (pkt *Commons) GetDuration() int64 {
+	return pkt.Packet.Duration()
+}
+
+func (pkt *Commons) SetDuration(v int64) {
+	pkt.Packet.SetDuration(v)
+}
+
 func (pkt *Commons) GetPTS() int64 {
 	return pkt.Packet.Pts()
 }
@@ -122,4 +138,8 @@ func (pkt *Commons) SetDTS(v int64) {
 
 func (pkt *Commons) GetPipelineSideData() types.PipelineSideData {
 	return pkt.StreamInfo.PipelineSideData
+}
+
+func (pkt *Commons) GetSource() Source {
+	return pkt.StreamInfo.Source
 }

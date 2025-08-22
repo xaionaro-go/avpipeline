@@ -11,6 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xcontext"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -136,8 +137,10 @@ const (
 	GetRouteModeFailIfNotFound = GetRouteMode(iota)
 	GetRouteModeWaitUntilCreated
 	GetRouteModeWaitForPublisher
-	GetRouteModeCreateIfNotFound
-	GetRouteModeCreate
+	GetRouteModeCreateTemporaryIfNotFound
+	GetRouteModeCreateTemporary
+	GetRouteModeCreatePersistentIfNotFound
+	GetRouteModeCreatePersistent
 )
 
 func (m GetRouteMode) String() string {
@@ -148,10 +151,14 @@ func (m GetRouteMode) String() string {
 		return "wait-until-created"
 	case GetRouteModeWaitForPublisher:
 		return "wait-for-publisher"
-	case GetRouteModeCreateIfNotFound:
-		return "create-if-not-found"
-	case GetRouteModeCreate:
-		return "create"
+	case GetRouteModeCreateTemporaryIfNotFound:
+		return "create-temporary-if-not-found"
+	case GetRouteModeCreateTemporary:
+		return "create-temporary"
+	case GetRouteModeCreatePersistentIfNotFound:
+		return "create-persistent-if-not-found"
+	case GetRouteModeCreatePersistent:
+		return "create-persistent"
 	default:
 		return fmt.Sprintf("unknown-mode-%d", int(m))
 	}
@@ -161,7 +168,6 @@ func (r *Router[T]) GetRoute(
 	ctx context.Context,
 	path RoutePath,
 	mode GetRouteMode,
-
 ) (_ret *Route[T], _err error) {
 	logger.Debugf(ctx, "GetRoute(ctx, '%s', '%s')", path, mode)
 	defer func() { logger.Debugf(ctx, "/GetRoute(ctx, '%s', '%s'): %v %v", path, mode, _ret, _err) }()
@@ -193,9 +199,9 @@ func (r *Router[T]) getRouteLocked(
 				}
 				return curRoute, nil
 			}
-		case GetRouteModeCreateIfNotFound:
+		case GetRouteModeCreateTemporaryIfNotFound, GetRouteModeCreatePersistentIfNotFound:
 			return curRoute, nil
-		case GetRouteModeCreate:
+		case GetRouteModeCreateTemporary, GetRouteModeCreatePersistent:
 			return nil, fmt.Errorf("the route '%s' already exists", path)
 		}
 		return nil, fmt.Errorf("unknown mode: %d (%s)", int(mode), mode)
@@ -236,9 +242,15 @@ func (r *Router[T]) getRouteLocked(
 			break
 		}
 		return route, nil
-	case GetRouteModeCreateIfNotFound:
+	case GetRouteModeCreateTemporaryIfNotFound, GetRouteModeCreatePersistentIfNotFound:
+		if mode == GetRouteModeCreatePersistentIfNotFound {
+			ctx = xcontext.DetachDone(ctx)
+		}
 		return r.createRoute(ctx, path), nil
-	case GetRouteModeCreate:
+	case GetRouteModeCreateTemporary, GetRouteModeCreatePersistent:
+		if mode == GetRouteModeCreatePersistent {
+			ctx = xcontext.DetachDone(ctx)
+		}
 		return r.createRoute(ctx, path), nil
 	}
 	return nil, fmt.Errorf("unknown mode: %d (%s)", int(mode), mode)
