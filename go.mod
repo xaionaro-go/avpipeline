@@ -2,12 +2,12 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.24.2
 
-replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250521203320-7402f3e25a7c
+replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250822190616-666bb00322f2
 
 require (
 	github.com/anthonynsimon/bild v0.14.0
 	github.com/asticode/go-astiav v0.36.0
-	github.com/asticode/go-astikit v0.54.0
+	github.com/asticode/go-astikit v0.55.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250308011339-62fb7027b11f
 	github.com/go-ng/xatomic v0.0.0-20250819203610-2369a3becc10

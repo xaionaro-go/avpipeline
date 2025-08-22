@@ -23,9 +23,9 @@ import (
 const (
 	encoderWriteHeaderOnFinishedGettingStreams = false
 	encoderWriteHeaderOnNotifyPacketSources    = false
-	encoderCopyDTSPTS                          = true
+	encoderCopyTime                            = true
 	encoderDTSHigherPTSCorrect                 = false
-	encoderDebug                               = false
+	encoderDebug                               = true
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -287,6 +287,8 @@ func (e *Encoder[EF]) SendInputPacket(
 	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
+// TODO: should I just delete this function? astiav.CodecParameters can be reused
+// without reallocation if no edit happens (and it already work that way before).
 func fixCodecParameters(
 	ctx context.Context,
 	orig *astiav.CodecParameters,
@@ -296,12 +298,11 @@ func fixCodecParameters(
 	setFinalizerFree(ctx, cp)
 	orig.Copy(cp)
 	if cp.FrameRate().Float64() < 1 {
-		if averageFPS.Float64() < 1 {
-			averageFPS = astiav.NewRational(30, 1)
-		}
-		logger.Errorf(ctx, "unable to detect the FPS, correcting to %s", averageFPS)
-		cp.SetFrameRate(averageFPS)
+		logger.Errorf(ctx, "unable to detect the FPS")
 	}
+
+	// TODO: add any fixes required
+
 	return cp
 }
 
@@ -328,6 +329,12 @@ func (e *Encoder[EF]) sendInputPacket(
 
 	if !codec.IsEncoderCopy(encoder.Encoder) {
 		return ErrNotCopyEncoder{}
+	}
+
+	if encoderDebug {
+		if input.Packet.Duration() <= 0 {
+			logger.Errorf(ctx, "input packet has no duration set; pos:%d; time_base:%v; stream duration: %v", input.Pos(), input.GetStream().TimeBase(), input.GetStream().Duration())
+		}
 	}
 
 	outputStream := e.outputStreams[input.GetStreamIndex()]
@@ -362,6 +369,9 @@ func (e *Encoder[EF]) sendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	logger.Tracef(ctx, "sendInputFrame: %s", input.GetMediaType())
+	defer func() { logger.Tracef(ctx, "/sendInputFrame: %s: %v", input.GetMediaType(), _err) }()
+
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
@@ -383,6 +393,10 @@ func (e *Encoder[EF]) sendInputFrame(
 	}
 	assert(ctx, encoder != nil)
 	ctx = belt.WithField(ctx, "encoder", encoder)
+
+	if encoderDebug {
+		logger.Tracef(ctx, "input frame: dur:%d", input.Frame.Duration())
+	}
 
 	if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
 		logger.Debugf(ctx, "writing the header")
@@ -442,6 +456,10 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 
+	if encoderDebug {
+		logger.Tracef(ctx, "scaled frame: dur:%d, dts:%d, pts:%d", input.Frame.Duration(), input.Frame.PktDts(), input.Frame.Pts())
+	}
+
 	err := encoder.SendFrame(ctx, scaledFrame)
 	if err != nil {
 		return fmt.Errorf("unable to send a frame to the encoder: %w", err)
@@ -463,11 +481,18 @@ func (e *Encoder[EF]) sendInputFrame(
 		logger.Tracef(ctx, "encoder.ReceivePacket(): got a %s packet, resulting size: %d (pts: %d)", outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
 
 		pkt.SetStreamIndex(outputStream.Index())
-		if encoderCopyDTSPTS {
+
+		if encoderCopyTime {
+			// get rid of this copying below. We should calculate these values
+			// from scratch, instead of just copying them.
+			if pkt.Duration() <= 0 {
+				pkt.SetDuration(input.Frame.Duration())
+			}
 			pkt.SetDts(input.PktDts())
 			pkt.SetPts(input.Pts())
 			pkt.RescaleTs(input.TimeBase, outputStream.TimeBase())
 		}
+
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
 			if encoderDTSHigherPTSCorrect {
@@ -577,6 +602,12 @@ func (e *Encoder[EF]) send(
 			pipelineSideData,
 		),
 	)
+
+	if encoderDebug {
+		if outPktWrapped.Duration() <= 0 {
+			logger.Errorf(ctx, "packet duration is not set")
+		}
+	}
 
 	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.CodecParameters().MediaType(), outPktWrapped.Dts(), outPktWrapped.Pts())
 	defer func() { logger.Tracef(ctx, "/send: %v %v", outPktWrapped.CodecParameters().MediaType(), _err) }()

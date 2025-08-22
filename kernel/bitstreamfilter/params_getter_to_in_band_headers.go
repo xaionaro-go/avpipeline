@@ -16,8 +16,17 @@ func (ParamsGetterToInBandHeaders) GetChainParams(
 	input packet.Input,
 ) []Params {
 	stream := input.GetStream()
-	codecID := stream.CodecParameters().CodecID()
-	params := ParamsMP4ToMP2(stream.CodecParameters().CodecID())
+	if stream == nil {
+		logger.Errorf(ctx, "no stream associated with the input packet")
+		return nil
+	}
+	codecParams := stream.CodecParameters()
+	if codecParams == nil {
+		logger.Errorf(ctx, "no codec parameters associated with the input packet's stream")
+		return nil
+	}
+	codecID := codecParams.CodecID()
+	params := ParamsMP4ToMP2(codecParams.CodecID())
 	logger.Debugf(ctx, "stream #%d: codec: %s: filters: %#+v", stream.Index(), codecID, params)
 	return params
 }

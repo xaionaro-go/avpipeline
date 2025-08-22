@@ -19,6 +19,8 @@ import (
 const (
 	doFullCopyOfParameters     = false
 	manuallySetHardwareContext = false
+	setRoteControlParameters   = false
+	setSetPktTimeBase          = false
 )
 
 type codecInternals struct {
@@ -290,7 +292,8 @@ func newCodec(
 				logIfError(options.Set("bf", "0", 0))
 			}
 			if codecParameters.BitRate() > 0 {
-				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0)
+				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
+				options.Set("rc", "cbr", 0)
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
@@ -353,6 +356,16 @@ func newCodec(
 
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
+		if bitRate := codecParameters.BitRate(); bitRate > 0 {
+			logger.Tracef(ctx, "bitrate: %d", bitRate)
+			c.codecContext.SetBitRate(bitRate)
+			if setRoteControlParameters {
+				c.codecContext.SetRateControlMinRate(bitRate)
+				c.codecContext.SetRateControlMaxRate(bitRate)
+				c.codecContext.SetRateControlBufferSize(int(bitRate * 2))
+			}
+			c.codecContext.SetFlags(c.codecContext.Flags() & ^astiav.CodecContextFlags(astiav.CodecContextFlagQscale))
+		}
 		if v := codecParameters.FrameRate(); v.Float64() > 0 {
 			logger.Tracef(ctx, "setting frame rate to %s", v)
 			c.codecContext.SetFramerate(v)
@@ -389,6 +402,9 @@ func newCodec(
 
 	logger.Debugf(ctx, "time_base == %v", timeBase)
 	c.codecContext.SetTimeBase(timeBase)
+	if setSetPktTimeBase {
+		c.codecContext.SetPktTimeBase(timeBase)
+	}
 
 	if isEncoder {
 		if timeBase.Num() == 0 {

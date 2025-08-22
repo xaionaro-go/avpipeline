@@ -211,6 +211,39 @@ func (i *Input) Generate(
 		i.IOInterrupter.Interrupt()
 	})
 
+	sendPkt := func(outPkt *packet.Output) error {
+		logger.Tracef(
+			ctx,
+			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d",
+			outPkt.Stream.CodecParameters().MediaType(),
+			outPkt.StreamIndex(),
+			outPkt.Pos(), outPkt.Pts(), outPkt.Dts(), outPkt.Packet.Duration(),
+			outPkt.Flags().Has(astiav.PacketFlagKey),
+			len(outPkt.Data()),
+		)
+
+		select {
+		case outputPacketsCh <- *outPkt:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-i.CloseChan():
+			return io.EOF
+		}
+		return nil
+	}
+
+	var curPkt *packet.Output
+	defer func() {
+		if curPkt == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-i.CloseChan():
+		default:
+		}
+		sendPkt(curPkt)
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,27 +255,43 @@ func (i *Input) Generate(
 		err := i.readIntoPacket(ctx, pkt)
 		switch err {
 		case nil:
+			stream := avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex())
 			logger.Tracef(
 				ctx,
-				"received a packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d), dataLen:%d, data: 0x %X",
+				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d",
+				stream.CodecParameters().MediaType(),
 				pkt.StreamIndex(),
 				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
-				len(pkt.Data()), pkt.Data(),
+				pkt.Flags().Has(astiav.PacketFlagKey),
+				len(pkt.Data()),
 			)
 
-			select {
-			case outputPacketsCh <- packet.BuildOutput(
+			prevPkt := curPkt
+			curPkt = ptr(packet.BuildOutput(
 				pkt,
 				packet.BuildStreamInfo(
-					avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex()),
+					stream,
 					i,
 					nil,
 				),
-			):
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-i.CloseChan():
-				return io.EOF
+			))
+			if prevPkt != nil {
+				prevPkt.Packet.SetDuration(curPkt.Pts() - prevPkt.Pts())
+				logger.Debugf(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
+
+				if err := sendPkt(prevPkt); err != nil {
+					return err
+				}
+			}
+
+			if curPkt.Duration() <= 0 {
+				continue
+			}
+			// no correction is needed, let's send immediately
+			err := sendPkt(curPkt)
+			curPkt = nil
+			if err != nil {
+				return err
 			}
 		case io.EOF:
 			pkt.Free()

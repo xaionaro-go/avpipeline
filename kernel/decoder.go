@@ -125,7 +125,7 @@ func (d *Decoder[DF]) sendInputPacket(
 	}
 	ctx = belt.WithField(ctx, "decoder", decoder)
 
-	if !encoderCopyDTSPTS {
+	if !encoderCopyTime {
 		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())
 	}
 
