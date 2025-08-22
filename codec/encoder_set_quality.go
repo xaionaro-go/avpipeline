@@ -59,14 +59,14 @@ func (e *EncoderFull) setQualityNow(
 
 	codecWords := strings.Split(codecName, "_")
 	if len(codecWords) != 2 {
-		return e.setQualityCodecReinit(ctx, q)
+		return e.setQualityGeneric(ctx, q)
 	}
 	codecModifier := codecWords[1]
 	switch strings.ToLower(codecModifier) {
 	case "mediacodec":
 		return e.setQualityMediacodec(ctx, q)
 	}
-	return e.setQualityCodecReinit(ctx, q)
+	return e.setQualityGeneric(ctx, q)
 }
 
 func (e *EncoderFull) setQualityGeneric(

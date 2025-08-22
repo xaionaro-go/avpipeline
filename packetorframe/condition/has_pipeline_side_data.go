@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
@@ -22,8 +23,10 @@ func (v HasPipelineSideDataCond) String() string {
 }
 
 func (v HasPipelineSideDataCond) Match(
-	_ context.Context,
+	ctx context.Context,
 	input packetorframe.InputUnion,
-) bool {
-	return input.GetPipelineSideData().Contains(v.Value)
+) (_ret bool) {
+	sideData := input.Packet.GetPipelineSideData()
+	logger.Tracef(ctx, "sideData: %#+v", sideData)
+	return sideData.Contains(v.Value)
 }
