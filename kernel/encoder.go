@@ -199,6 +199,12 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 		return nil
 	}
 
+	switch params.MediaType() {
+	case astiav.MediaTypeVideo:
+		logger.Tracef(ctx, "FPS: %v", params.FrameRate())
+	case astiav.MediaTypeAudio:
+		logger.Tracef(ctx, "SampleRate: %d", params.SampleRate())
+	}
 	err := e.initEncoderFor(ctx, streamIndex, params, timeBase)
 	if err != nil {
 		return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", streamIndex, err)
@@ -280,6 +286,24 @@ func (e *Encoder[EF]) SendInputPacket(
 	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
+func fixCodecParameters(
+	ctx context.Context,
+	orig *astiav.CodecParameters,
+	averageFPS astiav.Rational,
+) *astiav.CodecParameters {
+	cp := astiav.AllocCodecParameters()
+	setFinalizerFree(ctx, cp)
+	orig.Copy(cp)
+	if cp.FrameRate().Float64() < 1 {
+		if averageFPS.Float64() < 1 {
+			averageFPS = astiav.NewRational(30, 1)
+		}
+		logger.Errorf(ctx, "unable to detect the FPS, correcting to %s", averageFPS)
+		cp.SetFrameRate(averageFPS)
+	}
+	return cp
+}
+
 func (e *Encoder[EF]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
@@ -289,8 +313,10 @@ func (e *Encoder[EF]) sendInputPacket(
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
+		input.Stream.AvgFrameRate()
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		err := e.initEncoderAndOutputFor(ctx, input.GetStreamIndex(), input.CodecParameters(), input.GetStream().TimeBase())
+		codecParams := fixCodecParameters(ctx, input.CodecParameters(), input.Stream.AvgFrameRate())
+		err := e.initEncoderAndOutputFor(ctx, input.GetStreamIndex(), codecParams, input.GetStream().TimeBase())
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (packet): %w", err)
 		}
@@ -339,7 +365,8 @@ func (e *Encoder[EF]) sendInputFrame(
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		err := e.initEncoderAndOutputFor(ctx, input.StreamIndex, input.CodecParameters, input.GetTimeBase())
+		codecParams := fixCodecParameters(ctx, input.CodecParameters, input.AvgFrameRate)
+		err := e.initEncoderAndOutputFor(ctx, input.StreamIndex, codecParams, input.GetTimeBase())
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
@@ -572,10 +599,11 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 					continue
 				}
 				changed = true
+				codecParams := fixCodecParameters(ctx, inputStream.CodecParameters(), inputStream.AvgFrameRate())
 				err := e.initEncoderAndOutputFor(
 					ctx,
 					inputStream.Index(),
-					inputStream.CodecParameters(),
+					codecParams,
 					inputStream.TimeBase(),
 				)
 				if err != nil {

@@ -237,14 +237,15 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		),
 		codec.NewNaiveEncoderFactory(ctx,
 			&codec.NaiveEncoderFactoryParams{
-				VideoCodec:         cfg.VideoTrackConfigs[0].CodecName,
-				AudioCodec:         codec.NameCopy,
-				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-				VideoOptions:       convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
-				AudioOptions:       convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
-				VideoQuality:       videoQuality,
-				VideoResolution:    videoResolution,
+				VideoCodec:            cfg.VideoTrackConfigs[0].CodecName,
+				AudioCodec:            codec.NameCopy,
+				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
+				VideoOptions:          convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
+				AudioOptions:          convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
+				VideoQuality:          videoQuality,
+				VideoResolution:       videoResolution,
+				VideoAverageFrameRate: astiav.NewRational(int(cfg.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),
 			},
 		),
 		nil,
@@ -280,8 +281,15 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 
 			if videoCfg.AverageBitRate == 0 {
 				s.Recoder.EncoderFactory.VideoOptions.Unset("b")
+				s.Recoder.EncoderFactory.VideoQuality = nil
 			} else {
 				s.Recoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", videoCfg.AverageBitRate), 0)
+				s.Recoder.EncoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
+			}
+
+			if videoCfg.AverageFrameRate > 0 {
+				s.Recoder.EncoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
+				s.Recoder.EncoderFactory.VideoAverageFrameRate.SetDen(1000)
 			}
 			return nil
 		}

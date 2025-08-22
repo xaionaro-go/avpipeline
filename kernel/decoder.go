@@ -165,6 +165,7 @@ func (d *Decoder[DF]) sendInputPacket(
 					d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
 					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
 					input.Stream.Duration(),
+					input.Stream.AvgFrameRate(),
 					timeBase,
 					input.Packet.Duration(),
 					input.PipelineSideData,

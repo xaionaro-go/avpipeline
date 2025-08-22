@@ -167,11 +167,12 @@ func newCodec(
 	options := params.Options
 	flags := params.Flags
 
-	logger.Tracef(ctx, "newCodec(ctx, '%s', %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags)
+	logger.Tracef(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags)
 	defer func() {
-		logger.Tracef(ctx, "/newCodec(ctx, '%s', %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags, _ret, _err)
+		logger.Tracef(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
+	ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 	c := &Codec{
@@ -269,6 +270,9 @@ func newCodec(
 				logger.Debugf(ctx, "bf is not set, defaulting to zero")
 				logIfError(options.Set("bf", "0", 0))
 			}
+			if codecParameters.BitRate() > 0 {
+				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0)
+			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
@@ -331,6 +335,7 @@ func newCodec(
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
 		if v := codecParameters.FrameRate(); v.Float64() > 0 {
+			logger.Tracef(ctx, "setting frame rate to %s", v)
 			c.codecContext.SetFramerate(v)
 		}
 		c.codecContext.SetWidth(codecParameters.Width())

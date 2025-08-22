@@ -24,14 +24,15 @@ type NaiveEncoderFactory struct {
 }
 
 type NaiveEncoderFactoryParams struct {
-	VideoCodec         Name
-	AudioCodec         Name
-	HardwareDeviceType astiav.HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	VideoOptions       *astiav.Dictionary
-	AudioOptions       *astiav.Dictionary
-	VideoQuality       Quality
-	VideoResolution    *Resolution
+	VideoCodec            Name
+	AudioCodec            Name
+	HardwareDeviceType    astiav.HardwareDeviceType
+	HardwareDeviceName    HardwareDeviceName
+	VideoOptions          *astiav.Dictionary
+	AudioOptions          *astiav.Dictionary
+	VideoQuality          Quality
+	VideoResolution       *Resolution
+	VideoAverageFrameRate astiav.Rational
 }
 
 func DefaultNaiveEncoderFactoryParams() *NaiveEncoderFactoryParams {
@@ -140,13 +141,19 @@ func (f *NaiveEncoderFactory) amendVideoCodecParams(
 
 	var errs []error
 	if f.VideoQuality != nil {
+		logger.Tracef(ctx, "applying video quality %v", f.VideoQuality)
 		if err := f.VideoQuality.Apply(codecParams); err != nil {
 			errs = append(errs, fmt.Errorf("unable to apply video quality %#+v: %w", f.VideoQuality, err))
 		}
 	}
 	if f.VideoResolution != nil {
+		logger.Tracef(ctx, "applying video resolution %#+v", f.VideoResolution)
 		codecParams.SetWidth(int(f.VideoResolution.Width))
 		codecParams.SetHeight(int(f.VideoResolution.Height))
+	}
+	if f.VideoAverageFrameRate.Num() > 0 {
+		logger.Tracef(ctx, "applying video average frame rate %s", f.VideoAverageFrameRate)
+		codecParams.SetFrameRate(f.VideoAverageFrameRate)
 	}
 	return errors.Join(errs...)
 }

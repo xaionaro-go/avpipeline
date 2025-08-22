@@ -348,6 +348,7 @@ func (m *MapStreamIndices) sendInputFrame(
 				outputStream.Index(),
 				len(m.outputStreams),
 				input.StreamDuration,
+				input.AvgFrameRate,
 				input.TimeBase,
 				input.StreamInfo.Duration,
 				input.PipelineSideData,

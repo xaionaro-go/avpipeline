@@ -28,6 +28,7 @@ type VideoTrackConfig struct {
 	OutputTrackIDs     []int              `yaml:"output_track_ids"`
 	CodecName          codec.Name         `yaml:"codec_name"`
 	AveragingPeriod    time.Duration      `yaml:"averaging_period"`
+	AverageFrameRate   float64            `yaml:"average_frame_rate"`
 	AverageBitRate     uint64             `yaml:"average_bit_rate"`
 	CustomOptions      DictionaryItems    `yaml:"custom_options"`
 	HardwareDeviceType HardwareDeviceType `yaml:"hardware_device_type"`

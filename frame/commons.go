@@ -13,6 +13,7 @@ type StreamInfo struct {
 	StreamIndex      int
 	StreamsCount     int
 	StreamDuration   int64
+	AvgFrameRate     astiav.Rational // TODO: reuse the avg_frame_rate from the frame
 	TimeBase         astiav.Rational // TODO: reuse the time_base from the frame
 	Duration         int64           // TODO: reuse duration from the frame
 	PipelineSideData types.PipelineSideData
@@ -22,6 +23,7 @@ func BuildStreamInfo(
 	codecParameters *astiav.CodecParameters,
 	streamIndex, streamsCount int,
 	streamDuration int64,
+	avgFrameRate astiav.Rational,
 	timeBase astiav.Rational,
 	duration int64,
 	pipelineSideData types.PipelineSideData,
@@ -31,6 +33,7 @@ func BuildStreamInfo(
 		StreamIndex:      streamIndex,
 		StreamsCount:     streamsCount,
 		StreamDuration:   streamDuration,
+		AvgFrameRate:     avgFrameRate,
 		TimeBase:         timeBase,
 		Duration:         duration,
 		PipelineSideData: pipelineSideData,

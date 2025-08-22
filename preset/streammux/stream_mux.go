@@ -345,6 +345,8 @@ func (s *StreamMux[C]) reconfigureOutput(
 			if videoCfg.AverageBitRate != 0 {
 				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}
+			encoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
+			encoderFactory.VideoAverageFrameRate.SetDen(1000)
 			return nil
 		}
 
