@@ -94,8 +94,9 @@ type Output struct {
 
 	formatContextLocker xsync.RWMutex
 
-	URL              string
-	URLParsed        *url.URL
+	URL       string
+	URLParsed *url.URL
+
 	started          bool
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
@@ -316,7 +317,7 @@ func (o *Output) doOpen(
 	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
 	if cfg.SendBufferSize != 0 {
-		if err := o.SetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
+		if err := o.UnsafeSetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
 			return fmt.Errorf("unable to set the send buffer size to %d: %w", cfg.SendBufferSize, err)
 		}
 	}
@@ -324,14 +325,14 @@ func (o *Output) doOpen(
 	return nil
 }
 
-func (o *Output) SetSendBufferSize(
+func (o *Output) UnsafeSetSendBufferSize(
 	ctx context.Context,
 	size uint,
 ) (_err error) {
 	logger.Debugf(ctx, "SetSendBufferSize(ctx, %d)", size)
 	defer func() { logger.Debugf(ctx, "/SetSendBufferSize(ctx, %d): %v", size, _err) }()
 
-	fd, err := o.GetFileDescriptor(ctx)
+	fd, err := o.UnsafeGetFileDescriptor(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get file descriptor: %w", err)
 	}
@@ -342,26 +343,6 @@ func (o *Output) SetSendBufferSize(
 	}
 
 	return nil
-}
-
-func (o *Output) GetFileDescriptor(
-	ctx context.Context,
-) (_ret int, _err error) {
-	logger.Debugf(ctx, "GetFileDescriptor")
-	defer func() { logger.Debugf(ctx, "/GetFileDescriptor: %v %v", _ret, _err) }()
-	return xsync.DoA1R2(ctx, &o.formatContextLocker, o.getFileDescriptor, ctx)
-}
-
-func (o *Output) getFileDescriptor(
-	ctx context.Context,
-) (_ret int, _err error) {
-	switch o.URLParsed.Scheme {
-	case "rtmp":
-		return formatContextToRTMPFD(ctx, o.FormatContext)
-	case "srt":
-		return formatContextToSRTFD(ctx, o.FormatContext)
-	}
-	return 0, fmt.Errorf("do not know how to obtain the file descriptor of the output for network scheme '%s'", o.URLParsed.Scheme)
 }
 
 func (o *Output) Close(
@@ -810,12 +791,12 @@ func (o *Output) doWritePacket(
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data len: %d",
+			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
 			pkt.Pos(), pkt.Pts(), avconv.Duration(pkt.Pts(), outputStream.TimeBase()), pkt.Dts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
-			len(pkt.Data()),
+			pkt.Data(),
 		)
 	}
 
@@ -881,12 +862,4 @@ func (o *Output) NotifyAboutPacketSource(
 		return nil
 	}
 	return errors.Join(errs...)
-}
-
-var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
-
-func (r *Output) GetInternalQueueSize(
-	ctx context.Context,
-) *uint64 {
-	return nil // not implemented, yet
 }
