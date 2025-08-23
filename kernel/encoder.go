@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/resampler"
 	"github.com/xaionaro-go/avpipeline/scaler"
 	"github.com/xaionaro-go/xsync"
 )
@@ -48,9 +49,11 @@ var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
 type streamEncoder struct {
 	codec.Encoder
-	Scaler      scaler.Scaler
-	ScaledFrame *astiav.Frame
-	LastInitTS  time.Time
+	Resampler       *resampler.Resampler
+	ResampledFrames []*astiav.Frame
+	Scaler          scaler.Scaler
+	ScaledFrame     *astiav.Frame
+	LastInitTS      time.Time
 }
 
 func NewEncoder[EF codec.EncoderFactory](
@@ -443,26 +446,19 @@ func (e *Encoder[EF]) sendInputFrame(
 	encoderMediaType := encoder.MediaType()
 	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
-	scaledFrame := input.Frame
-	width, height := encoder.GetResolution(ctx)
-	if input.Frame.Width() != int(width) || input.Frame.Height() != int(height) {
-		var err error
-		scaledFrame, err = encoder.getScaledFrame(ctx, input.Frame, codec.Resolution{
-			Width:  width,
-			Height: height,
-		})
-		if err != nil {
-			return fmt.Errorf("unable to scale the frame: %w", err)
-		}
-	}
-
-	if encoderDebug {
-		logger.Tracef(ctx, "scaled frame: dur:%d, dts:%d, pts:%d", input.Frame.Duration(), input.Frame.PktDts(), input.Frame.Pts())
-	}
-
-	err := encoder.SendFrame(ctx, scaledFrame)
+	fittedFrames, err := encoder.fitFrameForEncoding(ctx, input.Frame)
 	if err != nil {
-		return fmt.Errorf("unable to send a frame to the encoder: %w", err)
+		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
+	}
+
+	for _, fittedFrame := range fittedFrames {
+		if encoderDebug {
+			logger.Tracef(ctx, "scaled frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
+		}
+		err := encoder.SendFrame(ctx, fittedFrame)
+		if err != nil {
+			return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
+		}
 	}
 
 	for {
@@ -510,6 +506,143 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 
+	return nil
+}
+
+func (e *streamEncoder) fitFrameForEncoding(
+	ctx context.Context,
+	inputFrame *astiav.Frame,
+) (fittedFrames []*astiav.Frame, _err error) {
+	logger.Tracef(ctx, "fitFrameForEncoding")
+	defer func() { logger.Tracef(ctx, "/fitFrameForEncoding: %v %v", fittedFrames, _err) }()
+
+	switch e.MediaType() {
+	case astiav.MediaTypeVideo:
+		res := e.GetResolution(ctx)
+		if res == nil {
+			return nil, fmt.Errorf("unable to get the resolution from the encoder")
+		}
+		if inputFrame.Width() == int(res.Width) || inputFrame.Height() == int(res.Height) {
+			return []*astiav.Frame{inputFrame}, nil
+		}
+		scaledFrame, err := e.getScaledFrame(ctx, inputFrame, *res)
+		if err != nil {
+			return nil, fmt.Errorf("unable to scale the frame: %w", err)
+		}
+		return []*astiav.Frame{scaledFrame}, nil
+	case astiav.MediaTypeAudio:
+		inPCMFmt := getPCMAudioFormatFromFrame(ctx, inputFrame)
+		if inPCMFmt == nil {
+			return nil, fmt.Errorf("unable to get PCM audio format from the input frame")
+		}
+		encPCMFmt := e.Encoder.GetPCMAudioFormat(ctx)
+		if encPCMFmt == nil {
+			return []*astiav.Frame{inputFrame}, nil
+		}
+		if encPCMFmt.Equal(*inPCMFmt) {
+			return []*astiav.Frame{inputFrame}, nil
+		}
+		resampledFrames, err := e.getResampledFrames(ctx, inputFrame, *inPCMFmt, *encPCMFmt)
+		if err != nil {
+			return nil, fmt.Errorf("unable to resample the audio frame: %w", err)
+		}
+		return resampledFrames, nil
+	default:
+		logger.Debugf(ctx, "unsupported media type: %s", e.MediaType())
+		return []*astiav.Frame{inputFrame}, nil
+	}
+}
+
+func getPCMAudioFormatFromFrame(
+	ctx context.Context,
+	frame *astiav.Frame,
+) *codec.PCMAudioFormat {
+	if frame == nil {
+		return nil
+	}
+	return &codec.PCMAudioFormat{
+		SampleFormat:  frame.SampleFormat(),
+		SampleRate:    frame.SampleRate(),
+		ChannelLayout: frame.ChannelLayout(),
+		ChunkSize:     frame.NbSamples(),
+	}
+}
+
+func (e *streamEncoder) getResampledFrames(
+	ctx context.Context,
+	inputFrame *astiav.Frame,
+	inPCMFmt codec.PCMAudioFormat,
+	outPCMFmt codec.PCMAudioFormat,
+) (resampledFrames []*astiav.Frame, _err error) {
+	logger.Tracef(ctx, "getResampledFrames: in:%v; out:%v", inPCMFmt, outPCMFmt)
+	defer func() {
+		logger.Tracef(ctx, "/getResampledFrames: in:%v; out:%v: %v %v", inPCMFmt, outPCMFmt, resampledFrames, _err)
+	}()
+
+	err := e.prepareResampler(ctx, inPCMFmt, outPCMFmt)
+	if err != nil {
+		return nil, fmt.Errorf("unable to prepare the resampler: %w", err)
+	}
+
+	err = e.Resampler.SendFrame(ctx, inputFrame)
+	if err != nil {
+		return nil, fmt.Errorf("unable to send the frame: %w", err)
+	}
+
+	for idx := 0; ; idx++ {
+		for idx >= len(e.ResampledFrames) {
+			newFrame, err := e.Resampler.AllocateOutputFrame(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("unable to allocate a new output frame: %w", err)
+			}
+			e.ResampledFrames = append(e.ResampledFrames, newFrame)
+		}
+
+		outputFrame := e.ResampledFrames[idx]
+		err := e.Resampler.ReceiveFrame(ctx, outputFrame)
+		if err != nil {
+			isEOF := errors.Is(err, astiav.ErrEof)
+			isEAgain := errors.Is(err, astiav.ErrEagain)
+			logger.Tracef(ctx, "resampler.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
+			if isEOF || isEAgain {
+				break
+			}
+			return nil, fmt.Errorf("unable to receive the frame from the resampler: %w", err)
+		}
+		resampledFrames = append(resampledFrames, outputFrame)
+	}
+
+	return resampledFrames, nil
+}
+
+func (e *streamEncoder) prepareResampler(
+	ctx context.Context,
+	inPCMFmt codec.PCMAudioFormat,
+	outPCMFmt codec.PCMAudioFormat,
+) (_err error) {
+	logger.Tracef(ctx, "prepareResampler: in:%v; out:%v", inPCMFmt, outPCMFmt)
+	defer func() { logger.Tracef(ctx, "/prepareResampler: in:%v; out:%v: %v", inPCMFmt, outPCMFmt, _err) }()
+
+	if e.Resampler != nil {
+		if outPCMFmt == e.Resampler.FormatOutput {
+			logger.Tracef(ctx, "reusing the resampler")
+			return nil
+		}
+		if err := e.Resampler.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close the resampler: %v", err)
+		}
+	}
+
+	s, err := resampler.New(
+		ctx,
+		outPCMFmt,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create a resampler: %w", err)
+	}
+
+	e.Resampler = s
+	e.ResampledFrames = nil
 	return nil
 }
 

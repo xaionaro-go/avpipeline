@@ -39,9 +39,10 @@ type Encoder interface {
 	ReceivePacket(context.Context, *astiav.Packet) error
 	GetQuality(ctx context.Context) Quality
 	SetQuality(context.Context, Quality, condition.Condition) error
-	GetResolution(ctx context.Context) (uint32, uint32)
-	SetResolution(context.Context, uint32, uint32, condition.Condition) error
+	GetResolution(ctx context.Context) *Resolution
+	SetResolution(context.Context, Resolution, condition.Condition) error
 	Reset(ctx context.Context) error
+	GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat
 }
 
 type EncoderFullBackend = Codec
@@ -53,8 +54,31 @@ type EncoderFull struct {
 }
 
 type Resolution struct {
-	Width  uint32
-	Height uint32
+	Width  uint32 `yaml:"width"`
+	Height uint32 `yaml:"height"`
+}
+
+func (r Resolution) String() string {
+	return fmt.Sprintf("%dx%d", r.Width, r.Height)
+}
+
+type PCMAudioFormat struct {
+	SampleFormat  astiav.SampleFormat
+	SampleRate    int
+	ChannelLayout astiav.ChannelLayout
+	ChunkSize     int
+}
+
+func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
+	channelLayoutEqual, err := pcmFmt.ChannelLayout.Compare(other.ChannelLayout)
+	if err != nil {
+		logger.Errorf(context.TODO(), "unable to compare channel layouts: %v", err)
+		return false
+	}
+	return pcmFmt.SampleFormat == other.SampleFormat &&
+		pcmFmt.SampleRate == other.SampleRate &&
+		channelLayoutEqual &&
+		pcmFmt.ChunkSize == other.ChunkSize
 }
 
 type SwitchEncoderParams struct {
@@ -225,7 +249,7 @@ func (e *EncoderFull) receivePacketLocked(
 			}
 		}
 		if r := next.Resolution; r != nil {
-			rErr := e.setResolutionNow(ctx, r.Width, r.Height)
+			rErr := e.setResolutionNow(ctx, *r)
 			if rErr != nil {
 				logger.Errorf(ctx, "unable to set resolution to %dx%d: %v", r.Width, r.Height, rErr)
 			}

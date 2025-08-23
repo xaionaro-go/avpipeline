@@ -22,6 +22,10 @@ import (
 	"github.com/xaionaro-go/unsafetools"
 )
 
+const (
+	inputCorrectZeroDurationPackets = false
+)
+
 type InputConfig struct {
 	CustomOptions types.DictionaryItems
 	AsyncOpen     bool
@@ -289,7 +293,7 @@ func (i *Input) Generate(
 				}
 			}
 
-			if curPkt.Duration() <= 0 {
+			if curPkt.Duration() <= 0 && inputCorrectZeroDurationPackets {
 				continue
 			}
 			// no correction is needed, let's send immediately

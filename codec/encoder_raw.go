@@ -66,14 +66,19 @@ func (EncoderRaw) SetQuality(context.Context, Quality, condition.Condition) erro
 	return fmt.Errorf("'raw' implies the quality cannot be manipulated")
 }
 
-func (EncoderRaw) GetResolution(ctx context.Context) (uint32, uint32) {
-	return 0, 0
+func (EncoderRaw) GetResolution(ctx context.Context) *Resolution {
+	return nil
 }
-func (EncoderRaw) SetResolution(context.Context, uint32, uint32, condition.Condition) error {
+
+func (EncoderRaw) SetResolution(context.Context, Resolution, condition.Condition) error {
 	return fmt.Errorf("'raw' implies the resolution cannot be manipulated")
 }
 
 func (EncoderRaw) Reset(context.Context) error {
+	return nil
+}
+
+func (EncoderRaw) GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat {
 	return nil
 }
 

@@ -33,8 +33,7 @@ type VideoTrackConfig struct {
 	CustomOptions      DictionaryItems    `yaml:"custom_options"`
 	HardwareDeviceType HardwareDeviceType `yaml:"hardware_device_type"`
 	HardwareDeviceName HardwareDeviceName `yaml:"hardware_device_name"`
-	Width              uint32             `yaml:"width"`
-	Height             uint32             `yaml:"height"`
+	Resolution         codec.Resolution   `yaml:"resolution"`
 }
 
 func (c *VideoTrackConfig) Codec(ctx context.Context) *astiav.Codec {
@@ -54,12 +53,10 @@ func (c *RecoderConfig) OutputKey(
 		audioCodec = c.AudioTrackConfigs[0].CodecName.Canonicalize(ctx, true)
 	}
 	var videoCodec codec.Name
+	var resolution codec.Resolution
 	if len(c.VideoTrackConfigs) > 0 {
 		videoCodec = c.VideoTrackConfigs[0].CodecName.Canonicalize(ctx, true)
-	}
-	resolution := codec.Resolution{
-		Width:  c.VideoTrackConfigs[0].Width,
-		Height: c.VideoTrackConfigs[0].Height,
+		resolution = c.VideoTrackConfigs[0].Resolution
 	}
 	return OutputKey{
 		AudioCodec: audioCodec,

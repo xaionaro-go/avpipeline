@@ -11,41 +11,38 @@ import (
 
 func (e *EncoderFull) SetResolution(
 	ctx context.Context,
-	width, height uint32,
+	res Resolution,
 	when condition.Condition,
 ) (_err error) {
-	logger.Debugf(ctx, "SetResolution(ctx, %dx%d)", width, height)
-	defer func() { logger.Tracef(ctx, "/SetResolution(ctx, %dx%d): %v", width, height, _err) }()
-	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setResolutionLocked, ctx, width, height, when)
+	logger.Debugf(ctx, "SetResolution(ctx, %v)", res)
+	defer func() { logger.Tracef(ctx, "/SetResolution(ctx, %v): %v", res, _err) }()
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setResolutionLocked, ctx, res, when)
 }
 
 func (e *EncoderFull) setResolutionLocked(
 	ctx context.Context,
-	width, height uint32,
+	res Resolution,
 	when condition.Condition,
 ) (_err error) {
 	if when == nil {
-		return e.setResolutionNow(ctx, width, height)
+		return e.setResolutionNow(ctx, res)
 	}
 	logger.Tracef(ctx, "setResolutionLocked(): will set the new resolution when condition '%s' is satisfied", when)
 	e.Next.Set(SwitchEncoderParams{
-		When: when,
-		Resolution: &Resolution{
-			Width:  width,
-			Height: height,
-		},
+		When:       when,
+		Resolution: &res,
 	})
 	return nil
 }
 
 func (e *EncoderFull) setResolutionNow(
 	ctx context.Context,
-	width, height uint32,
+	res Resolution,
 ) (_err error) {
 	codecName := e.codec.Name()
-	logger.Debugf(ctx, "setResolutionNow(ctx, %dx%d): %s:%v", width, height, codecName, e.InitParams.HardwareDeviceType)
+	logger.Debugf(ctx, "setResolutionNow(ctx, %v): %s:%v", res, codecName, e.InitParams.HardwareDeviceType)
 	defer func() {
-		logger.Debugf(ctx, "/setResolutionNow(ctx, %dx%d): %s:%v: %v", width, height, codecName, e.InitParams.HardwareDeviceType, _err)
+		logger.Debugf(ctx, "/setResolutionNow(ctx, %v): %s:%v: %v", res, codecName, e.InitParams.HardwareDeviceType, _err)
 	}()
 	defer func() {
 		if _err != nil {
@@ -53,27 +50,30 @@ func (e *EncoderFull) setResolutionNow(
 		}
 	}()
 
-	return e.setResolutionGeneric(ctx, width, height)
+	return e.setResolutionGeneric(ctx, res)
 }
 
 func (e *EncoderFull) setResolutionGeneric(
 	ctx context.Context,
-	width, height uint32,
+	res Resolution,
 ) (_err error) {
-	curW, curH := e.getResolutionLocked(ctx)
-	if width == curW && height == curH {
-		logger.Debugf(ctx, "the resolution is already %dx%d", width, height)
+	oldRes := e.getResolutionLocked(ctx)
+	if oldRes == nil {
+		return fmt.Errorf("cannot get current resolution")
+	}
+	if res == *oldRes {
+		logger.Debugf(ctx, "the resolution is already %v", res)
 		return nil
 	}
-	logger.Infof(ctx, "SetResolution (generic): %dx%d", width, height)
-	e.InitParams.CodecParameters.SetWidth(int(width))
-	e.InitParams.CodecParameters.SetHeight(int(height))
-	e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", width, height), 0)
+	logger.Infof(ctx, "SetResolution (generic): %v", res)
+	e.InitParams.CodecParameters.SetWidth(int(res.Width))
+	e.InitParams.CodecParameters.SetHeight(int(res.Height))
+	e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", res.Width, res.Height), 0)
 	defer func() {
 		if _err != nil {
-			e.InitParams.CodecParameters.SetWidth(int(curW))
-			e.InitParams.CodecParameters.SetHeight(int(curH))
-			e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", curW, curH), 0)
+			e.InitParams.CodecParameters.SetWidth(int(oldRes.Width))
+			e.InitParams.CodecParameters.SetHeight(int(oldRes.Height))
+			e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", oldRes.Width, oldRes.Height), 0)
 		}
 	}()
 	return e.reinitEncoder(ctx)

@@ -213,11 +213,8 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		videoQuality = quality.ConstantBitrate(bitRate)
 	}
 
-	if width, height := cfg.VideoTrackConfigs[0].Width, cfg.VideoTrackConfigs[0].Height; width > 0 && height > 0 {
-		videoResolution = &codec.Resolution{
-			Width:  width,
-			Height: height,
-		}
+	if res := cfg.VideoTrackConfigs[0].Resolution; res != (codec.Resolution{}) {
+		videoResolution = &res
 	}
 
 	var err error
@@ -322,13 +319,16 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 		}
 
 		{
-			w, h := encoder.GetResolution(ctx)
-			logger.Debugf(ctx, "current resolution: %dx%d; requested resolution: %dx%d", w, h)
-			if w != videoCfg.Width && h != videoCfg.Height {
+			res := encoder.GetResolution(ctx)
+			if res == nil {
+				return fmt.Errorf("unable to get the current resolution")
+			}
+			logger.Debugf(ctx, "current resolution: %s; requested resolution: %s", res, videoCfg.Resolution)
+			if *res != videoCfg.Resolution {
 				logger.Debugf(ctx, "resolution needs changing...")
-				err := encoder.SetResolution(ctx, videoCfg.Width, videoCfg.Height, nil)
+				err := encoder.SetResolution(ctx, videoCfg.Resolution, nil)
 				if err != nil {
-					return fmt.Errorf("unable to set resolution to %d%x: %w", videoCfg.Width, videoCfg.Height, err)
+					return fmt.Errorf("unable to set resolution to %v: %w", videoCfg.Resolution, err)
 				}
 			}
 		}

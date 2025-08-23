@@ -35,10 +35,12 @@ func (p *Pool[T]) Get() *T {
 	return p.Pool.Get().(*T)
 }
 
-func (p *Pool[T]) Put(item *T) {
+func (p *Pool[T]) Put(items ...*T) {
 	if !ReuseMemory {
 		return
 	}
-	p.ResetFunc(item)
-	p.Pool.Put(item)
+	for _, item := range items {
+		p.ResetFunc(item)
+		p.Pool.Put(item)
+	}
 }

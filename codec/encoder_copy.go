@@ -67,14 +67,18 @@ func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) err
 	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
 }
 
-func (EncoderCopy) GetResolution(ctx context.Context) (uint32, uint32) {
-	return 0, 0
+func (EncoderCopy) GetResolution(ctx context.Context) *Resolution {
+	return nil
 }
-func (EncoderCopy) SetResolution(context.Context, uint32, uint32, condition.Condition) error {
+func (EncoderCopy) SetResolution(context.Context, Resolution, condition.Condition) error {
 	return fmt.Errorf("'copy' implies the resolution cannot be manipulated")
 }
 
 func (EncoderCopy) Reset(context.Context) error {
+	return nil
+}
+
+func (EncoderCopy) GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat {
 	return nil
 }
 
