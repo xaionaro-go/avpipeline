@@ -453,7 +453,7 @@ func (e *Encoder[EF]) sendInputFrame(
 
 	for _, fittedFrame := range fittedFrames {
 		if encoderDebug {
-			logger.Tracef(ctx, "scaled frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
+			logger.Tracef(ctx, "fitted frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
 		}
 		err := encoder.SendFrame(ctx, fittedFrame)
 		if err != nil {

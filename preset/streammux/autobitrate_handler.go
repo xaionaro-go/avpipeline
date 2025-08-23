@@ -107,12 +107,12 @@ type AutoBitRateHandler[C any] struct {
 }
 
 func (h *AutoBitRateHandler[C]) String() string {
-	return fmt.Sprintf("AutoBitrateHandler(output_id=%d)", h.Output.ID)
+	return fmt.Sprintf("AutoBitRateHandler(output_id=%d)", h.Output.ID)
 }
 
 func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "AutoBitrateHandler.Close()")
-	defer func() { logger.Debugf(ctx, "/AutoBitrateHandler.Close(): %v", _err) }()
+	logger.Debugf(ctx, "AutoBitRateHandler.Close()")
+	defer func() { logger.Debugf(ctx, "/AutoBitRateHandler.Close(): %v", _err) }()
 	h.closureSignaler.Close(ctx)
 	return nil
 }
