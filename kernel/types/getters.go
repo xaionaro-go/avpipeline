@@ -5,7 +5,7 @@ import (
 )
 
 type GetInternalQueueSizer interface {
-	GetInternalQueueSize(context.Context) *uint64
+	GetInternalQueueSize(context.Context) map[string]uint64
 }
 
 type GetKerneler interface {

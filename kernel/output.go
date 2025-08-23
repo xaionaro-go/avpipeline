@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
@@ -96,6 +97,8 @@ type Output struct {
 
 	URL       string
 	URLParsed *url.URL
+
+	LatestSentDTS time.Duration
 
 	started          bool
 	pendingPackets   []pendingPacket
@@ -682,6 +685,18 @@ func (o *Output) send(
 	return nil
 }
 
+type GetLatestSentDTSer interface {
+	GetLatestSentDTS(ctx context.Context) time.Duration
+}
+
+func (o *Output) GetLatestSentDTS(
+	ctx context.Context,
+) time.Duration {
+	return xsync.DoR1(ctx, &o.formatContextLocker, func() time.Duration {
+		return o.LatestSentDTS
+	})
+}
+
 func (o *Output) doWritePacket(
 	ctx context.Context,
 	pkt *astiav.Packet,
@@ -798,6 +813,7 @@ func (o *Output) doWritePacket(
 		return err
 	}
 	outputStream.LastDTS = dts
+	o.LatestSentDTS = avconv.Duration(dts, outputStream.TimeBase())
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
 			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s; len:%d: %v",

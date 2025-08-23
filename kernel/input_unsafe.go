@@ -30,8 +30,6 @@ func (i *Input) UnsafeSetRecvBufferSize(
 	return nil
 }
 
-var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
-
 func (i *Input) UnsafeGetRawAVIOContext(
 	ctx context.Context,
 ) *avcommon.AVIOContext {

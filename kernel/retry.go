@@ -271,7 +271,7 @@ var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
 
 func (r *Retry[T]) GetInternalQueueSize(
 	ctx context.Context,
-) *uint64 {
+) map[string]uint64 {
 	if _, ok := any(r.Kernel).(GetInternalQueueSizer); !ok {
 		return nil
 	}

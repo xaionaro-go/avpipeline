@@ -31,7 +31,7 @@ func (o *Output) UnsafeSetSendBufferSize(
 	return nil
 }
 
-var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
+var _ GetInternalQueueSizer = (*Output)(nil)
 
 // Warning! The implementation intrudes into private structures, which is unsafe.
 func (r *Output) GetInternalQueueSize(

@@ -45,8 +45,10 @@ func (c *PushQueueSizeCond) Match(
 		sinkStats.BytesCountMissed.Load()
 	if proc, ok := c.NodeSink.GetProcessor().(processor.GetInternalQueueSizer); ok {
 		if internalQueue := proc.GetInternalQueueSize(ctx); internalQueue != nil {
-			logger.Tracef(ctx, "internal queue size: %d", *internalQueue)
-			queueSizeBytes += *internalQueue
+			logger.Tracef(ctx, "internal queue size: %v", internalQueue)
+			for _, internalQueue := range internalQueue {
+				queueSizeBytes += internalQueue
+			}
 		}
 	}
 	logger.Tracef(ctx, "queue size: %d", queueSizeBytes)

@@ -210,7 +210,7 @@ var _ GetInternalQueueSizer = (*FromKernel[kernel.Abstract])(nil)
 
 func (p *FromKernel[T]) GetInternalQueueSize(
 	ctx context.Context,
-) *uint64 {
+) map[string]uint64 {
 	queuer, ok := any(p.Kernel).(GetInternalQueueSizer)
 	if !ok {
 		return nil
