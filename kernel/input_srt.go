@@ -9,6 +9,6 @@ import (
 	"github.com/xaionaro-go/libsrt/threadsafe"
 )
 
-func (input *Input) SRT(ctx context.Context) (*threadsafe.Socket, error) {
-	return formatContextToSRTSocket(ctx, input.FormatContext)
+func (i *Input) SRT(ctx context.Context) (*threadsafe.Socket, error) {
+	return formatContextToSRTSocket(ctx, i.FormatContext)
 }

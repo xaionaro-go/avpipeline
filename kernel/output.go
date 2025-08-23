@@ -26,7 +26,6 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
-	"github.com/xaionaro-go/sockopt"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -44,6 +43,7 @@ const (
 	outputAcceptOnlyKeyFramesUntilStart = true
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
+	outputDebug                         = true
 )
 
 type OutputConfigWaitForOutputStreams struct {
@@ -320,26 +320,6 @@ func (o *Output) doOpen(
 		if err := o.UnsafeSetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
 			return fmt.Errorf("unable to set the send buffer size to %d: %w", cfg.SendBufferSize, err)
 		}
-	}
-
-	return nil
-}
-
-func (o *Output) UnsafeSetSendBufferSize(
-	ctx context.Context,
-	size uint,
-) (_err error) {
-	logger.Debugf(ctx, "SetSendBufferSize(ctx, %d)", size)
-	defer func() { logger.Debugf(ctx, "/SetSendBufferSize(ctx, %d): %v", size, _err) }()
-
-	fd, err := o.UnsafeGetFileDescriptor(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to get file descriptor: %w", err)
-	}
-
-	err = sockopt.SetWriteBuffer(fd, int(size))
-	if err != nil {
-		return fmt.Errorf("unable to set the buffer size of file descriptor %d to %d", fd, int(size))
 	}
 
 	return nil
@@ -827,6 +807,9 @@ func (o *Output) doWritePacket(
 			dataLen,
 			err,
 		)
+	}
+	if outputDebug {
+		logger.Tracef(ctx, "current queue size: %#+v", o.GetInternalQueueSize(ctx))
 	}
 	return nil
 }

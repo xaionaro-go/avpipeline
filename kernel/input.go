@@ -27,9 +27,10 @@ const (
 )
 
 type InputConfig struct {
-	CustomOptions types.DictionaryItems
-	AsyncOpen     bool
-	OnOpened      func(context.Context, *Input) error
+	CustomOptions  types.DictionaryItems
+	RecvBufferSize uint
+	AsyncOpen      bool
+	OnOpened       func(context.Context, *Input) error
 }
 
 type Input struct {
@@ -40,8 +41,9 @@ type Input struct {
 	*astiav.IOInterrupter
 	*astiav.Dictionary
 
-	ID  InputID
-	URL string
+	ID        InputID
+	URL       string
+	URLParsed *url.URL
 }
 
 var _ Abstract = (*Input)(nil)
@@ -58,13 +60,15 @@ func NewInputFromURL(
 	if urlString == "" {
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
-	if urlParsed, err := url.Parse(urlString); err == nil && urlParsed.Scheme != "" {
+	urlParsed, err := url.Parse(urlString)
+	if err == nil && urlParsed.Scheme != "" {
 		logger.Debugf(ctx, "URL: %#+v", urlParsed)
 		urlString += "/"
 	}
 	i := &Input{
-		ID:  InputID(nextInputID.Add(1)),
-		URL: urlString,
+		ID:        InputID(nextInputID.Add(1)),
+		URL:       urlString,
+		URLParsed: urlParsed,
 
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
@@ -145,6 +149,12 @@ func (i *Input) doOpen(
 		i.FormatContext.CloseInput()
 		i.FormatContext.Free()
 	})
+
+	if cfg.RecvBufferSize != 0 {
+		if err := i.UnsafeSetRecvBufferSize(ctx, cfg.RecvBufferSize); err != nil {
+			return fmt.Errorf("unable to set the recv buffer size to %d: %w", cfg.RecvBufferSize, err)
+		}
+	}
 
 	if err := i.FormatContext.FindStreamInfo(nil); err != nil {
 		return fmt.Errorf("unable to get stream info: %w", err)

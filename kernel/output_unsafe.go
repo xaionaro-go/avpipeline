@@ -7,8 +7,29 @@ import (
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/sockopt"
 	"github.com/xaionaro-go/xsync"
 )
+
+func (o *Output) UnsafeSetSendBufferSize(
+	ctx context.Context,
+	size uint,
+) (_err error) {
+	logger.Debugf(ctx, "UnsafeSetSendBufferSize(ctx, %d)", size)
+	defer func() { logger.Debugf(ctx, "/UnsafeSetSendBufferSize(ctx, %d): %v", size, _err) }()
+
+	fd, err := o.UnsafeGetFileDescriptor(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get file descriptor: %w", err)
+	}
+
+	err = sockopt.SetWriteBuffer(fd, int(size))
+	if err != nil {
+		return fmt.Errorf("unable to set the buffer size of file descriptor %d to %d", fd, int(size))
+	}
+
+	return nil
+}
 
 var _ GetInternalQueueSizer = (*Retry[Abstract])(nil)
 
@@ -62,8 +83,8 @@ func (r *Output) unsafeGetRawAVFormatContext(
 func (o *Output) UnsafeGetFileDescriptor(
 	ctx context.Context,
 ) (_ret int, _err error) {
-	logger.Debugf(ctx, "GetFileDescriptor")
-	defer func() { logger.Debugf(ctx, "/GetFileDescriptor: %v %v", _ret, _err) }()
+	logger.Debugf(ctx, "UnsafeGetFileDescriptor")
+	defer func() { logger.Debugf(ctx, "/UnsafeGetFileDescriptor: %v %v", _ret, _err) }()
 	return xsync.DoA1R2(ctx, &o.formatContextLocker, o.unsafeGetFileDescriptor, ctx)
 }
 
@@ -91,7 +112,7 @@ func (r *Output) UnsafeGetRawURLContext(
 func (r *Output) unsafeGetRawURLContext(
 	ctx context.Context,
 ) *avcommon.URLContext {
-	avioCtx := r.UnsafeGetRawAVIOContext(ctx)
+	avioCtx := r.unsafeGetRawAVIOContext(ctx)
 	return avcommon.WrapURLContext(avioCtx.Opaque())
 }
 
