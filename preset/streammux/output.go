@@ -7,6 +7,7 @@ import (
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -139,8 +140,8 @@ func newOutput[C any](
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, nil),
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
-			VideoCodec:      outputKey.VideoCodec,
-			AudioCodec:      outputKey.AudioCodec,
+			VideoCodec:      codec.Name(outputKey.VideoCodec),
+			AudioCodec:      codec.Name(outputKey.AudioCodec),
 			VideoResolution: &outputKey.Resolution,
 		}),
 		nil,
@@ -283,4 +284,29 @@ func (o *Output[C]) Output() node.Abstract {
 
 func (o *Output[C]) Flush(ctx context.Context) (_err error) {
 	return o.RecoderNode.Processor.Kernel.Reset(ctx)
+}
+
+func OutputKeyFromRecoderConfig(
+	ctx context.Context,
+	c *types.RecoderConfig,
+) OutputKey {
+	if c == nil {
+		return OutputKey{}
+	}
+
+	var audioCodec codec.Name
+	if len(c.AudioTrackConfigs) > 0 {
+		audioCodec = codec.Name(c.AudioTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+	}
+	var videoCodec codec.Name
+	var resolution codec.Resolution
+	if len(c.VideoTrackConfigs) > 0 {
+		videoCodec = codec.Name(c.VideoTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+		resolution = c.VideoTrackConfigs[0].Resolution
+	}
+	return OutputKey{
+		AudioCodec: codectypes.Name(audioCodec),
+		VideoCodec: codectypes.Name(videoCodec),
+		Resolution: resolution,
+	}
 }

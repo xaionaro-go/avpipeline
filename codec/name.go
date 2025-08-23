@@ -4,10 +4,11 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
-type Name string
+type Name types.Name
 
 func (n Name) Codec(
 	ctx context.Context,

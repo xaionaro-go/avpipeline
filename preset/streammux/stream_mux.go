@@ -303,7 +303,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
-	outputKey := cfg.OutputKey(ctx)
+	outputKey := OutputKeyFromRecoderConfig(ctx, &cfg)
 	var err error
 	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
 	if err != nil {
@@ -358,8 +358,8 @@ func (s *StreamMux[C]) reconfigureOutput(
 		if len(encoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
-			encoderFactory.VideoCodec = videoCfg.CodecName
-			encoderFactory.AudioCodec = audioCfg.CodecName
+			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
+			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
 			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
 			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
@@ -372,7 +372,7 @@ func (s *StreamMux[C]) reconfigureOutput(
 			return nil
 		}
 
-		if videoCfg.CodecName != encoderFactory.VideoCodec {
+		if codec.Name(videoCfg.CodecName) != encoderFactory.VideoCodec {
 			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
 		}
 

@@ -3,13 +3,13 @@ package types
 import (
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
 type OutputKey struct {
-	AudioCodec codec.Name
-	VideoCodec codec.Name
-	Resolution codec.Resolution
+	AudioCodec codectypes.Name
+	VideoCodec codectypes.Name
+	Resolution codectypes.Resolution
 }
 
 func (k OutputKey) String() string {

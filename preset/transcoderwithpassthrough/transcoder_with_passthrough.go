@@ -12,6 +12,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -134,7 +135,7 @@ func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
 	}
 	cpy := s.RecodingConfig
 	cpy.VideoTrackConfigs = slices.Clone(cpy.VideoTrackConfigs)
-	cpy.VideoTrackConfigs[0].CodecName = codec.NameCopy
+	cpy.VideoTrackConfigs[0].CodecName = codectypes.Name(codec.NameCopy)
 	return cpy
 }
 
@@ -178,10 +179,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 		}
 		return nil
 	}
-	if cfg.AudioTrackConfigs[0].CodecName != codec.NameCopy {
+	if codec.Name(cfg.AudioTrackConfigs[0].CodecName) != codec.NameCopy {
 		return fmt.Errorf("we currently do not support audio recoding: '%s' != 'copy'", cfg.AudioTrackConfigs[0].CodecName)
 	}
-	if cfg.VideoTrackConfigs[0].CodecName == codec.NameCopy {
+	if codec.Name(cfg.VideoTrackConfigs[0].CodecName) == codec.NameCopy {
 		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -234,7 +235,7 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		),
 		codec.NewNaiveEncoderFactory(ctx,
 			&codec.NaiveEncoderFactoryParams{
-				VideoCodec:            cfg.VideoTrackConfigs[0].CodecName,
+				VideoCodec:            codec.Name(cfg.VideoTrackConfigs[0].CodecName),
 				AudioCodec:            codec.NameCopy,
 				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
 				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
@@ -262,7 +263,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
 
 	encoderFactory := s.Recoder.EncoderFactory
-	if cfg.VideoTrackConfigs[0].CodecName != encoderFactory.VideoCodec {
+	if codec.Name(cfg.VideoTrackConfigs[0].CodecName) != encoderFactory.VideoCodec {
 		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
 	}
 

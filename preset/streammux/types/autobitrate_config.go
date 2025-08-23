@@ -2,11 +2,9 @@ package types
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
 type AutoBitRateCalculator interface {
@@ -19,7 +17,7 @@ type AutoBitRateCalculator interface {
 }
 
 type AutoBitRateResolutionAndBitRateConfig struct {
-	codec.Resolution
+	codectypes.Resolution
 	BitrateHigh uint64
 	BitrateLow  uint64
 }
@@ -27,7 +25,7 @@ type AutoBitRateResolutionAndBitRateConfig struct {
 type AutoBitRateResolutionAndBitRateConfigs []AutoBitRateResolutionAndBitRateConfig
 
 func (r AutoBitRateResolutionAndBitRateConfigs) Find(
-	res codec.Resolution,
+	res codectypes.Resolution,
 ) *AutoBitRateResolutionAndBitRateConfig {
 	for i := range r {
 		if r[i].Width == res.Width && r[i].Height == res.Height {
@@ -79,51 +77,4 @@ type AutoBitRateConfig struct {
 	ResolutionsAndBitRates AutoBitRateResolutionAndBitRateConfigs
 	Calculator             AutoBitRateCalculator
 	CheckInterval          time.Duration
-}
-
-func multiplyBitRates(
-	resolutions []AutoBitRateResolutionAndBitRateConfig,
-	k float64,
-) []AutoBitRateResolutionAndBitRateConfig {
-	out := make([]AutoBitRateResolutionAndBitRateConfig, len(resolutions))
-	for i := range resolutions {
-		out[i] = resolutions[i]
-		out[i].BitrateHigh = uint64(float64(out[i].BitrateHigh) * k)
-		out[i].BitrateLow = uint64(float64(out[i].BitrateLow) * k)
-	}
-	return out
-}
-
-func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) []AutoBitRateResolutionAndBitRateConfig {
-	switch codecID {
-	case astiav.CodecIDH264:
-		return []AutoBitRateResolutionAndBitRateConfig{
-			{
-				Resolution:  codec.Resolution{Width: 3840, Height: 2160},
-				BitrateHigh: 24 << 20, BitrateLow: 8 << 20, // 24 Mbps .. 8 Mbps
-			},
-			{
-				Resolution:  codec.Resolution{Width: 2560, Height: 1440},
-				BitrateHigh: 12 << 20, BitrateLow: 4 << 20, // 12 Mbps .. 4 Mbps
-			},
-			{
-				Resolution:  codec.Resolution{Width: 1920, Height: 1080},
-				BitrateHigh: 6 << 20, BitrateLow: 2 << 20, // 6 Mbps .. 2 Mbps
-			},
-			{
-				Resolution:  codec.Resolution{Width: 1280, Height: 720},
-				BitrateHigh: 3 << 20, BitrateLow: 1 << 20, // 3 Mbps .. 1 Mbps
-			},
-			{
-				Resolution:  codec.Resolution{Width: 854, Height: 480},
-				BitrateHigh: 2 << 20, BitrateLow: 128 << 10, // 2 Mbps .. 128 Kbps
-			},
-		}
-	case astiav.CodecIDHevc:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.7)
-	case astiav.CodecIDAv1:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.5)
-	default:
-		panic(fmt.Errorf("unsupported codec for DefaultAutoBitrateConfig: %s", codecID))
-	}
 }

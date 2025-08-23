@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
@@ -53,14 +54,13 @@ type EncoderFull struct {
 	Next    typing.Optional[SwitchEncoderParams]
 }
 
-type Resolution struct {
-	Width  uint32 `yaml:"width"`
-	Height uint32 `yaml:"height"`
+type SwitchEncoderParams struct {
+	When       condition.Condition
+	Quality    quality.Quality
+	Resolution *Resolution
 }
 
-func (r Resolution) String() string {
-	return fmt.Sprintf("%dx%d", r.Width, r.Height)
-}
+type Resolution = types.Resolution
 
 type PCMAudioFormat struct {
 	SampleFormat  astiav.SampleFormat
@@ -79,12 +79,6 @@ func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 		pcmFmt.SampleRate == other.SampleRate &&
 		channelLayoutEqual &&
 		pcmFmt.ChunkSize == other.ChunkSize
-}
-
-type SwitchEncoderParams struct {
-	When       condition.Condition
-	Quality    quality.Quality
-	Resolution *Resolution
 }
 
 var _ Encoder = (*EncoderFull)(nil)
