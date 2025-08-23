@@ -90,15 +90,15 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "closeLocked")
 	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
 	logger.Tracef(ctx, "closing the codec, due to: %s", debug.Stack())
-	if err := c.reset(ctx); err != nil {
-		logger.Errorf(ctx, "unable to reset the codec: %w", err)
-	}
 	defer func() {
 		c.codec = nil
 		c.codecContext = nil
 	}()
 	if c.closer == nil {
 		return nil
+	}
+	if err := c.reset(ctx); err != nil {
+		logger.Errorf(ctx, "unable to reset the codec: %v", err)
 	}
 	err := c.closer.Close()
 	c.closer = nil
