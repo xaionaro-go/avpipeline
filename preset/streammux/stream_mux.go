@@ -265,9 +265,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	}
 
 	cfg := InitOutputOptions(opts).config()
-	if cfg.RetryParameters != nil {
-		return nil, fmt.Errorf("retry parameters are not supported in the StreamMux preset, yet")
-	}
+	_ = cfg // currently unused
 
 	outputID := len(s.Outputs)
 	output, err := newOutput(

@@ -13,7 +13,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
-	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 )
 
@@ -159,12 +158,12 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			if o == nil {
 				continue
 			}
-			outputNode, ok := o.OutputNode.GetProcessor().(*processor.FromKernel[*kernel.Output])
+			outputProc, ok := o.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
 			if !ok {
-				logger.Errorf(ctx, "currently only processor.FromKernel[*kernel.Output] is supported, got: %T", o.OutputNode.GetProcessor())
+				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", o.OutputNode.GetProcessor())
 				continue
 			}
-			getQueueSizers = append(getQueueSizers, outputNode)
+			getQueueSizers = append(getQueueSizers, outputProc)
 		}
 	})
 

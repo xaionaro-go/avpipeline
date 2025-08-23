@@ -46,12 +46,7 @@ type OutputConfig struct {
 	OutputThrottlerMaxQueueSizeBytes uint64
 }
 
-type RetryParameters struct {
-}
-
-type initOutputConfig struct {
-	RetryParameters *RetryParameters
-}
+type initOutputConfig struct{}
 
 type InitOutputOption interface {
 	apply(*initOutputConfig)
@@ -70,8 +65,6 @@ func (opts InitOutputOptions) config() initOutputConfig {
 	opts.apply(&cfg)
 	return cfg
 }
-
-type InitOutputOptionRetry *RetryParameters
 
 // An example with two Outputs:
 //

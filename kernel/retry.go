@@ -22,7 +22,7 @@ type Retry[T Abstract] struct {
 	OnError      func(context.Context, T, error) error
 	Kernel       T
 	KernelIsSet  bool
-	KernelLocker xsync.Mutex
+	KernelLocker xsync.CtxLocker
 	KernelError  error
 }
 
@@ -37,6 +37,7 @@ func NewRetry[T Abstract](
 		Factory:         factory,
 		OnStart:         onStart,
 		OnError:         onError,
+		KernelLocker:    make(xsync.CtxLocker, 1),
 	}
 	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {

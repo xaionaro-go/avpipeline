@@ -8,28 +8,32 @@ import (
 )
 
 type AutoBitrateCalculatorThresholds struct {
-	OutputVeryHighQueueSizeDuration time.Duration
-	OutputHighQueueSizeDuration     time.Duration
-	OutputLowQueueSizeDuration      time.Duration
-	OutputVeryLowQueueSizeDuration  time.Duration
-	IncreaseK                       float64
-	DecreaseK                       float64
-	QuickIncreaseK                  float64
-	QuickDecreaseK                  float64
+	OutputExtremelyHighQueueSizeDuration time.Duration
+	OutputVeryHighQueueSizeDuration      time.Duration
+	OutputHighQueueSizeDuration          time.Duration
+	OutputLowQueueSizeDuration           time.Duration
+	OutputVeryLowQueueSizeDuration       time.Duration
+	IncreaseK                            float64
+	DecreaseK                            float64
+	QuickIncreaseK                       float64
+	QuickDecreaseK                       float64
+	ExtremeDecreaseK                     float64
 }
 
 var _ AutoBitRateCalculator = (*AutoBitrateCalculatorThresholds)(nil)
 
 func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
 	return &AutoBitrateCalculatorThresholds{
-		OutputVeryHighQueueSizeDuration: time.Second * 5,
-		OutputHighQueueSizeDuration:     time.Second * 2,
-		OutputLowQueueSizeDuration:      time.Second,
-		OutputVeryLowQueueSizeDuration:  time.Second / 2,
-		IncreaseK:                       1.01,
-		DecreaseK:                       0.95,
-		QuickIncreaseK:                  1.2,
-		QuickDecreaseK:                  0.5,
+		OutputExtremelyHighQueueSizeDuration: time.Second * 30,
+		OutputVeryHighQueueSizeDuration:      time.Second * 5,
+		OutputHighQueueSizeDuration:          time.Second * 2,
+		OutputLowQueueSizeDuration:           time.Second,
+		OutputVeryLowQueueSizeDuration:       time.Second / 2,
+		IncreaseK:                            1.01,
+		DecreaseK:                            0.95,
+		QuickIncreaseK:                       1.2,
+		QuickDecreaseK:                       0.5,
+		ExtremeDecreaseK:                     0.1,
 	}
 }
 
@@ -38,6 +42,8 @@ func (d *AutoBitrateCalculatorThresholds) decideFloat(
 	queueDuration time.Duration,
 ) (_ret float64) {
 	switch {
+	case queueDuration >= d.OutputExtremelyHighQueueSizeDuration:
+		return d.ExtremeDecreaseK
 	case queueDuration >= d.OutputVeryHighQueueSizeDuration:
 		return d.QuickDecreaseK
 	case queueDuration <= d.OutputVeryLowQueueSizeDuration:
