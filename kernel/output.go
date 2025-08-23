@@ -93,7 +93,7 @@ type Output struct {
 	ioContext *astiav.IOContext
 	proxy     *proxy.TCPProxy
 
-	formatContextLocker xsync.RWMutex
+	formatContextLocker xsync.CtxLocker
 
 	URL       string
 	URLParsed *url.URL
@@ -169,7 +169,8 @@ func NewOutputFromURL(
 		Config:          cfg,
 		ClosureSignaler: closuresignaler.New(),
 
-		waitingKeyFrames: make(map[int]struct{}),
+		formatContextLocker: make(xsync.CtxLocker, 1),
+		waitingKeyFrames:    make(map[int]struct{}),
 	}
 
 	rtmpAppName := strings.Trim(url.Path, "/")

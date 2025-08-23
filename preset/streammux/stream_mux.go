@@ -42,6 +42,7 @@ type StreamMux[C any] struct {
 
 	// aux
 	InputNodeAsPacketSource packet.Source
+	AutoBitRateHandler      *AutoBitRateHandler[C]
 
 	// to become a fake node myself:
 	nodeboilerplate.Statistics
@@ -61,11 +62,13 @@ type OutputFactory interface {
 func New(
 	ctx context.Context,
 	muxMode types.MuxMode,
+	autoBitRate *AutoBitRateConfig,
 	outputFactory OutputFactory,
 ) (*StreamMux[struct{}], error) {
 	return NewWithCustomData[struct{}](
 		ctx,
 		muxMode,
+		autoBitRate,
 		outputFactory,
 	)
 }
@@ -73,6 +76,7 @@ func New(
 func NewWithCustomData[C any](
 	ctx context.Context,
 	muxMode types.MuxMode,
+	autoBitRate *AutoBitRateConfig,
 	outputFactory OutputFactory,
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
@@ -87,6 +91,20 @@ func NewWithCustomData[C any](
 	}
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
 	s.initSwitches()
+
+	if autoBitRate != nil {
+		logger.Tracef(ctx, "enabling automatic bitrate control")
+		if len(autoBitRate.ResolutionsAndBitRates) == 0 {
+			return nil, fmt.Errorf("at least one resolution must be specified for automatic bitrate control")
+		}
+		h := s.initAutoBitRateHandler(*autoBitRate)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): done")
+			err := h.ServeContext(ctx)
+			logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
+		})
+	}
+
 	return s, nil
 }
 
@@ -178,17 +196,22 @@ func (s *StreamMux[C]) initSwitches() {
 	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagNextOutputStateBlock)
 }
 
-func (p *StreamMux[C]) Close(ctx context.Context) (_err error) {
+func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "StreamMux.Close()")
 	defer func() { logger.Debugf(ctx, "/StreamMux.Close(): %v", _err) }()
 	var errs []error
 
-	if err := p.InputNode.GetProcessor().Close(ctx); err != nil {
+	if err := s.InputNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close the input node: %w", err))
 	}
-	for _, output := range p.Outputs {
+	for _, output := range s.Outputs {
 		if err := output.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close the output chain %d: %w", output.ID, err))
+		}
+	}
+	if s.AutoBitRateHandler != nil {
+		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler: %w", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -543,4 +566,34 @@ func (s *StreamMux[C]) WaitForStop(
 	defer func() { logger.Tracef(ctx, "/WaitForStop: %v", _err) }()
 	s.waitGroup.Wait()
 	return nil
+}
+
+func (s *StreamMux[C]) GetActiveOutput() *Output[C] {
+	outputID := s.OutputSwitch.CurrentValue.Load()
+	if int(outputID) < 0 || int(outputID) >= len(s.Outputs) {
+		return nil
+	}
+	return s.Outputs[outputID]
+}
+
+func (s *StreamMux[C]) SetResolution(
+	ctx context.Context,
+	res codec.Resolution,
+) (_err error) {
+	logger.Tracef(ctx, "SetResolution: %s", res)
+	defer func() { logger.Tracef(ctx, "/SetResolution: %s: %v", res, _err) }()
+
+	cfg := s.GetRecoderConfig(ctx)
+	if len(cfg.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
+	}
+	curRes := cfg.VideoTrackConfigs[0].Resolution
+	if curRes == res {
+		logger.Tracef(ctx, "the resolution is already set to %s", res)
+		return nil
+	}
+	newRes := cfg.VideoTrackConfigs[0]
+	newRes.Resolution = res
+	cfg.VideoTrackConfigs[0] = newRes
+	return s.SetRecoderConfig(ctx, cfg)
 }

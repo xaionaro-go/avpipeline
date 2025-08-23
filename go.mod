@@ -24,7 +24,7 @@ require (
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
-	github.com/xaionaro-go/xsync v0.0.0-20250511184922-deec5fb01a0f
+	github.com/xaionaro-go/xsync v0.0.0-20250823213430-c05fb7aa7ed0
 	go.uber.org/atomic v1.11.0
 	gocv.io/x/gocv v0.41.0
 	google.golang.org/grpc v1.72.1

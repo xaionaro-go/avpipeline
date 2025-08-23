@@ -8,18 +8,18 @@ import (
 
 var _ processor.Abstract = (*StreamMux[struct{}])(nil)
 
-func (p *StreamMux[C]) SendInputPacketChan() chan<- packet.Input {
-	return p.InputNode.Processor.InputPacketCh
+func (s *StreamMux[C]) SendInputPacketChan() chan<- packet.Input {
+	return s.InputNode.Processor.InputPacketCh
 }
-func (p *StreamMux[C]) OutputPacketChan() <-chan packet.Output {
+func (s *StreamMux[C]) OutputPacketChan() <-chan packet.Output {
 	return nil
 }
-func (p *StreamMux[C]) SendInputFrameChan() chan<- frame.Input {
-	return p.InputNode.Processor.InputFrameCh
+func (s *StreamMux[C]) SendInputFrameChan() chan<- frame.Input {
+	return s.InputNode.Processor.InputFrameCh
 }
-func (p *StreamMux[C]) OutputFrameChan() <-chan frame.Output {
+func (s *StreamMux[C]) OutputFrameChan() <-chan frame.Output {
 	return nil
 }
-func (p *StreamMux[C]) ErrorChan() <-chan error {
+func (s *StreamMux[C]) ErrorChan() <-chan error {
 	panic("not implemented")
 }

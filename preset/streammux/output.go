@@ -20,7 +20,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xcontext"
 )
 
@@ -30,23 +29,21 @@ type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kern
 type OutputKey = types.OutputKey
 
 type Output[C any] struct {
-	ID                 int
-	InputFilter        *NodeBarrier[C]
-	InputThrottler     *packetcondition.VideoAverageBitrateLower
-	InputFixer         *autofix.AutoFixer
-	RecoderNode        *NodeRecoder[C]
-	OutputThrottler    *packetcondition.VideoAverageBitrateLower
-	MapIndices         *NodeMapStreamIndexes[C]
-	OutputFixer        *autofix.AutoFixer
-	OutputSyncer       *NodeBarrier[C]
-	OutputNode         node.Abstract
-	OutputNodeConfig   OutputConfig
-	AutoBitRateHandler *AutoBitRateHandler[C]
+	ID               int
+	InputFilter      *NodeBarrier[C]
+	InputThrottler   *packetcondition.VideoAverageBitrateLower
+	InputFixer       *autofix.AutoFixer
+	RecoderNode      *NodeRecoder[C]
+	OutputThrottler  *packetcondition.VideoAverageBitrateLower
+	MapIndices       *NodeMapStreamIndexes[C]
+	OutputFixer      *autofix.AutoFixer
+	OutputSyncer     *NodeBarrier[C]
+	OutputNode       node.Abstract
+	OutputNodeConfig OutputConfig
 }
 
 type OutputConfig struct {
 	OutputThrottlerMaxQueueSizeBytes uint64
-	AutoBitrate                      *AutoBitRateConfig
 }
 
 type RetryParameters struct {
@@ -187,23 +184,6 @@ func newOutput[C any](
 		OutputNodeConfig: outputConfig,
 	}
 
-	// auto bitrate handler
-
-	if outputConfig.AutoBitrate != nil {
-		logger.Tracef(ctx, "enabling automatic bitrate control for output %d", o.ID)
-		if len(outputConfig.AutoBitrate.ResolutionsAndBitRates) == 0 {
-			return nil, fmt.Errorf("at least one resolution must be specified for automatic bitrate control")
-		}
-		if queueSizer, ok := outputNode.GetProcessor().(processor.GetInternalQueueSizer); ok {
-			h := o.autoBitRateHandler(*outputConfig.AutoBitrate, queueSizer)
-			observability.Go(ctx, func(ctx context.Context) {
-				defer logger.Debugf(ctx, "autoBitRateHandler(%d).ServeContext(): done", o.ID)
-				err := h.ServeContext(ctx)
-				logger.Debugf(ctx, "autoBitRateHandler(%d).ServeContext(): %v", o.ID, err)
-			})
-		}
-	}
-
 	// wiring
 
 	o.InputFilter.AddPushPacketsTo(
@@ -266,11 +246,6 @@ func (o *Output[C]) Close(ctx context.Context) (_err error) {
 	}
 	if err := o.OutputNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output node for output %d: %w", o.ID, err))
-	}
-	if o.AutoBitRateHandler != nil {
-		if err := o.AutoBitRateHandler.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler for output %d: %w", o.ID, err))
-		}
 	}
 	return errors.Join(errs...)
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -85,29 +87,29 @@ func DefaultAutoBitrateConfig(
 	return result
 }
 
-func (o *Output[C]) autoBitRateHandler(
+func (s *StreamMux[C]) initAutoBitRateHandler(
 	cfg AutoBitRateConfig,
-	queueSizer processor.GetInternalQueueSizer,
 ) *AutoBitRateHandler[C] {
+	if s.AutoBitRateHandler != nil {
+		panic("AutoBitRateHandler is already initialized")
+	}
 	r := &AutoBitRateHandler[C]{
 		AutoBitRateConfig: cfg,
-		Output:            o,
-		QueueSizer:        queueSizer,
+		StreamMux:         s,
 		closureSignaler:   closuresignaler.New(),
 	}
-	o.AutoBitRateHandler = r
+	s.AutoBitRateHandler = r
 	return r
 }
 
 type AutoBitRateHandler[C any] struct {
 	AutoBitRateConfig
-	Output          *Output[C]
-	QueueSizer      processor.GetInternalQueueSizer
+	StreamMux       *StreamMux[C]
 	closureSignaler *closuresignaler.ClosureSignaler
 }
 
 func (h *AutoBitRateHandler[C]) String() string {
-	return fmt.Sprintf("AutoBitRateHandler(output_id=%d)", h.Output.ID)
+	return "AutoBitRateHandler"
 }
 
 func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
@@ -120,8 +122,8 @@ func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
 func (h *AutoBitRateHandler[C]) ServeContext(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "ServeContext: %d", h.Output.ID)
-	defer func() { logger.Debugf(ctx, "/ServeContext: %d: %v", h.Output.ID, _err) }()
+	logger.Debugf(ctx, "ServeContext")
+	defer func() { logger.Debugf(ctx, "/ServeContext: %v", _err) }()
 	t := time.NewTicker(h.CheckInterval)
 	defer t.Stop()
 	for {
@@ -137,7 +139,11 @@ func (h *AutoBitRateHandler[C]) ServeContext(
 }
 
 func (h *AutoBitRateHandler[C]) GetEncoder() codec.Encoder {
-	encoders := h.Output.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
+	o := h.StreamMux.GetActiveOutput()
+	if o == nil {
+		return nil
+	}
+	encoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
 	if len(encoders) != 1 {
 		return nil
 	}
@@ -147,18 +153,42 @@ func (h *AutoBitRateHandler[C]) GetEncoder() codec.Encoder {
 func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
-	queueSize := h.QueueSizer.GetInternalQueueSize(ctx)
-	if queueSize == nil {
-		logger.Tracef(ctx, "unable to get queue size")
-		return
-	}
-
-	logger.Tracef(ctx, "queue size: %+v", queueSize)
+	var getQueueSizers []kernel.GetInternalQueueSizer
+	h.StreamMux.Locker.Do(ctx, func() {
+		for _, o := range h.StreamMux.Outputs {
+			if o == nil {
+				continue
+			}
+			outputNode, ok := o.OutputNode.GetProcessor().(*processor.FromKernel[*kernel.Output])
+			if !ok {
+				logger.Errorf(ctx, "currently only processor.FromKernel[*kernel.Output] is supported, got: %T", o.OutputNode.GetProcessor())
+				continue
+			}
+			getQueueSizers = append(getQueueSizers, outputNode)
+		}
+	})
 
 	var totalQueue uint64
-	for _, q := range queueSize {
-		totalQueue += q
+	for _, outputNode := range getQueueSizers {
+		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancelFn()
+		queueSize := outputNode.GetInternalQueueSize(nodeReqCtx)
+		reqErr := nodeReqCtx.Err()
+		if queueSize == nil && reqErr == nil {
+			logger.Warnf(ctx, "unable to get queue size")
+			continue
+		}
+		if reqErr != nil {
+			logger.Errorf(ctx, "timed out on getting queue size; likely the output is locked, assuming huge queue")
+			totalQueue = math.MaxUint32 / 4 // "max32/4" to avoid weird behaviors if somebody will change the type
+		} else {
+			logger.Tracef(ctx, "queue size: %+v", queueSize)
+			for _, q := range queueSize {
+				totalQueue += q
+			}
+		}
 	}
+	logger.Tracef(ctx, "total queue size: %d", totalQueue)
 
 	encoder := h.GetEncoder()
 	if encoder == nil {
@@ -288,8 +318,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	}
 
 	logger.Infof(ctx, "changing resolution from %v to %v", *res, newRes.Resolution)
-	err := encoder.SetResolution(ctx, newRes.Resolution, nil)
-	if err != nil {
+	if err := h.StreamMux.SetResolution(ctx, newRes.Resolution); err != nil {
 		return fmt.Errorf("unable to set resolution to %v: %w", newRes.Resolution, err)
 	}
 	return nil

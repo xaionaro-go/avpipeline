@@ -14,16 +14,16 @@ import (
 
 var _ node.Abstract = (*StreamMux[struct{}])(nil)
 
-func (n *StreamMux[C]) Serve(
+func (s *StreamMux[C]) Serve(
 	ctx context.Context,
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
 	logger.Tracef(ctx, "StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
 	defer logger.Tracef(ctx, "/StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
-	n.waitGroup.Add(1)
-	defer n.waitGroup.Done()
-	startCh := *xatomic.LoadPointer(&n.startedCh)
+	s.waitGroup.Add(1)
+	defer s.waitGroup.Done()
+	startCh := *xatomic.LoadPointer(&s.startedCh)
 	select {
 	case <-startCh:
 		panic("this StreamMux is already serving")
@@ -31,60 +31,60 @@ func (n *StreamMux[C]) Serve(
 	}
 	close(startCh)
 	defer func() {
-		xatomic.StorePointer(&n.startedCh, ptr(make(chan struct{})))
+		xatomic.StorePointer(&s.startedCh, ptr(make(chan struct{})))
 	}()
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{
 		EachNode:             cfg,
 		AutoServeNewBranches: true,
-	}, errCh, n.InputNode)
+	}, errCh, s.InputNode)
 }
 
-func (n *StreamMux[C]) String() string {
+func (s *StreamMux[C]) String() string {
 	return "StreamMux"
 }
 
-func (n *StreamMux[C]) IsServing() bool {
-	return n.InputNode.IsServing()
+func (s *StreamMux[C]) IsServing() bool {
+	return s.InputNode.IsServing()
 }
 
-func (n *StreamMux[C]) GetPushPacketsTos() node.PushPacketsTos {
+func (s *StreamMux[C]) GetPushPacketsTos() node.PushPacketsTos {
 	return nil
 }
 
-func (n *StreamMux[C]) AddPushPacketsTo(
+func (s *StreamMux[C]) AddPushPacketsTo(
 	dst node.Abstract,
 	conds ...packetfiltercondition.Condition,
 ) {
 }
 
-func (n *StreamMux[C]) SetPushPacketsTos(
+func (s *StreamMux[C]) SetPushPacketsTos(
 	v node.PushPacketsTos,
 ) {
 }
 
-func (n *StreamMux[C]) GetPushFramesTos() node.PushFramesTos {
+func (s *StreamMux[C]) GetPushFramesTos() node.PushFramesTos {
 	return nil
 }
 
-func (n *StreamMux[C]) AddPushFramesTo(
+func (s *StreamMux[C]) AddPushFramesTo(
 	dst node.Abstract,
 	conds ...framefiltercondition.Condition,
 ) {
 }
 
-func (n *StreamMux[C]) SetPushFramesTos(
+func (s *StreamMux[C]) SetPushFramesTos(
 	v node.PushFramesTos,
 ) {
 }
 
-func (n *StreamMux[C]) GetProcessor() processor.Abstract {
-	return n
+func (s *StreamMux[C]) GetProcessor() processor.Abstract {
+	return s
 }
 
-func (n *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
+func (s *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
 	return nil
 }
 
-func (n *StreamMux[C]) GetChangeChanPushFramesTo() <-chan struct{} {
+func (s *StreamMux[C]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return nil
 }
