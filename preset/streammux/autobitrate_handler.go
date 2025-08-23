@@ -80,7 +80,7 @@ func DefaultAutoBitrateConfig(
 	result := AutoBitRateConfig{
 		ResolutionsAndBitRates: resolutions,
 		Calculator:             DefaultAutoBitrateCalculatorThresholds(),
-		CheckInterval:          time.Second,
+		CheckInterval:          time.Second / 2,
 	}
 	return result
 }
@@ -111,8 +111,8 @@ func (h *AutoBitRateHandler[C]) String() string {
 }
 
 func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "AutoBitRateHandler.Close()")
-	defer func() { logger.Debugf(ctx, "/AutoBitRateHandler.Close(): %v", _err) }()
+	logger.Debugf(ctx, "Close()")
+	defer func() { logger.Debugf(ctx, "/Close(): %v", _err) }()
 	h.closureSignaler.Close(ctx)
 	return nil
 }
@@ -120,8 +120,8 @@ func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
 func (h *AutoBitRateHandler[C]) ServeContext(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "autoBitRateHandler(%d).ServeContext()", h.Output.ID)
-	defer func() { logger.Debugf(ctx, "autoBitRateHandler(%d).ServeContext(): %v", h.Output.ID, _err) }()
+	logger.Debugf(ctx, "ServeContext: %d", h.Output.ID)
+	defer func() { logger.Debugf(ctx, "/ServeContext: %d: %v", h.Output.ID, _err) }()
 	t := time.NewTicker(h.CheckInterval)
 	defer t.Stop()
 	for {
@@ -139,7 +139,7 @@ func (h *AutoBitRateHandler[C]) ServeContext(
 func (h *AutoBitRateHandler[C]) GetEncoder() codec.Encoder {
 	encoders := h.Output.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
 	if len(encoders) != 1 {
-		panic(fmt.Sprintf("expected exactly one video encoder, got %d", len(encoders)))
+		return nil
 	}
 	return encoders[0]
 }
@@ -149,11 +149,11 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 ) {
 	queueSize := h.QueueSizer.GetInternalQueueSize(ctx)
 	if queueSize == nil {
-		logger.Tracef(ctx, "autoBitRateHandler: unable to get queue size")
+		logger.Tracef(ctx, "unable to get queue size")
 		return
 	}
 
-	logger.Tracef(ctx, "autoBitRateHandler: %+v", queueSize)
+	logger.Tracef(ctx, "queue size: %+v", queueSize)
 
 	var totalQueue uint64
 	for _, q := range queueSize {
@@ -161,13 +161,17 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}
 
 	encoder := h.GetEncoder()
+	if encoder == nil {
+		logger.Warnf(ctx, "unable to get encoder")
+		return
+	}
 
 	var curBitRate uint64
 	q := encoder.GetQuality(ctx)
 	if q, ok := q.(quality.ConstantBitrate); ok {
 		curBitRate = uint64(q)
 	} else {
-		logger.Debugf(ctx, "autoBitRateHandler: unable to get current bitrate")
+		logger.Debugf(ctx, "unable to get current bitrate")
 	}
 
 	newBitRate := h.Calculator.CalculateBitRate(
@@ -176,44 +180,82 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		totalQueue,
 		&h.AutoBitRateConfig,
 	)
+	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curBitRate, totalQueue)
 
 	if newBitRate == curBitRate {
-		logger.Tracef(ctx, "autoBitRateHandler: bitrate remains unchanged: %d", curBitRate)
+		logger.Tracef(ctx, "bitrate remains unchanged: %d", curBitRate)
 		return
 	}
 
-	logger.Infof(ctx, "autoBitRateHandler: changing bitrate from %d to %d", curBitRate, newBitRate)
-	h.setBitrate(ctx, newBitRate)
+	if err := h.setBitrate(ctx, curBitRate, newBitRate); err != nil {
+		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
+		return
+	}
 }
 
 func (h *AutoBitRateHandler[C]) setBitrate(
 	ctx context.Context,
-	bitrate uint64,
-) {
-	logger.Infof(ctx, "autoBitRateHandler: setting bitrate to %d", bitrate)
-	defer func() { logger.Infof(ctx, "autoBitRateHandler: setting bitrate to %d: done", bitrate) }()
+	oldBitRate uint64,
+	newBitRate uint64,
+) (_err error) {
+	logger.Debugf(ctx, "setBitrate: %d->%d", oldBitRate, newBitRate)
+	defer func() { logger.Debugf(ctx, "/setBitrate: %d->%d: %v", oldBitRate, newBitRate, _err) }()
 
-	if err := h.changeResolutionIfNeeded(ctx, bitrate); err != nil {
-		logger.Errorf(ctx, "autoBitRateHandler: unable to change resolution: %v", err)
+	if err := h.changeResolutionIfNeeded(ctx, newBitRate); err != nil {
+		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
-	err := h.GetEncoder().SetQuality(ctx, quality.ConstantBitrate(bitrate), nil)
-	if err != nil {
-		logger.Errorf(ctx, "autoBitRateHandler: unable to set bitrate to %d: %v", bitrate, err)
+	encoder := h.GetEncoder()
+	if encoder == nil {
+		logger.Warnf(ctx, "unable to get encoder")
 		return
 	}
+
+	res := encoder.GetResolution(ctx)
+	if res == nil {
+		return fmt.Errorf("unable to get current resolution")
+	}
+
+	resCfg := h.AutoBitRateConfig.ResolutionsAndBitRates.Find(*res)
+	if resCfg == nil {
+		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
+	}
+
+	clampedBitRate := newBitRate
+	switch {
+	case newBitRate < resCfg.BitrateLow:
+		clampedBitRate = resCfg.BitrateLow
+	case newBitRate > resCfg.BitrateHigh:
+		clampedBitRate = resCfg.BitrateHigh
+	}
+
+	if clampedBitRate == oldBitRate {
+		logger.Debugf(ctx, "bitrate remains unchanged after clamping: %d (resCfg: %#+v)", oldBitRate, resCfg)
+		return nil
+	}
+
+	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v)", oldBitRate, clampedBitRate, resCfg)
+	if err := encoder.SetQuality(ctx, quality.ConstantBitrate(clampedBitRate), nil); err != nil {
+		return fmt.Errorf("unable to set bitrate to %d: %w", clampedBitRate, err)
+	}
+
+	return nil
 }
 
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	ctx context.Context,
 	bitrate uint64,
 ) (_err error) {
-	logger.Tracef(ctx, "autoBitRateHandler: changeResolutionIfNeeded(bitrate=%d)", bitrate)
+	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%d)", bitrate)
 	defer func() {
-		logger.Tracef(ctx, "autoBitRateHandler: changeResolutionIfNeeded(bitrate=%d): %v", bitrate, _err)
+		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%d): %v", bitrate, _err)
 	}()
 
 	encoder := h.GetEncoder()
+	if encoder == nil {
+		logger.Warnf(ctx, "unable to get encoder")
+		return
+	}
 
 	res := encoder.GetResolution(ctx)
 	if res == nil {
@@ -230,14 +272,14 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	case bitrate < resCfg.BitrateLow:
 		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
 		if _newRes == nil {
-			logger.Debugf(ctx, "autoBitRateHandler: already at the lowest resolution %v", *res)
+			logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %#+v), minBitRate", *res, resCfg, resCfg.BitrateLow)
 			return nil
 		}
 		newRes = *_newRes
 	case bitrate > resCfg.BitrateHigh:
 		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
 		if _newRes == nil {
-			logger.Debugf(ctx, "autoBitRateHandler: already at the highest resolution %v", *res)
+			logger.Debugf(ctx, "already at the highest resolution %v (resCfg: %#+v), maxBitRate: %d", *res, resCfg, resCfg.BitrateHigh)
 			return nil
 		}
 		newRes = *_newRes
@@ -245,7 +287,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return nil
 	}
 
-	logger.Infof(ctx, "autoBitRateHandler: changing resolution from %v to %v", *res, newRes.Resolution)
+	logger.Infof(ctx, "changing resolution from %v to %v", *res, newRes.Resolution)
 	err := encoder.SetResolution(ctx, newRes.Resolution, nil)
 	if err != nil {
 		return fmt.Errorf("unable to set resolution to %v: %w", newRes.Resolution, err)

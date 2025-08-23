@@ -190,6 +190,7 @@ func newOutput[C any](
 	// auto bitrate handler
 
 	if outputConfig.AutoBitrate != nil {
+		logger.Tracef(ctx, "enabling automatic bitrate control for output %d", o.ID)
 		if len(outputConfig.AutoBitrate.ResolutionsAndBitRates) == 0 {
 			return nil, fmt.Errorf("at least one resolution must be specified for automatic bitrate control")
 		}
