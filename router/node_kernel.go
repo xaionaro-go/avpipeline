@@ -137,6 +137,19 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	logger.Tracef(ctx, "makeTimeMoveOnlyForward")
 	defer func() { logger.Tracef(ctx, "/makeTimeMoveOnlyForward: %v", _err) }()
 
+	if input.GetMediaType() != astiav.MediaTypeVideo {
+		// TODO: investigate this
+		//
+		// This is actually weird, I'd expect audio clock to be much more stable than video clock.
+		// However if I calculate shifts using audio clock I for some reason get a huge jump in PTS
+		// when I switch from av1_nvenc to copy in a streammux-powered client.
+		//
+		// Keep this as is for now... It works at least for me. But if there are issues with audio sync,
+		// feel free to create ticket on GitHub or send me an email: xaionaro@gmail.com, opensource@dx.center.
+		logger.Tracef(ctx, "Not a video stream, skipping")
+		return nil
+	}
+
 	if input.GetDTS() > input.GetPTS() {
 		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for source %v", input.GetDTS(), input.GetPTS(), packetSource)
 	}

@@ -810,12 +810,12 @@ func (o *Output) doWritePacket(
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data 0x %X",
+			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data len: %d",
 			pkt.Pos(), pkt.Pts(), avconv.Duration(pkt.Pts(), outputStream.TimeBase()), pkt.Dts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),
-			pkt.Data(),
+			len(pkt.Data()),
 		)
 	}
 
