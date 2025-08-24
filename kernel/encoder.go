@@ -501,6 +501,7 @@ func (e *Encoder[EF]) sendInputFrame(
 		}
 	}
 
+	packetCount := 0
 	for {
 		pkt := packet.Pool.Get()
 		err := encoder.ReceivePacket(ctx, pkt)
@@ -514,7 +515,8 @@ func (e *Encoder[EF]) sendInputFrame(
 			}
 			return fmt.Errorf("unable receive the packet from the encoder: %w", err)
 		}
-		logger.Tracef(ctx, "encoder.ReceivePacket(): got a %s packet, resulting size: %d (pts: %d)", outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
+		packetCount++
+		logger.Tracef(ctx, "encoder.ReceivePacket(): got the %dth %s packet, resulting size: %d (pts: %d)", packetCount, outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
 
 		pkt.SetStreamIndex(outputStream.Index())
 

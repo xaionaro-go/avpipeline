@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -103,6 +102,7 @@ func (s *StreamMux[C]) initAutoBitRateHandler(
 		AutoBitRateConfig: cfg,
 		StreamMux:         s,
 		closureSignaler:   closuresignaler.New(),
+		previousQueueSize: map[kernel.GetInternalQueueSizer]uint64{},
 	}
 	s.AutoBitRateHandler = r
 	return r
@@ -110,8 +110,11 @@ func (s *StreamMux[C]) initAutoBitRateHandler(
 
 type AutoBitRateHandler[C any] struct {
 	AutoBitRateConfig
-	StreamMux       *StreamMux[C]
-	closureSignaler *closuresignaler.ClosureSignaler
+	StreamMux         *StreamMux[C]
+	closureSignaler   *closuresignaler.ClosureSignaler
+	previousQueueSize map[kernel.GetInternalQueueSizer]uint64
+	lastBitRate       uint64
+	lastCheckTS       time.Time
 }
 
 func (h *AutoBitRateHandler[C]) String() string {
@@ -159,8 +162,10 @@ func (h *AutoBitRateHandler[C]) GetEncoder() codec.Encoder {
 func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
+	var activeOutput *Output[C]
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
+		activeOutput = h.StreamMux.GetActiveOutput()
 		for _, o := range h.StreamMux.Outputs {
 			if o == nil {
 				continue
@@ -174,25 +179,38 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		}
 	})
 
+	now := time.Now()
+	tsDiff := now.Sub(h.lastCheckTS)
+	h.lastCheckTS = now
+
 	var totalQueue uint64
-	for _, outputNode := range getQueueSizers {
-		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 500*time.Millisecond)
+	for _, proc := range getQueueSizers {
+		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancelFn()
-		queueSize := outputNode.GetInternalQueueSize(nodeReqCtx)
+		queueSize := proc.GetInternalQueueSize(nodeReqCtx)
 		reqErr := nodeReqCtx.Err()
 		if queueSize == nil && reqErr == nil {
 			logger.Warnf(ctx, "unable to get queue size")
 			continue
 		}
+		var nodeTotalQueue uint64
 		if reqErr != nil {
-			logger.Errorf(ctx, "timed out on getting queue size; likely the output is locked, assuming huge queue")
-			totalQueue = math.MaxUint32 / 4 // "max32/4" to avoid weird behaviors if somebody will change the type
-		} else {
-			logger.Tracef(ctx, "queue size: %+v", queueSize)
-			for _, q := range queueSize {
-				totalQueue += q
+			if any(activeOutput.OutputNode.GetProcessor) == any(proc) {
+				logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d", tsDiff, h.lastBitRate/8)
+				nodeTotalQueue = h.previousQueueSize[proc] + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
+			} else {
+				logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
+				nodeTotalQueue = h.previousQueueSize[proc]
 			}
+		} else {
+			logger.Tracef(ctx, "node queue size details: %+v", queueSize)
+			for _, q := range queueSize {
+				nodeTotalQueue += q
+			}
+			h.previousQueueSize[proc] = nodeTotalQueue
 		}
+		logger.Tracef(ctx, "nodeTotalQueue: %d", nodeTotalQueue)
+		totalQueue += nodeTotalQueue
 	}
 	logger.Tracef(ctx, "total queue size: %d", totalQueue)
 
