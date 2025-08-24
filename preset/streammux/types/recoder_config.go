@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -71,8 +72,8 @@ const (
 	HardwareDeviceTypeVulkan       = HardwareDeviceType(0xb)
 )
 
-func (hwt HardwareDeviceType) String() string {
-	switch hwt {
+func (t HardwareDeviceType) String() string {
+	switch t {
 	case HardwareDeviceTypeCUDA:
 		return "cuda"
 	case HardwareDeviceTypeDRM:
@@ -98,7 +99,7 @@ func (hwt HardwareDeviceType) String() string {
 	case HardwareDeviceTypeVulkan:
 		return "vulkan"
 	}
-	return fmt.Sprintf("unknown_%X", int64(hwt))
+	return fmt.Sprintf("unknown_%X", int64(t))
 }
 
 func HardwareDeviceTypeFromString(s string) HardwareDeviceType {
@@ -114,4 +115,21 @@ func HardwareDeviceTypeFromString(s string) HardwareDeviceType {
 		}
 	}
 	return -1
+}
+
+func (t *HardwareDeviceType) UnmarshalYAML(b []byte) error {
+	devType := string(b)
+	devType = strings.Trim(strings.ToLower(devType), " \"\n\t\r")
+	for candidate := range HardwareDeviceType(0xf) {
+		if strings.ToLower(candidate.String()) == devType {
+			*t = candidate
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unknown hardware device type: '%s'", devType)
+}
+
+func (t HardwareDeviceType) MarshalYAML() ([]byte, error) {
+	return json.Marshal(t.String())
 }

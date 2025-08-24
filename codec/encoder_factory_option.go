@@ -1,27 +1,20 @@
 package codec
 
-type EncoderFactoryOptionCommons struct{}
+import (
+	"github.com/xaionaro-go/avpipeline/codec/types"
+)
 
-func (EncoderFactoryOptionCommons) encoderFactoryOption() {}
+type EncoderFactoryOption = types.EncoderFactoryOption
+type EncoderFactoryOptions = types.EncoderFactoryOptions
+type EncoderFactoryOptionCommons = types.EncoderFactoryOptionCommons
 
-type EncoderFactoryOption interface {
-	encoderFactoryOption()
-}
-
-type EncoderFactoryOptions []EncoderFactoryOption
-
-func EncoderFactoryOptionLatest[T EncoderFactoryOption](s EncoderFactoryOptions) (ret T, ok bool) {
-	for i := len(s) - 1; i >= 0; i-- {
-		if v, ok := s[i].(T); ok {
-			return v, true
-		}
-	}
-	return
+func EncoderFactoryOptionLatest[T EncoderFactoryOption](s []EncoderFactoryOption) (ret T, ok bool) {
+	return types.EncoderFactoryOptionLatest[T](s)
 }
 
 type EncoderFactoryOptionFrameSource struct {
 	EncoderFactoryOptionCommons
-	FrameSource FrameSource
+	FrameSource
 }
 
 type EncoderFactoryOptionOnlyDummy struct {
@@ -31,5 +24,5 @@ type EncoderFactoryOptionOnlyDummy struct {
 
 type EncoderFactoryOptionReusableResources struct {
 	EncoderFactoryOptionCommons
-	ReusableResources *Resources
+	*Resources
 }

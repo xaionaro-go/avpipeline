@@ -2,6 +2,7 @@ package codec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime/debug"
@@ -22,6 +23,15 @@ const (
 	setSetPktTimeBase        = false
 )
 
+type hardwareContextType int
+
+const (
+	undefinedHardwareContextType hardwareContextType = iota
+	hardwareContextTypeDevice
+	hardwareContextTypeFrames
+	endOfHardwareContextType
+)
+
 type codecInternals struct {
 	InitParams            CodecParams
 	IsEncoder             bool
@@ -29,6 +39,7 @@ type codecInternals struct {
 	codecContext          *astiav.CodecContext
 	hardwareDeviceContext *astiav.HardwareDeviceContext
 	hardwarePixelFormat   astiav.PixelFormat
+	hardwareContextType   hardwareContextType
 	closer                *astikit.Closer
 }
 
@@ -171,10 +182,6 @@ func findCodec(
 	return findDecoderCodec(codecID, codecName)
 }
 
-type Resources struct {
-	HWDeviceContext *astiav.HardwareDeviceContext
-}
-
 func newCodec(
 	ctx context.Context,
 	isEncoder bool, // otherwise: decoder
@@ -189,15 +196,15 @@ func newCodec(
 	timeBase := params.TimeBase
 	options := params.Options
 	flags := params.Flags
+	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
+	ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
+	ctx = belt.WithField(ctx, "codec_name", codecName)
+	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 
 	logger.Tracef(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags)
 	defer func() {
 		logger.Tracef(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags, _ret, _err)
 	}()
-	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
-	ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
-	ctx = belt.WithField(ctx, "codec_name", codecName)
-	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 	c := &Codec{
 		codecInternals: &codecInternals{
 			InitParams: params,
@@ -342,7 +349,11 @@ func newCodec(
 			flags,
 			reusableResources,
 		)
-		if err != nil {
+		switch {
+		case err == nil:
+		case errors.As(err, &ErrNotImplemented{}):
+			logger.Warnf(ctx, "hardware initialization of this type is not implemented, yet: %v", err)
+		default:
 			return nil, fmt.Errorf("unable to init hardware device context: %w", err)
 		}
 	}
@@ -427,6 +438,14 @@ func (c *Codec) logHints(ctx context.Context) {
 	}
 }
 
+type ErrNotImplemented struct {
+	Err error
+}
+
+func (e ErrNotImplemented) Error() string {
+	return fmt.Sprintf("not implemented: %v", e.Err)
+}
+
 func (c *Codec) initHardware(
 	ctx context.Context,
 	hardwareDeviceType astiav.HardwareDeviceType,
@@ -439,7 +458,16 @@ func (c *Codec) initHardware(
 	defer func() {
 		logger.Tracef(ctx, "/initHardware(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, flags, _err)
 	}()
-	err := c.initHardwareDeviceContext(
+	err := c.initHardwarePixelFormat(ctx, hardwareDeviceType)
+	if err != nil {
+		return fmt.Errorf("unable to init hardware pixel format: %w", err)
+	}
+
+	if c.hardwareContextType == hardwareContextTypeFrames {
+		return ErrNotImplemented{Err: fmt.Errorf("hardware context type 'frames' is not implemented")}
+	}
+
+	err = c.initHardwareDeviceContext(
 		ctx,
 		hardwareDeviceType,
 		hardwareDeviceName,
@@ -451,10 +479,6 @@ func (c *Codec) initHardware(
 		return fmt.Errorf("unable to get or create hardware device context: %w", err)
 	}
 
-	err = c.initHardwarePixelFormat(ctx, hardwareDeviceType)
-	if err != nil {
-		return fmt.Errorf("unable to init hardware pixel format: %w", err)
-	}
 	c.platformSpecificHWSanityChecks(ctx)
 	return nil
 }
@@ -465,11 +489,23 @@ func (c *Codec) initHardwarePixelFormat(
 ) (_err error) {
 	logger.Tracef(ctx, "initHardwarePixelFormat")
 	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v", _err) }()
-	for _, p := range c.codec.HardwareConfigs() {
-		if p.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx) && p.HardwareDeviceType() == hardwareDeviceType {
-			c.hardwarePixelFormat = p.PixelFormat()
-			break
+	for _, hwCfgs := range c.codec.HardwareConfigs() {
+		logger.Tracef(ctx, "hw config: %v %v %v", hwCfgs.PixelFormat(), hwCfgs.MethodFlags(), hwCfgs.HardwareDeviceType())
+		if hwCfgs.HardwareDeviceType() != hardwareDeviceType {
+			logger.Tracef(ctx, "skipping this config, since it is for another hardware device type")
+			continue
 		}
+		switch {
+		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx):
+			c.hardwareContextType = hardwareContextTypeFrames
+		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx):
+			c.hardwareContextType = hardwareContextTypeDevice
+		default:
+			logger.Tracef(ctx, "skipping this config, since it doesn't support neither HW frames nor HW device context")
+			continue
+		}
+		c.hardwarePixelFormat = hwCfgs.PixelFormat()
+		break
 	}
 
 	if c.hardwarePixelFormat == astiav.PixelFormatNone {

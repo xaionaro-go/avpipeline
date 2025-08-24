@@ -8,6 +8,8 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
+	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -189,8 +191,7 @@ func newOutput[C any](
 	}
 
 	if outputReuseDecoderResources {
-		logger.Warnf(ctx, "the output is configured to reuse decoder resources, which makes impossible to scale the frame (the resolution cannot be changed)")
-		o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory
+		o.initReuseDecoderResources(ctx)
 	}
 
 	// wiring
@@ -225,6 +226,46 @@ func newOutput[C any](
 	)
 
 	return o, nil
+}
+
+func (o *Output[C]) initReuseDecoderResources(
+	ctx context.Context,
+) {
+	res := *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+
+	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = resourcegetter.NewConditional(
+		o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory,
+		resourcegetter.Condition(resourcegettercondition.Function(func(
+			ctx context.Context,
+			f resourcegetter.ConditionInput,
+		) (_ret bool) {
+			logger.Tracef(ctx, "checking if we can reuse resources")
+			defer func() { logger.Tracef(ctx, "/checking if we can reuse resources: %v", _ret) }()
+
+			frameSource, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionFrameSource](f.Options)
+			if !ok {
+				logger.Debugf(ctx, "unable to find FrameSource in the EncoderFactory options: %#+v", f.Options)
+				return false
+			}
+
+			// we can reuse the resources only if no scaling is required
+			if f.Params.Width() != int(res.Width) {
+				return false
+			}
+			if f.Params.Height() != int(res.Height) {
+				return false
+			}
+
+			// we can reuse the resources only if pixel format is the same
+			decoder := frameSource.FrameSource.GetDecoder()
+			if f.Params.PixelFormat() != astiav.PixelFormatNone {
+				if f.Params.PixelFormat() != decoder.CodecContext().PixelFormat() {
+					return false
+				}
+			}
+			return true
+		})),
+	)
 }
 
 func (o *Output[C]) Close(ctx context.Context) (_err error) {

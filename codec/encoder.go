@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	"github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -115,6 +116,8 @@ func NewEncoder(
 	return e, nil
 }
 
+type Resources = resourcegetter.Resources
+
 func newEncoder(
 	ctx context.Context,
 	params CodecParams,
@@ -142,7 +145,7 @@ func newEncoder(
 	}
 	var reusableResources *Resources
 	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionReusableResources](opts); ok {
-		reusableResources = v.ReusableResources
+		reusableResources = v.Resources
 	}
 	c, err := newCodec(
 		ctx,
@@ -328,7 +331,7 @@ func (e *EncoderFull) reinitEncoder(
 
 	var opts EncoderFactoryOptions
 	if e.ReusableResources != nil {
-		opts = append(opts, EncoderFactoryOptionReusableResources{ReusableResources: e.ReusableResources})
+		opts = append(opts, EncoderFactoryOptionReusableResources{Resources: e.ReusableResources})
 	}
 	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality, opts...)
 	if err != nil {

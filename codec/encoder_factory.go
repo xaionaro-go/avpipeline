@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/xsync"
 )
@@ -20,15 +21,7 @@ type EncoderFactory interface {
 	) (Encoder, error)
 }
 
-type ResourcesGetter interface {
-	fmt.Stringer
-	GetResources(
-		ctx context.Context,
-		params *astiav.CodecParameters,
-		timeBase astiav.Rational,
-		opts ...EncoderFactoryOption,
-	) *Resources
-}
+type ResourcesGetter = resourcegetter.ResourcesGetter
 
 type NaiveEncoderFactory struct {
 	NaiveEncoderFactoryParams
@@ -158,7 +151,7 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 		logger.Tracef(ctx, "getting reusable resources from %s", f.ResourcesGetter)
 		reusableResources := f.ResourcesGetter.GetResources(ctx, codecParams, timeBase, opts...)
 		if reusableResources != nil {
-			opts = append(opts, EncoderFactoryOptionReusableResources{ReusableResources: reusableResources})
+			opts = append(opts, EncoderFactoryOptionReusableResources{Resources: reusableResources})
 		}
 	}
 	return NewEncoder(ctx, *encParams, opts...)
