@@ -6,9 +6,9 @@ import (
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
-type Condition = globaltypes.Condition[ConditionInput]
+type Condition = globaltypes.Condition[Input]
 
-type ConditionInput struct {
+type Input struct {
 	Params   *astiav.CodecParameters
 	TimeBase astiav.Rational
 	Options  []types.EncoderFactoryOption

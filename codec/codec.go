@@ -182,13 +182,19 @@ func findCodec(
 	return findDecoderCodec(codecID, codecName)
 }
 
+type Input struct {
+	IsEncoder         bool // otherwise: decoder
+	Params            CodecParams
+	ReusableResources *Resources
+}
+
 func newCodec(
 	ctx context.Context,
-	isEncoder bool, // otherwise: decoder
-	params CodecParams,
-	reusableResources *Resources,
+	input Input,
 ) (_ret *Codec, _err error) {
-	params = params.Clone(ctx)
+	isEncoder := input.IsEncoder
+	params := input.Params.Clone(ctx)
+	reusableResources := input.ReusableResources
 	codecName := params.CodecName
 	codecParameters := params.CodecParameters
 	hardwareDeviceType := params.HardwareDeviceType
@@ -323,7 +329,7 @@ func newCodec(
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 					logIfError(options.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
-					forcePixelFormat = astiav.PixelFormatMediacodec
+					forcePixelFormat = defaultMediaCodecPixelFormat
 				}
 			}
 		} else {
@@ -331,15 +337,14 @@ func newCodec(
 				if options.Get("pixel_format", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 					logIfError(options.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
-					forcePixelFormat = astiav.PixelFormatMediacodec
+					forcePixelFormat = defaultMediaCodecPixelFormat
 				}
 
 				height := codecParameters.Height()
 				alignedHeight := (height + 15) &^ 15
 				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
 				if alignedHeight != height && options.Get("create_window", nil, 0) == nil {
-					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this we are forcing create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
-					logIfError(options.Set("create_window", "1", 0))
+					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle you may want to use create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
 				}
 			}
 		}

@@ -15,6 +15,6 @@ func (v Static) String() string {
 	return fmt.Sprintf("%t", v)
 }
 
-func (v Static) Match(context.Context, resourcegetter.ConditionInput) bool {
+func (v Static) Match(context.Context, resourcegetter.Input) bool {
 	return (bool)(v)
 }

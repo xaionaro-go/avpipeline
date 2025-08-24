@@ -5,4 +5,4 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type Condition = types.Condition[resourcegetter.ConditionInput]
+type Condition = types.Condition[resourcegetter.Input]

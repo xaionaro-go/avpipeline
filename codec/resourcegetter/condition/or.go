@@ -27,7 +27,7 @@ func (s Or) String() string {
 
 func (s Or) Match(
 	ctx context.Context,
-	f resourcegetter.ConditionInput,
+	f resourcegetter.Input,
 ) bool {
 	for _, item := range s {
 		if item.Match(ctx, f) {

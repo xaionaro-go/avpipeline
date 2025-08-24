@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	outputReuseDecoderResources = true
+	outputReuseDecoderResources = false
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -228,16 +228,62 @@ func newOutput[C any](
 	return o, nil
 }
 
+func logIfError(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	logger.Errorf(ctx, "got an error: %v", err)
+}
+
 func (o *Output[C]) initReuseDecoderResources(
 	ctx context.Context,
 ) {
+	logger.Tracef(ctx, "initReuseDecoderResources()")
+	defer func() { logger.Tracef(ctx, "/initReuseDecoderResources()") }()
+
 	encRes := *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 
+	// use reusable (by encoder) pixel_format without offloading to CPU
+	o.RecoderNode.Processor.Kernel.DecoderFactory.PreInitFunc = func(
+		ctx context.Context,
+		stream *astiav.Stream,
+		input *codec.DecoderInput,
+	) {
+		logger.Tracef(ctx, "PreInitFunc(ctx, stream=%p, input=%v)", stream, input)
+		defer func() { logger.Tracef(ctx, "/PreInitFunc(ctx, stream=%p, input=%v)", stream, input) }()
+
+		if stream.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+			logger.Debugf(ctx, "not a video stream")
+			return
+		}
+
+		if stream.CodecParameters().Width() != int(encRes.Width) {
+			logger.Debugf(ctx, "unable to reuse the decoder resources: width mismatch: %d != %d", stream.CodecParameters().Width(), encRes.Width)
+			return
+		}
+
+		if stream.CodecParameters().Height() != int(encRes.Height) {
+			logger.Debugf(ctx, "unable to reuse the decoder resources: height mismatch: %d != %d", stream.CodecParameters().Height(), encRes.Height)
+			return
+		}
+
+		if input.Options == nil {
+			input.Options = astiav.NewDictionary()
+			setFinalizerFree(ctx, input.Options)
+		}
+
+		if input.HardwareDeviceType == astiav.HardwareDeviceTypeMediaCodec {
+			logIfError(ctx, input.Options.Set("pixel_format", "mediacodec", 0))
+			logIfError(ctx, input.Options.Set("create_window", "1", 0))
+		}
+	}
+
+	// allow sharing the resources between decoder and encoder
 	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = resourcegetter.NewConditional(
 		o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory,
-		resourcegetter.Condition(resourcegettercondition.Function(func(
+		resourcegettercondition.Function(func(
 			ctx context.Context,
-			f resourcegetter.ConditionInput,
+			f resourcegetter.Input,
 		) (_ret bool) {
 			logger.Tracef(ctx, "checking if we can reuse resources")
 			defer func() { logger.Tracef(ctx, "/checking if we can reuse resources: %v", _ret) }()
@@ -264,7 +310,7 @@ func (o *Output[C]) initReuseDecoderResources(
 				}
 			}
 			return true
-		})),
+		}),
 	)
 }
 

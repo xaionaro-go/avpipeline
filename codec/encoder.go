@@ -46,6 +46,7 @@ type Encoder interface {
 	Reset(ctx context.Context) error
 	GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat
 }
+type EncoderInput = resourcegetter.Input
 
 type EncoderFullBackend = Codec
 type EncoderFull struct {
@@ -147,11 +148,14 @@ func newEncoder(
 	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionReusableResources](opts); ok {
 		reusableResources = v.Resources
 	}
+	input := Input{
+		IsEncoder:         true,
+		Params:            params,
+		ReusableResources: reusableResources,
+	}
 	c, err := newCodec(
 		ctx,
-		true,
-		params,
-		reusableResources,
+		input,
 	)
 	if err != nil {
 		return nil, err

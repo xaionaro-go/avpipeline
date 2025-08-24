@@ -15,31 +15,38 @@ type Decoder struct {
 	*Codec
 }
 
+type DecoderInput struct {
+	CodecName          Name
+	CodecParameters    *astiav.CodecParameters
+	HardwareDeviceType astiav.HardwareDeviceType
+	HardwareDeviceName HardwareDeviceName
+	Options            *astiav.Dictionary
+	Flags              int
+}
+
 func NewDecoder(
 	ctx context.Context,
-	codecName Name,
-	codecParameters *astiav.CodecParameters,
-	hardwareDeviceType astiav.HardwareDeviceType,
-	hardwareDeviceName HardwareDeviceName,
-	options *astiav.Dictionary,
-	flags int,
+	decInput DecoderInput,
 ) (_ret *Decoder, _err error) {
 	_codecParameters := astiav.AllocCodecParameters()
 	defer _codecParameters.Free()
-	codecParameters.Copy(_codecParameters)
+	decInput.CodecParameters.Copy(_codecParameters)
+	input := Input{
+		IsEncoder: false,
+		Params: CodecParams{
+			CodecName:          decInput.CodecName,
+			CodecParameters:    _codecParameters,
+			HardwareDeviceType: decInput.HardwareDeviceType,
+			HardwareDeviceName: decInput.HardwareDeviceName,
+			TimeBase:           astiav.NewRational(0, 0),
+			Options:            decInput.Options,
+			Flags:              decInput.Flags,
+		},
+		ReusableResources: nil,
+	}
 	c, err := newCodec(
 		ctx,
-		false,
-		CodecParams{
-			CodecName:          codecName,
-			CodecParameters:    _codecParameters,
-			HardwareDeviceType: hardwareDeviceType,
-			HardwareDeviceName: hardwareDeviceName,
-			TimeBase:           astiav.NewRational(0, 0),
-			Options:            options,
-			Flags:              flags,
-		},
-		nil,
+		input,
 	)
 	if err != nil {
 		return nil, err

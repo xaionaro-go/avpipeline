@@ -29,6 +29,7 @@ type NaiveDecoderFactoryParams struct {
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
 	AudioOptions       *astiav.Dictionary
+	PreInitFunc        func(context.Context, *astiav.Stream, *DecoderInput)
 	PostInitFunc       func(context.Context, *Decoder)
 }
 
@@ -82,30 +83,37 @@ func (f *NaiveDecoderFactory) newDecoder(
 		}
 	}()
 
+	var decInput DecoderInput
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeAudio:
-		return NewDecoder(
-			ctx,
-			"",
-			codecParameters,
-			0,
-			"",
-			f.AudioOptions,
-			0,
-		)
+		decInput = DecoderInput{
+			CodecName:          "",
+			CodecParameters:    codecParameters,
+			HardwareDeviceType: 0,
+			HardwareDeviceName: "",
+			Options:            f.AudioOptions,
+			Flags:              0,
+		}
 	case astiav.MediaTypeVideo:
-		return NewDecoder(
-			ctx,
-			"",
-			codecParameters,
-			f.HardwareDeviceType,
-			f.HardwareDeviceName,
-			f.VideoOptions,
-			0,
-		)
-	}
+		decInput = DecoderInput{
+			CodecName:          "",
+			CodecParameters:    codecParameters,
+			HardwareDeviceType: f.HardwareDeviceType,
+			HardwareDeviceName: f.HardwareDeviceName,
+			Options:            f.VideoOptions,
+			Flags:              0,
+		}
+	default:
+		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveDecoderFactory, yet")
 
-	return nil, fmt.Errorf("only audio and video tracks are supported by NaiveDecoderFactory, yet")
+	}
+	if fn := f.PreInitFunc; fn != nil {
+		fn(ctx, stream, &decInput)
+	}
+	return NewDecoder(
+		ctx,
+		decInput,
+	)
 }
 
 func (f *NaiveDecoderFactory) String() string {

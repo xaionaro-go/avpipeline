@@ -574,7 +574,7 @@ func (e *streamEncoder) fitFrameForEncoding(
 		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat())
 		scaledFrame, err := e.getScaledFrame(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("unable to scale the frame: %w", err)
+			return nil, fmt.Errorf("unable to scale the frame from %dx%d/%s to %s/%s: %w", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat(), err)
 		}
 		if encoderCopyTimeAfterScaling {
 			scaledFrame.SetPts(input.Frame.Pts())
@@ -720,9 +720,9 @@ func (e *streamEncoder) prepareScaler(
 ) (_err error) {
 	inputResolution := input.GetResolution()
 	outputResolution := e.Encoder.GetResolution(ctx)
-	logger.Tracef(ctx, "getScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat())
+	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat())
 	defer func() {
-		logger.Tracef(ctx, "/getScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat(), _err)
+		logger.Tracef(ctx, "/prepareScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat(), _err)
 	}()
 
 	if outputResolution == nil {

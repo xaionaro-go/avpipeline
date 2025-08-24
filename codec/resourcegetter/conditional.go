@@ -39,7 +39,7 @@ func (c *Conditional) GetResources(
 		logger.Tracef(ctx, "no condition set, so always matching")
 		return c.ResourcesGetter.GetResources(ctx, params, timeBase, opts...)
 	}
-	if c.Condition.Match(ctx, ConditionInput{
+	if c.Condition.Match(ctx, Input{
 		Params:   params,
 		TimeBase: timeBase,
 		Options:  opts,

@@ -27,7 +27,7 @@ func (s And) String() string {
 
 func (s And) Match(
 	ctx context.Context,
-	f resourcegetter.ConditionInput,
+	f resourcegetter.Input,
 ) bool {
 	for _, item := range s {
 		if !item.Match(ctx, f) {

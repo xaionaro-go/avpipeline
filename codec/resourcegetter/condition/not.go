@@ -19,7 +19,7 @@ func (n Not) String() string {
 
 func (n Not) Match(
 	ctx context.Context,
-	f resourcegetter.ConditionInput,
+	f resourcegetter.Input,
 ) bool {
 	return !n.Condition.Match(ctx, f)
 }
