@@ -12,6 +12,7 @@ import (
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -388,6 +389,9 @@ func (s *StreamMux[C]) reconfigureOutput(
 			if videoCfg.AverageBitRate != 0 {
 				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}
+			if videoCfg.Resolution != (codectypes.Resolution{}) {
+				encoderFactory.VideoResolution = &videoCfg.Resolution
+			}
 			encoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
 			encoderFactory.VideoAverageFrameRate.SetDen(1000)
 			return nil
@@ -431,6 +435,23 @@ func (s *StreamMux[C]) reconfigureOutput(
 				err := encoder.SetQuality(ctx, quality.ConstantBitrate(videoCfg.AverageBitRate), nil)
 				if err != nil {
 					return fmt.Errorf("unable to set bitrate to %v: %w", videoCfg.AverageBitRate, err)
+				}
+			}
+		}
+
+		{
+			res := encoder.GetResolution(ctx)
+			if res == nil {
+				return fmt.Errorf("unable to get the current encoding resolution")
+			}
+			logger.Debugf(ctx,
+				"current resolution: %#+v; requested resolution: %#+v",
+				*res, videoCfg.Resolution,
+			)
+			if videoCfg.Resolution != (codectypes.Resolution{}) && *res != videoCfg.Resolution {
+				err := encoder.SetResolution(ctx, videoCfg.Resolution, nil)
+				if err != nil {
+					return fmt.Errorf("unable to set resolution to %v: %w", videoCfg.Resolution, err)
 				}
 			}
 		}

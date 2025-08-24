@@ -107,8 +107,14 @@ func newEncoder(
 	params CodecParams,
 	overrideQuality Quality,
 ) (_ret *EncoderFull, _err error) {
-	logger.Tracef(ctx, "newEncoder(ctx, %#+v, %#+v)", params, overrideQuality)
-	defer func() { logger.Tracef(ctx, "/newEncoder(ctx, %#+v, %#+v): %p %v", params, overrideQuality, _ret, _err) }()
+	res := Resolution{
+		Width:  uint32(params.CodecParameters.Width()),
+		Height: uint32(params.CodecParameters.Height()),
+	}
+	logger.Tracef(ctx, "newEncoder(ctx, %#+v, %#+v, %v)", params, overrideQuality, res)
+	defer func() {
+		logger.Tracef(ctx, "/newEncoder(ctx, %#+v, %#+v, %v): %p %v", params, overrideQuality, res, _ret, _err)
+	}()
 	params = params.Clone(ctx)
 	if overrideQuality != nil {
 		if params.CodecParameters == nil {
