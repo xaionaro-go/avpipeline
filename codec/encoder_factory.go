@@ -12,15 +12,31 @@ import (
 
 type EncoderFactory interface {
 	fmt.Stringer
-	NewEncoder(ctx context.Context, params *astiav.CodecParameters, timeBase astiav.Rational) (Encoder, error)
+	NewEncoder(
+		ctx context.Context,
+		params *astiav.CodecParameters,
+		timeBase astiav.Rational,
+		opts ...EncoderFactoryOption,
+	) (Encoder, error)
+}
+
+type ResourcesGetter interface {
+	fmt.Stringer
+	GetResources(
+		ctx context.Context,
+		params *astiav.CodecParameters,
+		timeBase astiav.Rational,
+		opts ...EncoderFactoryOption,
+	) *Resources
 }
 
 type NaiveEncoderFactory struct {
 	NaiveEncoderFactoryParams
 
-	Locker        xsync.Mutex
-	VideoEncoders []Encoder
-	AudioEncoders []Encoder
+	Locker          xsync.Mutex
+	VideoEncoders   []Encoder
+	AudioEncoders   []Encoder
+	ResourcesGetter ResourcesGetter
 }
 
 type NaiveEncoderFactoryParams struct {
@@ -71,20 +87,28 @@ func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
 	return findEncoderCodec(0, f.AudioCodec).ID()
 }
 
+type FrameSource interface {
+	GetDecoder() *Decoder
+}
+
 func (f *NaiveEncoderFactory) NewEncoder(
 	ctx context.Context,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
+	opts ...EncoderFactoryOption,
 ) (_ret Encoder, _err error) {
 	logger.Tracef(ctx, "NewEncoder: %#+v, %s", params, timeBase)
 	defer func() { logger.Tracef(ctx, "/NewEncoder: %#+v, %s: %T %v", params, timeBase, _ret, _err) }()
-	return xsync.DoA3R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderLocked, ctx, params, timeBase)
+	return xsync.DoR2(xsync.WithNoLogging(ctx, true), &f.Locker, func() (Encoder, error) {
+		return f.newEncoderLocked(ctx, params, timeBase, opts...)
+	})
 }
 
 func (f *NaiveEncoderFactory) newEncoderLocked(
 	ctx context.Context,
 	codecParamsOrig *astiav.CodecParameters,
 	timeBase astiav.Rational,
+	opts ...EncoderFactoryOption,
 ) (_ret Encoder, _err error) {
 	if timeBase.Num() == 0 {
 		return nil, fmt.Errorf("TimeBase must be set")
@@ -129,7 +153,15 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
 	}
-	return NewEncoder(ctx, *encParams)
+
+	if f.ResourcesGetter != nil {
+		logger.Tracef(ctx, "getting reusable resources from %s", f.ResourcesGetter)
+		reusableResources := f.ResourcesGetter.GetResources(ctx, codecParams, timeBase, opts...)
+		if reusableResources != nil {
+			opts = append(opts, EncoderFactoryOptionReusableResources{ReusableResources: reusableResources})
+		}
+	}
+	return NewEncoder(ctx, *encParams, opts...)
 }
 
 func (f *NaiveEncoderFactory) amendVideoCodecParams(

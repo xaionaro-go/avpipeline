@@ -5,10 +5,12 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
 type StreamInfo struct {
+	Source           Source
 	CodecParameters  *astiav.CodecParameters // TODO: remove this from here
 	StreamIndex      int
 	StreamsCount     int
@@ -20,6 +22,7 @@ type StreamInfo struct {
 }
 
 func BuildStreamInfo(
+	source Source,
 	codecParameters *astiav.CodecParameters,
 	streamIndex, streamsCount int,
 	streamDuration int64,
@@ -29,6 +32,7 @@ func BuildStreamInfo(
 	pipelineSideData types.PipelineSideData,
 ) *StreamInfo {
 	return &StreamInfo{
+		Source:           source,
 		CodecParameters:  codecParameters,
 		StreamIndex:      streamIndex,
 		StreamsCount:     streamsCount,
@@ -105,4 +109,11 @@ func (f *Commons) GetPTSAsDuration() time.Duration {
 
 func (f *Commons) GetStreamDurationAsDuration() time.Duration {
 	return avconv.Duration(f.StreamDuration, f.TimeBase)
+}
+
+func (f *Commons) GetResolution() codectypes.Resolution {
+	return codectypes.Resolution{
+		Width:  uint32(f.Frame.Width()),
+		Height: uint32(f.Frame.Height()),
+	}
 }

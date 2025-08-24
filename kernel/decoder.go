@@ -16,6 +16,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+const (
+	decoderDebug = true
+)
+
 type Decoder[DF codec.DecoderFactory] struct {
 	*closuresignaler.ClosureSignaler
 
@@ -125,6 +129,10 @@ func (d *Decoder[DF]) sendInputPacket(
 	}
 	ctx = belt.WithField(ctx, "decoder", decoder)
 
+	if decoderDebug {
+		logger.Tracef(ctx, "input packet: dur:%d; res:%s", input.Duration(), input.GetResolution())
+	}
+
 	if !encoderCopyTime {
 		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())
 	}
@@ -158,10 +166,23 @@ func (d *Decoder[DF]) sendInputPacket(
 				return false, fmt.Errorf("internal error: TimeBase is not set")
 			}
 			f.SetPictureType(astiav.PictureTypeNone)
+			if f.Pts() == astiav.NoPtsValue {
+				if decoderDebug {
+					logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", input.Packet.Pts())
+				}
+				f.SetPts(input.Packet.Pts())
+			}
+			if f.Duration() <= 0 {
+				if decoderDebug {
+					logger.Tracef(ctx, "setting frame duration from packet duration: %d", input.Packet.Duration())
+				}
+				f.SetDuration(input.Packet.Duration())
+			}
 			frameToSend := frame.BuildOutput(
 				f,
 				input.Packet.Pos(),
 				frame.BuildStreamInfo(
+					d.asSource(decoder),
 					d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
 					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
 					input.Stream.Duration(),
@@ -193,6 +214,24 @@ func (d *Decoder[DF]) sendInputPacket(
 	return nil
 }
 
+type decoderAsSource[DF codec.DecoderFactory] struct {
+	Kernel  *Decoder[DF]
+	Decoder *codec.Decoder
+}
+
+var _ frame.Source = (*decoderAsSource[codec.DecoderFactory])(nil)
+
+func (d *decoderAsSource[DF]) GetDecoder() *codec.Decoder {
+	return d.Decoder
+}
+
+func (d *Decoder[DF]) asSource(decoder *codec.Decoder) frame.Source {
+	return &decoderAsSource[DF]{
+		Kernel:  d,
+		Decoder: decoder,
+	}
+}
+
 func (d *Decoder[DF]) getOutputCodecParameters(
 	ctx context.Context,
 	streamIndex int,
@@ -205,6 +244,12 @@ func (d *Decoder[DF]) getOutputCodecParameters(
 	codecParams := astiav.AllocCodecParameters()
 	setFinalizerFree(ctx, codecParams)
 	decoder.ToCodecParameters(codecParams)
+	switch codecParams.MediaType() {
+	case astiav.MediaTypeVideo:
+		codecParams.SetCodecID(astiav.CodecIDRawvideo)
+	case astiav.MediaTypeAudio:
+		// TODO: figure out which PCM is used here and set it
+	}
 	d.OutputCodecParameters[streamIndex] = codecParams
 	return codecParams
 }

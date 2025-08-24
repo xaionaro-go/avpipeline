@@ -17,10 +17,9 @@ import (
 )
 
 const (
-	doFullCopyOfParameters     = false
-	manuallySetHardwareContext = false
-	setRoteControlParameters   = false
-	setSetPktTimeBase          = false
+	doFullCopyOfParameters   = false
+	setRoteControlParameters = false
+	setSetPktTimeBase        = false
 )
 
 type codecInternals struct {
@@ -172,10 +171,15 @@ func findCodec(
 	return findDecoderCodec(codecID, codecName)
 }
 
+type Resources struct {
+	HWDeviceContext *astiav.HardwareDeviceContext
+}
+
 func newCodec(
 	ctx context.Context,
 	isEncoder bool, // otherwise: decoder
 	params CodecParams,
+	reusableResources *Resources,
 ) (_ret *Codec, _err error) {
 	params = params.Clone(ctx)
 	codecName := params.CodecName
@@ -287,8 +291,8 @@ func newCodec(
 					logger.Warnf(ctx, "unable to detect the FPS, assuming 30")
 					fps = 30
 				}
-				v := int(0.999 + fps)
-				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS value (%d <- %f)", v, fps)
+				v := int(0.999+fps) * 2
+				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS*2 value (%d <- %f)", v, fps)
 				logIfError(options.Set("g", fmt.Sprintf("%d", v), 0))
 			}
 			if options.Get("bf", nil, 0) == nil {
@@ -298,64 +302,49 @@ func newCodec(
 			if codecParameters.BitRate() > 0 {
 				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
 				options.Set("rc", "cbr", 0)
+				options.Set("bitrate_mode", "cbr", 0) // TODO: do we need to deduplicate this with the line above?
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
-					logIfError(options.Set("pix_fmt", "nv12", 0))
-					forcePixelFormat = astiav.PixelFormatNv12
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing MediaCodec pixel format")
+					logIfError(options.Set("pix_fmt", "mediacodec", 0))
+					forcePixelFormat = astiav.PixelFormatMediacodec
 				}
 			}
 		} else {
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pixel_format", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing NV12 pixel format")
-					logIfError(options.Set("pixel_format", "nv12", 0))
-					forcePixelFormat = astiav.PixelFormatNv12
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing MediaCodec pixel format")
+					logIfError(options.Set("pixel_format", "mediacodec", 0))
+					forcePixelFormat = astiav.PixelFormatMediacodec
+				}
+
+				height := codecParameters.Height()
+				alignedHeight := (height + 15) &^ 15
+				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
+				if alignedHeight != height && options.Get("create_window", nil, 0) == nil {
+					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this we are forcing create_window=1", codecParameters.Height(), (codecParameters.Height()+15)&^15)
+					logIfError(options.Set("create_window", "1", 0))
 				}
 			}
 		}
 	}
 
-	if manuallySetHardwareContext && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+	if hardwareDeviceType != astiav.HardwareDeviceTypeNone {
 		if codecParameters.MediaType() != astiav.MediaTypeVideo {
 			return nil, fmt.Errorf("currently hardware encoding/decoding is supported only for video streams")
 		}
-
-		for _, p := range c.codec.HardwareConfigs() {
-			if p.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx) && p.HardwareDeviceType() == hardwareDeviceType {
-				c.hardwarePixelFormat = p.PixelFormat()
-				break
-			}
-		}
-
-		if c.hardwarePixelFormat == astiav.PixelFormatNone {
-			return nil, fmt.Errorf("hardware device type '%v' is not supported", hardwareDeviceType)
-		}
-
-		var err error
-		c.hardwareDeviceContext, err = astiav.CreateHardwareDeviceContext(
+		err := c.initHardware(
+			ctx,
 			hardwareDeviceType,
-			string(hardwareDeviceName),
+			hardwareDeviceName,
 			options,
 			flags,
+			reusableResources,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("unable to create hardware (%s:%s) device context: %w", hardwareDeviceType, hardwareDeviceName, err)
+			return nil, fmt.Errorf("unable to init hardware device context: %w", err)
 		}
-		c.closer.Add(c.hardwareDeviceContext.Free)
-
-		c.codecContext.SetHardwareDeviceContext(c.hardwareDeviceContext)
-		c.codecContext.SetPixelFormatCallback(func(pfs []astiav.PixelFormat) astiav.PixelFormat {
-			for _, pf := range pfs {
-				if pf == c.hardwarePixelFormat {
-					return pf
-				}
-			}
-
-			logger.Errorf(ctx, "unable to find appropriate pixel format")
-			return astiav.PixelFormatNone
-		})
 	}
 
 	switch codecParameters.MediaType() {
@@ -418,6 +407,7 @@ func newCodec(
 		c.codecContext.SetExtraData(codecParameters.ExtraData())
 	}
 
+	c.logHints(ctx)
 	logger.Tracef(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, options)
 	if err := c.codecContext.Open(c.codec, options); err != nil {
 		return nil, fmt.Errorf("unable to open codec context: %w", err)
@@ -425,4 +415,109 @@ func newCodec(
 
 	setFinalizer(ctx, c.codecInternals, func(c *codecInternals) { c.closeLocked(ctx) })
 	return c, nil
+}
+
+func (c *Codec) logHints(ctx context.Context) {
+	if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+		height := c.codecContext.Height()
+		suggestedHeight := (height + 15) &^ 15
+		if suggestedHeight != height {
+			logger.Debugf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this copy-crop frames from H264/HEVC using swscale to be %dp", height, suggestedHeight, height)
+		}
+	}
+}
+
+func (c *Codec) initHardware(
+	ctx context.Context,
+	hardwareDeviceType astiav.HardwareDeviceType,
+	hardwareDeviceName HardwareDeviceName,
+	options *astiav.Dictionary,
+	flags int,
+	reusableResources *Resources,
+) (_err error) {
+	err := c.initHardwareDeviceContext(
+		ctx,
+		hardwareDeviceType,
+		hardwareDeviceName,
+		options,
+		flags,
+		reusableResources,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to get or create hardware device context: %w", err)
+	}
+
+	err = c.initHardwarePixelFormat(ctx, hardwareDeviceType)
+	if err != nil {
+		return fmt.Errorf("unable to init hardware pixel format: %w", err)
+	}
+	return nil
+}
+
+func (c *Codec) initHardwarePixelFormat(
+	ctx context.Context,
+	hardwareDeviceType astiav.HardwareDeviceType,
+) (_err error) {
+	logger.Tracef(ctx, "initHardwarePixelFormat")
+	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v", _err) }()
+	for _, p := range c.codec.HardwareConfigs() {
+		if p.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx) && p.HardwareDeviceType() == hardwareDeviceType {
+			c.hardwarePixelFormat = p.PixelFormat()
+			break
+		}
+	}
+
+	if c.hardwarePixelFormat == astiav.PixelFormatNone {
+		return fmt.Errorf("hardware device type '%v' is not supported", hardwareDeviceType)
+	}
+	c.codecContext.SetPixelFormatCallback(func(pfs []astiav.PixelFormat) astiav.PixelFormat {
+		for _, pf := range pfs {
+			if pf == c.hardwarePixelFormat {
+				return pf
+			}
+		}
+
+		logger.Errorf(ctx, "unable to find appropriate pixel format")
+		return astiav.PixelFormatNone
+	})
+
+	return nil
+}
+
+func (c *Codec) initHardwareDeviceContext(
+	ctx context.Context,
+	hardwareDeviceType astiav.HardwareDeviceType,
+	hardwareDeviceName HardwareDeviceName,
+	options *astiav.Dictionary,
+	flags int,
+	reusableResources *Resources,
+) error {
+	if reusableResources != nil {
+		// TODO: add a check if we can reuse the hardware device context; for example, we
+		//       might've been asked to use another device at all
+		if oldHWCtx := reusableResources.HWDeviceContext; oldHWCtx != nil {
+			logger.Debugf(ctx, "reusing the old hardware device context: %p", oldHWCtx)
+			c.hardwareDeviceContext = oldHWCtx
+			c.closer.Add(func() {
+				logger.Tracef(ctx, "not closing the reused hardware device context: %p", oldHWCtx)
+			})
+			c.codecContext.SetHardwareDeviceContext(c.hardwareDeviceContext)
+			return nil
+		}
+	}
+
+	var err error
+	c.hardwareDeviceContext, err = astiav.CreateHardwareDeviceContext(
+		hardwareDeviceType,
+		string(hardwareDeviceName),
+		options,
+		flags,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create hardware (%s:%s) device context: %w", hardwareDeviceType, hardwareDeviceName, err)
+	}
+	c.closer.Add(c.hardwareDeviceContext.Free)
+	c.codecContext.SetHardwareDeviceContext(c.hardwareDeviceContext)
+	logger.Tracef(ctx, "HardwareDeviceContext: %p", c.hardwareDeviceContext)
+	return nil
 }

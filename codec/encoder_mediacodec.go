@@ -28,5 +28,10 @@ func (e *EncoderFull) setQualityMediacodecConstantBitrate(
 	ctx context.Context,
 	q quality.ConstantBitrate,
 ) error {
-	return e.ffAMediaFormatSetInt32(ctx, "video-bitrate", int32(q))
+	if err := e.ffAMediaFormatSetInt32(ctx, "video-bitrate", int32(q)); err != nil {
+		return fmt.Errorf("unable to set video-bitrate: %w", err)
+	}
+
+	e.codecContext.SetBitRate(int64(q))
+	return nil
 }

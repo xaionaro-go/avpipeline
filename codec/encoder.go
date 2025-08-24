@@ -49,9 +49,10 @@ type Encoder interface {
 type EncoderFullBackend = Codec
 type EncoderFull struct {
 	*EncoderFullBackend
-	Quality Quality
-	InitTS  time.Time
-	Next    typing.Optional[SwitchEncoderParams]
+	ReusableResources *Resources
+	Quality           Quality
+	InitTS            time.Time
+	Next              typing.Optional[SwitchEncoderParams]
 }
 
 type SwitchEncoderParams struct {
@@ -83,9 +84,16 @@ func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 
 var _ Encoder = (*EncoderFull)(nil)
 
+type ErrNotDummy struct{}
+
+func (ErrNotDummy) Error() string {
+	return "not a dummy encoder"
+}
+
 func NewEncoder(
 	ctx context.Context,
 	params CodecParams,
+	opts ...EncoderFactoryOption,
 ) (_ret Encoder, _err error) {
 	logger.Tracef(ctx, "NewEncoder(%#+v)", params)
 	defer func() { logger.Tracef(ctx, "/NewEncoder(%#+v): %T %v", params, _ret, _err) }()
@@ -95,7 +103,12 @@ func NewEncoder(
 	case NameRaw:
 		return EncoderRaw{}, nil
 	}
-	e, err := newEncoder(ctx, params, nil)
+	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionOnlyDummy](opts); ok {
+		if v.OnlyDummy {
+			return nil, ErrNotDummy{}
+		}
+	}
+	e, err := newEncoder(ctx, params, nil, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +119,7 @@ func newEncoder(
 	ctx context.Context,
 	params CodecParams,
 	overrideQuality Quality,
+	opts ...EncoderFactoryOption,
 ) (_ret *EncoderFull, _err error) {
 	res := Resolution{
 		Width:  uint32(params.CodecParameters.Width()),
@@ -126,18 +140,26 @@ func newEncoder(
 			return nil, fmt.Errorf("unable to apply quality override %#+v: %w", overrideQuality, err)
 		}
 	}
+	var reusableResources *Resources
+	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionReusableResources](opts); ok {
+		reusableResources = v.ReusableResources
+	}
 	c, err := newCodec(
 		ctx,
 		true,
 		params,
+		reusableResources,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &EncoderFull{
+
+	e := &EncoderFull{
 		EncoderFullBackend: c,
+		ReusableResources:  reusableResources,
 		InitTS:             time.Now(),
-	}, nil
+	}
+	return e, nil
 }
 
 func (e *EncoderFull) String() string {
@@ -275,7 +297,7 @@ func (e *EncoderFull) closeLocked(ctx context.Context) error {
 	return errors.Join(result...)
 }
 
-func IsFakeEncoder(encoder Encoder) bool {
+func IsDummyEncoder(encoder Encoder) bool {
 	return IsEncoderCopy(encoder) || IsEncoderRaw(encoder)
 }
 
@@ -304,7 +326,11 @@ func (e *EncoderFull) reinitEncoder(
 		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
 	}
 
-	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality)
+	var opts EncoderFactoryOptions
+	if e.ReusableResources != nil {
+		opts = append(opts, EncoderFactoryOptionReusableResources{ReusableResources: e.ReusableResources})
+	}
+	newEncoder, err := newEncoder(ctx, e.InitParams, e.Quality, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
 	}

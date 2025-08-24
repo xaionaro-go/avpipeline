@@ -6,6 +6,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -142,4 +143,21 @@ func (pkt *Commons) GetPipelineSideData() types.PipelineSideData {
 
 func (pkt *Commons) GetSource() Source {
 	return pkt.StreamInfo.Source
+}
+
+func (pkt *Commons) GetResolution() *codectypes.Resolution {
+	if pkt.Stream == nil {
+		return nil
+	}
+	codecParams := pkt.Stream.CodecParameters()
+	if codecParams == nil {
+		return nil
+	}
+	if codecParams.MediaType() != astiav.MediaTypeVideo {
+		return nil
+	}
+	return &codectypes.Resolution{
+		Width:  uint32(codecParams.Width()),
+		Height: uint32(codecParams.Height()),
+	}
 }

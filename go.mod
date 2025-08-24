@@ -42,6 +42,7 @@ require (
 
 require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
+	github.com/dustin/go-humanize v1.0.1
 	github.com/go-ng/container v0.0.0-20220615121757-4740bf4bbc52
 	github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 // indirect
 	github.com/go-ng/sort v0.0.0-20220617173827-2cc7cd04f7c7 // indirect

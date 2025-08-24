@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
@@ -20,6 +21,10 @@ type AutoBitRateResolutionAndBitRateConfig struct {
 	codectypes.Resolution
 	BitrateHigh uint64
 	BitrateLow  uint64
+}
+
+func (res AutoBitRateResolutionAndBitRateConfig) String() string {
+	return res.Resolution.String() + " (" + humanize.SI(float64(res.BitrateLow), "bps") + " .. " + humanize.SI(float64(res.BitrateHigh), "bps") + ")"
 }
 
 type AutoBitRateResolutionAndBitRateConfigs []AutoBitRateResolutionAndBitRateConfig
@@ -77,4 +82,7 @@ type AutoBitRateConfig struct {
 	ResolutionsAndBitRates AutoBitRateResolutionAndBitRateConfigs
 	Calculator             AutoBitRateCalculator
 	CheckInterval          time.Duration
+	AutoByPass             bool
+	MaxBitRate             uint64
+	MinBitRate             uint64
 }

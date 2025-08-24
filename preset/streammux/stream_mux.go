@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -497,6 +498,14 @@ func (s *StreamMux[C]) GetActiveOutput() *Output[C] {
 	return s.Outputs[outputID]
 }
 
+type ErrNotImplemented struct {
+	Err error
+}
+
+func (e ErrNotImplemented) Error() string {
+	return fmt.Sprintf("not implemented: %v", e.Err)
+}
+
 func (s *StreamMux[C]) SetResolution(
 	ctx context.Context,
 	res codec.Resolution,
@@ -508,13 +517,18 @@ func (s *StreamMux[C]) SetResolution(
 	if len(cfg.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
 	}
-	curRes := cfg.VideoTrackConfigs[0].Resolution
+	videoCfg := cfg.VideoTrackConfigs[0]
+	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") {
+		// TODO: this should not be here, it should be somewhere else.
+		return ErrNotImplemented{Err: fmt.Errorf("cannot change resolution when using MediaCodec, since we don't support scaling yet")}
+	}
+
+	curRes := videoCfg.Resolution
 	if curRes == res {
 		logger.Tracef(ctx, "the resolution is already set to %s", res)
 		return nil
 	}
-	newRes := cfg.VideoTrackConfigs[0]
-	newRes.Resolution = res
-	cfg.VideoTrackConfigs[0] = newRes
+	videoCfg.Resolution = res
+	cfg.VideoTrackConfigs[0] = videoCfg
 	return s.SetRecoderConfig(ctx, cfg)
 }

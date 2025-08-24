@@ -26,6 +26,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+const (
+	outputReuseDecoderResources = true
+)
+
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
 type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
 type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
@@ -182,6 +186,11 @@ func newOutput[C any](
 		)),
 		OutputNode:       outputNode,
 		OutputNodeConfig: outputConfig,
+	}
+
+	if outputReuseDecoderResources {
+		logger.Warnf(ctx, "the output is configured to reuse decoder resources, which makes impossible to scale the frame (the resolution cannot be changed)")
+		o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory
 	}
 
 	// wiring

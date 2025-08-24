@@ -25,6 +25,7 @@ const (
 	encoderWriteHeaderOnFinishedGettingStreams = false
 	encoderWriteHeaderOnNotifyPacketSources    = false
 	encoderCopyTime                            = true
+	encoderCopyTimeAfterScaling                = true
 	encoderDTSHigherPTSCorrect                 = false
 	encoderDebug                               = true
 )
@@ -195,9 +196,18 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	streamIndex int,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
+	frameSource frame.Source,
 ) (_err error) {
-	logger.Debugf(ctx, "initEncoderAndOutputFor(%d)", streamIndex)
-	defer func() { logger.Debugf(ctx, "/initEncoderAndOutputFor(%d): %v", streamIndex, _err) }()
+	res := codec.Resolution{
+		Width:  uint32(params.Width()),
+		Height: uint32(params.Height()),
+	}
+	codecID := params.CodecID()
+	pixFmt := params.PixelFormat()
+	logger.Debugf(ctx, "initEncoderAndOutputFor(%d): %s, %v/%s", streamIndex, codecID, res, pixFmt)
+	defer func() {
+		logger.Debugf(ctx, "/initEncoderAndOutputFor(%d): %s, %v/%s: %v", streamIndex, codecID, res, pixFmt, _err)
+	}()
 	if _, ok := e.encoders[streamIndex]; ok {
 		logger.Errorf(ctx, "stream #%d already exists, not initializing", streamIndex)
 		return nil
@@ -209,7 +219,7 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	case astiav.MediaTypeAudio:
 		logger.Tracef(ctx, "SampleRate: %d", params.SampleRate())
 	}
-	err := e.initEncoderFor(ctx, streamIndex, params, timeBase)
+	err := e.initEncoderFor(ctx, streamIndex, params, timeBase, frameSource)
 	if err != nil {
 		return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", streamIndex, err)
 	}
@@ -238,6 +248,7 @@ func (e *Encoder[EF]) initEncoderFor(
 	streamIndex int,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
+	frameSource frame.Source,
 ) (_err error) {
 	logger.Debugf(ctx, "initEncoderFor(ctx, stream[%d])", streamIndex)
 	defer func() { logger.Debugf(ctx, "/initEncoderFor(ctx, stream[%d]): %v", streamIndex, _err) }()
@@ -245,11 +256,19 @@ func (e *Encoder[EF]) initEncoderFor(
 	if timeBase.Num() == 0 {
 		return fmt.Errorf("TimeBase must be set")
 	}
-	encoderInstance, err := e.EncoderFactory.NewEncoder(ctx, params, timeBase)
+
+	var opts []codec.EncoderFactoryOption
+	if frameSource != nil {
+		opts = append(opts, codec.EncoderFactoryOptionFrameSource{FrameSource: frameSource})
+	} else {
+		opts = append(opts, codec.EncoderFactoryOptionOnlyDummy{OnlyDummy: true})
+	}
+
+	encoderInstance, err := e.EncoderFactory.NewEncoder(ctx, params, timeBase, opts...)
 	if err != nil {
 		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", streamIndex, err)
 	}
-	if !codec.IsFakeEncoder(encoderInstance) && encoderInstance.CodecContext() == nil {
+	if !codec.IsDummyEncoder(encoderInstance) && encoderInstance.CodecContext() == nil {
 		return fmt.Errorf("the encoder factory produced an encoder %T with nil CodecContext", encoderInstance)
 	}
 
@@ -315,14 +334,26 @@ func (e *Encoder[EF]) sendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "mode", "packet")
+
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		input.Stream.AvgFrameRate()
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
 		codecParams := fixCodecParameters(ctx, input.CodecParameters(), input.Stream.AvgFrameRate())
-		err := e.initEncoderAndOutputFor(ctx, input.GetStreamIndex(), codecParams, input.GetStream().TimeBase())
-		if err != nil {
+		err := e.initEncoderAndOutputFor(
+			ctx,
+			input.GetStreamIndex(),
+			codecParams,
+			input.GetStream().TimeBase(),
+			nil,
+		)
+		switch {
+		case err == nil:
+		case errors.As(err, &codec.ErrNotDummy{}):
+			return ErrNotCopyEncoder{}
+		default:
 			return fmt.Errorf("unable to update outputs (packet): %w", err)
 		}
 		encoder = e.encoders[input.GetStreamIndex()]
@@ -372,15 +403,24 @@ func (e *Encoder[EF]) sendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "sendInputFrame: %s", input.GetMediaType())
-	defer func() { logger.Tracef(ctx, "/sendInputFrame: %s: %v", input.GetMediaType(), _err) }()
+	ctx = belt.WithField(ctx, "mode", "frame")
+	ctx = belt.WithField(ctx, "media_type", "input", input.GetMediaType())
+
+	logger.Tracef(ctx, "sendInputFrame")
+	defer func() { logger.Tracef(ctx, "/sendInputFrame: %v", _err) }()
 
 	encoder := e.encoders[input.GetStreamIndex()]
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
 		codecParams := fixCodecParameters(ctx, input.CodecParameters, input.AvgFrameRate)
-		err := e.initEncoderAndOutputFor(ctx, input.StreamIndex, codecParams, input.GetTimeBase())
+		err := e.initEncoderAndOutputFor(
+			ctx,
+			input.StreamIndex,
+			codecParams,
+			input.GetTimeBase(),
+			input.Source,
+		)
 		if err != nil {
 			return fmt.Errorf("unable to update outputs (frame): %w", err)
 		}
@@ -398,7 +438,7 @@ func (e *Encoder[EF]) sendInputFrame(
 	ctx = belt.WithField(ctx, "encoder", encoder)
 
 	if encoderDebug {
-		logger.Tracef(ctx, "input frame: dur:%d", input.Frame.Duration())
+		logger.Tracef(ctx, "input frame: dur:%d; res:%dx%d", input.Frame.Duration(), input.Frame.Width(), input.Frame.Height())
 	}
 
 	if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
@@ -446,7 +486,7 @@ func (e *Encoder[EF]) sendInputFrame(
 	encoderMediaType := encoder.MediaType()
 	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
-	fittedFrames, err := encoder.fitFrameForEncoding(ctx, input.Frame)
+	fittedFrames, err := encoder.fitFrameForEncoding(ctx, input)
 	if err != nil {
 		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
 	}
@@ -511,10 +551,10 @@ func (e *Encoder[EF]) sendInputFrame(
 
 func (e *streamEncoder) fitFrameForEncoding(
 	ctx context.Context,
-	inputFrame *astiav.Frame,
+	input frame.Input,
 ) (fittedFrames []*astiav.Frame, _err error) {
-	logger.Tracef(ctx, "fitFrameForEncoding")
-	defer func() { logger.Tracef(ctx, "/fitFrameForEncoding: %v %v", fittedFrames, _err) }()
+	logger.Tracef(ctx, "fitFrameForEncoding: %s", e.MediaType())
+	defer func() { logger.Tracef(ctx, "/fitFrameForEncoding: %s: %v %v", e.MediaType(), fittedFrames, _err) }()
 
 	switch e.MediaType() {
 	case astiav.MediaTypeVideo:
@@ -522,34 +562,44 @@ func (e *streamEncoder) fitFrameForEncoding(
 		if res == nil {
 			return nil, fmt.Errorf("unable to get the resolution from the encoder")
 		}
-		if inputFrame.Width() == int(res.Width) || inputFrame.Height() == int(res.Height) {
-			return []*astiav.Frame{inputFrame}, nil
+		if encoderDebug {
+			logger.Tracef(ctx, "input frame: %dx%d (%s); encoder resolution: %s", input.Frame.Width(), input.Frame.Height(), input.CodecParameters.CodecID(), res)
 		}
-		scaledFrame, err := e.getScaledFrame(ctx, inputFrame, *res)
+		// TODO: also check if non-hardware-backed pixel formats do match
+		if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) {
+			return []*astiav.Frame{input.Frame}, nil
+		}
+		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat())
+		scaledFrame, err := e.getScaledFrame(ctx, input)
 		if err != nil {
 			return nil, fmt.Errorf("unable to scale the frame: %w", err)
 		}
+		if encoderCopyTimeAfterScaling {
+			scaledFrame.SetPts(input.Frame.Pts())
+			scaledFrame.SetPktDts(input.Frame.PktDts())
+			scaledFrame.SetDuration(input.Frame.Duration())
+		}
 		return []*astiav.Frame{scaledFrame}, nil
 	case astiav.MediaTypeAudio:
-		inPCMFmt := getPCMAudioFormatFromFrame(ctx, inputFrame)
+		inPCMFmt := getPCMAudioFormatFromFrame(ctx, input.Frame)
 		if inPCMFmt == nil {
 			return nil, fmt.Errorf("unable to get PCM audio format from the input frame")
 		}
 		encPCMFmt := e.Encoder.GetPCMAudioFormat(ctx)
 		if encPCMFmt == nil {
-			return []*astiav.Frame{inputFrame}, nil
+			return []*astiav.Frame{input.Frame}, nil
 		}
 		if encPCMFmt.Equal(*inPCMFmt) {
-			return []*astiav.Frame{inputFrame}, nil
+			return []*astiav.Frame{input.Frame}, nil
 		}
-		resampledFrames, err := e.getResampledFrames(ctx, inputFrame, *inPCMFmt, *encPCMFmt)
+		resampledFrames, err := e.getResampledFrames(ctx, input.Frame, *inPCMFmt, *encPCMFmt)
 		if err != nil {
 			return nil, fmt.Errorf("unable to resample the audio frame: %w", err)
 		}
 		return resampledFrames, nil
 	default:
 		logger.Debugf(ctx, "unsupported media type: %s", e.MediaType())
-		return []*astiav.Frame{inputFrame}, nil
+		return []*astiav.Frame{input.Frame}, nil
 	}
 }
 
@@ -648,46 +698,37 @@ func (e *streamEncoder) prepareResampler(
 
 func (e *streamEncoder) getScaledFrame(
 	ctx context.Context,
-	inputFrame *astiav.Frame,
-	resolution codec.Resolution,
+	input frame.Input,
 ) (_ret *astiav.Frame, _err error) {
-	logger.Tracef(ctx, "getScaledFrame: %dx%d", resolution.Width, resolution.Height)
-	defer func() { logger.Tracef(ctx, "/getScaledFrame: %dx%d: %v", resolution.Width, resolution.Height, _err) }()
+	logger.Tracef(ctx, "getScaledFrame")
+	defer func() { logger.Tracef(ctx, "/getScaledFrame: %v", _err) }()
 
-	err := e.prepareScaler(ctx, inputFrame, resolution)
+	err := e.prepareScaler(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get a scaler: %w", err)
 	}
 
-	e.Scaler.ScaleFrame(ctx, inputFrame, e.ScaledFrame)
+	e.Scaler.ScaleFrame(ctx, input.Frame, e.ScaledFrame)
 	return e.ScaledFrame, nil
-}
-
-func getResolutionFromAstiavFrame(
-	frame *astiav.Frame,
-) codec.Resolution {
-	if frame == nil {
-		return codec.Resolution{}
-	}
-	return codec.Resolution{
-		Width:  uint32(frame.Width()),
-		Height: uint32(frame.Height()),
-	}
 }
 
 func (e *streamEncoder) prepareScaler(
 	ctx context.Context,
-	inputFrame *astiav.Frame,
-	outputResolution codec.Resolution,
+	input frame.Input,
 ) (_err error) {
-	logger.Tracef(ctx, "getScaler: %dx%d", outputResolution.Width, outputResolution.Height)
+	inputResolution := input.GetResolution()
+	outputResolution := e.Encoder.GetResolution(ctx)
+	logger.Tracef(ctx, "getScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat())
 	defer func() {
-		logger.Tracef(ctx, "/getScaler: %dx%d: %v", outputResolution.Width, outputResolution.Height, _err)
+		logger.Tracef(ctx, "/getScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat(), _err)
 	}()
 
-	inputResolution := getResolutionFromAstiavFrame(inputFrame)
+	if outputResolution == nil {
+		return fmt.Errorf("unable to get the resolution from the encoder")
+	}
+
 	if e.Scaler != nil {
-		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == outputResolution {
+		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == *outputResolution && input.PixelFormat() == e.Scaler.SourcePixelFormat() && e.Encoder.CodecContext().PixelFormat() == e.Scaler.DestinationPixelFormat() {
 			logger.Tracef(ctx, "reusing the scaler")
 			return nil
 		}
@@ -700,15 +741,15 @@ func (e *streamEncoder) prepareScaler(
 	setFinalizerFree(ctx, e.ScaledFrame)
 	e.ScaledFrame.SetWidth(int(outputResolution.Width))
 	e.ScaledFrame.SetHeight(int(outputResolution.Height))
-	e.ScaledFrame.SetPixelFormat(inputFrame.PixelFormat())
+	e.ScaledFrame.SetPixelFormat(e.Encoder.CodecContext().PixelFormat())
 	if err := e.ScaledFrame.AllocBuffer(0); err != nil { // TODO(memleak): make sure the buffer is not already allocated, otherwise it may lead to a memleak
 		return fmt.Errorf("unable to allocate a buffer for the scaled frame: %w", err)
 	}
 
 	s, err := scaler.NewSoftware(
 		ctx,
-		inputResolution, inputFrame.PixelFormat(),
-		outputResolution, e.ScaledFrame.PixelFormat(),
+		inputResolution, input.Frame.PixelFormat(),
+		*outputResolution, e.ScaledFrame.PixelFormat(),
 		astiav.SoftwareScaleContextFlagLanczos,
 	)
 	if err != nil {
@@ -765,7 +806,10 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
 ) error {
+	logger.Tracef(ctx, "NotifyAboutPacketSource: %s", source)
+	defer func() { logger.Tracef(ctx, "/NotifyAboutPacketSource: %s", source) }()
 	var errs []error
+	ctx = belt.WithField(ctx, "source", source)
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		e.Locker.Do(ctx, func() {
 			changed := false
@@ -780,8 +824,12 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 					inputStream.Index(),
 					codecParams,
 					inputStream.TimeBase(),
+					nil,
 				)
-				if err != nil {
+				switch {
+				case err == nil:
+				case errors.As(err, &codec.ErrNotDummy{}):
+				default:
 					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", inputStream.Index(), source, err))
 				}
 			}

@@ -2,6 +2,7 @@ package streammux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +20,7 @@ import (
 type AutoBitRateCalculator = types.AutoBitRateCalculator
 type AutoBitRateConfig = types.AutoBitRateConfig
 type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
+type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
 
 func multiplyBitRates(
 	resolutions []AutoBitRateResolutionAndBitRateConfig,
@@ -33,10 +35,10 @@ func multiplyBitRates(
 	return out
 }
 
-func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) []AutoBitRateResolutionAndBitRateConfig {
+func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateResolutionAndBitRateConfigs {
 	switch codecID {
 	case astiav.CodecIDH264:
-		return []AutoBitRateResolutionAndBitRateConfig{
+		return AutoBitRateResolutionAndBitRateConfigs{
 			{
 				Resolution:  codec.Resolution{Width: 3840, Height: 2160},
 				BitrateHigh: 24 << 20, BitrateLow: 8 << 20, // 24 Mbps .. 8 Mbps
@@ -55,13 +57,13 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) []AutoBitRat
 			},
 			{
 				Resolution:  codec.Resolution{Width: 854, Height: 480},
-				BitrateHigh: 2 << 20, BitrateLow: 128 << 10, // 2 Mbps .. 128 Kbps
+				BitrateHigh: 2 << 20, BitrateLow: 512 << 10, // 2 Mbps .. 512 Kbps
 			},
 		}
 	case astiav.CodecIDHevc:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.7)
+		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.85)
 	case astiav.CodecIDAv1:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.5)
+		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.7)
 	default:
 		panic(fmt.Errorf("unsupported codec for DefaultAutoBitrateConfig: %s", codecID))
 	}
@@ -78,10 +80,15 @@ func DefaultAutoBitrateConfig(
 			break
 		}
 	}
+
+	resBest := resolutions.Best()
+	resWorst := resolutions.Worst()
 	result := AutoBitRateConfig{
 		ResolutionsAndBitRates: resolutions,
 		Calculator:             DefaultAutoBitrateCalculatorThresholds(),
 		CheckInterval:          time.Second / 2,
+		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
+		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
 	}
 	return result
 }
@@ -169,7 +176,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	var totalQueue uint64
 	for _, outputNode := range getQueueSizers {
-		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
+		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 500*time.Millisecond)
 		defer cancelFn()
 		queueSize := outputNode.GetInternalQueueSize(nodeReqCtx)
 		reqErr := nodeReqCtx.Err()
@@ -227,8 +234,8 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 	oldBitRate uint64,
 	newBitRate uint64,
 ) (_err error) {
-	logger.Debugf(ctx, "setBitrate: %d->%d", oldBitRate, newBitRate)
-	defer func() { logger.Debugf(ctx, "/setBitrate: %d->%d: %v", oldBitRate, newBitRate, _err) }()
+	logger.Tracef(ctx, "setBitrate: %d->%d", oldBitRate, newBitRate)
+	defer func() { logger.Tracef(ctx, "/setBitrate: %d->%d: %v", oldBitRate, newBitRate, _err) }()
 
 	if err := h.changeResolutionIfNeeded(ctx, newBitRate); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
@@ -252,10 +259,10 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 
 	clampedBitRate := newBitRate
 	switch {
-	case newBitRate < resCfg.BitrateLow:
-		clampedBitRate = resCfg.BitrateLow
-	case newBitRate > resCfg.BitrateHigh:
-		clampedBitRate = resCfg.BitrateHigh
+	case newBitRate < h.MinBitRate:
+		clampedBitRate = h.MinBitRate
+	case newBitRate > h.MaxBitRate:
+		clampedBitRate = h.MaxBitRate
 	}
 
 	if clampedBitRate == oldBitRate {
@@ -296,19 +303,27 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
 
+	logger.Tracef(ctx, "current resolution: %v; resCfg: %v", *res, resCfg)
+
 	var newRes AutoBitRateResolutionAndBitRateConfig
 	switch {
 	case bitrate < resCfg.BitrateLow:
 		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
 		if _newRes == nil {
-			logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %#+v), minBitRate", *res, resCfg, resCfg.BitrateLow)
+			_newRes = h.AutoBitRateConfig.ResolutionsAndBitRates.Worst()
+		}
+		if _newRes.Resolution == *res {
+			logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %v), minBitRate: %d", *res, resCfg, resCfg.BitrateLow)
 			return nil
 		}
 		newRes = *_newRes
 	case bitrate > resCfg.BitrateHigh:
 		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
 		if _newRes == nil {
-			logger.Debugf(ctx, "already at the highest resolution %v (resCfg: %#+v), maxBitRate: %d", *res, resCfg, resCfg.BitrateHigh)
+			_newRes = h.AutoBitRateConfig.ResolutionsAndBitRates.Best()
+		}
+		if _newRes.Resolution == *res {
+			logger.Debugf(ctx, "already at the highest resolution %v (resCfg: %v), maxBitRate: %d", *res, resCfg, resCfg.BitrateHigh)
 			return nil
 		}
 		newRes = *_newRes
@@ -317,8 +332,14 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	}
 
 	logger.Infof(ctx, "changing resolution from %v to %v", *res, newRes.Resolution)
-	if err := h.StreamMux.SetResolution(ctx, newRes.Resolution); err != nil {
+	err := h.StreamMux.SetResolution(ctx, newRes.Resolution)
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &ErrNotImplemented{}):
+		logger.Debugf(ctx, "resolution change is not implemented: %v", err)
+		return nil
+	default:
 		return fmt.Errorf("unable to set resolution to %v: %w", newRes.Resolution, err)
 	}
-	return nil
 }

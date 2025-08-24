@@ -344,6 +344,7 @@ func (m *MapStreamIndices) sendInputFrame(
 			frame.CloneAsReferenced(input.Frame),
 			input.Pos,
 			frame.BuildStreamInfo(
+				input.Source,
 				input.CodecParameters,
 				outputStream.Index(),
 				len(m.outputStreams),

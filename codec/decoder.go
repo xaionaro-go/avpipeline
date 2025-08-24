@@ -39,6 +39,7 @@ func NewDecoder(
 			Options:            options,
 			Flags:              flags,
 		},
+		nil,
 	)
 	if err != nil {
 		return nil, err

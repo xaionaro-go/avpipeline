@@ -47,7 +47,5 @@ func (c *Codec) ffAMediaFormatSetInt32(
 		return fmt.Errorf("unable to SetParameters: %w", err)
 	}
 
-	c.codecContext.SetBitRate(int64(value))
-
 	return nil
 }

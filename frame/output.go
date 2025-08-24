@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -83,4 +84,8 @@ func (f *Output) GetStreamDurationAsDuration() time.Duration {
 
 func (f *Output) GetPipelineSideData() types.PipelineSideData {
 	return f.PipelineSideData
+}
+
+func (f *Output) Resolution() codectypes.Resolution {
+	return (*Commons)(f).GetResolution()
 }
