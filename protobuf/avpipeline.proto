@@ -61,3 +61,16 @@ message Frame {
   int64 pos = 7;
   int64 duration = 8;
 }
+
+message AutoBitRateCalculatorThresholds {
+  uint64 outputExtremelyHighQueueSizeDurationMS = 1;
+  uint64 outputVeryHighQueueSizeDurationMS = 2;
+  uint64 outputHighQueueSizeDurationMS = 3;
+  uint64 outputLowQueueSizeDurationMS = 4;
+  uint64 outputVeryLowQueueSizeDurationMS = 5;
+  double increaseK = 6;
+  double decreaseK = 7;
+  double quickIncreaseK = 8;
+  double quickDecreaseK = 9;
+  double extremeDecreaseK = 10;
+}
