@@ -231,7 +231,7 @@ func newOutput[C any](
 func (o *Output[C]) initReuseDecoderResources(
 	ctx context.Context,
 ) {
-	res := *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	encRes := *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 
 	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = resourcegetter.NewConditional(
 		o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory,
@@ -249,10 +249,10 @@ func (o *Output[C]) initReuseDecoderResources(
 			}
 
 			// we can reuse the resources only if no scaling is required
-			if f.Params.Width() != int(res.Width) {
+			if f.Params.Width() != int(encRes.Width) {
 				return false
 			}
-			if f.Params.Height() != int(res.Height) {
+			if f.Params.Height() != int(encRes.Height) {
 				return false
 			}
 

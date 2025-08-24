@@ -404,7 +404,7 @@ func (e *Encoder[EF]) sendInputFrame(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	ctx = belt.WithField(ctx, "mode", "frame")
-	ctx = belt.WithField(ctx, "media_type", "input", input.GetMediaType())
+	ctx = belt.WithField(ctx, "media_type", input.GetMediaType())
 
 	logger.Tracef(ctx, "sendInputFrame")
 	defer func() { logger.Tracef(ctx, "/sendInputFrame: %v", _err) }()

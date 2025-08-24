@@ -290,6 +290,14 @@ func newCodec(
 	case astiav.MediaTypeVideo:
 		lazyInitOptions()
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
+
+		defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
+		if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
+				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
+			}
+		}
+
 		if isEncoder {
 			options.Set("gpu", "0", 0)
 			if options.Get("g", nil, 0) == nil {
@@ -313,16 +321,16 @@ func newCodec(
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing MediaCodec pixel format")
-					logIfError(options.Set("pix_fmt", "mediacodec", 0))
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
+					logIfError(options.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
 					forcePixelFormat = astiav.PixelFormatMediacodec
 				}
 			}
 		} else {
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pixel_format", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing MediaCodec pixel format")
-					logIfError(options.Set("pixel_format", "mediacodec", 0))
+					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
+					logIfError(options.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
 					forcePixelFormat = astiav.PixelFormatMediacodec
 				}
 
@@ -330,7 +338,7 @@ func newCodec(
 				alignedHeight := (height + 15) &^ 15
 				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
 				if alignedHeight != height && options.Get("create_window", nil, 0) == nil {
-					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this we are forcing create_window=1", codecParameters.Height(), (codecParameters.Height()+15)&^15)
+					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this we are forcing create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
 					logIfError(options.Set("create_window", "1", 0))
 				}
 			}
@@ -433,7 +441,7 @@ func (c *Codec) logHints(ctx context.Context) {
 		height := c.codecContext.Height()
 		suggestedHeight := (height + 15) &^ 15
 		if suggestedHeight != height {
-			logger.Debugf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle this copy-crop frames from H264/HEVC using swscale to be %dp", height, suggestedHeight, height)
+			logger.Debugf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp)", height, suggestedHeight)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 type Conditional struct {
@@ -34,7 +35,11 @@ func (c *Conditional) GetResources(
 	timeBase astiav.Rational,
 	opts ...types.EncoderFactoryOption,
 ) *Resources {
-	if c.Condition == nil || c.Condition.Match(ctx, ConditionInput{
+	if c.Condition == nil {
+		logger.Tracef(ctx, "no condition set, so always matching")
+		return c.ResourcesGetter.GetResources(ctx, params, timeBase, opts...)
+	}
+	if c.Condition.Match(ctx, ConditionInput{
 		Params:   params,
 		TimeBase: timeBase,
 		Options:  opts,
