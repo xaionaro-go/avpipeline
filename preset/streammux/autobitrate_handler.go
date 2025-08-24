@@ -41,23 +41,23 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 		return AutoBitRateResolutionAndBitRateConfigs{
 			{
 				Resolution:  codec.Resolution{Width: 3840, Height: 2160},
-				BitrateHigh: 24 << 20, BitrateLow: 8 << 20, // 24 Mbps .. 8 Mbps
+				BitrateHigh: 24_000_000, BitrateLow: 8_000_000, // 24 Mbps .. 8 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 2560, Height: 1440},
-				BitrateHigh: 12 << 20, BitrateLow: 4 << 20, // 12 Mbps .. 4 Mbps
+				BitrateHigh: 12_000_000, BitrateLow: 4_000_000, // 12 Mbps .. 4 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1920, Height: 1080},
-				BitrateHigh: 6 << 20, BitrateLow: 2 << 20, // 6 Mbps .. 2 Mbps
+				BitrateHigh: 6_000_000, BitrateLow: 2_000_000, // 6 Mbps .. 2 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1280, Height: 720},
-				BitrateHigh: 3 << 20, BitrateLow: 1 << 20, // 3 Mbps .. 1 Mbps
+				BitrateHigh: 3_000_000, BitrateLow: 1_000_000, // 3 Mbps .. 1 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 854, Height: 480},
-				BitrateHigh: 2 << 20, BitrateLow: 512 << 10, // 2 Mbps .. 512 Kbps
+				BitrateHigh: 2_000_000, BitrateLow: 500_000, // 2 Mbps .. 500 Kbps
 			},
 		}
 	case astiav.CodecIDHevc:
@@ -331,10 +331,10 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return nil
 	}
 
-	logger.Infof(ctx, "changing resolution from %v to %v", *res, newRes.Resolution)
 	err := h.StreamMux.SetResolution(ctx, newRes.Resolution)
 	switch {
 	case err == nil:
+		logger.Infof(ctx, "changed resolution from %v to %v", *res, newRes.Resolution)
 		return nil
 	case errors.As(err, &ErrNotImplemented{}):
 		logger.Debugf(ctx, "resolution change is not implemented: %v", err)

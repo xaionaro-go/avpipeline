@@ -51,6 +51,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/phuslu/goid v1.0.2 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825
 	github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d // indirect
 	github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f // indirect
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect

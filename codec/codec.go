@@ -435,6 +435,10 @@ func (c *Codec) initHardware(
 	flags int,
 	reusableResources *Resources,
 ) (_err error) {
+	logger.Tracef(ctx, "initHardware(%s, '%s', %#+v, %X)", hardwareDeviceType, hardwareDeviceName, options, flags)
+	defer func() {
+		logger.Tracef(ctx, "/initHardware(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, flags, _err)
+	}()
 	err := c.initHardwareDeviceContext(
 		ctx,
 		hardwareDeviceType,
@@ -451,6 +455,7 @@ func (c *Codec) initHardware(
 	if err != nil {
 		return fmt.Errorf("unable to init hardware pixel format: %w", err)
 	}
+	c.platformSpecificHWSanityChecks(ctx)
 	return nil
 }
 
