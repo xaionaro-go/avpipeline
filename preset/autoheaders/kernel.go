@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// TODO: consider using AVCodecParserContext instead
 type AutoHeaders struct {
 	Locker    xsync.Mutex
 	Sink      packet.Sink

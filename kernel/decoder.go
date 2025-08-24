@@ -130,7 +130,7 @@ func (d *Decoder[DF]) sendInputPacket(
 	}
 
 	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
-		logger.Debugf(ctx, "decoder.CodecContext().SendInput(): %v", err)
+		logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
 		if errors.Is(err, astiav.ErrEagain) {
 			return nil
 		}
