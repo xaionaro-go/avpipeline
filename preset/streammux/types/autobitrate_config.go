@@ -78,6 +78,46 @@ func (r AutoBitRateResolutionAndBitRateConfigs) Worst() *AutoBitRateResolutionAn
 	return &worst
 }
 
+func (r AutoBitRateResolutionAndBitRateConfigs) MaxHeight(h uint32) AutoBitRateResolutionAndBitRateConfigs {
+	out := make(AutoBitRateResolutionAndBitRateConfigs, 0, len(r))
+	for i := range r {
+		if r[i].Height <= h {
+			out = append(out, r[i])
+		}
+	}
+	return out
+}
+
+func (r AutoBitRateResolutionAndBitRateConfigs) MaxWidth(w uint32) AutoBitRateResolutionAndBitRateConfigs {
+	out := make(AutoBitRateResolutionAndBitRateConfigs, 0, len(r))
+	for i := range r {
+		if r[i].Width <= w {
+			out = append(out, r[i])
+		}
+	}
+	return out
+}
+
+func (r AutoBitRateResolutionAndBitRateConfigs) MinHeight(h uint32) AutoBitRateResolutionAndBitRateConfigs {
+	out := make(AutoBitRateResolutionAndBitRateConfigs, 0, len(r))
+	for i := range r {
+		if r[i].Height >= h {
+			out = append(out, r[i])
+		}
+	}
+	return out
+}
+
+func (r AutoBitRateResolutionAndBitRateConfigs) MinWidth(w uint32) AutoBitRateResolutionAndBitRateConfigs {
+	out := make(AutoBitRateResolutionAndBitRateConfigs, 0, len(r))
+	for i := range r {
+		if r[i].Width >= w {
+			out = append(out, r[i])
+		}
+	}
+	return out
+}
+
 type AutoBitRateConfig struct {
 	ResolutionsAndBitRates AutoBitRateResolutionAndBitRateConfigs
 	Calculator             AutoBitRateCalculator

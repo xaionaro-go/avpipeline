@@ -70,16 +70,8 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 
 func DefaultAutoBitrateConfig(
 	codecID astiav.CodecID,
-	highestResolutionHeight uint32,
 ) AutoBitRateConfig {
 	resolutions := GetDefaultAutoBitrateResolutionsConfig(codecID)
-	for i := range resolutions {
-		if resolutions[i].Height <= highestResolutionHeight {
-			resolutions = resolutions[i:]
-			break
-		}
-	}
-
 	resBest := resolutions.Best()
 	resWorst := resolutions.Worst()
 	result := AutoBitRateConfig{
