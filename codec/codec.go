@@ -253,8 +253,10 @@ func newCodec(
 			c.codec = hwCodec
 		}
 	}
+
+	ctx = belt.WithField(ctx, "codec_id", c.codec.ID())
 	codecParameters.SetCodecID(c.codec.ID())
-	logger.Tracef(ctx, "codec name: '%s'", c.codec.Name())
+	logger.Tracef(ctx, "codec name: '%s' (%s)", c.codec.Name(), c.codec.ID())
 
 	c.codecContext = astiav.AllocCodecContext(c.codec)
 	if c.codecContext == nil {
