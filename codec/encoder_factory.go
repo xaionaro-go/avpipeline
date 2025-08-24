@@ -76,8 +76,8 @@ func (f *NaiveEncoderFactory) NewEncoder(
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (_ret Encoder, _err error) {
-	logger.Tracef(ctx, "NewEncoder")
-	defer func() { logger.Tracef(ctx, "/NewEncoder: %T %v", _ret, _err) }()
+	logger.Tracef(ctx, "NewEncoder: %#+v, %s", params, timeBase)
+	defer func() { logger.Tracef(ctx, "/NewEncoder: %#+v, %s: %T %v", params, timeBase, _ret, _err) }()
 	return xsync.DoA3R2(xsync.WithNoLogging(ctx, true), &f.Locker, f.newEncoderLocked, ctx, params, timeBase)
 }
 

@@ -21,7 +21,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
-	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -249,6 +248,13 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	outputKey types.OutputKey,
 	opts []InitOutputOption,
 ) (_ret *Output[C], _err error) {
+	logger.Tracef(ctx, "getOrInitOutputLocked: %#+v, %#+v", outputKey, opts)
+	defer func() { logger.Tracef(ctx, "/getOrInitOutputLocked: %#+v, %#+v: %v, %v", outputKey, opts, _ret, _err) }()
+
+	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+		return nil, fmt.Errorf("output resolution is not set")
+	}
+
 	if output, ok := s.OutputsMap[outputKey]; ok {
 		return output, nil
 	}
@@ -326,6 +332,10 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	cfg types.RecoderConfig,
 ) (_err error) {
 	outputKey := OutputKeyFromRecoderConfig(ctx, &cfg)
+	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+		return fmt.Errorf("output resolution is not set")
+	}
+
 	var err error
 	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
 	if err != nil {
@@ -333,7 +343,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
-	err = s.reconfigureOutput(ctx, output, cfg)
+	err = output.reconfigureRecoder(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
 	}
@@ -353,114 +363,6 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	}
 
 	s.RecodingConfig = cfg
-	return nil
-}
-
-func (s *StreamMux[C]) reconfigureOutput(
-	ctx context.Context,
-	output *Output[C],
-	cfg types.RecoderConfig,
-) (_err error) {
-	logger.Tracef(ctx, "reconfigureOutput(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureOutput(ctx, %#+v): %v", cfg, _err) }()
-
-	if len(cfg.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
-	}
-	videoCfg := cfg.VideoTrackConfigs[0]
-
-	if len(cfg.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
-	}
-	audioCfg := cfg.AudioTrackConfigs[0]
-
-	encoderFactory := output.RecoderNode.Processor.Kernel.EncoderFactory
-
-	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
-		if len(encoderFactory.VideoEncoders) == 0 {
-			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
-
-			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
-			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
-			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
-			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
-			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
-			encoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.HardwareDeviceType)
-			if videoCfg.AverageBitRate != 0 {
-				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
-			}
-			if videoCfg.Resolution != (codectypes.Resolution{}) {
-				encoderFactory.VideoResolution = &videoCfg.Resolution
-			}
-			encoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
-			encoderFactory.VideoAverageFrameRate.SetDen(1000)
-			return nil
-		}
-
-		if codec.Name(videoCfg.CodecName) != encoderFactory.VideoCodec {
-			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
-		}
-
-		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
-		encoder := encoderFactory.VideoEncoders[0]
-
-		if videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
-			return fmt.Errorf("unable to change the hardware device type on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceType, encoderFactory.HardwareDeviceType)
-		}
-
-		if videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
-			return fmt.Errorf("unable to change the hardware device name on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceName, encoderFactory.HardwareDeviceName)
-		}
-
-		{
-			q := encoder.GetQuality(ctx)
-			if q == nil {
-				logger.Errorf(ctx, "unable to get the current encoding quality")
-				q = quality.ConstantBitrate(0)
-			}
-			logger.Debugf(ctx,
-				"current quality: %#+v; requested quality: %#+v",
-				q, quality.ConstantBitrate(videoCfg.AverageBitRate),
-			)
-
-			needsChangingBitrate := true
-			if q, ok := q.(quality.ConstantBitrate); ok {
-				if q == quality.ConstantBitrate(videoCfg.AverageBitRate) {
-					needsChangingBitrate = false
-				}
-			}
-
-			if needsChangingBitrate && videoCfg.AverageBitRate > 0 {
-				logger.Debugf(ctx, "bitrate needs changing...")
-				err := encoder.SetQuality(ctx, quality.ConstantBitrate(videoCfg.AverageBitRate), nil)
-				if err != nil {
-					return fmt.Errorf("unable to set bitrate to %v: %w", videoCfg.AverageBitRate, err)
-				}
-			}
-		}
-
-		{
-			res := encoder.GetResolution(ctx)
-			if res == nil {
-				return fmt.Errorf("unable to get the current encoding resolution")
-			}
-			logger.Debugf(ctx,
-				"current resolution: %#+v; requested resolution: %#+v",
-				*res, videoCfg.Resolution,
-			)
-			if videoCfg.Resolution != (codectypes.Resolution{}) && *res != videoCfg.Resolution {
-				err := encoder.SetResolution(ctx, videoCfg.Resolution, nil)
-				if err != nil {
-					return fmt.Errorf("unable to set resolution to %v: %w", videoCfg.Resolution, err)
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -20,7 +21,9 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xcontext"
+	"github.com/xaionaro-go/xsync"
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -118,6 +121,10 @@ func newOutput[C any](
 			cancelFn()
 		}
 	}()
+
+	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+		return nil, fmt.Errorf("output resolution is not set")
+	}
 
 	// construct nodes
 
@@ -278,4 +285,162 @@ func OutputKeyFromRecoderConfig(
 		VideoCodec: codectypes.Name(videoCodec),
 		Resolution: resolution,
 	}
+}
+
+func (o *Output[C]) reconfigureRecoder(
+	ctx context.Context,
+	cfg types.RecoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
+
+	if err := o.reconfigureDecoder(ctx, cfg); err != nil {
+		return fmt.Errorf("unable to reconfigure the decoder: %w", err)
+	}
+	if err := o.reconfigureEncoder(ctx, cfg); err != nil {
+		return fmt.Errorf("unable to reconfigure the encoder: %w", err)
+	}
+	return nil
+}
+
+func (o *Output[C]) reconfigureDecoder(
+	ctx context.Context,
+	cfg types.RecoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureDecoder: %#+v", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureDecoder: %#+v: %v", cfg, _err) }()
+	if len(cfg.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
+	}
+	videoCfg := cfg.VideoTrackConfigs[0]
+
+	decoder := o.RecoderNode.Processor.Kernel.Decoder
+	decoderFactory := decoder.DecoderFactory
+
+	err := xsync.DoR1(ctx, &decoder.Locker, func() error {
+		if len(decoder.Decoders) == 0 {
+			logger.Debugf(ctx, "the decoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
+			decoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.GetDecoderHardwareDeviceType())
+			decoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.GetDecoderHardwareDeviceName())
+			return nil
+		}
+		if videoCfg.GetDecoderHardwareDeviceType() != types.HardwareDeviceType(decoderFactory.HardwareDeviceType) {
+			return fmt.Errorf("unable to change the decoding hardware device type on the fly, yet: '%s' != '%s'", videoCfg.GetDecoderHardwareDeviceType(), decoderFactory.HardwareDeviceType)
+		}
+		if videoCfg.GetDecoderHardwareDeviceName() != types.HardwareDeviceName(decoderFactory.HardwareDeviceName) {
+			return fmt.Errorf("unable to change the decoding hardware device name on the fly, yet: '%s' != '%s'", videoCfg.GetDecoderHardwareDeviceName(), decoderFactory.HardwareDeviceName)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (o *Output[C]) reconfigureEncoder(
+	ctx context.Context,
+	cfg types.RecoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureEncoder: %#+v", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureEncoder: %#+v: %v", cfg, _err) }()
+	if len(cfg.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
+	}
+	videoCfg := cfg.VideoTrackConfigs[0]
+
+	if len(cfg.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
+	}
+	audioCfg := cfg.AudioTrackConfigs[0]
+
+	encoderFactory := o.RecoderNode.Processor.Kernel.EncoderFactory
+
+	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
+		if len(encoderFactory.VideoEncoders) == 0 {
+			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
+
+			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
+			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
+			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
+			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
+			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
+			encoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.HardwareDeviceType)
+			if videoCfg.AverageBitRate != 0 {
+				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
+			}
+			if videoCfg.Resolution != (codectypes.Resolution{}) {
+				encoderFactory.VideoResolution = &videoCfg.Resolution
+			}
+			encoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
+			encoderFactory.VideoAverageFrameRate.SetDen(1000)
+			return nil
+		}
+
+		if codec.Name(videoCfg.CodecName) != encoderFactory.VideoCodec {
+			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
+		}
+
+		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
+		encoder := encoderFactory.VideoEncoders[0]
+
+		if videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
+			return fmt.Errorf("unable to change the hardware device type on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceType, encoderFactory.HardwareDeviceType)
+		}
+
+		if videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
+			return fmt.Errorf("unable to change the hardware device name on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceName, encoderFactory.HardwareDeviceName)
+		}
+
+		{
+			q := encoder.GetQuality(ctx)
+			if q == nil {
+				logger.Errorf(ctx, "unable to get the current encoding quality")
+				q = quality.ConstantBitrate(0)
+			}
+			logger.Debugf(ctx,
+				"current quality: %#+v; requested quality: %#+v",
+				q, quality.ConstantBitrate(videoCfg.AverageBitRate),
+			)
+
+			needsChangingBitrate := true
+			if q, ok := q.(quality.ConstantBitrate); ok {
+				if q == quality.ConstantBitrate(videoCfg.AverageBitRate) {
+					needsChangingBitrate = false
+				}
+			}
+
+			if needsChangingBitrate && videoCfg.AverageBitRate > 0 {
+				logger.Debugf(ctx, "bitrate needs changing...")
+				err := encoder.SetQuality(ctx, quality.ConstantBitrate(videoCfg.AverageBitRate), nil)
+				if err != nil {
+					return fmt.Errorf("unable to set bitrate to %v: %w", videoCfg.AverageBitRate, err)
+				}
+			}
+		}
+
+		{
+			res := encoder.GetResolution(ctx)
+			if res == nil {
+				return fmt.Errorf("unable to get the current encoding resolution")
+			}
+			logger.Debugf(ctx,
+				"current resolution: %#+v; requested resolution: %#+v",
+				*res, videoCfg.Resolution,
+			)
+			if videoCfg.Resolution != (codectypes.Resolution{}) && *res != videoCfg.Resolution {
+				err := encoder.SetResolution(ctx, videoCfg.Resolution, nil)
+				if err != nil {
+					return fmt.Errorf("unable to set resolution to %v: %w", videoCfg.Resolution, err)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
