@@ -26,6 +26,7 @@ type AutoBitRateConfig = types.AutoBitRateConfig
 type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
 type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
 type BitRateChangeRequest = types.BitRateChangeRequest
+type CalculateBitRateRequest = types.CalculateBitRateRequest
 
 func multiplyBitRates(
 	resolutions []AutoBitRateResolutionAndBitRateConfig,
@@ -76,6 +77,7 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 
 type AutoBitrateCalculatorThresholds = types.AutoBitrateCalculatorThresholds
 type AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorLogK
+type AutoBitrateCalculatorQueueSizeGapDecay = types.AutoBitrateCalculatorQueueSizeGapDecay
 type FPSReducerConfig = types.FPSReducerConfig
 
 func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
@@ -84,6 +86,10 @@ func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
 
 func DefaultAutoBitrateCalculatorLogK() *AutoBitrateCalculatorConstantQueueSize {
 	return types.DefaultAutoBitrateCalculatorLogK()
+}
+
+func DefaultAutoBitrateCalculatorQueueSizeGapDecay() *AutoBitrateCalculatorQueueSizeGapDecay {
+	return types.DefaultAutoBitrateCalculatorQueueSizeGapDecay()
 }
 
 func DefaultFPSReducerConfig() FPSReducerConfig {
@@ -99,7 +105,7 @@ func DefaultAutoBitrateConfig(
 	result := AutoBitRateConfig{
 		ResolutionsAndBitRates: resolutions,
 		FPSReducer:             DefaultFPSReducerConfig(),
-		Calculator:             DefaultAutoBitrateCalculatorLogK(),
+		Calculator:             DefaultAutoBitrateCalculatorQueueSizeGapDecay(),
 		CheckInterval:          time.Second / 2,
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
@@ -137,6 +143,7 @@ type AutoBitRateHandler[C any] struct {
 	closureSignaler                *closuresignaler.ClosureSignaler
 	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
 	lastBitRate                    uint64
+	lastTotalQueueSize             uint64
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
 }
@@ -279,13 +286,18 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}
 
 	actualOutputBitrate := h.StreamMux.CurrentOutputBitRate.Load()
+	totalQueueSizeDerivative := (float64(totalQueue.Load()) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
+	h.lastTotalQueueSize = totalQueue.Load()
 	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
-		curReqBitRate,
-		h.StreamMux.CurrentInputBitRate.Load(),
-		actualOutputBitrate,
-		totalQueue.Load(),
-		&h.AutoBitRateConfig,
+		CalculateBitRateRequest{
+			CurrentBitrateSetting: curReqBitRate,
+			InputBitrate:          h.StreamMux.CurrentInputBitRate.Load(),
+			ActualOutputBitrate:   actualOutputBitrate,
+			QueueSize:             totalQueue.Load(),
+			QueueSizeDerivative:   totalQueueSizeDerivative,
+			Config:                &h.AutoBitRateConfig,
+		},
 	)
 	if bitRateRequest.BitRate == 0 {
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
@@ -508,9 +520,9 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	bitrate uint64,
 	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %d (isCritical:%d)", outputKey, bitrate, isCritical)
+	logger.Tracef(ctx, "setOutput: %v, %d (isCritical:%t)", outputKey, bitrate, isCritical)
 	defer func() {
-		logger.Tracef(ctx, "/setOutput: %v, %d (isCritical:%d): %v", outputKey, bitrate, isCritical, _err)
+		logger.Tracef(ctx, "/setOutput: %v, %d (isCritical:%t): %v", outputKey, bitrate, isCritical, _err)
 	}()
 
 	enc := h.GetVideoEncoder(ctx)
@@ -588,7 +600,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		return h.StreamMux.EnableRecodingBypass(ctx)
 	}
 
-	err := h.StreamMux.setResolution(ctx, outputKey.Resolution, bitrate)
+	err := h.StreamMux.setResolutionBitRateCodec(ctx, outputKey.Resolution, bitrate, outputKey.VideoCodec, outputKey.AudioCodec)
 	switch {
 	case err == nil:
 		logger.Infof(ctx, "changed resolution to %v (bitrate: %d)", outputKey.Resolution, bitrate)

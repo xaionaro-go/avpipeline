@@ -12,6 +12,15 @@ const (
 	queueDurationError = 20 * time.Millisecond
 )
 
+type CalculateBitRateRequest struct {
+	CurrentBitrateSetting uint64
+	InputBitrate          uint64
+	ActualOutputBitrate   uint64
+	QueueSize             uint64
+	QueueSizeDerivative   float64
+	Config                *AutoBitRateConfig
+}
+
 type BitRateChangeRequest struct {
 	BitRate    uint64
 	IsCritical bool
@@ -20,11 +29,7 @@ type BitRateChangeRequest struct {
 type AutoBitRateCalculator interface {
 	CalculateBitRate(
 		ctx context.Context,
-		currentBitrateSetting uint64,
-		inputBitrate uint64,
-		actualOutputBitrate uint64,
-		queueSize uint64,
-		config *AutoBitRateConfig,
+		req CalculateBitRateRequest,
 	) BitRateChangeRequest
 }
 

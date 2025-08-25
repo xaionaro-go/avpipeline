@@ -67,6 +67,7 @@ message AutoBitrateCalculator {
     AutoBitRateCalculatorThresholds thresholds = 1;
     AutoBitrateCalculatorLogK logK = 2;
     uint64 static = 3;
+    AutoBitrateCalculatorQueueSizeGapDecay queueSizeGapDecay = 4;
   }
 }
 
@@ -82,7 +83,6 @@ message AutoBitRateCalculatorThresholds {
   double quickDecreaseK = 9;
   double extremeDecreaseK = 10;
 }
-
 message MovingAverageConfigMAMA {
   double fastLimit = 1;
   double slowLimit = 2;
@@ -103,4 +103,10 @@ message AutoBitrateCalculatorLogK {
   uint64 queueOptimalMS = 1;
   double inertia = 2; // [0.0..1.0]
   MovingAverageConfig movingAverage = 3;
+}
+
+message AutoBitrateCalculatorQueueSizeGapDecay {
+  uint64 queueOptimalMS = 1;
+  uint64 decayMS = 2;
+  MovingAverageConfig derivativeSmoothed = 3;
 }

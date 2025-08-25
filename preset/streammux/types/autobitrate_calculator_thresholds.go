@@ -58,21 +58,17 @@ func (d *AutoBitrateCalculatorThresholds) decideFloat(
 
 func (d *AutoBitrateCalculatorThresholds) CalculateBitRate(
 	ctx context.Context,
-	currentBitrateSetting uint64,
-	inputBitrate uint64,
-	actualOutputBitrate uint64,
-	queueSize uint64,
-	config *AutoBitRateConfig,
+	req CalculateBitRateRequest,
 ) (_ret BitRateChangeRequest) {
-	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrateSetting) * float64(time.Second))
-	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config)
+	queueDuration := time.Duration(float64(req.QueueSize) * 8 / float64(req.ActualOutputBitrate) * float64(time.Second))
+	logger.Tracef(ctx, "CalculateBitRate: %#+v", req)
 	defer func() {
-		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config, _ret)
+		logger.Tracef(ctx, "/CalculateBitRate: %#+v: %v", req, _ret)
 	}()
 
 	k, isCritical := d.decideFloat(ctx, queueDuration)
 	if k == 1 {
-		return BitRateChangeRequest{BitRate: currentBitrateSetting}
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting}
 	}
-	return BitRateChangeRequest{BitRate: uint64(float64(currentBitrateSetting) * k), IsCritical: isCritical}
+	return BitRateChangeRequest{BitRate: uint64(float64(req.CurrentBitrateSetting) * k), IsCritical: isCritical}
 }

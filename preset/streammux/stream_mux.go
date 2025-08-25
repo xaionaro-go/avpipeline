@@ -561,30 +561,47 @@ func (e ErrNotImplemented) Error() string {
 	return fmt.Sprintf("not implemented: %v", e.Err)
 }
 
-func (s *StreamMux[C]) setResolution(
+func (s *StreamMux[C]) setResolutionBitRateCodec(
 	ctx context.Context,
 	res codec.Resolution,
 	bitrate uint64,
+	videoCodec codectypes.Name,
+	audioCodec codectypes.Name,
 ) (_err error) {
-	logger.Tracef(ctx, "SetResolution: %s", res)
-	defer func() { logger.Tracef(ctx, "/SetResolution: %s: %v", res, _err) }()
-	return xsync.DoA3R1(ctx, &s.Locker, s.setResolutionLocked, ctx, res, bitrate)
+	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, %s, %s", res, bitrate, videoCodec, audioCodec)
+	defer func() {
+		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, %s, %s: %v", res, bitrate, videoCodec, audioCodec, _err)
+	}()
+	return xsync.DoR1(ctx, &s.Locker, func() error {
+		return s.setResolutionBitRateCodecLocked(ctx, res, bitrate, videoCodec, audioCodec)
+	})
 }
 
-func (s *StreamMux[C]) setResolutionLocked(
+func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	ctx context.Context,
 	res codec.Resolution,
 	bitrate uint64,
+	videoCodec codectypes.Name,
+	audioCodec codectypes.Name,
 ) (_err error) {
 	cfg := s.getRecoderConfigLocked(ctx)
+	if len(cfg.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.AudioTrackConfigs))
+	}
+	audioCfg := cfg.AudioTrackConfigs[0]
+
 	if len(cfg.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
 	}
 	videoCfg := cfg.VideoTrackConfigs[0]
+
 	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
 		// TODO: this should not be here, it should be somewhere else.
 		return ErrNotImplemented{Err: fmt.Errorf("when scaling from 1080p to let's say 480p, we get a distorted image when using mediacodec, to be investigated; until then this is forbidden")}
 	}
+
+	audioCfg.CodecName = audioCodec
+	cfg.AudioTrackConfigs[0] = audioCfg
 
 	curRes := videoCfg.Resolution
 	if curRes == res {
@@ -593,6 +610,7 @@ func (s *StreamMux[C]) setResolutionLocked(
 	}
 	videoCfg.Resolution = res
 	videoCfg.AverageBitRate = bitrate
+	videoCfg.CodecName = videoCodec
 	cfg.VideoTrackConfigs[0] = videoCfg
 	return s.setRecoderConfigLocked(ctx, cfg)
 }

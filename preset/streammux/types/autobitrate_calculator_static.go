@@ -13,15 +13,11 @@ var _ AutoBitRateCalculator = (*AutoBitrateCalculatorStatic)(nil)
 
 func (d AutoBitrateCalculatorStatic) CalculateBitRate(
 	ctx context.Context,
-	currentBitrateSetting uint64,
-	inputBitrate uint64,
-	actualOutputBitrate uint64,
-	queueSize uint64,
-	config *AutoBitRateConfig,
+	req CalculateBitRateRequest,
 ) (_ret BitRateChangeRequest) {
-	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config)
+	logger.Tracef(ctx, "CalculateBitRate: %#+v", req)
 	defer func() {
-		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config, _ret)
+		logger.Tracef(ctx, "/CalculateBitRate: %#+v: %v", req, _ret)
 	}()
 
 	return BitRateChangeRequest{BitRate: uint64(d), IsCritical: true}

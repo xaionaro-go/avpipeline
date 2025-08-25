@@ -13,7 +13,7 @@ import (
 type MovingAverage[T constraints.Integer | constraints.Float] = indicator.MovingAverage[T]
 
 // AutoBitrateCalculatorLogK tries to keep the queue size around QueueOptimal
-// and to smooth the bitrate changes.
+// by looking at the gap between optimal queue size and actual.
 type AutoBitrateCalculatorLogK struct {
 	QueueOptimal  time.Duration
 	Inertia       float64
@@ -32,32 +32,26 @@ func DefaultAutoBitrateCalculatorLogK() *AutoBitrateCalculatorLogK {
 
 func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 	ctx context.Context,
-	currentBitrateSetting uint64,
-	inputBitrate uint64,
-	actualOutputBitrate uint64,
-	queueSize uint64,
-	config *AutoBitRateConfig,
+	req CalculateBitRateRequest,
 ) (_ret BitRateChangeRequest) {
-	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrateSetting) * float64(time.Second))
-	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config)
-	defer func() {
-		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config, _ret)
-	}()
+	queueDuration := time.Duration(float64(req.QueueSize) * 8 / float64(req.CurrentBitrateSetting) * float64(time.Second))
+	logger.Tracef(ctx, "CalculateBitRate: %#+v", req)
+	defer func() { logger.Tracef(ctx, "/CalculateBitRate: %#+v: %v", req, _ret) }()
 
 	k := (d.QueueOptimal + queueDurationError).Seconds() / (queueDuration + queueDurationError).Seconds()
 	kSmoothed := d.MovingAverage.Update(k)
 	if !d.MovingAverage.Valid() {
-		return BitRateChangeRequest{BitRate: currentBitrateSetting, IsCritical: false}
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
 	if math.IsNaN(kSmoothed) {
-		logger.Errorf(ctx, "CalculateBitRate: kSmoothed is NaN, returning currentBitrate=%d", currentBitrateSetting)
-		return BitRateChangeRequest{BitRate: currentBitrateSetting, IsCritical: false}
+		logger.Errorf(ctx, "CalculateBitRate: kSmoothed is NaN, returning currentBitrate=%d", req.CurrentBitrateSetting)
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
-	diff := float64(currentBitrateSetting) * math.Log(kSmoothed) * (1.0 - d.Inertia)
-	newBitRate := max(int64(float64(currentBitrateSetting)+diff), 1)
+	diff := float64(req.CurrentBitrateSetting) * math.Log(kSmoothed) * (1.0 - d.Inertia)
+	newBitRate := max(int64(float64(req.CurrentBitrateSetting)+diff), 1)
 	logger.Tracef(ctx, "CalculateBitRate: k=%f kSmoothed=%f diff=%f newBitRate=%d", k, kSmoothed, diff, newBitRate)
 	return BitRateChangeRequest{
 		BitRate:    uint64(newBitRate),
-		IsCritical: newBitRate < int64(actualOutputBitrate)/2 || newBitRate < int64(inputBitrate)/2,
+		IsCritical: newBitRate < int64(req.ActualOutputBitrate)/2 || newBitRate < int64(req.InputBitrate)/2,
 	}
 }
