@@ -10,6 +10,7 @@ import (
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/observability"
 )
 
 var _ node.Abstract = (*StreamMux[struct{}])(nil)
@@ -33,6 +34,9 @@ func (s *StreamMux[C]) Serve(
 	defer func() {
 		xatomic.StorePointer(&s.startedCh, ptr(make(chan struct{})))
 	}()
+	observability.Go(ctx, func(ctx context.Context) {
+		s.inputBitRateMeasurerLoop(ctx)
+	})
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{
 		EachNode:             cfg,
 		AutoServeNewBranches: true,

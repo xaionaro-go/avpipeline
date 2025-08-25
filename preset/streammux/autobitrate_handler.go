@@ -219,11 +219,15 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}
 
 	var curBitRate uint64
-	q := encoder.GetQuality(ctx)
-	if q, ok := q.(quality.ConstantBitrate); ok {
-		curBitRate = uint64(q)
+	if codec.IsEncoderCopy(encoder) {
+		curBitRate = h.StreamMux.CurrentInputBitRate.Load()
 	} else {
-		logger.Debugf(ctx, "unable to get current bitrate")
+		q := encoder.GetQuality(ctx)
+		if q, ok := q.(quality.ConstantBitrate); ok {
+			curBitRate = uint64(q)
+		} else {
+			logger.Debugf(ctx, "unable to get current bitrate")
+		}
 	}
 
 	newBitRate := h.Calculator.CalculateBitRate(
@@ -245,6 +249,24 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}
 }
 
+func (h *AutoBitRateHandler[C]) isBypassEnabled() bool {
+	encoder := h.GetEncoder()
+	if encoder == nil {
+		return false
+	}
+	return codec.IsEncoderCopy(encoder)
+}
+
+func (h *AutoBitRateHandler[C]) enableBypass(
+	ctx context.Context,
+	enable bool,
+) (_err error) {
+	logger.Tracef(ctx, "enableByPass: %v", enable)
+	defer func() { logger.Tracef(ctx, "/enableByPass: %v: %v", enable, _err) }()
+
+	return h.StreamMux.SetBypassEnabled(ctx, enable)
+}
+
 func (h *AutoBitRateHandler[C]) setBitrate(
 	ctx context.Context,
 	oldBitRate uint64,
@@ -252,6 +274,32 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 ) (_err error) {
 	logger.Tracef(ctx, "setBitrate: %d->%d", oldBitRate, newBitRate)
 	defer func() { logger.Tracef(ctx, "/setBitrate: %d->%d: %v", oldBitRate, newBitRate, _err) }()
+
+	inputBitRate := h.StreamMux.CurrentInputBitRate.Load()
+	if h.StreamMux.AutoBitRateHandler.AutoByPass {
+		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, newBitRate, inputBitRate)
+		if h.isBypassEnabled() {
+			if newBitRate < oldBitRate {
+				if err := h.enableBypass(ctx, false); err != nil {
+					return fmt.Errorf("unable to disable bypass mode: %w", err)
+				}
+				logger.Infof(ctx, "disabled bypass mode since the calculated bitrate %d is lower than the previous bitrate %d", newBitRate, oldBitRate)
+			}
+		} else {
+			if float64(newBitRate) > 1.2*float64(inputBitRate) {
+				err := h.enableBypass(ctx, true)
+				if err != nil {
+					return fmt.Errorf("unable to enable bypass mode: %w", err)
+				}
+				logger.Infof(ctx, "enabled bypass mode since the calculated bitrate %d is significantly higher than the input bitrate %d", newBitRate, inputBitRate)
+			}
+		}
+	}
+
+	if h.isBypassEnabled() {
+		logger.Tracef(ctx, "bypass mode is enabled; skipping bitrate change")
+		return nil
+	}
 
 	if err := h.changeResolutionIfNeeded(ctx, newBitRate); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
@@ -273,12 +321,17 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
 
+	maxBitRate := h.MaxBitRate
+	if inputBitRate > h.MinBitRate*2 && inputBitRate < maxBitRate {
+		maxBitRate = 2 * inputBitRate
+	}
+
 	clampedBitRate := newBitRate
 	switch {
 	case newBitRate < h.MinBitRate:
 		clampedBitRate = h.MinBitRate
-	case newBitRate > h.MaxBitRate:
-		clampedBitRate = h.MaxBitRate
+	case newBitRate > maxBitRate:
+		clampedBitRate = maxBitRate
 	}
 
 	if clampedBitRate == oldBitRate {
@@ -286,7 +339,7 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 		return nil
 	}
 
-	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v)", oldBitRate, clampedBitRate, resCfg)
+	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v); max:%d, min:%d, in:%d", oldBitRate, clampedBitRate, resCfg, maxBitRate, h.MinBitRate, inputBitRate)
 	if err := encoder.SetQuality(ctx, quality.ConstantBitrate(clampedBitRate), nil); err != nil {
 		return fmt.Errorf("unable to set bitrate to %d: %w", clampedBitRate, err)
 	}

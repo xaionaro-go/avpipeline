@@ -209,16 +209,21 @@ func newOutput[C any](
 	o.initFPSFractioner(ctx)
 
 	// wiring
+	var inputFixer, outputFixer node.Abstract
+	inputFixer, outputFixer = o.InputFixer, o.OutputFixer
+	if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
+		inputFixer, outputFixer = o.RecoderNode, o.OutputSyncer
+	}
 
 	o.InputFilter.AddPushPacketsTo(
-		o.InputFixer,
+		inputFixer,
 		packetfiltercondition.Packet{Condition: o.InputThrottler},
 	)
 	o.InputFixer.AddPushPacketsTo(o.RecoderNode)
 	o.RecoderNode.AddPushPacketsTo(
 		o.MapIndices,
 	)
-	o.MapIndices.AddPushPacketsTo(o.OutputFixer)
+	o.MapIndices.AddPushPacketsTo(outputFixer)
 	o.OutputFixer.AddPushPacketsTo(o.OutputSyncer)
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
 		return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes
@@ -586,4 +591,16 @@ func (o *Output[C]) reconfigureEncoder(
 	}
 
 	return nil
+}
+
+func (o *Output[C]) GetKey() OutputKey {
+	var res codec.Resolution
+	if o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
+		res = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	}
+	return OutputKey{
+		AudioCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
+		VideoCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
+		Resolution: res,
+	}
 }

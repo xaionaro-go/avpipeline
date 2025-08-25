@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/dustin/go-humanize"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -46,6 +48,8 @@ type StreamMux[C any] struct {
 	InputNodeAsPacketSource packet.Source
 	AutoBitRateHandler      *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
+	CurrentInputBitRate     atomic.Uint64
+	OutputIDBeforeBypass    int
 
 	// to become a fake node myself:
 	nodeboilerplate.Statistics
@@ -93,6 +97,7 @@ func NewWithCustomData[C any](
 		startedCh: ptr(make(chan struct{})),
 	}
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
+	s.CurrentInputBitRate.Store(math.MaxUint64)
 	s.initSwitches()
 
 	if autoBitRate != nil {
@@ -299,6 +304,63 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		logger.Errorf(ctx, "received an error while notifying about packet sources (%s -> %s): %v", s.InputNodeAsPacketSource, output.Input(), err)
 	}
 	return output, nil
+}
+
+func (s *StreamMux[C]) SetBypassEnabled(
+	ctx context.Context,
+	enable bool,
+) (_err error) {
+	logger.Tracef(ctx, "SetBypassEnabled: %v", enable)
+	defer func() { logger.Tracef(ctx, "/SetBypassEnabled: %v: %v", enable, _err) }()
+	return xsync.DoA2R1(ctx, &s.Locker, s.setBypassEnabledLocked, ctx, enable)
+}
+
+func (s *StreamMux[C]) setBypassEnabledLocked(
+	ctx context.Context,
+	enable bool,
+) (_err error) {
+	logger.Tracef(ctx, "setBypassEnabledLocked: %v", enable)
+	defer func() { logger.Tracef(ctx, "/setBypassEnabledLocked: %v: %v", enable, _err) }()
+
+	if !enable {
+		output := s.Outputs[s.OutputIDBeforeBypass]
+		outputKey := output.GetKey()
+		err := s.setPreferredOutput(ctx, outputKey)
+		if err != nil {
+			return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
+		}
+		return nil
+	}
+
+	if s.GetActiveOutput() == nil {
+		return fmt.Errorf("cannot enable bypass mode: while no active output (not implemented, yet)")
+	}
+
+	outputKey := OutputKey{
+		AudioCodec: codectypes.Name(codec.NameCopy),
+		VideoCodec: codectypes.Name(codec.NameCopy),
+	}
+	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
+	if err != nil {
+		return fmt.Errorf("unable to get-or-initialize the bypass output: %w", err)
+	}
+
+	logger.Debugf(ctx, "notifying about the sources")
+	err = avpipeline.NotifyAboutPacketSources(ctx,
+		s.InputNodeAsPacketSource,
+		output.InputFilter,
+	)
+	if err != nil {
+		return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.InputNodeAsPacketSource, output.InputFilter, err)
+	}
+
+	err = s.setPreferredOutput(ctx, outputKey)
+	if err != nil {
+		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
+	}
+	s.OutputIDBeforeBypass = output.ID
+
+	return nil
 }
 
 func (s *StreamMux[C]) Input() *NodeInput[C] {
@@ -521,7 +583,7 @@ func (s *StreamMux[C]) SetResolution(
 		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
 	}
 	videoCfg := cfg.VideoTrackConfigs[0]
-	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") {
+	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
 		// TODO: this should not be here, it should be somewhere else.
 		return ErrNotImplemented{Err: fmt.Errorf("cannot change resolution when using MediaCodec, since we don't support scaling yet")}
 	}
@@ -546,4 +608,34 @@ func (s *StreamMux[C]) GetFPSFraction(ctx context.Context) (num, den uint32) {
 	num = uint32(numDen >> 32)
 	den = uint32(numDen & 0xFFFFFFFF)
 	return
+}
+
+func (s *StreamMux[C]) inputBitRateMeasurerLoop(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "inputBitRateMeasurerLoop")
+	defer func() { logger.Tracef(ctx, "/inputBitRateMeasurerLoop: %v", _err) }()
+
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	bytesReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
+	tsPrev := time.Now()
+	for {
+		var tsNext time.Time
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case tsNext = <-t.C:
+			bytesReadTotalNext := int64(s.InputNode.Statistics.BytesCountRead.Load())
+
+			bytesRead := bytesReadTotalNext - bytesReadTotalPrev
+			duration := tsNext.Sub(tsPrev)
+
+			bytesReadTotalPrev, tsPrev = bytesReadTotalNext, tsNext
+
+			bitRate := int(float64(bytesRead*8) / duration.Seconds())
+			s.CurrentInputBitRate.Store(uint64(bitRate))
+			logger.Debugf(ctx, "input bitrate: %d (%s)", bitRate, humanize.SI(float64(bitRate), "bps"))
+		}
+	}
 }
