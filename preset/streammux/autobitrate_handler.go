@@ -370,13 +370,13 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
 		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, req.BitRate, inputBitRate)
 		if h.isBypassEnabled(ctx) {
-			if req.BitRate < oldBitRate {
+			if req.BitRate < inputBitRate {
 				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
 			}
 		} else {
-			if float64(req.BitRate) > float64(inputBitRate) {
+			if float64(req.BitRate) > float64(inputBitRate)*1.2 {
 				err := h.enableBypass(ctx, true, req.IsCritical)
 				if err != nil {
 					return fmt.Errorf("unable to enable bypass mode: %w", err)
