@@ -39,9 +39,9 @@ func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 	config *AutoBitRateConfig,
 ) (_ret uint64) {
 	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrateSetting) * float64(time.Second))
-	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config)
+	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config)
 	defer func() {
-		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config, _ret)
+		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, config, _ret)
 	}()
 
 	k := (d.QueueOptimal + queueDurationError).Seconds() / (queueDuration + queueDurationError).Seconds()
@@ -54,7 +54,7 @@ func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 		return currentBitrateSetting
 	}
 	diff := float64(currentBitrateSetting) * math.Log(kSmoothed) * (1.0 - d.Inertia)
-	newBitRate := int64(float64(currentBitrateSetting) + diff)
+	newBitRate := max(int64(float64(currentBitrateSetting)+diff), 1)
 	logger.Tracef(ctx, "CalculateBitRate: k=%f kSmoothed=%f diff=%f newBitRate=%d", k, kSmoothed, diff, newBitRate)
 	return uint64(newBitRate)
 }
