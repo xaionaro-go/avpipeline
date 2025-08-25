@@ -206,6 +206,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	h.lastCheckTS = now
 
 	var totalQueue uint64
+	activeOutputProc, _ := activeOutput.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
 	for _, proc := range getQueueSizers {
 		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancelFn()
@@ -217,7 +218,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		}
 		var nodeTotalQueue uint64
 		if reqErr != nil {
-			if any(activeOutput.OutputNode.GetProcessor) == any(proc) {
+			if proc == activeOutputProc {
 				logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d", tsDiff, h.lastBitRate/8)
 				nodeTotalQueue = h.previousQueueSize[proc] + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
 			} else {
