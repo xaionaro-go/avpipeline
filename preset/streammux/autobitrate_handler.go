@@ -118,6 +118,7 @@ func (s *StreamMux[C]) initAutoBitRateHandler(
 type resolutionChangeRequest struct {
 	IsUpgrade bool // otherwise is downgrade
 	StartedAt time.Time
+	LatestAt  time.Time
 }
 
 type AutoBitRateHandler[C any] struct {
@@ -507,17 +508,20 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		return fmt.Errorf("unable to compare output keys: %v and %v", outputKey, outputCur.GetKey())
 	}
 
+	now := time.Now()
 	prevRequest := h.currentResolutionChangeRequest
-	if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade {
+	if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade || now.Sub(prevRequest.LatestAt) > time.Minute {
 		h.currentResolutionChangeRequest = &resolutionChangeRequest{
 			IsUpgrade: isUpgrade,
-			StartedAt: time.Now(),
+			StartedAt: now,
+			LatestAt:  now,
 		}
 		logger.Debugf(ctx, "started resolution change request: %v", h.currentResolutionChangeRequest)
 		return nil
 	}
+	prevRequest.LatestAt = now
 
-	reqDur := time.Since(prevRequest.StartedAt)
+	reqDur := now.Sub(prevRequest.StartedAt)
 	switch {
 	case isUpgrade && reqDur < h.ResolutionSlowdownDurationUpgrade:
 		logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationUpgrade)
