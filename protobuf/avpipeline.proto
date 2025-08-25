@@ -66,6 +66,7 @@ message AutoBitrateCalculator {
   oneof AutoBitrateCalculator {
     AutoBitRateCalculatorThresholds thresholds = 1;
     AutoBitrateCalculatorLogK logK = 2;
+    uint64 static = 3;
   }
 }
 
