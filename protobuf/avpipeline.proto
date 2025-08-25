@@ -62,6 +62,13 @@ message Frame {
   int64 duration = 8;
 }
 
+message AutoBitrateCalculator {
+  oneof AutoBitrateCalculator {
+    AutoBitRateCalculatorThresholds thresholds = 1;
+    AutoBitrateCalculatorConstantQueueSize constantQueueSize = 2;
+  }
+}
+
 message AutoBitRateCalculatorThresholds {
   uint64 outputExtremelyHighQueueSizeDurationMS = 1;
   uint64 outputVeryHighQueueSizeDurationMS = 2;
@@ -75,7 +82,23 @@ message AutoBitRateCalculatorThresholds {
   double extremeDecreaseK = 10;
 }
 
-message AutoBitrateCalculatorConstantQueueSize {
-  uint64 queueOptimalMS = 1;
+message MovingAverageConfigMAMA {
+  double fastLimit = 1;
+  double slowLimit = 2;
 }
 
+message MovingAverageConfigOther {
+  string jsonConfig = 1;
+}
+
+message MovingAverageConfig {
+  oneof MovingAverageConfig {
+    MovingAverageConfigMAMA mama = 1;
+    MovingAverageConfigOther other = 65535;
+  }
+}
+
+message AutoBitrateCalculatorConstantQueueSize {
+  uint64 queueOptimalMS = 1;
+  MovingAverageConfig movingAverage = 2;
+}
