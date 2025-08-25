@@ -42,6 +42,7 @@ type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kern
 type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
 type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 type OutputKey = types.OutputKey
+type OutputKeys = types.OutputKeys
 
 type FPSFractionGetter interface {
 	GetFPSFraction(ctx context.Context) (num, den uint32)

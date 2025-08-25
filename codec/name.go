@@ -11,6 +11,11 @@ import (
 
 type Name codectypes.Name
 
+const (
+	NameCopy = Name(codectypes.NameCopy)
+	NameRaw  = Name(codectypes.NameRaw)
+)
+
 func (n Name) Codec(
 	ctx context.Context,
 	isEncoder bool,

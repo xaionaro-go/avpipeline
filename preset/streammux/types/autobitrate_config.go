@@ -125,4 +125,7 @@ type AutoBitRateConfig struct {
 	AutoByPass             bool
 	MaxBitRate             uint64
 	MinBitRate             uint64
+
+	ResolutionSlowdownDurationUpgrade   time.Duration
+	ResolutionSlowdownDurationDowngrade time.Duration
 }

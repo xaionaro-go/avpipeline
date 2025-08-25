@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -309,35 +311,19 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	return output, nil
 }
 
-func (s *StreamMux[C]) SetBypassEnabled(
+func (s *StreamMux[C]) EnableRecodingBypass(
 	ctx context.Context,
-	enable bool,
 ) (_err error) {
-	logger.Tracef(ctx, "SetBypassEnabled: %v", enable)
-	defer func() { logger.Tracef(ctx, "/SetBypassEnabled: %v: %v", enable, _err) }()
-	return xsync.DoA2R1(ctx, &s.Locker, s.setBypassEnabledLocked, ctx, enable)
+	logger.Tracef(ctx, "EnableRecodingBypass")
+	defer func() { logger.Tracef(ctx, "/EnableRecodingBypass: %v", _err) }()
+	return xsync.DoA1R1(ctx, &s.Locker, s.enableRecodingBypassLocked, ctx)
 }
 
-func (s *StreamMux[C]) setBypassEnabledLocked(
+func (s *StreamMux[C]) enableRecodingBypassLocked(
 	ctx context.Context,
-	enable bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setBypassEnabledLocked: %v", enable)
-	defer func() { logger.Tracef(ctx, "/setBypassEnabledLocked: %v: %v", enable, _err) }()
-
-	if !enable {
-		output := s.Outputs[s.OutputIDBeforeBypass]
-		outputKey := output.GetKey()
-		err := s.setPreferredOutput(ctx, outputKey)
-		if err != nil {
-			return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
-		}
-		return nil
-	}
-
-	if s.GetActiveOutput() == nil {
-		return fmt.Errorf("cannot enable bypass mode: while no active output (not implemented, yet)")
-	}
+	logger.Tracef(ctx, "enableRecodingBypassLocked")
+	defer func() { logger.Tracef(ctx, "/enableRecodingBypassLocked: %v: %v", _err) }()
 
 	outputKey := OutputKey{
 		AudioCodec: codectypes.Name(codec.NameCopy),
@@ -346,15 +332,6 @@ func (s *StreamMux[C]) setBypassEnabledLocked(
 	output, err := s.getOrInitOutputLocked(ctx, outputKey, nil)
 	if err != nil {
 		return fmt.Errorf("unable to get-or-initialize the bypass output: %w", err)
-	}
-
-	logger.Debugf(ctx, "notifying about the sources")
-	err = avpipeline.NotifyAboutPacketSources(ctx,
-		s.InputNodeAsPacketSource,
-		output.InputFilter,
-	)
-	if err != nil {
-		return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", s.InputNodeAsPacketSource, output.InputFilter, err)
 	}
 
 	err = s.setPreferredOutput(ctx, outputKey)
@@ -558,7 +535,15 @@ func (s *StreamMux[C]) WaitForStop(
 	return nil
 }
 
-func (s *StreamMux[C]) GetActiveOutput() *Output[C] {
+func (s *StreamMux[C]) GetActiveOutput(
+	ctx context.Context,
+) *Output[C] {
+	return xsync.DoA1R1(ctx, &s.Locker, s.getActiveOutputLocked, ctx)
+}
+
+func (s *StreamMux[C]) getActiveOutputLocked(
+	ctx context.Context,
+) *Output[C] {
 	outputID := s.OutputSwitch.CurrentValue.Load()
 	if int(outputID) < 0 || int(outputID) >= len(s.Outputs) {
 		return nil
@@ -574,15 +559,22 @@ func (e ErrNotImplemented) Error() string {
 	return fmt.Sprintf("not implemented: %v", e.Err)
 }
 
-func (s *StreamMux[C]) SetResolution(
+func (s *StreamMux[C]) setResolution(
 	ctx context.Context,
 	res codec.Resolution,
 	bitrate uint64,
 ) (_err error) {
 	logger.Tracef(ctx, "SetResolution: %s", res)
 	defer func() { logger.Tracef(ctx, "/SetResolution: %s: %v", res, _err) }()
+	return xsync.DoA3R1(ctx, &s.Locker, s.setResolutionLocked, ctx, res, bitrate)
+}
 
-	cfg := s.GetRecoderConfig(ctx)
+func (s *StreamMux[C]) setResolutionLocked(
+	ctx context.Context,
+	res codec.Resolution,
+	bitrate uint64,
+) (_err error) {
+	cfg := s.getRecoderConfigLocked(ctx)
 	if len(cfg.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
 	}
@@ -600,7 +592,7 @@ func (s *StreamMux[C]) SetResolution(
 	videoCfg.Resolution = res
 	videoCfg.AverageBitRate = bitrate
 	cfg.VideoTrackConfigs[0] = videoCfg
-	return s.SetRecoderConfig(ctx, cfg)
+	return s.setRecoderConfigLocked(ctx, cfg)
 }
 
 func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {
@@ -661,4 +653,26 @@ func updateWithInertialValue(
 	// make it volatile in the beginning, and more stable later:
 	effectiveInertia := inertia * (float64(measurementsCount) / float64(measurementsCount+3))
 	return uint64(float64(oldValue)*effectiveInertia + float64(newValue)*(1-effectiveInertia))
+}
+
+func (s *StreamMux[C]) GetBestNotBypassOutput(
+	ctx context.Context,
+) (_ret *Output[C]) {
+	logger.Tracef(ctx, "GetBestNotBypassOutput")
+	defer func() { logger.Tracef(ctx, "/GetBestNotBypassOutput: %v", _ret) }()
+	return xsync.DoA1R1(ctx, &s.Locker, s.getBestNotBypassOutputLocked, ctx)
+}
+
+func (s *StreamMux[C]) getBestNotBypassOutputLocked(
+	ctx context.Context,
+) (_ret *Output[C]) {
+	outputKeys := OutputKeys(slices.Collect(maps.Keys(s.OutputsMap)))
+	outputKeys.Sort()
+	for _, outputKey := range outputKeys {
+		if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
+			continue
+		}
+		return s.OutputsMap[outputKey]
+	}
+	return nil
 }

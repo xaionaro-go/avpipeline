@@ -22,11 +22,6 @@ const (
 	encoderDebug = false
 )
 
-const (
-	NameCopy = Name("copy")
-	NameRaw  = Name("raw")
-)
-
 type Encoder interface {
 	fmt.Stringer
 	Closer
