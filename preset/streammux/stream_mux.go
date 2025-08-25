@@ -48,8 +48,11 @@ type StreamMux[C any] struct {
 	InputNodeAsPacketSource packet.Source
 	AutoBitRateHandler      *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
-	CurrentInputBitRate     atomic.Uint64
 	OutputIDBeforeBypass    int
+
+	// measurements
+	CurrentInputBitRate                  atomic.Uint64
+	CurrentInputBitRateMeasurementsCount atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Statistics
@@ -574,6 +577,7 @@ func (e ErrNotImplemented) Error() string {
 func (s *StreamMux[C]) SetResolution(
 	ctx context.Context,
 	res codec.Resolution,
+	bitrate uint64,
 ) (_err error) {
 	logger.Tracef(ctx, "SetResolution: %s", res)
 	defer func() { logger.Tracef(ctx, "/SetResolution: %s: %v", res, _err) }()
@@ -585,7 +589,7 @@ func (s *StreamMux[C]) SetResolution(
 	videoCfg := cfg.VideoTrackConfigs[0]
 	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
 		// TODO: this should not be here, it should be somewhere else.
-		return ErrNotImplemented{Err: fmt.Errorf("cannot change resolution when using MediaCodec, since we don't support scaling yet")}
+		return ErrNotImplemented{Err: fmt.Errorf("when scaling from 1080p to let's say 480p, we get a distorted image when using mediacodec, to be investigated; until then this is forbidden")}
 	}
 
 	curRes := videoCfg.Resolution
@@ -594,6 +598,7 @@ func (s *StreamMux[C]) SetResolution(
 		return nil
 	}
 	videoCfg.Resolution = res
+	videoCfg.AverageBitRate = bitrate
 	cfg.VideoTrackConfigs[0] = videoCfg
 	return s.SetRecoderConfig(ctx, cfg)
 }
@@ -616,7 +621,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 	logger.Tracef(ctx, "inputBitRateMeasurerLoop")
 	defer func() { logger.Tracef(ctx, "/inputBitRateMeasurerLoop: %v", _err) }()
 
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	bytesReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
 	tsPrev := time.Now()
@@ -626,16 +631,34 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 		case <-ctx.Done():
 			return ctx.Err()
 		case tsNext = <-t.C:
-			bytesReadTotalNext := int64(s.InputNode.Statistics.BytesCountRead.Load())
+			bytesReadTotalNext := int64(s.GetStatistics().BytesCountRead.Load())
 
 			bytesRead := bytesReadTotalNext - bytesReadTotalPrev
 			duration := tsNext.Sub(tsPrev)
 
-			bytesReadTotalPrev, tsPrev = bytesReadTotalNext, tsNext
-
 			bitRate := int(float64(bytesRead*8) / duration.Seconds())
-			s.CurrentInputBitRate.Store(uint64(bitRate))
-			logger.Debugf(ctx, "input bitrate: %d (%s)", bitRate, humanize.SI(float64(bitRate), "bps"))
+
+			oldValue := s.CurrentInputBitRate.Load()
+			newValue := updateWithInertialValue(oldValue, uint64(bitRate), 0.9, s.CurrentInputBitRateMeasurementsCount.Load())
+			logger.Debugf(ctx, "input bitrate: %d (%s): (%d-%d)*8/%v; setting %d as the new value",
+				bitRate, humanize.SI(float64(bitRate), "bps"),
+				bytesReadTotalNext, bytesReadTotalPrev, duration,
+				newValue,
+			)
+			s.CurrentInputBitRate.Store(newValue)
+			s.CurrentInputBitRateMeasurementsCount.Add(1)
+
+			bytesReadTotalPrev, tsPrev = bytesReadTotalNext, tsNext
 		}
 	}
+}
+
+func updateWithInertialValue(
+	oldValue, newValue uint64,
+	inertia float64,
+	measurementsCount uint64,
+) uint64 {
+	// make it volatile in the beginning, and more stable later:
+	effectiveInertia := inertia * (float64(measurementsCount) / float64(measurementsCount+3))
+	return uint64(float64(oldValue)*effectiveInertia + float64(newValue)*(1-effectiveInertia))
 }

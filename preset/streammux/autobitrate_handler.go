@@ -220,8 +220,10 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	var curBitRate uint64
 	if codec.IsEncoderCopy(encoder) {
+		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
 		curBitRate = h.StreamMux.CurrentInputBitRate.Load()
 	} else {
+		logger.Tracef(ctx, "getting current bitrate from the encoder")
 		q := encoder.GetQuality(ctx)
 		if q, ok := q.(quality.ConstantBitrate); ok {
 			curBitRate = uint64(q)
@@ -230,12 +232,21 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		}
 	}
 
+	if curBitRate == 0 {
+		logger.Debugf(ctx, "current bitrate is 0; skipping this check")
+		return
+	}
+
 	newBitRate := h.Calculator.CalculateBitRate(
 		ctx,
 		curBitRate,
 		totalQueue,
 		&h.AutoBitRateConfig,
 	)
+	if newBitRate == 0 {
+		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
+		return
+	}
 	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curBitRate, totalQueue)
 
 	if newBitRate == curBitRate {
@@ -400,7 +411,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return nil
 	}
 
-	err := h.StreamMux.SetResolution(ctx, newRes.Resolution)
+	err := h.StreamMux.SetResolution(ctx, newRes.Resolution, bitrate)
 	switch {
 	case err == nil:
 		logger.Infof(ctx, "changed resolution from %v to %v (bitrate: %d)", *res, newRes.Resolution, bitrate)
