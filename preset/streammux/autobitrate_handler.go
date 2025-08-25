@@ -205,6 +205,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	tsDiff := now.Sub(h.lastCheckTS)
 	h.lastCheckTS = now
 
+	wasErrorReadingOutputs := false
 	var totalQueue uint64
 	activeOutputProc, _ := activeOutput.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
 	for _, proc := range getQueueSizers {
@@ -225,6 +226,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
 				nodeTotalQueue = h.previousQueueSize[proc]
 			}
+			wasErrorReadingOutputs = true
 		} else {
 			logger.Tracef(ctx, "node queue size details: %+v", queueSize)
 			for _, q := range queueSize {
@@ -236,6 +238,9 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		totalQueue += nodeTotalQueue
 	}
 	logger.Tracef(ctx, "total queue size: %d", totalQueue)
+	if !wasErrorReadingOutputs {
+		h.lastBitRate = h.StreamMux.CurrentOutputBitRate.Load()
+	}
 
 	encoder := h.GetVideoEncoder(ctx)
 	if encoder == nil {
