@@ -37,10 +37,39 @@ func (s *StreamMux[C]) Serve(
 	observability.Go(ctx, func(ctx context.Context) {
 		s.inputBitRateMeasurerLoop(ctx)
 	})
+	rawErrCh := make(chan node.Error, 1)
+	defer close(rawErrCh)
+	observability.Go(ctx, func(ctx context.Context) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case nodeErr, ok := <-rawErrCh:
+				if !ok {
+					return
+				}
+				logger.Tracef(ctx, "got error from rawErrCh: %v", nodeErr)
+				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData]); ok {
+					output := customDataer.GetCustomData().Output
+					if int32(output.ID) != s.OutputSwitch.CurrentValue.Load() {
+						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
+						delete(s.OutputsMap, output.GetKey())
+						output.Close(ctx)
+						continue
+					}
+				}
+				select {
+				case errCh <- nodeErr:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	})
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{
 		EachNode:             cfg,
 		AutoServeNewBranches: true,
-	}, errCh, s.InputNode)
+	}, rawErrCh, s.InputNode)
 }
 
 func (s *StreamMux[C]) String() string {

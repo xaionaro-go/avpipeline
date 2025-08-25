@@ -42,8 +42,8 @@ type StreamMux[C any] struct {
 
 	// nodes:
 	InputNode     *NodeInput[C]
-	Outputs       []*Output[C]
-	OutputsMap    map[OutputKey]*Output[C]
+	Outputs       []*Output
+	OutputsMap    map[OutputKey]*Output
 	OutputFactory OutputFactory
 
 	// aux
@@ -98,7 +98,7 @@ func NewWithCustomData[C any](
 		OutputSwitch:  barrierstategetter.NewSwitch(),
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
-		OutputsMap:    map[OutputKey]*Output[C]{},
+		OutputsMap:    map[OutputKey]*Output{},
 		MuxMode:       muxMode,
 
 		startedCh: ptr(make(chan struct{})),
@@ -252,7 +252,7 @@ func (s *StreamMux[C]) InitOutput(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts ...InitOutputOption,
-) (output *Output[C], _err error) {
+) (output *Output, _err error) {
 	logger.Tracef(ctx, "InitOutput(%#+v)", outputKey)
 	defer func() { logger.Tracef(ctx, "/InitOutput(%#+v): %v", outputKey, _err) }()
 	return xsync.DoA3R2(ctx, &s.Locker, s.getOrInitOutputLocked, ctx, outputKey, opts)
@@ -262,7 +262,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts []InitOutputOption,
-) (_ret *Output[C], _err error) {
+) (_ret *Output, _err error) {
 	logger.Tracef(ctx, "getOrInitOutputLocked: %#+v, %#+v", outputKey, opts)
 	defer func() { logger.Tracef(ctx, "/getOrInitOutputLocked: %#+v, %#+v: %v, %v", outputKey, opts, _ret, _err) }()
 
@@ -539,13 +539,13 @@ func (s *StreamMux[C]) WaitForStop(
 
 func (s *StreamMux[C]) GetActiveOutput(
 	ctx context.Context,
-) *Output[C] {
+) *Output {
 	return xsync.DoA1R1(ctx, &s.Locker, s.getActiveOutputLocked, ctx)
 }
 
 func (s *StreamMux[C]) getActiveOutputLocked(
 	ctx context.Context,
-) *Output[C] {
+) *Output {
 	outputID := s.OutputSwitch.CurrentValue.Load()
 	if int(outputID) < 0 || int(outputID) >= len(s.Outputs) {
 		return nil
@@ -681,7 +681,7 @@ func updateWithInertialValue(
 
 func (s *StreamMux[C]) GetBestNotBypassOutput(
 	ctx context.Context,
-) (_ret *Output[C]) {
+) (_ret *Output) {
 	logger.Tracef(ctx, "GetBestNotBypassOutput")
 	defer func() { logger.Tracef(ctx, "/GetBestNotBypassOutput: %v", _ret) }()
 	return xsync.DoA1R1(ctx, &s.Locker, s.getBestNotBypassOutputLocked, ctx)
@@ -689,7 +689,7 @@ func (s *StreamMux[C]) GetBestNotBypassOutput(
 
 func (s *StreamMux[C]) getBestNotBypassOutputLocked(
 	ctx context.Context,
-) (_ret *Output[C]) {
+) (_ret *Output) {
 	outputKeys := OutputKeys(slices.Collect(maps.Keys(s.OutputsMap)))
 	outputKeys.Sort()
 	for _, outputKey := range outputKeys {

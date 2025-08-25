@@ -131,6 +131,10 @@ func (n *MyFancyNodePlaceholder) GetChangeChanPushFramesTo() <-chan struct{} {
 
 */
 
+type GetCustomDataer[C any] interface {
+	GetCustomData() C
+}
+
 type NodeWithCustomData[C any, T processor.Abstract] struct {
 	*Statistics
 	Processor         T
@@ -151,6 +155,7 @@ type Node[T processor.Abstract] = NodeWithCustomData[struct{}, T]
 
 var _ Abstract = (*Node[processor.Abstract])(nil)
 var _ DotBlockContentStringWriteToer = (*Node[processor.Abstract])(nil)
+var _ GetCustomDataer[struct{}] = (*Node[processor.Abstract])(nil)
 
 func New[T processor.Abstract](processor T) *Node[T] {
 	return NewWithCustomData[struct{}](processor)
@@ -187,6 +192,10 @@ func NewWithCustomDataFromKernel[C any, T kernel.Abstract](
 			opts...,
 		),
 	)
+}
+
+func (n *NodeWithCustomData[C, T]) GetCustomData() C {
+	return n.CustomData
 }
 
 func (n *NodeWithCustomData[C, T]) IsServing() bool {

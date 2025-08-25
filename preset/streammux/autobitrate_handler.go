@@ -188,7 +188,7 @@ func (h *AutoBitRateHandler[C]) GetVideoEncoder(
 func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
-	var activeOutput *Output[C]
+	var activeOutput *Output
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
 		activeOutput = h.StreamMux.getActiveOutputLocked(ctx)

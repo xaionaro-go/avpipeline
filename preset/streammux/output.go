@@ -48,16 +48,20 @@ type FPSFractionGetter interface {
 	GetFPSFraction(ctx context.Context) (num, den uint32)
 }
 
-type Output[C any] struct {
+type OutputCustomData struct {
+	*Output
+}
+
+type Output struct {
 	ID                int
-	InputFilter       *NodeBarrier[C]
+	InputFilter       *NodeBarrier[OutputCustomData]
 	InputThrottler    *packetcondition.VideoAverageBitrateLower
-	InputFixer        *autofix.AutoFixer
-	RecoderNode       *NodeRecoder[C]
+	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData]
+	RecoderNode       *NodeRecoder[OutputCustomData]
 	OutputThrottler   *packetcondition.VideoAverageBitrateLower
-	MapIndices        *NodeMapStreamIndexes[C]
-	OutputFixer       *autofix.AutoFixer
-	OutputSyncer      *NodeBarrier[C]
+	MapIndices        *NodeMapStreamIndexes[OutputCustomData]
+	OutputFixer       *autofix.AutoFixerWithCustomData[OutputCustomData]
+	OutputSyncer      *NodeBarrier[OutputCustomData]
 	OutputNode        node.Abstract
 	OutputNodeConfig  OutputConfig
 	FPSFractionGetter FPSFractionGetter
@@ -128,7 +132,7 @@ func newOutput[C any](
 	outputSyncer barrierstategetter.StateGetter,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	FPSFractionGetter FPSFractionGetter,
-) (_ret *Output[C], _err error) {
+) (_ret *Output, _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -171,31 +175,35 @@ func newOutput[C any](
 		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", outputNode)
 	}
 
-	o := &Output[C]{
+	var o *Output
+
+	o = &Output{
 		ID: outputID,
-		InputFilter: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(
+		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),
 			outputSwitch,
 		)),
 		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		InputFixer: autofix.New(
+		InputFixer: autofix.NewWithCustomData[OutputCustomData](
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
 			inputNode.Processor.GetPacketSource(),
 			recoderKernel.Decoder,
+			OutputCustomData{Output: o},
 		),
-		RecoderNode: node.NewWithCustomDataFromKernel[C](
+		RecoderNode: node.NewWithCustomDataFromKernel[OutputCustomData](
 			ctx,
 			recoderKernel,
 			processor.DefaultOptionsRecoder()...,
 		),
 		OutputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		MapIndices:      node.NewWithCustomDataFromKernel[C](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
-		OutputFixer: autofix.New(
+		MapIndices:      node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
+		OutputFixer: autofix.NewWithCustomData[OutputCustomData](
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
+			OutputCustomData{Output: o},
 		),
-		OutputSyncer: node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(
+		OutputSyncer: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
 			outputSyncer,
 		)),
@@ -203,6 +211,10 @@ func newOutput[C any](
 		OutputNodeConfig:  outputConfig,
 		FPSFractionGetter: FPSFractionGetter,
 	}
+	o.InputFilter.CustomData = OutputCustomData{Output: o}
+	o.RecoderNode.CustomData = OutputCustomData{Output: o}
+	o.MapIndices.CustomData = OutputCustomData{Output: o}
+	o.OutputSyncer.CustomData = OutputCustomData{Output: o}
 
 	if outputReuseDecoderResources {
 		o.initReuseDecoderResources(ctx)
@@ -255,7 +267,7 @@ func logIfError(ctx context.Context, err error) {
 	logger.Errorf(ctx, "got an error: %v", err)
 }
 
-func (o *Output[C]) initFPSFractioner(ctx context.Context) {
+func (o *Output) initFPSFractioner(ctx context.Context) {
 	logger.Tracef(ctx, "initFPSFractioner()")
 	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
 
@@ -288,7 +300,7 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 	})
 }
 
-func (o *Output[C]) initReuseDecoderResources(
+func (o *Output) initReuseDecoderResources(
 	ctx context.Context,
 ) {
 	logger.Tracef(ctx, "initReuseDecoderResources()")
@@ -367,7 +379,7 @@ func (o *Output[C]) initReuseDecoderResources(
 	)
 }
 
-func (o *Output[C]) Close(ctx context.Context) (_err error) {
+func (o *Output) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Output.Close()")
 	defer func() { logger.Tracef(ctx, "/Output.Close(): %v", _err) }()
 	var errs []error
@@ -399,15 +411,15 @@ func (o *Output[C]) Close(ctx context.Context) (_err error) {
 	return errors.Join(errs...)
 }
 
-func (o *Output[C]) Input() node.Abstract {
+func (o *Output) Input() node.Abstract {
 	return o.InputFilter
 }
 
-func (o *Output[C]) Output() node.Abstract {
+func (o *Output) Output() node.Abstract {
 	return o.OutputNode
 }
 
-func (o *Output[C]) Flush(ctx context.Context) (_err error) {
+func (o *Output) Flush(ctx context.Context) (_err error) {
 	return o.RecoderNode.Processor.Kernel.Reset(ctx)
 }
 
@@ -436,7 +448,7 @@ func OutputKeyFromRecoderConfig(
 	}
 }
 
-func (o *Output[C]) reconfigureRecoder(
+func (o *Output) reconfigureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -452,7 +464,7 @@ func (o *Output[C]) reconfigureRecoder(
 	return nil
 }
 
-func (o *Output[C]) reconfigureDecoder(
+func (o *Output) reconfigureDecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -488,7 +500,7 @@ func (o *Output[C]) reconfigureDecoder(
 	return nil
 }
 
-func (o *Output[C]) reconfigureEncoder(
+func (o *Output) reconfigureEncoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -594,7 +606,7 @@ func (o *Output[C]) reconfigureEncoder(
 	return nil
 }
 
-func (o *Output[C]) GetKey() OutputKey {
+func (o *Output) GetKey() OutputKey {
 	var res codec.Resolution
 	if o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
 		res = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
