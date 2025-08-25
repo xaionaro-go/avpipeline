@@ -1,14 +1,13 @@
 package indicator
 
 import (
-	"math"
 	"sync"
 
 	indicators "github.com/lmpizarro/go_ehlers_indicators"
 	"golang.org/x/exp/constraints"
 )
 
-type MAMA[T constraints.Integer] struct {
+type MAMA[T constraints.Integer | constraints.Float] struct {
 	FastLimit           float64
 	SlowLimit           float64
 	values              []float64
@@ -20,13 +19,13 @@ type MAMA[T constraints.Integer] struct {
 
 var _ MovingAverage[int64] = (*MAMA[int64])(nil)
 
-func NewMAMADefault[T constraints.Integer](
+func NewMAMADefault[T constraints.Integer | constraints.Float](
 	n int,
 ) *MAMA[T] {
 	return NewMAMA[T](n, 0.5, 0.05)
 }
 
-func NewMAMA[T constraints.Integer](
+func NewMAMA[T constraints.Integer | constraints.Float](
 	n int,
 	fastLimit float64,
 	slowLimit float64,
@@ -58,13 +57,13 @@ func (m *MAMA[T]) Update(v T) T {
 	}
 
 	result := indicators.MAMA(m.orderedValuesBuffer, m.FastLimit, m.SlowLimit)
-	return T(math.Round(result[len(result)-1]))
+	return T(result[len(result)-1])
 }
 
 func (m *MAMA[T]) InitPeriod() int64 {
-	return 0
+	return int64(len(m.values))
 }
 
 func (m *MAMA[T]) Valid() bool {
-	return true
+	return m.measurementsCount >= len(m.values)
 }

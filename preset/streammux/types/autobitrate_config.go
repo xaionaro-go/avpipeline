@@ -8,6 +8,10 @@ import (
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
+const (
+	queueDurationError = 20 * time.Millisecond
+)
+
 type AutoBitRateCalculator interface {
 	CalculateBitRate(
 		ctx context.Context,

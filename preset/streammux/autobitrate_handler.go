@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -181,7 +180,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	var activeOutput *Output[C]
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
-		activeOutput = h.StreamMux.GetActiveOutput(ctx)
+		activeOutput = h.StreamMux.getActiveOutputLocked(ctx)
 		for _, o := range h.StreamMux.Outputs {
 			if o == nil {
 				continue
@@ -272,7 +271,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	if err := h.setBitrate(ctx, curBitRate, newBitRate); err != nil {
+	if err := h.trySetBitrate(ctx, curBitRate, newBitRate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
 		return
 	}
@@ -302,7 +301,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 				AudioCodec: codectypes.NameCopy,
 				VideoCodec: codectypes.NameCopy,
 			},
-			math.MaxUint64,
+			0,
 		)
 	}
 
@@ -313,7 +312,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	)
 }
 
-func (h *AutoBitRateHandler[C]) setBitrate(
+func (h *AutoBitRateHandler[C]) trySetBitrate(
 	ctx context.Context,
 	oldBitRate uint64,
 	newBitRate uint64,
@@ -368,8 +367,8 @@ func (h *AutoBitRateHandler[C]) setBitrate(
 	}
 
 	maxBitRate := h.MaxBitRate
-	if inputBitRate > h.MinBitRate*2 && inputBitRate < maxBitRate {
-		maxBitRate = 2 * inputBitRate
+	if inputBitRate > h.MinBitRate*2 && float64(inputBitRate)*1.5 < float64(maxBitRate) {
+		maxBitRate = uint64(1.5 * float64(inputBitRate))
 	}
 
 	clampedBitRate := newBitRate
