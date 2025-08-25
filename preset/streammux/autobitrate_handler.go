@@ -71,13 +71,18 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 
 type AutoBitrateCalculatorThresholds = types.AutoBitrateCalculatorThresholds
 type AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorLogK
+type FPSReducerConfig = types.FPSReducerConfig
 
 func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
 	return types.DefaultAutoBitrateCalculatorThresholds()
 }
 
-func DefaultAutoBitrateCalculatorConstantQueueSize() *AutoBitrateCalculatorConstantQueueSize {
+func DefaultAutoBitrateCalculatorLogK() *AutoBitrateCalculatorConstantQueueSize {
 	return types.DefaultAutoBitrateCalculatorLogK()
+}
+
+func DefaultFPSReducerConfig() FPSReducerConfig {
+	return types.DefaultFPSReducerConfig()
 }
 
 func DefaultAutoBitrateConfig(
@@ -88,7 +93,8 @@ func DefaultAutoBitrateConfig(
 	resWorst := resolutions.Worst()
 	result := AutoBitRateConfig{
 		ResolutionsAndBitRates: resolutions,
-		Calculator:             DefaultAutoBitrateCalculatorConstantQueueSize(),
+		FPSReducer:             DefaultFPSReducerConfig(),
+		Calculator:             DefaultAutoBitrateCalculatorLogK(),
 		CheckInterval:          time.Second / 2,
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
@@ -331,7 +337,6 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 				if err := h.enableBypass(ctx, false); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
-				logger.Infof(ctx, "disabled bypass mode since the calculated bitrate %d is lower than the previous bitrate %d", newBitRate, oldBitRate)
 			}
 		} else {
 			if float64(newBitRate) > float64(inputBitRate) {
@@ -339,7 +344,6 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 				if err != nil {
 					return fmt.Errorf("unable to enable bypass mode: %w", err)
 				}
-				logger.Infof(ctx, "enabled bypass mode since the calculated bitrate %d is higher than the input bitrate %d", newBitRate, inputBitRate)
 			}
 		}
 	}
@@ -361,6 +365,9 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	case newBitRate > maxBitRate:
 		clampedBitRate = maxBitRate
 	}
+
+	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(clampedBitRate)
+	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
 
 	if err := h.changeResolutionIfNeeded(ctx, clampedBitRate); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)

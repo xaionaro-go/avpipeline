@@ -127,6 +127,7 @@ func (r AutoBitRateResolutionAndBitRateConfigs) MinWidth(w uint32) AutoBitRateRe
 type AutoBitRateConfig struct {
 	ResolutionsAndBitRates AutoBitRateResolutionAndBitRateConfigs
 	Calculator             AutoBitRateCalculator
+	FPSReducer             FPSReducerConfig
 	CheckInterval          time.Duration
 	AutoByPass             bool
 	MaxBitRate             uint64
@@ -134,4 +135,45 @@ type AutoBitRateConfig struct {
 
 	ResolutionSlowdownDurationUpgrade   time.Duration
 	ResolutionSlowdownDurationDowngrade time.Duration
+}
+
+type FPSReducerConfig []FPSReductionRange
+
+type FPSReductionRange struct {
+	BitrateMin  uint64
+	BitrateMax  uint64
+	FractionNum uint32
+	FractionDen uint32
+}
+
+func DefaultFPSReducerConfig() FPSReducerConfig {
+	return FPSReducerConfig{
+		{
+			BitrateMax:  500_000,
+			BitrateMin:  150_000,
+			FractionNum: 1,
+			FractionDen: 2,
+		},
+		{
+			BitrateMax:  150_000,
+			BitrateMin:  50_000,
+			FractionNum: 1,
+			FractionDen: 4,
+		},
+		{
+			BitrateMax:  50_000,
+			BitrateMin:  10_000,
+			FractionNum: 1,
+			FractionDen: 10,
+		},
+	}
+}
+
+func (r FPSReducerConfig) GetFraction(bitrate uint64) (num, den uint32) {
+	for i := range r {
+		if r[i].BitrateMin <= bitrate && bitrate <= r[i].BitrateMax {
+			return r[i].FractionNum, r[i].FractionDen
+		}
+	}
+	return 1, 1
 }
