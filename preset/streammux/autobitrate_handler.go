@@ -25,6 +25,7 @@ type AutoBitRateCalculator = types.AutoBitRateCalculator
 type AutoBitRateConfig = types.AutoBitRateConfig
 type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
 type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
+type BitRateChangeRequest = types.BitRateChangeRequest
 
 func multiplyBitRates(
 	resolutions []AutoBitRateResolutionAndBitRateConfig,
@@ -277,26 +278,27 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	newBitRate := h.Calculator.CalculateBitRate(
+	actualOutputBitrate := h.StreamMux.CurrentOutputBitRate.Load()
+	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
 		curReqBitRate,
 		h.StreamMux.CurrentInputBitRate.Load(),
-		h.StreamMux.CurrentOutputBitRate.Load(),
+		actualOutputBitrate,
 		totalQueue.Load(),
 		&h.AutoBitRateConfig,
 	)
-	if newBitRate == 0 {
+	if bitRateRequest.BitRate == 0 {
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curReqBitRate, totalQueue.Load())
+	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
 
-	if newBitRate == curReqBitRate {
+	if bitRateRequest.BitRate == curReqBitRate {
 		logger.Tracef(ctx, "bitrate remains unchanged: %d", curReqBitRate)
 		return
 	}
 
-	if err := h.trySetBitrate(ctx, curReqBitRate, newBitRate); err != nil {
+	if err := h.trySetBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
 		return
 	}
@@ -315,6 +317,7 @@ func (h *AutoBitRateHandler[C]) isBypassEnabled(
 func (h *AutoBitRateHandler[C]) enableBypass(
 	ctx context.Context,
 	enable bool,
+	isCritical bool,
 ) (_err error) {
 	logger.Tracef(ctx, "enableByPass: %v", enable)
 	defer func() { logger.Tracef(ctx, "/enableByPass: %v: %v", enable, _err) }()
@@ -327,6 +330,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 				VideoCodec: codectypes.NameCopy,
 			},
 			0,
+			isCritical,
 		)
 	}
 
@@ -334,29 +338,46 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 		ctx,
 		nil,
 		uint64(float64(h.StreamMux.CurrentInputBitRate.Load())*0.9),
+		isCritical,
 	)
 }
 
 func (h *AutoBitRateHandler[C]) trySetBitrate(
 	ctx context.Context,
 	oldBitRate uint64,
-	newBitRate uint64,
+	req BitRateChangeRequest,
+	actualOutputBitrate uint64,
 ) (_err error) {
-	logger.Tracef(ctx, "setBitrate: %d->%d", oldBitRate, newBitRate)
-	defer func() { logger.Tracef(ctx, "/setBitrate: %d->%d: %v", oldBitRate, newBitRate, _err) }()
+	logger.Tracef(ctx, "setBitrate: %d->%d (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
+	defer func() {
+		logger.Tracef(ctx, "/setBitrate: %d->%d (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
+	}()
+
+	if h.currentResolutionChangeRequest != nil {
+		switch {
+		case req.BitRate > actualOutputBitrate && !h.currentResolutionChangeRequest.IsUpgrade:
+			// we are increasing bitrate while a downgrade is in progress; cancel the downgrade
+			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate")
+			h.currentResolutionChangeRequest = nil
+		case req.BitRate < actualOutputBitrate && h.currentResolutionChangeRequest.IsUpgrade:
+			// we are decreasing bitrate while an upgrade is in progress; cancel the upgrade
+			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate")
+			h.currentResolutionChangeRequest = nil
+		}
+	}
 
 	inputBitRate := h.StreamMux.CurrentInputBitRate.Load()
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
-		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, newBitRate, inputBitRate)
+		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, req.BitRate, inputBitRate)
 		if h.isBypassEnabled(ctx) {
-			if newBitRate < oldBitRate {
-				if err := h.enableBypass(ctx, false); err != nil {
+			if req.BitRate < oldBitRate {
+				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
 			}
 		} else {
-			if float64(newBitRate) > float64(inputBitRate) {
-				err := h.enableBypass(ctx, true)
+			if float64(req.BitRate) > float64(inputBitRate) {
+				err := h.enableBypass(ctx, true, req.IsCritical)
 				if err != nil {
 					return fmt.Errorf("unable to enable bypass mode: %w", err)
 				}
@@ -374,18 +395,18 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		maxBitRate = uint64(1.5 * float64(inputBitRate))
 	}
 
-	clampedBitRate := newBitRate
+	clampedBitRate := req.BitRate
 	switch {
-	case newBitRate < h.MinBitRate:
+	case req.BitRate < h.MinBitRate:
 		clampedBitRate = h.MinBitRate
-	case newBitRate > maxBitRate:
+	case req.BitRate > maxBitRate:
 		clampedBitRate = maxBitRate
 	}
 
 	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(clampedBitRate)
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
 
-	if err := h.changeResolutionIfNeeded(ctx, clampedBitRate); err != nil {
+	if err := h.changeResolutionIfNeeded(ctx, clampedBitRate, req.IsCritical); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
@@ -421,10 +442,11 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	ctx context.Context,
 	bitrate uint64,
+	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%d)", bitrate)
+	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%d, isCritical=%t)", bitrate, isCritical)
 	defer func() {
-		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%d): %v", bitrate, _err)
+		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%d, isCritical=%t): %v", bitrate, isCritical, _err)
 	}()
 
 	encoder := h.GetVideoEncoder(ctx)
@@ -473,7 +495,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 
 	err := h.setOutput(ctx, &OutputKey{
 		Resolution: newRes.Resolution,
-	}, bitrate)
+	}, bitrate, isCritical)
 	if err != nil {
 		return fmt.Errorf("unable to set new resolution %v: %w", newRes.Resolution, err)
 	}
@@ -484,9 +506,12 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	ctx context.Context,
 	outputKey *OutputKey,
 	bitrate uint64,
+	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %d", outputKey, bitrate)
-	defer func() { logger.Tracef(ctx, "/setOutput: %v, %d: %v", outputKey, bitrate, _err) }()
+	logger.Tracef(ctx, "setOutput: %v, %d (isCritical:%d)", outputKey, bitrate, isCritical)
+	defer func() {
+		logger.Tracef(ctx, "/setOutput: %v, %d (isCritical:%d): %v", outputKey, bitrate, isCritical, _err)
+	}()
 
 	enc := h.GetVideoEncoder(ctx)
 	var curACodecName, curVCodecName codec.Name
@@ -531,27 +556,31 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		return fmt.Errorf("unable to compare output keys: %v and %v", outputKey, outputCur.GetKey())
 	}
 
-	now := time.Now()
-	prevRequest := h.currentResolutionChangeRequest
-	if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade || now.Sub(prevRequest.LatestAt) > time.Minute {
-		h.currentResolutionChangeRequest = &resolutionChangeRequest{
-			IsUpgrade: isUpgrade,
-			StartedAt: now,
-			LatestAt:  now,
+	if isCritical {
+		h.currentResolutionChangeRequest = nil
+	} else {
+		now := time.Now()
+		prevRequest := h.currentResolutionChangeRequest
+		if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade || now.Sub(prevRequest.LatestAt) > time.Minute {
+			h.currentResolutionChangeRequest = &resolutionChangeRequest{
+				IsUpgrade: isUpgrade,
+				StartedAt: now,
+				LatestAt:  now,
+			}
+			logger.Debugf(ctx, "started resolution change request: %v", h.currentResolutionChangeRequest)
+			return nil
 		}
-		logger.Debugf(ctx, "started resolution change request: %v", h.currentResolutionChangeRequest)
-		return nil
-	}
-	prevRequest.LatestAt = now
+		prevRequest.LatestAt = now
 
-	reqDur := now.Sub(prevRequest.StartedAt)
-	switch {
-	case isUpgrade && reqDur < h.ResolutionSlowdownDurationUpgrade:
-		logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationUpgrade)
-		return nil
-	case !isUpgrade && reqDur < h.ResolutionSlowdownDurationDowngrade:
-		logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationDowngrade)
-		return nil
+		reqDur := now.Sub(prevRequest.StartedAt)
+		switch {
+		case isUpgrade && reqDur < h.ResolutionSlowdownDurationUpgrade:
+			logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationUpgrade)
+			return nil
+		case !isUpgrade && reqDur < h.ResolutionSlowdownDurationDowngrade:
+			logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationDowngrade)
+			return nil
+		}
 	}
 
 	if outputKey.VideoCodec == codectypes.NameCopy {
