@@ -232,8 +232,8 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			for _, q := range queueSize {
 				nodeTotalQueue += q
 			}
-			h.previousQueueSize[proc] = nodeTotalQueue
 		}
+		h.previousQueueSize[proc] = nodeTotalQueue
 		logger.Tracef(ctx, "nodeTotalQueue: %d", nodeTotalQueue)
 		totalQueue += nodeTotalQueue
 	}
