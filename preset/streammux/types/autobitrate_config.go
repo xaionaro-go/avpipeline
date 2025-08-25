@@ -15,7 +15,9 @@ const (
 type AutoBitRateCalculator interface {
 	CalculateBitRate(
 		ctx context.Context,
-		currentBitrate uint64,
+		currentBitrateSetting uint64,
+		inputBitrate uint64,
+		actualOutputBitrate uint64,
 		queueSize uint64,
 		config *AutoBitRateConfig,
 	) uint64

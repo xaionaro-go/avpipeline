@@ -58,19 +58,21 @@ func (d *AutoBitrateCalculatorThresholds) decideFloat(
 
 func (d *AutoBitrateCalculatorThresholds) CalculateBitRate(
 	ctx context.Context,
-	currentBitrate uint64,
+	currentBitrateSetting uint64,
+	inputBitrate uint64,
+	actualOutputBitrate uint64,
 	queueSize uint64,
 	config *AutoBitRateConfig,
 ) (_ret uint64) {
-	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrate) * float64(time.Second))
-	logger.Tracef(ctx, "Decide: currentBitrate=%d queueSize=%d queueDuration=%s config=%+v", currentBitrate, queueSize, queueDuration, config)
+	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrateSetting) * float64(time.Second))
+	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config)
 	defer func() {
-		logger.Tracef(ctx, "/Decide: currentBitrate=%d queueSize=%d queueDuration=%s config=%+v: %v", currentBitrate, queueSize, queueDuration, config, _ret)
+		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config, _ret)
 	}()
 
 	k := d.decideFloat(ctx, queueDuration)
 	if k == 1 {
-		return currentBitrate
+		return currentBitrateSetting
 	}
-	return uint64(float64(currentBitrate) * k)
+	return uint64(float64(currentBitrateSetting) * k)
 }

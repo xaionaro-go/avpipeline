@@ -53,8 +53,10 @@ type StreamMux[C any] struct {
 	OutputIDBeforeBypass    int
 
 	// measurements
-	CurrentInputBitRate                  atomic.Uint64
-	CurrentInputBitRateMeasurementsCount atomic.Uint64
+	CurrentInputBitRate             atomic.Uint64
+	CurrentOutputBitRate            atomic.Uint64
+	CurrentBitRateMeasurementsCount atomic.Uint64
+	PrevMeasuredOutputID            atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Statistics
@@ -615,7 +617,10 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
-	bytesReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
+	activeOutput := s.GetActiveOutput(ctx)
+	bytesInputReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
+	bytesOutputReadTotalPrev := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
+	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
 	tsPrev := time.Now()
 	for {
 		var tsNext time.Time
@@ -623,24 +628,43 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 		case <-ctx.Done():
 			return ctx.Err()
 		case tsNext = <-t.C:
-			bytesReadTotalNext := int64(s.GetStatistics().BytesCountRead.Load())
-
-			bytesRead := bytesReadTotalNext - bytesReadTotalPrev
 			duration := tsNext.Sub(tsPrev)
+			activeOutput := s.GetActiveOutput(ctx)
+			bytesInputReadTotalNext := int64(s.GetStatistics().BytesCountRead.Load())
+			bytesOutputReadTotalNext := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
 
-			bitRate := int(float64(bytesRead*8) / duration.Seconds())
+			bytesInputRead := bytesInputReadTotalNext - bytesInputReadTotalPrev
+			bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
 
-			oldValue := s.CurrentInputBitRate.Load()
-			newValue := updateWithInertialValue(oldValue, uint64(bitRate), 0.9, s.CurrentInputBitRateMeasurementsCount.Load())
+			oldInputValue := s.CurrentInputBitRate.Load()
+			newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
 			logger.Debugf(ctx, "input bitrate: %d (%s): (%d-%d)*8/%v; setting %d as the new value",
-				bitRate, humanize.SI(float64(bitRate), "bps"),
-				bytesReadTotalNext, bytesReadTotalPrev, duration,
-				newValue,
+				bitRateInput, humanize.SI(float64(bitRateInput), "bps"),
+				bytesInputReadTotalNext, bytesInputReadTotalPrev, duration,
+				newInputValue,
 			)
-			s.CurrentInputBitRate.Store(newValue)
-			s.CurrentInputBitRateMeasurementsCount.Add(1)
+			s.CurrentInputBitRate.Store(newInputValue)
 
-			bytesReadTotalPrev, tsPrev = bytesReadTotalNext, tsNext
+			bytesOutputRead := bytesOutputReadTotalNext - bytesOutputReadTotalPrev
+			bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
+
+			oldOutputValue := s.CurrentOutputBitRate.Load()
+			newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			logger.Debugf(ctx, "output bitrate: %d (%s): (%d-%d)*8/%v; setting %d as the new value",
+				bitRateOutput, humanize.SI(float64(bitRateOutput), "bps"),
+				bytesOutputReadTotalNext, bytesOutputReadTotalPrev, duration,
+				newOutputValue,
+			)
+			if s.PrevMeasuredOutputID.Load() == uint64(activeOutput.ID) {
+				s.CurrentOutputBitRate.Store(newOutputValue)
+			} else {
+				s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
+			}
+
+			s.CurrentBitRateMeasurementsCount.Add(1)
+
+			bytesInputReadTotalPrev, bytesOutputReadTotalPrev = bytesInputReadTotalNext, bytesOutputReadTotalNext
+			tsPrev = tsNext
 		}
 	}
 }

@@ -32,27 +32,29 @@ func DefaultAutoBitrateCalculatorLogK() *AutoBitrateCalculatorLogK {
 
 func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 	ctx context.Context,
-	currentBitrate uint64,
+	currentBitrateSetting uint64,
+	inputBitrate uint64,
+	actualOutputBitrate uint64,
 	queueSize uint64,
 	config *AutoBitRateConfig,
 ) (_ret uint64) {
-	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrate) * float64(time.Second))
-	logger.Tracef(ctx, "CalculateBitRate: currentBitrate=%d queueSize=%d queueDuration=%s config=%+v", currentBitrate, queueSize, queueDuration, config)
+	queueDuration := time.Duration(float64(queueSize) * 8 / float64(currentBitrateSetting) * float64(time.Second))
+	logger.Tracef(ctx, "CalculateBitRate: %d %d %d %d %d %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config)
 	defer func() {
-		logger.Tracef(ctx, "/CalculateBitRate: currentBitrate=%d queueSize=%d queueDuration=%s config=%+v: %v", currentBitrate, queueSize, queueDuration, config, _ret)
+		logger.Tracef(ctx, "/CalculateBitRate: %d %d %d %d %d %v: %v", currentBitrateSetting, inputBitrate, actualOutputBitrate, queueSize, d, config, _ret)
 	}()
 
 	k := (d.QueueOptimal + queueDurationError).Seconds() / (queueDuration + queueDurationError).Seconds()
 	kSmoothed := d.MovingAverage.Update(k)
 	if !d.MovingAverage.Valid() {
-		return currentBitrate
+		return currentBitrateSetting
 	}
 	if math.IsNaN(kSmoothed) {
-		logger.Errorf(ctx, "CalculateBitRate: kSmoothed is NaN, returning currentBitrate=%d", currentBitrate)
-		return currentBitrate
+		logger.Errorf(ctx, "CalculateBitRate: kSmoothed is NaN, returning currentBitrate=%d", currentBitrateSetting)
+		return currentBitrateSetting
 	}
-	diff := float64(currentBitrate) * math.Log(kSmoothed) * (1.0 - d.Inertia)
-	newBitRate := int64(float64(currentBitrate) + diff)
+	diff := float64(currentBitrateSetting) * math.Log(kSmoothed) * (1.0 - d.Inertia)
+	newBitRate := int64(float64(currentBitrateSetting) + diff)
 	logger.Tracef(ctx, "CalculateBitRate: k=%f kSmoothed=%f diff=%f newBitRate=%d", k, kSmoothed, diff, newBitRate)
 	return uint64(newBitRate)
 }

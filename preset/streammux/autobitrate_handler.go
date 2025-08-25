@@ -235,28 +235,30 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	var curBitRate uint64
+	var curReqBitRate uint64
 	if codec.IsEncoderCopy(encoder) {
 		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
-		curBitRate = h.StreamMux.CurrentInputBitRate.Load()
+		curReqBitRate = h.StreamMux.CurrentInputBitRate.Load()
 	} else {
 		logger.Tracef(ctx, "getting current bitrate from the encoder")
 		q := encoder.GetQuality(ctx)
 		if q, ok := q.(quality.ConstantBitrate); ok {
-			curBitRate = uint64(q)
+			curReqBitRate = uint64(q)
 		} else {
 			logger.Debugf(ctx, "unable to get current bitrate")
 		}
 	}
 
-	if curBitRate == 0 {
+	if curReqBitRate == 0 {
 		logger.Debugf(ctx, "current bitrate is 0; skipping this check")
 		return
 	}
 
 	newBitRate := h.Calculator.CalculateBitRate(
 		ctx,
-		curBitRate,
+		curReqBitRate,
+		h.StreamMux.CurrentInputBitRate.Load(),
+		h.StreamMux.CurrentOutputBitRate.Load(),
 		totalQueue,
 		&h.AutoBitRateConfig,
 	)
@@ -264,14 +266,14 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curBitRate, totalQueue)
+	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curReqBitRate, totalQueue)
 
-	if newBitRate == curBitRate {
-		logger.Tracef(ctx, "bitrate remains unchanged: %d", curBitRate)
+	if newBitRate == curReqBitRate {
+		logger.Tracef(ctx, "bitrate remains unchanged: %d", curReqBitRate)
 		return
 	}
 
-	if err := h.trySetBitrate(ctx, curBitRate, newBitRate); err != nil {
+	if err := h.trySetBitrate(ctx, curReqBitRate, newBitRate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
 		return
 	}
