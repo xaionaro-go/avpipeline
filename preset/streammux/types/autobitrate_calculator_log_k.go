@@ -12,27 +12,25 @@ import (
 
 type MovingAverage[T constraints.Integer | constraints.Float] = indicator.MovingAverage[T]
 
-// AutoBitrateCalculatorConstantQueueSize tries to keep the queue size around QueueOptimal
-// and to smooth the bitrate changes. To make sure smoothing does not prevent reacting to
-// drastic changes, QueueRidiculouslyLow and QueueCriticallyHigh define the thresholds
-// for very quick bitrate changes.
-type AutoBitrateCalculatorConstantQueueSize struct {
+// AutoBitrateCalculatorLogK tries to keep the queue size around QueueOptimal
+// and to smooth the bitrate changes.
+type AutoBitrateCalculatorLogK struct {
 	QueueOptimal  time.Duration
 	Inertia       float64
 	MovingAverage MovingAverage[float64]
 }
 
-var _ AutoBitRateCalculator = (*AutoBitrateCalculatorConstantQueueSize)(nil)
+var _ AutoBitRateCalculator = (*AutoBitrateCalculatorLogK)(nil)
 
-func DefaultAutoBitrateCalculatorConstantQueueSize() *AutoBitrateCalculatorConstantQueueSize {
-	return &AutoBitrateCalculatorConstantQueueSize{
+func DefaultAutoBitrateCalculatorLogK() *AutoBitrateCalculatorLogK {
+	return &AutoBitrateCalculatorLogK{
 		QueueOptimal:  time.Second,
 		Inertia:       0.7,
 		MovingAverage: indicator.NewMAMA[float64](10, 0.3, 0.05),
 	}
 }
 
-func (d *AutoBitrateCalculatorConstantQueueSize) CalculateBitRate(
+func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 	ctx context.Context,
 	currentBitrate uint64,
 	queueSize uint64,

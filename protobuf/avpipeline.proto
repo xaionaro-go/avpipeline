@@ -65,7 +65,7 @@ message Frame {
 message AutoBitrateCalculator {
   oneof AutoBitrateCalculator {
     AutoBitRateCalculatorThresholds thresholds = 1;
-    AutoBitrateCalculatorConstantQueueSize constantQueueSize = 2;
+    AutoBitrateCalculatorLogK logK = 2;
   }
 }
 
@@ -98,7 +98,8 @@ message MovingAverageConfig {
   }
 }
 
-message AutoBitrateCalculatorConstantQueueSize {
+message AutoBitrateCalculatorLogK {
   uint64 queueOptimalMS = 1;
-  MovingAverageConfig movingAverage = 2;
+  double inertia = 2; // [0.0..1.0]
+  MovingAverageConfig movingAverage = 3;
 }

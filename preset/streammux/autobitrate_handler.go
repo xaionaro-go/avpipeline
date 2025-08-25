@@ -70,14 +70,14 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 }
 
 type AutoBitrateCalculatorThresholds = types.AutoBitrateCalculatorThresholds
-type AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorConstantQueueSize
+type AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorLogK
 
 func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
 	return types.DefaultAutoBitrateCalculatorThresholds()
 }
 
 func DefaultAutoBitrateCalculatorConstantQueueSize() *AutoBitrateCalculatorConstantQueueSize {
-	return types.DefaultAutoBitrateCalculatorConstantQueueSize()
+	return types.DefaultAutoBitrateCalculatorLogK()
 }
 
 func DefaultAutoBitrateConfig(
