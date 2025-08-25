@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -15,6 +17,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/quality"
+	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xsync"
 )
 
 type AutoBitRateCalculator = types.AutoBitRateCalculator
@@ -115,7 +119,6 @@ func (s *StreamMux[C]) initAutoBitRateHandler(
 		AutoBitRateConfig: cfg,
 		StreamMux:         s,
 		closureSignaler:   closuresignaler.New(),
-		previousQueueSize: map[kernel.GetInternalQueueSizer]uint64{},
 	}
 	s.AutoBitRateHandler = r
 	return r
@@ -131,7 +134,7 @@ type AutoBitRateHandler[C any] struct {
 	AutoBitRateConfig
 	StreamMux                      *StreamMux[C]
 	closureSignaler                *closuresignaler.ClosureSignaler
-	previousQueueSize              map[kernel.GetInternalQueueSizer]uint64
+	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
 	lastBitRate                    uint64
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
@@ -205,40 +208,47 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	tsDiff := now.Sub(h.lastCheckTS)
 	h.lastCheckTS = now
 
-	wasErrorReadingOutputs := false
-	var totalQueue uint64
+	var haveAnError atomic.Bool
+	var totalQueue atomic.Uint64
 	activeOutputProc, _ := activeOutput.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
+	var wg sync.WaitGroup
 	for _, proc := range getQueueSizers {
-		nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
-		defer cancelFn()
-		queueSize := proc.GetInternalQueueSize(nodeReqCtx)
-		reqErr := nodeReqCtx.Err()
-		if queueSize == nil && reqErr == nil {
-			logger.Warnf(ctx, "unable to get queue size")
-			continue
-		}
-		var nodeTotalQueue uint64
-		if reqErr != nil {
-			if proc == activeOutputProc {
-				logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d", tsDiff, h.lastBitRate/8)
-				nodeTotalQueue = h.previousQueueSize[proc] + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
+			defer cancelFn()
+			queueSize := proc.GetInternalQueueSize(nodeReqCtx)
+			reqErr := nodeReqCtx.Err()
+			if queueSize == nil && reqErr == nil {
+				logger.Warnf(ctx, "unable to get queue size")
+				return
+			}
+			var nodeTotalQueue uint64
+			if reqErr != nil {
+				previousQueueSize, _ := h.previousQueueSize.Load(proc)
+				if proc == activeOutputProc {
+					logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d", tsDiff, h.lastBitRate/8)
+					nodeTotalQueue = previousQueueSize + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
+				} else {
+					logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
+					nodeTotalQueue = previousQueueSize
+				}
+				haveAnError.Store(true)
 			} else {
-				logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
-				nodeTotalQueue = h.previousQueueSize[proc]
+				logger.Tracef(ctx, "node queue size details: %+v", queueSize)
+				for _, q := range queueSize {
+					nodeTotalQueue += q
+				}
 			}
-			wasErrorReadingOutputs = true
-		} else {
-			logger.Tracef(ctx, "node queue size details: %+v", queueSize)
-			for _, q := range queueSize {
-				nodeTotalQueue += q
-			}
-		}
-		h.previousQueueSize[proc] = nodeTotalQueue
-		logger.Tracef(ctx, "nodeTotalQueue: %d", nodeTotalQueue)
-		totalQueue += nodeTotalQueue
+			h.previousQueueSize.Store(proc, nodeTotalQueue)
+			logger.Tracef(ctx, "nodeTotalQueue: %d", nodeTotalQueue)
+			totalQueue.Add(nodeTotalQueue)
+		})
 	}
-	logger.Tracef(ctx, "total queue size: %d", totalQueue)
-	if !wasErrorReadingOutputs {
+	wg.Wait()
+	logger.Tracef(ctx, "total queue size: %d", totalQueue.Load())
+	if !haveAnError.Load() {
 		h.lastBitRate = h.StreamMux.CurrentOutputBitRate.Load()
 	}
 
@@ -272,14 +282,14 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		curReqBitRate,
 		h.StreamMux.CurrentInputBitRate.Load(),
 		h.StreamMux.CurrentOutputBitRate.Load(),
-		totalQueue,
+		totalQueue.Load(),
 		&h.AutoBitRateConfig,
 	)
 	if newBitRate == 0 {
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curReqBitRate, totalQueue)
+	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", newBitRate, curReqBitRate, totalQueue.Load())
 
 	if newBitRate == curReqBitRate {
 		logger.Tracef(ctx, "bitrate remains unchanged: %d", curReqBitRate)
