@@ -68,6 +68,12 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 	}
 }
 
+type AutoBitrateCalculatorThresholds = types.AutoBitrateCalculatorThresholds
+
+func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
+	return types.DefaultAutoBitrateCalculatorThresholds()
+}
+
 func DefaultAutoBitrateConfig(
 	codecID astiav.CodecID,
 ) AutoBitRateConfig {
@@ -344,7 +350,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	err := h.StreamMux.SetResolution(ctx, newRes.Resolution)
 	switch {
 	case err == nil:
-		logger.Infof(ctx, "changed resolution from %v to %v", *res, newRes.Resolution)
+		logger.Infof(ctx, "changed resolution from %v to %v (bitrate: %d)", *res, newRes.Resolution, bitrate)
 		return nil
 	case errors.As(err, &ErrNotImplemented{}):
 		logger.Debugf(ctx, "resolution change is not implemented: %v", err)

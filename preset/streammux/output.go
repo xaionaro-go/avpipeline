@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
@@ -11,6 +12,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/frame"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -24,12 +27,15 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
+	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/xcontext"
 	"github.com/xaionaro-go/xsync"
 )
 
 const (
 	outputReuseDecoderResources = false
+	outputDebug                 = true
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -37,18 +43,23 @@ type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKer
 type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 type OutputKey = types.OutputKey
 
+type FPSFractionGetter interface {
+	GetFPSFraction(ctx context.Context) (num, den uint32)
+}
+
 type Output[C any] struct {
-	ID               int
-	InputFilter      *NodeBarrier[C]
-	InputThrottler   *packetcondition.VideoAverageBitrateLower
-	InputFixer       *autofix.AutoFixer
-	RecoderNode      *NodeRecoder[C]
-	OutputThrottler  *packetcondition.VideoAverageBitrateLower
-	MapIndices       *NodeMapStreamIndexes[C]
-	OutputFixer      *autofix.AutoFixer
-	OutputSyncer     *NodeBarrier[C]
-	OutputNode       node.Abstract
-	OutputNodeConfig OutputConfig
+	ID                int
+	InputFilter       *NodeBarrier[C]
+	InputThrottler    *packetcondition.VideoAverageBitrateLower
+	InputFixer        *autofix.AutoFixer
+	RecoderNode       *NodeRecoder[C]
+	OutputThrottler   *packetcondition.VideoAverageBitrateLower
+	MapIndices        *NodeMapStreamIndexes[C]
+	OutputFixer       *autofix.AutoFixer
+	OutputSyncer      *NodeBarrier[C]
+	OutputNode        node.Abstract
+	OutputNodeConfig  OutputConfig
+	FPSFractionGetter FPSFractionGetter
 }
 
 type OutputConfig struct {
@@ -115,6 +126,7 @@ func newOutput[C any](
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
 	streamIndexAssigner kernel.StreamIndexAssigner,
+	FPSFractionGetter FPSFractionGetter,
 ) (_ret *Output[C], _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
@@ -186,13 +198,15 @@ func newOutput[C any](
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
 			outputSyncer,
 		)),
-		OutputNode:       outputNode,
-		OutputNodeConfig: outputConfig,
+		OutputNode:        outputNode,
+		OutputNodeConfig:  outputConfig,
+		FPSFractionGetter: FPSFractionGetter,
 	}
 
 	if outputReuseDecoderResources {
 		o.initReuseDecoderResources(ctx)
 	}
+	o.initFPSFractioner(ctx)
 
 	// wiring
 
@@ -235,6 +249,39 @@ func logIfError(ctx context.Context, err error) {
 	logger.Errorf(ctx, "got an error: %v", err)
 }
 
+func (o *Output[C]) initFPSFractioner(ctx context.Context) {
+	logger.Tracef(ctx, "initFPSFractioner()")
+	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
+
+	var frameCount atomic.Uint32
+	o.RecoderNode.Processor.Kernel.Filter = framecondition.Function(func(
+		ctx context.Context,
+		i frame.Input,
+	) (_ret bool) {
+		if i.GetMediaType() != astiav.MediaTypeVideo {
+			return true
+		}
+
+		num, den := o.FPSFractionGetter.GetFPSFraction(ctx)
+		if outputDebug {
+			logger.Tracef(ctx, "frame %p from stream %d: pts:%d, dur:%d: %v/%v", i.Frame, i.StreamIndex, i.Frame.Pts(), i.Frame.Duration(), num, den)
+			defer func() {
+				logger.Tracef(ctx, "/frame %p from stream %d: pts:%d, dur:%d: %v/%v: %v", i.Frame, i.StreamIndex, i.Frame.Pts(), i.Frame.Duration(), num, den, _ret)
+			}()
+		}
+		if den == 0 {
+			return true
+		}
+		i.Frame.SetDuration(i.Frame.Duration() * int64(den) / int64(num))
+		frameID := frameCount.Add(1)
+		shouldPass := frameID%den < num
+		if outputDebug {
+			logger.Tracef(ctx, "shouldPass: %t: frameID=%d, num=%d, den=%d", shouldPass, frameID, num, den)
+		}
+		return shouldPass
+	})
+}
+
 func (o *Output[C]) initReuseDecoderResources(
 	ctx context.Context,
 ) {
@@ -272,7 +319,7 @@ func (o *Output[C]) initReuseDecoderResources(
 			setFinalizerFree(ctx, input.Options)
 		}
 
-		if input.HardwareDeviceType == astiav.HardwareDeviceTypeMediaCodec {
+		if input.HardwareDeviceType == globaltypes.HardwareDeviceTypeMediaCodec {
 			logIfError(ctx, input.Options.Set("pixel_format", "mediacodec", 0))
 			logIfError(ctx, input.Options.Set("create_window", "1", 0))
 		}
@@ -416,7 +463,7 @@ func (o *Output[C]) reconfigureDecoder(
 	err := xsync.DoR1(ctx, &decoder.Locker, func() error {
 		if len(decoder.Decoders) == 0 {
 			logger.Debugf(ctx, "the decoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
-			decoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.GetDecoderHardwareDeviceType())
+			decoderFactory.HardwareDeviceType = videoCfg.GetDecoderHardwareDeviceType()
 			decoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.GetDecoderHardwareDeviceName())
 			return nil
 		}
@@ -459,10 +506,10 @@ func (o *Output[C]) reconfigureEncoder(
 
 			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
 			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
-			encoderFactory.AudioOptions = convertCustomOptions(audioCfg.CustomOptions).ToAstiav()
-			encoderFactory.VideoOptions = convertCustomOptions(videoCfg.CustomOptions).ToAstiav()
+			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(convertCustomOptions(audioCfg.CustomOptions))
+			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(convertCustomOptions(videoCfg.CustomOptions))
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
-			encoderFactory.HardwareDeviceType = astiav.HardwareDeviceType(videoCfg.HardwareDeviceType)
+			encoderFactory.HardwareDeviceType = types.HardwareDeviceType(videoCfg.HardwareDeviceType)
 			if videoCfg.AverageBitRate != 0 {
 				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}

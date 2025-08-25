@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -44,6 +45,7 @@ type StreamMux[C any] struct {
 	// aux
 	InputNodeAsPacketSource packet.Source
 	AutoBitRateHandler      *AutoBitRateHandler[C]
+	FPSFractionNumDen       atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Statistics
@@ -284,6 +286,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		s.OutputSwitch.Output(int32(outputID)),
 		s.OutputSyncer.Output(int32(outputID)),
 		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
+		s,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output: %w", err)
@@ -531,4 +534,16 @@ func (s *StreamMux[C]) SetResolution(
 	videoCfg.Resolution = res
 	cfg.VideoTrackConfigs[0] = videoCfg
 	return s.SetRecoderConfig(ctx, cfg)
+}
+
+func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {
+	logger.Debugf(ctx, "SetFPSFraction: %d/%d", num, den)
+	s.FPSFractionNumDen.Store((uint64(num) << 32) | uint64(den))
+}
+
+func (s *StreamMux[C]) GetFPSFraction(ctx context.Context) (num, den uint32) {
+	numDen := s.FPSFractionNumDen.Load()
+	num = uint32(numDen >> 32)
+	den = uint32(numDen & 0xFFFFFFFF)
+	return
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/types"
+	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -87,7 +88,7 @@ func main() {
 			AudioCodec:         codec.NameCopy,
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDevName,
-			VideoOptions:       types.DictionaryItems{{Key: "bf", Value: "0"}}.ToAstiav(),
+			VideoOptions:       xastiav.DictionaryItemsToAstiav(types.DictionaryItems{{Key: "bf", Value: "0"}}),
 		}),
 		nil,
 	)

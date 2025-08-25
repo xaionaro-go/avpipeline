@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/codec/types"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
+	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 )
 
-type Name types.Name
+type Name codectypes.Name
 
 func (n Name) Codec(
 	ctx context.Context,
@@ -53,7 +54,7 @@ func (n Name) hwName(
 		logger.Tracef(ctx, "/hwName(ctx, %t, '%s', %v): %v", isEncoder, n, hwDeviceType, _ret)
 	}()
 	switch hwDeviceType {
-	case astiav.HardwareDeviceTypeCUDA:
+	case globaltypes.HardwareDeviceTypeCUDA:
 		if isEncoder {
 			return n + "_nvenc"
 		} else {

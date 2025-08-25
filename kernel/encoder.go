@@ -314,7 +314,7 @@ func (e *Encoder[EF]) SendInputPacket(
 func fixCodecParameters(
 	ctx context.Context,
 	orig *astiav.CodecParameters,
-	averageFPS astiav.Rational,
+	_ astiav.Rational,
 ) *astiav.CodecParameters {
 	cp := astiav.AllocCodecParameters()
 	setFinalizerFree(ctx, cp)
@@ -332,7 +332,7 @@ func (e *Encoder[EF]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	_ chan<- frame.Output,
 ) (_err error) {
 	ctx = belt.WithField(ctx, "mode", "packet")
 

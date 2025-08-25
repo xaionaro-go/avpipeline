@@ -26,6 +26,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
+	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -239,8 +240,8 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 				AudioCodec:            codec.NameCopy,
 				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
 				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-				VideoOptions:          convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions).ToAstiav(),
-				AudioOptions:          convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions).ToAstiav(),
+				VideoOptions:          xastiav.DictionaryItemsToAstiav(convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions)),
+				AudioOptions:          xastiav.DictionaryItemsToAstiav(convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions)),
 				VideoQuality:          videoQuality,
 				VideoResolution:       videoResolution,
 				VideoAverageFrameRate: astiav.NewRational(int(cfg.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),

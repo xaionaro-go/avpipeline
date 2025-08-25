@@ -10,6 +10,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -29,6 +30,7 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
 	*closuresignaler.ClosureSignaler
+	Filter framecondition.Condition
 
 	locker                  xsync.Mutex
 	started                 bool
@@ -242,7 +244,12 @@ func (r *Recoder[DF, EF]) process(
 					return
 				}
 
-				err := r.Encoder.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+				inputFrame := frame.Input(f)
+				if r.Filter != nil && !r.Filter.Match(ctx, inputFrame) {
+					logger.Tracef(ctx, "frame filtered out")
+					return
+				}
+				err := r.Encoder.SendInputFrame(ctx, inputFrame, outputPacketsCh, outputFramesCh)
 				if err != nil {
 					encoderError = err
 				}
@@ -282,6 +289,10 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 		r.activeStreamsCount++
 		r.activeStreamsMap[streamIdx] = struct{}{}
 	})
+	if r.Filter != nil && !r.Filter.Match(ctx, input) {
+		logger.Tracef(ctx, "frame filtered out")
+		return nil
+	}
 	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 }
 

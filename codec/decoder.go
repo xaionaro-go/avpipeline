@@ -18,7 +18,7 @@ type Decoder struct {
 type DecoderInput struct {
 	CodecName          Name
 	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType astiav.HardwareDeviceType
+	HardwareDeviceType HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	Options            *astiav.Dictionary
 	Flags              int

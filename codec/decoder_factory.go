@@ -25,7 +25,7 @@ type NaiveDecoderFactory struct {
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
 
 type NaiveDecoderFactoryParams struct {
-	HardwareDeviceType astiav.HardwareDeviceType
+	HardwareDeviceType HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	VideoOptions       *astiav.Dictionary
 	AudioOptions       *astiav.Dictionary

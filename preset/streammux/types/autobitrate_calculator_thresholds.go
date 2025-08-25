@@ -1,4 +1,4 @@
-package streammux
+package types
 
 import (
 	"context"

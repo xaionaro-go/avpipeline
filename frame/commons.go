@@ -15,9 +15,9 @@ type StreamInfo struct {
 	StreamIndex      int
 	StreamsCount     int
 	StreamDuration   int64
-	AvgFrameRate     astiav.Rational // TODO: reuse the avg_frame_rate from the frame
-	TimeBase         astiav.Rational // TODO: reuse the time_base from the frame
-	Duration         int64           // TODO: reuse duration from the frame
+	AvgFrameRate     astiav.Rational
+	TimeBase         astiav.Rational
+	Duration         int64
 	PipelineSideData types.PipelineSideData
 }
 

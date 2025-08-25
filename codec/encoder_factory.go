@@ -35,7 +35,7 @@ type NaiveEncoderFactory struct {
 type NaiveEncoderFactoryParams struct {
 	VideoCodec            Name
 	AudioCodec            Name
-	HardwareDeviceType    astiav.HardwareDeviceType
+	HardwareDeviceType    HardwareDeviceType
 	HardwareDeviceName    HardwareDeviceName
 	VideoOptions          *astiav.Dictionary
 	AudioOptions          *astiav.Dictionary

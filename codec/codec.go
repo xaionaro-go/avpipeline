@@ -13,6 +13,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/logger"
+	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/unsafetools"
 	"github.com/xaionaro-go/xsync"
 )
@@ -242,7 +243,7 @@ func newCodec(
 
 	isHW := false
 	c.codec = nil
-	if codecName != "" && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+	if codecName != "" && hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
 		hwCodec := codecName.hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
 		if c.codec != nil {
 			isHW = true
@@ -263,7 +264,7 @@ func newCodec(
 		}
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
-	if !isHW && hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+	if !isHW && hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
 		hwCodec := Name(c.codec.Name()).hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
 		if hwCodec != nil {
 			isHW = true
@@ -350,7 +351,7 @@ func newCodec(
 		}
 	}
 
-	if hardwareDeviceType != astiav.HardwareDeviceTypeNone {
+	if hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
 		if codecParameters.MediaType() != astiav.MediaTypeVideo {
 			return nil, fmt.Errorf("currently hardware encoding/decoding is supported only for video streams")
 		}
@@ -461,7 +462,7 @@ func (e ErrNotImplemented) Error() string {
 
 func (c *Codec) initHardware(
 	ctx context.Context,
-	hardwareDeviceType astiav.HardwareDeviceType,
+	hardwareDeviceType globaltypes.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
 	options *astiav.Dictionary,
 	flags int,
@@ -498,13 +499,13 @@ func (c *Codec) initHardware(
 
 func (c *Codec) initHardwarePixelFormat(
 	ctx context.Context,
-	hardwareDeviceType astiav.HardwareDeviceType,
+	hardwareDeviceType HardwareDeviceType,
 ) (_err error) {
 	logger.Tracef(ctx, "initHardwarePixelFormat")
 	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v", _err) }()
 	for _, hwCfgs := range c.codec.HardwareConfigs() {
 		logger.Tracef(ctx, "hw config: %v %v %v", hwCfgs.PixelFormat(), hwCfgs.MethodFlags(), hwCfgs.HardwareDeviceType())
-		if hwCfgs.HardwareDeviceType() != hardwareDeviceType {
+		if hwCfgs.HardwareDeviceType() != astiav.HardwareDeviceType(hardwareDeviceType) {
 			logger.Tracef(ctx, "skipping this config, since it is for another hardware device type")
 			continue
 		}
@@ -540,7 +541,7 @@ func (c *Codec) initHardwarePixelFormat(
 
 func (c *Codec) initHardwareDeviceContext(
 	ctx context.Context,
-	hardwareDeviceType astiav.HardwareDeviceType,
+	hardwareDeviceType HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
 	options *astiav.Dictionary,
 	flags int,
@@ -562,7 +563,7 @@ func (c *Codec) initHardwareDeviceContext(
 
 	var err error
 	c.hardwareDeviceContext, err = astiav.CreateHardwareDeviceContext(
-		hardwareDeviceType,
+		astiav.HardwareDeviceType(hardwareDeviceType),
 		string(hardwareDeviceName),
 		options,
 		flags,

@@ -9,7 +9,7 @@ import (
 type CodecParams struct {
 	CodecName          Name
 	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType astiav.HardwareDeviceType
+	HardwareDeviceType HardwareDeviceType
 	HardwareDeviceName HardwareDeviceName
 	TimeBase           astiav.Rational
 	Options            *astiav.Dictionary
