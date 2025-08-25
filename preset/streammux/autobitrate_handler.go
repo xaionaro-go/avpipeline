@@ -348,7 +348,20 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		return nil
 	}
 
-	if err := h.changeResolutionIfNeeded(ctx, newBitRate); err != nil {
+	maxBitRate := h.MaxBitRate
+	if inputBitRate > h.MinBitRate*2 && float64(inputBitRate)*1.5 < float64(maxBitRate) {
+		maxBitRate = uint64(1.5 * float64(inputBitRate))
+	}
+
+	clampedBitRate := newBitRate
+	switch {
+	case newBitRate < h.MinBitRate:
+		clampedBitRate = h.MinBitRate
+	case newBitRate > maxBitRate:
+		clampedBitRate = maxBitRate
+	}
+
+	if err := h.changeResolutionIfNeeded(ctx, clampedBitRate); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
@@ -366,19 +379,6 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	resCfg := h.AutoBitRateConfig.ResolutionsAndBitRates.Find(*res)
 	if resCfg == nil {
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
-	}
-
-	maxBitRate := h.MaxBitRate
-	if inputBitRate > h.MinBitRate*2 && float64(inputBitRate)*1.5 < float64(maxBitRate) {
-		maxBitRate = uint64(1.5 * float64(inputBitRate))
-	}
-
-	clampedBitRate := newBitRate
-	switch {
-	case newBitRate < h.MinBitRate:
-		clampedBitRate = h.MinBitRate
-	case newBitRate > maxBitRate:
-		clampedBitRate = maxBitRate
 	}
 
 	if clampedBitRate == oldBitRate {
