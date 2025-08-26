@@ -45,7 +45,7 @@ const (
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
 	outputDebug                         = true
-	revert0c55f85                       = true
+	revert0c55f85                       = false
 )
 
 type OutputConfigWaitForOutputStreams struct {
