@@ -38,6 +38,7 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 
 	queueDerivative := d.DerivativeSmoothed.Update(req.QueueSizeDerivative)
 	if !d.DerivativeSmoothed.Valid() {
+		logger.Tracef(ctx, "CalculateBitRate: not enough data for derivative smoothing")
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
 
@@ -47,6 +48,9 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 	derivativeGap := desiredDerivative - queueDerivative
 	bitRateDiff := uint64(derivativeGap * 8)
 	newBitRate := max(int64(req.CurrentBitrateSetting)+int64(bitRateDiff), 1)
+	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, queueDerivative=%.2f, desiredDerivative=%.2f, derivativeGap=%.2f, bitRateDiff=%d, newBitRate=%d",
+		queueDuration, gap, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate,
+	)
 	return BitRateChangeRequest{
 		BitRate:    uint64(newBitRate),
 		IsCritical: newBitRate < int64(req.ActualOutputBitrate)/2 || newBitRate < int64(req.InputBitrate)/2,
