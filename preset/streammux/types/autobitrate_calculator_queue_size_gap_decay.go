@@ -46,8 +46,8 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 	gap := queueDuration - d.QueueOptimal
 	desiredDerivative := -gap.Seconds() / d.Decay.Seconds()
 	derivativeGap := desiredDerivative - queueDerivative
-	bitRateDiff := uint64(derivativeGap * 8)
-	newBitRate := max(int64(req.CurrentBitrateSetting)+int64(bitRateDiff), 1)
+	bitRateDiff := int64(derivativeGap * 8)
+	newBitRate := max(int64(req.CurrentBitrateSetting)+bitRateDiff, 1)
 	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, queueDerivative=%.2f, desiredDerivative=%.2f, derivativeGap=%.2f, bitRateDiff=%d, newBitRate=%d",
 		queueDuration, gap, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate,
 	)
