@@ -50,11 +50,12 @@ var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
 type streamEncoder struct {
 	codec.Encoder
-	Resampler       *resampler.Resampler
-	ResampledFrames []*astiav.Frame
-	Scaler          scaler.Scaler
-	ScaledFrame     *astiav.Frame
-	LastInitTS      time.Time
+	Resampler                  *resampler.Resampler
+	ResampledFrames            []*astiav.Frame
+	Scaler                     scaler.Scaler
+	ScaledFrame                *astiav.Frame
+	FramesWrittenWithoutOutput int
+	LastInitTS                 time.Time
 }
 
 func NewEncoder[EF codec.EncoderFactory](
@@ -502,6 +503,19 @@ func (e *Encoder[EF]) sendInputFrame(
 	}
 
 	packetCount := 0
+	defer func() {
+		if _err == nil {
+			return
+		}
+		if packetCount == 0 {
+			encoder.FramesWrittenWithoutOutput++
+		} else {
+			encoder.FramesWrittenWithoutOutput = 0
+		}
+		if encoder.FramesWrittenWithoutOutput > 100 {
+			_err = fmt.Errorf("encoder %s produced no output packets for %d frames, assuming it is stuck", encoder, encoder.FramesWrittenWithoutOutput)
+		}
+	}()
 	for {
 		pkt := packet.Pool.Get()
 		err := encoder.ReceivePacket(ctx, pkt)
