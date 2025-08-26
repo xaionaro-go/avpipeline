@@ -13,16 +13,16 @@ const (
 )
 
 type CalculateBitRateRequest struct {
-	CurrentBitrateSetting uint64
-	InputBitrate          uint64
-	ActualOutputBitrate   uint64
-	QueueSize             uint64
-	QueueSizeDerivative   float64
+	CurrentBitrateSetting Ubps
+	InputBitrate          Ubps
+	ActualOutputBitrate   Ubps
+	QueueSize             UB
+	QueueSizeDerivative   UBps
 	Config                *AutoBitRateConfig
 }
 
 type BitRateChangeRequest struct {
-	BitRate    uint64
+	BitRate    Ubps
 	IsCritical bool
 }
 

@@ -5,5 +5,8 @@
             "-I./protobuf/ -I./kernel/server/grpc"
         ]
     },
-    "go.showWelcome": false
+    "go.showWelcome": false,
+    "cSpell.words": [
+        "Tobps"
+    ]
 }

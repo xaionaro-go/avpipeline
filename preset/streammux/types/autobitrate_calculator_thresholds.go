@@ -70,5 +70,5 @@ func (d *AutoBitrateCalculatorThresholds) CalculateBitRate(
 	if k == 1 {
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting}
 	}
-	return BitRateChangeRequest{BitRate: uint64(float64(req.CurrentBitrateSetting) * k), IsCritical: isCritical}
+	return BitRateChangeRequest{BitRate: Ubps(float64(req.CurrentBitrateSetting) * k), IsCritical: isCritical}
 }

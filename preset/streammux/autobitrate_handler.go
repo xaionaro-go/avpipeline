@@ -222,8 +222,8 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			if reqErr != nil {
 				previousQueueSize, _ := h.previousQueueSize.Load(proc)
 				if proc == activeOutputProc {
-					logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d", tsDiff, h.lastBitRate/8)
 					nodeTotalQueue = previousQueueSize + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
+					logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d (and now is: %d)", tsDiff, h.lastBitRate/8, nodeTotalQueue)
 				} else {
 					logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
 					nodeTotalQueue = previousQueueSize
@@ -277,11 +277,11 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
 		CalculateBitRateRequest{
-			CurrentBitrateSetting: curReqBitRate,
-			InputBitrate:          h.StreamMux.CurrentInputBitRate.Load(),
-			ActualOutputBitrate:   actualOutputBitrate,
-			QueueSize:             totalQueue.Load(),
-			QueueSizeDerivative:   totalQueueSizeDerivative,
+			CurrentBitrateSetting: types.Ubps(curReqBitRate),
+			InputBitrate:          types.Ubps(h.StreamMux.CurrentInputBitRate.Load()),
+			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
+			QueueSize:             types.UB(totalQueue.Load()),
+			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
 			Config:                &h.AutoBitRateConfig,
 		},
 	)
@@ -289,9 +289,9 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %d (current: %d); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
+	logger.Debugf(ctx, "calculated new bitrate: %s (current: %d); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
 
-	if bitRateRequest.BitRate == curReqBitRate {
+	if uint64(bitRateRequest.BitRate) == curReqBitRate {
 		logger.Tracef(ctx, "bitrate remains unchanged: %d", curReqBitRate)
 		return
 	}
@@ -346,18 +346,18 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	req BitRateChangeRequest,
 	actualOutputBitrate uint64,
 ) (_err error) {
-	logger.Tracef(ctx, "setBitrate: %d->%d (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
+	logger.Tracef(ctx, "setBitrate: %d->%s (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
 	defer func() {
-		logger.Tracef(ctx, "/setBitrate: %d->%d (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
+		logger.Tracef(ctx, "/setBitrate: %d->%s (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
 	}()
 
 	if h.currentResolutionChangeRequest != nil {
 		switch {
-		case req.BitRate > actualOutputBitrate && !h.currentResolutionChangeRequest.IsUpgrade:
+		case uint64(req.BitRate) > actualOutputBitrate && !h.currentResolutionChangeRequest.IsUpgrade:
 			// we are increasing bitrate while a downgrade is in progress; cancel the downgrade
 			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate")
 			h.currentResolutionChangeRequest = nil
-		case req.BitRate < actualOutputBitrate && h.currentResolutionChangeRequest.IsUpgrade:
+		case uint64(req.BitRate) < actualOutputBitrate && h.currentResolutionChangeRequest.IsUpgrade:
 			// we are decreasing bitrate while an upgrade is in progress; cancel the upgrade
 			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate")
 			h.currentResolutionChangeRequest = nil
@@ -368,7 +368,7 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
 		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, req.BitRate, inputBitRate)
 		if h.isBypassEnabled(ctx) {
-			if req.BitRate < inputBitRate {
+			if uint64(req.BitRate) < inputBitRate {
 				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
@@ -393,11 +393,11 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		maxBitRate = uint64(1.5 * float64(inputBitRate))
 	}
 
-	clampedBitRate := req.BitRate
+	clampedBitRate := uint64(req.BitRate)
 	switch {
-	case req.BitRate < h.MinBitRate:
+	case uint64(req.BitRate) < h.MinBitRate:
 		clampedBitRate = h.MinBitRate
-	case req.BitRate > maxBitRate:
+	case uint64(req.BitRate) > maxBitRate:
 		clampedBitRate = maxBitRate
 	}
 

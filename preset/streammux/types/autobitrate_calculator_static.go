@@ -20,5 +20,5 @@ func (d AutoBitrateCalculatorStatic) CalculateBitRate(
 		logger.Tracef(ctx, "/CalculateBitRate: %#+v: %v", req, _ret)
 	}()
 
-	return BitRateChangeRequest{BitRate: uint64(d), IsCritical: true}
+	return BitRateChangeRequest{BitRate: Ubps(d), IsCritical: true}
 }

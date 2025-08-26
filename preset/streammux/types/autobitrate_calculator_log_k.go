@@ -51,7 +51,7 @@ func (d *AutoBitrateCalculatorLogK) CalculateBitRate(
 	newBitRate := max(int64(float64(req.CurrentBitrateSetting)+diff), 1)
 	logger.Tracef(ctx, "CalculateBitRate: k=%f kSmoothed=%f diff=%f newBitRate=%d", k, kSmoothed, diff, newBitRate)
 	return BitRateChangeRequest{
-		BitRate:    uint64(newBitRate),
+		BitRate:    Ubps(newBitRate),
 		IsCritical: newBitRate < int64(req.ActualOutputBitrate)/2 || newBitRate < int64(req.InputBitrate)/2,
 	}
 }

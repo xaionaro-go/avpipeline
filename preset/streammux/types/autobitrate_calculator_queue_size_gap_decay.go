@@ -14,7 +14,7 @@ import (
 type AutoBitrateCalculatorQueueSizeGapDecay struct {
 	QueueOptimal       time.Duration
 	Decay              time.Duration
-	DerivativeSmoothed MovingAverage[float64]
+	DerivativeSmoothed MovingAverage[UBps]
 }
 
 var _ AutoBitRateCalculator = (*AutoBitrateCalculatorQueueSizeGapDecay)(nil)
@@ -23,7 +23,7 @@ func DefaultAutoBitrateCalculatorQueueSizeGapDecay() *AutoBitrateCalculatorQueue
 	return &AutoBitrateCalculatorQueueSizeGapDecay{
 		QueueOptimal:       time.Second,
 		Decay:              time.Second,
-		DerivativeSmoothed: indicator.NewMAMA[float64](20, 0.3, 0.05),
+		DerivativeSmoothed: indicator.NewMAMA[UBps](20, 0.3, 0.05),
 	}
 }
 
@@ -42,17 +42,24 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
 
-	queueDuration := time.Duration(float64(req.QueueSize) * 8 / float64(req.CurrentBitrateSetting) * float64(time.Second))
-	gap := queueDuration - d.QueueOptimal
-	desiredDerivative := -gap.Seconds() / d.Decay.Seconds()
-	derivativeGap := desiredDerivative - queueDerivative
-	bitRateDiff := int64(derivativeGap * 8)
-	newBitRate := max(int64(req.CurrentBitrateSetting)+bitRateDiff, 1)
-	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, queueDerivative=%.2f, desiredDerivative=%.2f, derivativeGap=%.2f, bitRateDiff=%d, newBitRate=%d",
-		queueDuration, gap, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate,
+	queueDuration := US(time.Duration(
+		float64(req.QueueSize) * 8 /
+			float64(req.ActualOutputBitrate) *
+			float64(time.Second),
+	)) // s
+
+	gap := queueDuration - US(d.QueueOptimal)            // s
+	gapB := req.ActualOutputBitrate.Tob(gap).ToB()       // B
+	desiredDerivative := -gapB.ToBps(US(d.Decay))        // B/s
+	derivativeGap := desiredDerivative - queueDerivative // B/s
+	bitRateDiff := derivativeGap.Tobps()                 // b/s
+	newBitRate := max(Ubps(req.CurrentBitrateSetting)+bitRateDiff, 1)
+
+	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, gapB=%s, queueDerivative=%s, desiredDerivative=%s, derivativeGap=%s, bitRateDiff=%s, newBitRate=%s, currentBitRateSetting=%s, actualOutputBitrate=%s",
+		queueDuration, gap, gapB, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate, Ubps(req.CurrentBitrateSetting), Ubps(req.ActualOutputBitrate),
 	)
 	return BitRateChangeRequest{
-		BitRate:    uint64(newBitRate),
-		IsCritical: newBitRate < int64(req.ActualOutputBitrate)/2 || newBitRate < int64(req.InputBitrate)/2,
+		BitRate:    Ubps(newBitRate),
+		IsCritical: newBitRate < req.ActualOutputBitrate/2 || newBitRate < req.InputBitrate/2,
 	}
 }
