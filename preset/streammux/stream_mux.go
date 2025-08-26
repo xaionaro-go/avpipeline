@@ -2,6 +2,7 @@ package streammux
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -342,6 +343,13 @@ func (s *StreamMux[C]) enableRecodingBypassLocked(
 	}
 	s.OutputIDBeforeBypass = output.ID
 
+	for idx := range s.RecodingConfig.VideoTrackConfigs {
+		s.RecodingConfig.VideoTrackConfigs[idx].CodecName = codectypes.Name(codec.NameCopy)
+	}
+	for idx := range s.RecodingConfig.AudioTrackConfigs {
+		s.RecodingConfig.AudioTrackConfigs[idx].CodecName = codectypes.Name(codec.NameCopy)
+	}
+
 	return nil
 }
 
@@ -363,7 +371,8 @@ func (s *StreamMux[C]) GetRecoderConfig(
 func (s *StreamMux[C]) getRecoderConfigLocked(
 	ctx context.Context,
 ) (_ret types.RecoderConfig) {
-	return s.RecodingConfig
+	assertNoError(json.Unmarshal(must(json.Marshal(s.RecodingConfig)), &_ret)) // deep copy of a poor man
+	return
 }
 
 func (s *StreamMux[C]) SetRecoderConfig(
@@ -379,6 +388,9 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
+	logger.Tracef(ctx, "setRecoderConfigLocked: %#+v", cfg)
+	defer func() { logger.Tracef(ctx, "/setRecoderConfigLocked: %#+v: %v", cfg, _err) }()
+
 	outputKey := OutputKeyFromRecoderConfig(ctx, &cfg)
 	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
 		return fmt.Errorf("output resolution is not set")
@@ -600,18 +612,26 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		return ErrNotImplemented{Err: fmt.Errorf("when scaling from 1080p to let's say 480p, we get a distorted image when using mediacodec, to be investigated; until then this is forbidden")}
 	}
 
+	if videoCfg.Resolution == res && videoCfg.CodecName == videoCodec && audioCfg.CodecName == audioCodec {
+		logger.Tracef(ctx, "the config is already set to %v %s %s", res, videoCodec, audioCodec)
+		encoder := s.getVideoEncoderLocked(ctx)
+		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoder) {
+			logger.Errorf(ctx, "the video codec is set to %s, but the encoder is %s", videoCodec, encoder)
+		} else {
+			videoCfg.AverageBitRate = bitrate
+			cfg.VideoTrackConfigs[0] = videoCfg
+			return nil
+		}
+	}
+
 	audioCfg.CodecName = audioCodec
 	cfg.AudioTrackConfigs[0] = audioCfg
 
-	curRes := videoCfg.Resolution
-	if curRes == res {
-		logger.Tracef(ctx, "the resolution is already set to %s", res)
-		return nil
-	}
 	videoCfg.Resolution = res
 	videoCfg.AverageBitRate = bitrate
 	videoCfg.CodecName = videoCodec
 	cfg.VideoTrackConfigs[0] = videoCfg
+
 	return s.setRecoderConfigLocked(ctx, cfg)
 }
 
@@ -717,4 +737,24 @@ func (s *StreamMux[C]) getBestNotBypassOutputLocked(
 		return s.OutputsMap[outputKey]
 	}
 	return nil
+}
+
+func (s *StreamMux[C]) GetVideoEncoder(
+	ctx context.Context,
+) codec.Encoder {
+	return xsync.DoA1R1(ctx, &s.Locker, s.getVideoEncoderLocked, ctx)
+}
+
+func (s *StreamMux[C]) getVideoEncoderLocked(
+	ctx context.Context,
+) codec.Encoder {
+	o := s.getActiveOutputLocked(ctx)
+	if o == nil {
+		return nil
+	}
+	encoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
+	if len(encoders) != 1 {
+		return nil
+	}
+	return encoders[0]
 }
