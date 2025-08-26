@@ -143,6 +143,7 @@ type AutoBitRateConfig struct {
 	MaxBitRate             uint64
 	MinBitRate             uint64
 
+	BitRateIncreaseSlowdown             time.Duration
 	ResolutionSlowdownDurationUpgrade   time.Duration
 	ResolutionSlowdownDurationDowngrade time.Duration
 }

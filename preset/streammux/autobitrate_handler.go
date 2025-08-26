@@ -110,6 +110,7 @@ func DefaultAutoBitrateConfig(
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
 
+		BitRateIncreaseSlowdown:             time.Second * 1,
 		ResolutionSlowdownDurationUpgrade:   time.Minute,
 		ResolutionSlowdownDurationDowngrade: time.Second * 10,
 	}
@@ -146,6 +147,7 @@ type AutoBitRateHandler[C any] struct {
 	lastTotalQueueSize             uint64
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
+	lastBitRateDecreaseTS          time.Time
 }
 
 func (h *AutoBitRateHandler[C]) String() string {
@@ -350,6 +352,15 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	defer func() {
 		logger.Tracef(ctx, "/setBitrate: %d->%s (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
 	}()
+
+	now := time.Now()
+	if req.BitRate > types.Ubps(oldBitRate) && now.Sub(h.lastBitRateDecreaseTS) < h.BitRateIncreaseSlowdown {
+		logger.Tracef(ctx, "bitrate increase is slowed down since the last bitrate decrease was at %v (now: %v); skipping the increase")
+		return nil
+	}
+	if req.BitRate < types.Ubps(oldBitRate) {
+		h.lastBitRateDecreaseTS = now
+	}
 
 	if h.currentResolutionChangeRequest != nil {
 		switch {
