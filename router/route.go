@@ -78,9 +78,6 @@ func newRoute[T any](
 		processor.DefaultOptionsRecoder()...,
 	)
 	var opts node.Options
-	/*opts = append(opts,
-		node.OptionCacheHandler(cachehandler.New(cachehandler.CachePolicySinceLastKeyFrame, 30*60*2*10)),
-	)*/
 	logger.Tracef(ctx, "Creating node for route %s with options %v", path, opts)
 	r.Node = node.NewWithCustomData[GoBug63285RouteInterface[T]](
 		processor,

@@ -79,11 +79,13 @@ func (h *CacheHandler) handlePacketSinceLastKeyFrame(
 	}
 
 	if pkt.Flags().Has(astiav.PacketFlagKey) {
+		panic("DO NOT USE ME; for some reason the stream gets corrupted; haven't understood why, yet")
 		for _, p := range h.packetCache {
 			packet.Pool.Put(p.Packet)
 		}
 		h.packetCache = h.packetCache[:0]
-		logger.Tracef(ctx, "keyframe detected, cache cleared")
+		p := pkt.Packet
+		logger.Tracef(ctx, "keyframe detected, cache cleared: %d %v %v %v %v %v %v %v", len(p.Data()), p.Dts(), p.Pts(), p.Duration(), p.Pos(), p.Size(), p.Flags(), p.TimeBase())
 	}
 
 	if len(h.packetCache) >= cap(h.packetCache) {
