@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -179,7 +180,13 @@ func (r *Retry[T]) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return r.retry(ctx, func(k T) error {
+	return r.retry(ctx, func(k T) (_err error) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				_err = fmt.Errorf("panic in SendInputPacket: %v:\n%s", r, debug.Stack())
+			}
+		}()
 		return k.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 	})
 }
@@ -190,7 +197,13 @@ func (r *Retry[T]) SendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return r.retry(ctx, func(k T) error {
+	return r.retry(ctx, func(k T) (_err error) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				_err = fmt.Errorf("panic in SendInputFrame: %v:\n%s", r, debug.Stack())
+			}
+		}()
 		return k.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 	})
 }
