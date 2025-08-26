@@ -628,7 +628,7 @@ func (o *Output) send(
 	}
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
 	logger.Debugf(ctx, "isKeyFrame:%t", keyFrame)
-	if !keyFrame {
+	if !keyFrame && len(o.waitingKeyFrames) > 0 {
 		if outputAcceptOnlyKeyFramesUntilStart {
 			logger.Debugf(ctx, "not a key frame; skipping")
 			return nil
@@ -740,12 +740,14 @@ func (o *Output) doWritePacket(
 					outputStream.LastKeyFrameSource = source
 					logger.Debugf(ctx, "received a key frame from a new source: %p:%s", source, outputStream.LastKeyFrameSource)
 				} else {
-					logger.Errorf(
-						ctx,
-						"ignoring a non-keyframe packet received from another source (%p:%s != %p:%s) until we start a group using a key frame from that source",
-						source, source, outputStream.LastKeyFrameSource, outputStream.LastKeyFrameSource,
-					)
-					return nil
+					if outputStream.LastKeyFrameSource != nil {
+						logger.Errorf(
+							ctx,
+							"ignoring a non-keyframe packet received from another source (%p:%s != %p:%s) until we start a group using a key frame from that source",
+							source, source, outputStream.LastKeyFrameSource, outputStream.LastKeyFrameSource,
+						)
+						return nil
+					}
 				}
 			}
 		}

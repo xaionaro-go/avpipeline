@@ -20,26 +20,26 @@ const (
 	EndOfCachePolicy
 )
 
-type CachingHandler struct {
+type CacheHandler struct {
 	Policy         CachePolicy
 	packetCache    []packet.Input
 	locker         xsync.Mutex
 	needsSendingTo xsync.Map[node.Abstract, struct{}]
 }
 
-var _ node.CachingHandler = (*CachingHandler)(nil)
+var _ node.CachingHandler = (*CacheHandler)(nil)
 
 func New(
 	cachePolicy CachePolicy,
 	maxCachedPackets int,
-) *CachingHandler {
-	return &CachingHandler{
+) *CacheHandler {
+	return &CacheHandler{
 		Policy:      cachePolicy,
 		packetCache: make([]packet.Input, 0, maxCachedPackets),
 	}
 }
 
-func (h *CachingHandler) RememberPacketIfNeeded(
+func (h *CacheHandler) RememberPacketIfNeeded(
 	ctx context.Context,
 	pkt packet.Input,
 ) (_err error) {
@@ -64,14 +64,14 @@ func (h *CachingHandler) RememberPacketIfNeeded(
 	})
 }
 
-func (h *CachingHandler) handlePacketSinceLastKeyFrame(
+func (h *CacheHandler) handlePacketSinceLastKeyFrame(
 	ctx context.Context,
 	pkt packet.Input,
 ) (_err error) {
 	mediaType := pkt.GetMediaType()
 	logger.Tracef(ctx, "handlePacketSinceLastKeyFrame: pts:%d mediaType:%s", pkt.Pts(), mediaType)
 	defer func() {
-		logger.Tracef(ctx, "/handlePacketSinceLastKeyFrame: pts:%d mediaType:%s", pkt.Pts(), mediaType, _err)
+		logger.Tracef(ctx, "/handlePacketSinceLastKeyFrame: pts:%d mediaType:%s: %v", pkt.Pts(), mediaType, _err)
 	}()
 
 	if mediaType != astiav.MediaTypeVideo {
@@ -98,14 +98,14 @@ func (h *CachingHandler) handlePacketSinceLastKeyFrame(
 	return nil
 }
 
-func (h *CachingHandler) OnAddPushPacketsTo(
+func (h *CacheHandler) OnAddPushPacketsTo(
 	ctx context.Context,
 	pushTo node.PushPacketsTo,
 ) {
 	logger.Debugf(ctx, "OnAddPushPacketsTo: %s", pushTo.Node)
 	h.needsSendingTo.Store(pushTo.Node, struct{}{})
 }
-func (h *CachingHandler) OnRemovePushPacketsTo(
+func (h *CacheHandler) OnRemovePushPacketsTo(
 	ctx context.Context,
 	pushTo node.PushPacketsTo,
 ) {
@@ -113,7 +113,7 @@ func (h *CachingHandler) OnRemovePushPacketsTo(
 	h.needsSendingTo.Delete(pushTo.Node)
 }
 
-func (h *CachingHandler) GetPendingPackets(
+func (h *CacheHandler) GetPendingPackets(
 	ctx context.Context,
 	pushTo node.PushPacketsTo,
 ) (_ret []packet.Input, _err error) {
@@ -138,7 +138,7 @@ func (h *CachingHandler) GetPendingPackets(
 	return
 }
 
-func (h *CachingHandler) Reset(
+func (h *CacheHandler) Reset(
 	ctx context.Context,
 ) {
 	logger.Debugf(ctx, "Reset")

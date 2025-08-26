@@ -10,7 +10,6 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/node/cachehandler"
 	"github.com/xaionaro-go/avpipeline/processor"
 	routertypes "github.com/xaionaro-go/avpipeline/router/types"
 	"github.com/xaionaro-go/observability"
@@ -79,9 +78,9 @@ func newRoute[T any](
 		processor.DefaultOptionsRecoder()...,
 	)
 	var opts node.Options
-	opts = append(opts,
+	/*opts = append(opts,
 		node.OptionCacheHandler(cachehandler.New(cachehandler.CachePolicySinceLastKeyFrame, 30*60*2*10)),
-	)
+	)*/
 	logger.Tracef(ctx, "Creating node for route %s with options %v", path, opts)
 	r.Node = node.NewWithCustomData[GoBug63285RouteInterface[T]](
 		processor,
