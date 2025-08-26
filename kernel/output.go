@@ -45,6 +45,7 @@ const (
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
 	outputDebug                         = true
+	revert0c55f85                       = true
 )
 
 type OutputConfigWaitForOutputStreams struct {
@@ -628,7 +629,7 @@ func (o *Output) send(
 	}
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
 	logger.Debugf(ctx, "isKeyFrame:%t", keyFrame)
-	if !keyFrame && len(o.waitingKeyFrames) > 0 {
+	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
 		if outputAcceptOnlyKeyFramesUntilStart {
 			logger.Debugf(ctx, "not a key frame; skipping")
 			return nil
@@ -740,7 +741,7 @@ func (o *Output) doWritePacket(
 					outputStream.LastKeyFrameSource = source
 					logger.Debugf(ctx, "received a key frame from a new source: %p:%s", source, outputStream.LastKeyFrameSource)
 				} else {
-					if outputStream.LastKeyFrameSource != nil {
+					if revert0c55f85 || outputStream.LastKeyFrameSource != nil {
 						logger.Errorf(
 							ctx,
 							"ignoring a non-keyframe packet received from another source (%p:%s != %p:%s) until we start a group using a key frame from that source",
