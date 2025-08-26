@@ -28,16 +28,16 @@ func (a *AutoFixerWithCustomData[T]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (a *AutoFixerWithCustomData[T]) SendInputPacketChan() chan<- packet.Input {
-	return a.Input().GetProcessor().SendInputPacketChan()
+func (a *AutoFixerWithCustomData[T]) InputPacketChan() chan<- packet.Input {
+	return a.Input().GetProcessor().InputPacketChan()
 }
 
 func (a *AutoFixerWithCustomData[T]) OutputPacketChan() <-chan packet.Output {
 	return a.Output().GetProcessor().OutputPacketChan()
 }
 
-func (a *AutoFixerWithCustomData[T]) SendInputFrameChan() chan<- frame.Input {
-	return a.Input().GetProcessor().SendInputFrameChan()
+func (a *AutoFixerWithCustomData[T]) InputFrameChan() chan<- frame.Input {
+	return a.Input().GetProcessor().InputFrameChan()
 }
 
 func (a *AutoFixerWithCustomData[T]) OutputFrameChan() <-chan frame.Output {

@@ -23,16 +23,16 @@ func (a *ScreenCapturer[C]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (a *ScreenCapturer[C]) SendInputPacketChan() chan<- packet.Input {
-	return a.Input().GetProcessor().SendInputPacketChan()
+func (a *ScreenCapturer[C]) InputPacketChan() chan<- packet.Input {
+	return a.Input().GetProcessor().InputPacketChan()
 }
 
 func (a *ScreenCapturer[C]) OutputPacketChan() <-chan packet.Output {
 	return a.Output().GetProcessor().OutputPacketChan()
 }
 
-func (a *ScreenCapturer[C]) SendInputFrameChan() chan<- frame.Input {
-	return a.Input().GetProcessor().SendInputFrameChan()
+func (a *ScreenCapturer[C]) InputFrameChan() chan<- frame.Input {
+	return a.Input().GetProcessor().InputFrameChan()
 }
 
 func (a *ScreenCapturer[C]) OutputFrameChan() <-chan frame.Output {

@@ -17,19 +17,20 @@ type PushFramesTo = PushTo[frame.Input, framefiltercondition.Condition]
 
 type PushFramesTos []PushFramesTo
 
-func (s *PushFramesTos) Add(dst Abstract, conds ...framefiltercondition.Condition) *PushFramesTos {
-	var cond framefiltercondition.Condition
+func frameConds(conds ...framefiltercondition.Condition) framefiltercondition.Condition {
 	switch len(conds) {
 	case 0:
-		break
+		return nil
 	case 1:
-		cond = conds[0]
-	case 2:
-		cond = framefiltercondition.And(conds)
+		return conds[0]
 	}
+	return framefiltercondition.And(conds)
+}
+
+func (s *PushFramesTos) Add(dst Abstract, conds ...framefiltercondition.Condition) *PushFramesTos {
 	*s = append(*s, PushFramesTo{
 		Node:      dst,
-		Condition: cond,
+		Condition: frameConds(conds...),
 	})
 	return s
 }
@@ -46,19 +47,20 @@ type PushPacketsTo = PushTo[packet.Input, packetfiltercondition.Condition]
 
 type PushPacketsTos []PushPacketsTo
 
-func (s *PushPacketsTos) Add(dst Abstract, conds ...packetfiltercondition.Condition) *PushPacketsTos {
-	var cond packetfiltercondition.Condition
+func packetConds(conds ...packetfiltercondition.Condition) packetfiltercondition.Condition {
 	switch len(conds) {
 	case 0:
-		break
+		return nil
 	case 1:
-		cond = conds[0]
-	case 2:
-		cond = packetfiltercondition.And(conds)
+		return conds[0]
 	}
+	return packetfiltercondition.And(conds)
+}
+
+func (s *PushPacketsTos) Add(dst Abstract, conds ...packetfiltercondition.Condition) *PushPacketsTos {
 	*s = append(*s, PushPacketsTo{
 		Node:      dst,
-		Condition: cond,
+		Condition: packetConds(conds...),
 	})
 	return s
 }
@@ -69,4 +71,13 @@ func (s PushPacketsTos) Nodes() Nodes[Abstract] {
 		result = append(result, item.Node)
 	}
 	return result
+}
+
+func (s PushPacketsTos) Contains(pushTo PushPacketsTo) bool {
+	for _, item := range s {
+		if item == pushTo {
+			return true
+		}
+	}
+	return false
 }

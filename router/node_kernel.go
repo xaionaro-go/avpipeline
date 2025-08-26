@@ -198,12 +198,12 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 }
 
 func (k *NodeKernel) String() string {
-	return "NodeKernel"
+	return "RoutingNode"
 }
 
 func (k *NodeKernel) Close(ctx context.Context) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.Close()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.Close(): %v", _err) }()
+	logger.Tracef(ctx, "Close()")
+	defer func() { logger.Tracef(ctx, "/Close(): %v", _err) }()
 	k.ClosureSignaler.Close(ctx)
 	return nil
 }

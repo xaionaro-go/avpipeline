@@ -10,6 +10,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/node/cachehandler"
 	"github.com/xaionaro-go/avpipeline/processor"
 	routertypes "github.com/xaionaro-go/avpipeline/router/types"
 	"github.com/xaionaro-go/observability"
@@ -72,10 +73,19 @@ func newRoute[T any](
 		CancelFunc:           cancelFn,
 	}
 	close(r.PublishersChangeChan) // this line is just for local consistency: initially the route is closed until openNodeLocked is called
-	r.Node = node.NewWithCustomDataFromKernel[GoBug63285RouteInterface[T]](
+	processor := processor.NewFromKernel(
 		ctx,
 		must(NewNodeKernel(ctx)),
 		processor.DefaultOptionsRecoder()...,
+	)
+	var opts node.Options
+	opts = append(opts,
+		node.OptionCacheHandler(cachehandler.New(cachehandler.CachePolicySinceLastKeyFrame, 30*60*2*10)),
+	)
+	logger.Tracef(ctx, "Creating node for route %s with options %v", path, opts)
+	r.Node = node.NewWithCustomData[GoBug63285RouteInterface[T]](
+		processor,
+		opts...,
 	)
 	r.Node.CustomData = r
 	r.openNodeLocked(ctx)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node/filter"
@@ -78,13 +79,18 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			return ErrAlreadyStarted{}
 		}
 		n.IsServingValue = true
+		close(*xatomic.SwapPointer(&n.ChangeChanIsServing, ptr(make(chan struct{}))))
 		return nil
 	}); err != nil {
 		sendErr(err)
 		return
 	}
 	defer func() {
+		if n.Config.CacheHandler != nil {
+			n.Config.CacheHandler.Reset(ctx)
+		}
 		n.IsServingValue = false
+		close(*xatomic.SwapPointer(&n.ChangeChanIsServing, ptr(make(chan struct{}))))
 	}()
 
 	procNodeEndCtx := ctx
@@ -114,19 +120,40 @@ func (n *NodeWithCustomData[C, T]) Serve(
 				return
 			}
 			logger.Tracef(ctx, "pulled from %s a %s packet with stream index %d", n.Processor, pkt.GetMediaType(), pkt.Packet.StreamIndex())
+			if n.Config.CacheHandler != nil {
+				if err := n.Config.CacheHandler.RememberPacketIfNeeded(ctx, packet.BuildInput(
+					packet.CloneAsReferenced(pkt.Packet),
+					pkt.StreamInfo,
+				)); err != nil {
+					logger.Errorf(ctx, "unable to cache packet: %v", err)
+				}
+			}
 			n.Locker.Do(ctx, func() {
 				pushFurther(
 					ctx, n, pkt, n.PushPacketsTos, serveConfig,
 					func(
+						ctx context.Context,
 						pkt packet.Output,
-					) packet.Input {
-						return packet.BuildInput(
+						pushTo PushTo[packet.Input, packetcondition.Condition],
+					) []packet.Input {
+						var result []packet.Input
+						if n.Config.CacheHandler != nil {
+							pendingPackets, err := n.Config.CacheHandler.GetPendingPackets(ctx, pushTo)
+							if err != nil {
+								logger.Errorf(ctx, "unable to cache packet: %v", err)
+							}
+							if len(pendingPackets) > 0 {
+								return pendingPackets
+							}
+						}
+						result = append(result, packet.BuildInput(
 							packet.CloneAsReferenced(pkt.Packet),
 							pkt.StreamInfo,
-						)
+						))
+						return result
 					},
 					func(n Abstract) packetcondition.Condition { return n.GetInputPacketFilter() },
-					func(p processor.Abstract) chan<- packet.Input { return p.SendInputPacketChan() },
+					func(p processor.Abstract) chan<- packet.Input { return p.InputPacketChan() },
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
 					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Packets },
@@ -141,16 +168,18 @@ func (n *NodeWithCustomData[C, T]) Serve(
 				pushFurther(
 					ctx, n, f, n.PushFramesTos, serveConfig,
 					func(
+						ctx context.Context,
 						f frame.Output,
-					) frame.Input {
-						return frame.BuildInput(
+						pushTo PushTo[frame.Input, framecondition.Condition],
+					) []frame.Input {
+						return []frame.Input{frame.BuildInput(
 							frame.CloneAsReferenced(f.Frame),
 							f.Pos,
 							f.StreamInfo,
-						)
+						)}
 					},
 					func(n Abstract) framecondition.Condition { return n.GetInputFrameFilter() },
-					func(p processor.Abstract) chan<- frame.Input { return p.SendInputFrameChan() },
+					func(p processor.Abstract) chan<- frame.Input { return p.InputFrameChan() },
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
 					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Frames },
@@ -171,7 +200,7 @@ func pushFurther[
 	outputObj O,
 	pushTos []PushTo[I, C],
 	serveConfig ServeConfig,
-	buildInput func(O) I,
+	buildInput func(context.Context, O, PushTo[I, C]) []I,
 	getInputCondition func(Abstract) C,
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
@@ -194,70 +223,78 @@ func pushFurther[
 		logger.Debugf(ctx, "nowhere to push to a %T", zeroValue)
 		return
 	}
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for _, pushTo := range pushTos {
-		dst := pushTo.Node
-		inputObj := buildInput(outputObj)
-		filterArg := filter.Input[I]{
-			Destination: dst,
-			Input:       inputObj,
-		}
-		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, filterArg) {
-			logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
-			continue
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		n.Locker.UDo(ctx, func() {
-			if dst == nil {
-				logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
-				return
-			}
-
-			dstStats := dst.GetStatistics()
-			dstPacketsOrFramesStats := getFramesOrPacketsStats(dstStats)
-			isPushed := false
-			defer func() {
-				if isPushed {
-					dstStats.BytesCountRead.Add(objSize)
-					incrementCounters(&dstPacketsOrFramesStats.Read, mediaType)
-				} else {
-					dstStats.BytesCountMissed.Add(objSize)
-					incrementCounters(&dstPacketsOrFramesStats.Missed, mediaType)
+		pushTo := pushTo
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			for _, inputObj := range buildInput(ctx, outputObj, pushTo) {
+				filterArg := filter.Input[I]{
+					Destination: pushTo.Node,
+					Input:       inputObj,
 				}
-			}()
+				if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, filterArg) {
+					logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
+					continue
+				}
 
-			inputCond := getInputCondition(dst)
-			if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
-				logger.Tracef(ctx, "input condition %s was not met", inputCond)
-				return
-			}
-
-			pushChan := getPushChan(dst.GetProcessor())
-			logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", dst.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-			if serveConfig.FrameDrop {
 				select {
 				case <-ctx.Done():
 					return
-				case pushChan <- inputObj:
-					isPushed = true
 				default:
-					logger.Errorf(ctx, "unable to push to %s: the queue is full", dst)
-					poolPutInput(inputObj)
-					return
 				}
-			} else {
-				select {
-				case <-ctx.Done():
-					return
-				case pushChan <- inputObj:
-					isPushed = true
-				}
+				n.Locker.UDo(ctx, func() {
+					if pushTo.Node == nil {
+						logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
+						return
+					}
+
+					dstStats := pushTo.Node.GetStatistics()
+					dstPacketsOrFramesStats := getFramesOrPacketsStats(dstStats)
+					isPushed := false
+					defer func() {
+						if isPushed {
+							dstStats.BytesCountRead.Add(objSize)
+							incrementCounters(&dstPacketsOrFramesStats.Read, mediaType)
+						} else {
+							dstStats.BytesCountMissed.Add(objSize)
+							incrementCounters(&dstPacketsOrFramesStats.Missed, mediaType)
+						}
+					}()
+
+					inputCond := getInputCondition(pushTo.Node)
+					if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
+						logger.Tracef(ctx, "input condition %s was not met", inputCond)
+						return
+					}
+
+					pushChan := getPushChan(pushTo.Node.GetProcessor())
+					logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+					if serveConfig.FrameDrop {
+						select {
+						case <-ctx.Done():
+							return
+						case pushChan <- inputObj:
+							isPushed = true
+						default:
+							logger.Errorf(ctx, "unable to push to %s: the queue is full", pushTo.Node)
+							poolPutInput(inputObj)
+							return
+						}
+					} else {
+						select {
+						case <-ctx.Done():
+							return
+						case pushChan <- inputObj:
+							isPushed = true
+						}
+					}
+					logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+				})
 			}
-			logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", dst.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 		})
 	}
 }

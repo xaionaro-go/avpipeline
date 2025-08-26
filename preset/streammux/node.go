@@ -114,6 +114,10 @@ func (s *StreamMux[C]) GetProcessor() processor.Abstract {
 	return s
 }
 
+func (s *StreamMux[C]) GetChangeChanIsServing() <-chan struct{} {
+	return s.InputNode.GetChangeChanIsServing()
+}
+
 func (s *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
 	return nil
 }

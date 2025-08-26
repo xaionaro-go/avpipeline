@@ -160,7 +160,7 @@ func (p *FromKernel[T]) SendOutput(
 	p.OutputPacketCh <- outputPacket
 }
 
-func (p *FromKernel[T]) SendInputPacketChan() chan<- packet.Input {
+func (p *FromKernel[T]) InputPacketChan() chan<- packet.Input {
 	return p.InputPacketCh
 }
 
@@ -168,7 +168,7 @@ func (p *FromKernel[T]) OutputPacketChan() <-chan packet.Output {
 	return p.OutputPacketCh
 }
 
-func (p *FromKernel[T]) SendInputFrameChan() chan<- frame.Input {
+func (p *FromKernel[T]) InputFrameChan() chan<- frame.Input {
 	return p.InputFrameCh
 }
 
