@@ -88,7 +88,7 @@ func main() {
 			AudioCodec:         codec.NameCopy,
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDevName,
-			VideoOptions:       xastiav.DictionaryItemsToAstiav(types.DictionaryItems{{Key: "bf", Value: "0"}}),
+			VideoOptions:       xastiav.DictionaryItemsToAstiav(ctx, types.DictionaryItems{{Key: "bf", Value: "0"}}),
 		}),
 		nil,
 	)

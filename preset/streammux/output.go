@@ -524,8 +524,8 @@ func (o *Output) reconfigureEncoder(
 
 			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
 			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
-			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(convertCustomOptions(audioCfg.CustomOptions))
-			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(convertCustomOptions(videoCfg.CustomOptions))
+			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
+			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(videoCfg.CustomOptions))
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
 			encoderFactory.HardwareDeviceType = types.HardwareDeviceType(videoCfg.HardwareDeviceType)
 			if videoCfg.AverageBitRate != 0 {

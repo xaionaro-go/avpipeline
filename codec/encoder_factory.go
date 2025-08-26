@@ -141,7 +141,7 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParams,
 			TimeBase:        timeBase,
-			Options:         f.VideoOptions,
+			Options:         f.AudioOptions,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")

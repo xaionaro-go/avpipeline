@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
+	"strconv"
 	"strings"
 
 	"github.com/asticode/go-astiav"
@@ -292,6 +293,8 @@ func newCodec(
 		}
 	}
 
+	var gopSize int64
+	var bFrames int64
 	var forcePixelFormat astiav.PixelFormat
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
@@ -307,19 +310,28 @@ func newCodec(
 
 		if isEncoder {
 			options.Set("gpu", "0", 0)
-			if options.Get("g", nil, 0) == nil {
+			if v := options.Get("g", nil, 0); v == nil {
 				fps := codecParameters.FrameRate().Float64()
 				if fps < 1 {
 					logger.Warnf(ctx, "unable to detect the FPS, assuming 30")
 					fps = 30
 				}
-				v := int(0.999+fps) * 2
-				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS*2 value (%d <- %f)", v, fps)
-				logIfError(options.Set("g", fmt.Sprintf("%d", v), 0))
+				gopSize = int64(0.999+fps) * 2
+				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS*2 value (%d <- %f)", gopSize, fps)
+				logIfError(options.Set("g", fmt.Sprintf("%d", gopSize), 0))
+			} else {
+				var err error
+				gopSize, err = strconv.ParseInt(v.Value(), 10, 64)
+				logIfError(err)
 			}
-			if options.Get("bf", nil, 0) == nil {
+			if v := options.Get("bf", nil, 0); v == nil {
 				logger.Debugf(ctx, "bf is not set, defaulting to zero")
 				logIfError(options.Set("bf", "0", 0))
+				bFrames = 0
+			} else {
+				var err error
+				bFrames, err = strconv.ParseInt(v.Value(), 10, 64)
+				logIfError(err)
 			}
 			if codecParameters.BitRate() > 0 {
 				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
@@ -402,6 +414,8 @@ func newCodec(
 				c.codecContext.SetPixelFormat(pixFmts[0])
 			}
 		}
+		c.codecContext.SetMaxBFrames(int(bFrames))
+		c.codecContext.SetGopSize(int(gopSize))
 		c.codecContext.SetSampleAspectRatio(codecParameters.SampleAspectRatio())
 		logger.Tracef(ctx,
 			"pixel_format: %s; frame_rate: %s",
