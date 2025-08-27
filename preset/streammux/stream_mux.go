@@ -653,7 +653,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 	logger.Tracef(ctx, "inputBitRateMeasurerLoop")
 	defer func() { logger.Tracef(ctx, "/inputBitRateMeasurerLoop: %v", _err) }()
 
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
 	activeOutput := s.GetActiveOutput(ctx)
 	bytesInputReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())

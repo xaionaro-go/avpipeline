@@ -106,11 +106,11 @@ func DefaultAutoBitrateConfig(
 		ResolutionsAndBitRates: resolutions,
 		FPSReducer:             DefaultFPSReducerConfig(),
 		Calculator:             DefaultAutoBitrateCalculatorQueueSizeGapDecay(),
-		CheckInterval:          time.Second / 2,
+		CheckInterval:          time.Second / 4,
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
 
-		BitRateIncreaseSlowdown:             time.Second * 3 / 4, // essentially just skip one iteration of increasing after a decrease (to dumpen oscillations)
+		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dumpen oscillations)
 		ResolutionSlowdownDurationUpgrade:   time.Minute,
 		ResolutionSlowdownDurationDowngrade: time.Second * 10,
 	}
@@ -212,7 +212,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			nodeReqCtx, cancelFn := context.WithTimeout(ctx, 200*time.Millisecond)
+			nodeReqCtx, cancelFn := context.WithTimeout(ctx, max(h.AutoBitRateConfig.CheckInterval/4-50*time.Millisecond, 50*time.Millisecond))
 			defer cancelFn()
 			queueSize := proc.GetInternalQueueSize(nodeReqCtx)
 			reqErr := nodeReqCtx.Err()
@@ -225,9 +225,9 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				previousQueueSize, _ := h.previousQueueSize.Load(proc)
 				if proc == activeOutputProc {
 					nodeTotalQueue = previousQueueSize + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
-					logger.Errorf(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d (and now is: %d)", tsDiff, h.lastBitRate/8, nodeTotalQueue)
+					logger.Infof(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d (and now is: %d)", tsDiff, h.lastBitRate/8, nodeTotalQueue)
 				} else {
-					logger.Errorf(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
+					logger.Infof(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
 					nodeTotalQueue = previousQueueSize
 				}
 				haveAnError.Store(true)
