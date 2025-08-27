@@ -149,3 +149,15 @@ func (a *ScreenCapturer[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
 func (a *ScreenCapturer[C]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return a.Output().GetChangeChanPushFramesTo()
 }
+
+func (a *ScreenCapturer[C]) GetChangeChanDrained() <-chan struct{} {
+	return node.CombineGetChangeChanDrained(context.Background(), a.InputNode, a.DecoderNode)
+}
+
+func (a *ScreenCapturer[C]) IsDrained(ctx context.Context) bool {
+	return node.CombineIsDrained(ctx, a.InputNode, a.DecoderNode)
+}
+
+func (a *ScreenCapturer[C]) NotifyInputSent() {
+	a.Input().NotifyInputSent()
+}

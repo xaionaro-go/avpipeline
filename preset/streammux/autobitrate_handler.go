@@ -186,7 +186,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	var activeOutput *Output
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
-		activeOutput = h.StreamMux.getActiveOutputLocked(ctx)
+		activeOutput = h.StreamMux.waitForActiveOutputLocked(ctx)
 		for _, o := range h.StreamMux.Outputs {
 			if o == nil {
 				continue

@@ -51,6 +51,8 @@ func (s *StreamMux[C]) Serve(
 				logger.Tracef(ctx, "got error from rawErrCh: %v", nodeErr)
 				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData]); ok {
 					output := customDataer.GetCustomData().Output
+					assert(ctx, output != nil)
+					assert(ctx, s.OutputSwitch != nil)
 					if int32(output.ID) != s.OutputSwitch.CurrentValue.Load() {
 						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
 						delete(s.OutputsMap, output.GetKey())
@@ -124,4 +126,29 @@ func (s *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
 
 func (s *StreamMux[C]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return nil
+}
+
+func (s *StreamMux[C]) GetChangeChanDrained() <-chan struct{} {
+	ctx := context.Background()
+	return node.CombineGetChangeChanDrained(ctx, s.Nodes(ctx)...)
+}
+
+func (s *StreamMux[C]) IsDrained(ctx context.Context) bool {
+	return node.CombineIsDrained(ctx, s.Nodes(ctx)...)
+}
+
+func (s *StreamMux[C]) NotifyInputSent() {
+	s.InputNode.NotifyInputSent()
+}
+
+func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
+	nodes := []node.Abstract{
+		s.InputNode,
+	}
+	s.Locker.Do(ctx, func() {
+		for _, output := range s.OutputsMap {
+			nodes = append(nodes, output.Nodes()...)
+		}
+	})
+	return nodes
 }

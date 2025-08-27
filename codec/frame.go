@@ -11,7 +11,7 @@ import (
 type Frame struct {
 	*astiav.Frame
 	*InputPacket
-	Decoder  *Decoder
+	Decoder  *DecoderLocked
 	RAMFrame *astiav.Frame
 }
 

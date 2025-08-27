@@ -16,10 +16,10 @@ func (e *EncoderFull) SetResolution(
 ) (_err error) {
 	logger.Debugf(ctx, "SetResolution(ctx, %v)", res)
 	defer func() { logger.Tracef(ctx, "/SetResolution(ctx, %v): %v", res, _err) }()
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setResolutionLocked, ctx, res, when)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.unlocked().SetResolution, ctx, res, when)
 }
 
-func (e *EncoderFull) setResolutionLocked(
+func (e *EncoderFullLocked) SetResolution(
 	ctx context.Context,
 	res Resolution,
 	when condition.Condition,
@@ -35,7 +35,7 @@ func (e *EncoderFull) setResolutionLocked(
 	return nil
 }
 
-func (e *EncoderFull) setResolutionNow(
+func (e *EncoderFullLocked) setResolutionNow(
 	ctx context.Context,
 	res Resolution,
 ) (_err error) {
@@ -53,11 +53,11 @@ func (e *EncoderFull) setResolutionNow(
 	return e.setResolutionGeneric(ctx, res)
 }
 
-func (e *EncoderFull) setResolutionGeneric(
+func (e *EncoderFullLocked) setResolutionGeneric(
 	ctx context.Context,
 	res Resolution,
 ) (_err error) {
-	oldRes := e.getResolutionLocked(ctx)
+	oldRes := e.GetResolution(ctx)
 	if oldRes == nil {
 		return fmt.Errorf("cannot get current resolution")
 	}

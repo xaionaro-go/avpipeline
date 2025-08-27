@@ -8,6 +8,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
+	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
@@ -154,6 +155,9 @@ func newOutput[C any](
 	outputNode, outputConfig, err := outputFactory.NewOutput(ctx, outputKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output node: %w", err)
+	}
+	if outputNode == nil {
+		return nil, fmt.Errorf("output node is nil")
 	}
 
 	recoderKernel, err := kernel.NewRecoder(
@@ -353,7 +357,7 @@ func (o *Output) initReuseDecoderResources(
 			logger.Tracef(ctx, "checking if we can reuse resources")
 			defer func() { logger.Tracef(ctx, "/checking if we can reuse resources: %v", _ret) }()
 
-			frameSource, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionFrameSource](f.Options)
+			getDecoderer, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionGetDecoderer](f.Options)
 			if !ok {
 				logger.Debugf(ctx, "unable to find FrameSource in the EncoderFactory options: %#+v", f.Options)
 				return false
@@ -368,7 +372,7 @@ func (o *Output) initReuseDecoderResources(
 			}
 
 			// we can reuse the resources only if pixel format is the same
-			decoder := frameSource.FrameSource.GetDecoder()
+			decoder := getDecoderer.GetDecoderer.GetDecoder()
 			if f.Params.PixelFormat() != astiav.PixelFormatNone {
 				if f.Params.PixelFormat() != decoder.CodecContext().PixelFormat() {
 					return false
@@ -420,7 +424,16 @@ func (o *Output) Output() node.Abstract {
 }
 
 func (o *Output) Flush(ctx context.Context) (_err error) {
-	return o.RecoderNode.Processor.Kernel.Reset(ctx)
+	proc := o.RecoderNode.Processor
+	err := proc.Kernel.Flush(ctx, proc.OutputPacketCh, proc.OutputFrameCh)
+	if err != nil {
+		return fmt.Errorf("unable to flush the recoder kernel: %w", err)
+	}
+	err = avpipeline.WaitForDrain(ctx, o.Nodes()...)
+	if err != nil {
+		return fmt.Errorf("unable to wait for drain the output %d: %w", o.ID, err)
+	}
+	return nil
 }
 
 func OutputKeyFromRecoderConfig(
@@ -615,5 +628,17 @@ func (o *Output) GetKey() OutputKey {
 		AudioCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
 		VideoCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
 		Resolution: res,
+	}
+}
+
+func (o *Output) Nodes() []node.Abstract {
+	return []node.Abstract{
+		o.InputFilter,
+		o.InputFixer,
+		o.RecoderNode,
+		o.MapIndices,
+		o.OutputFixer,
+		o.OutputSyncer,
+		o.OutputNode,
 	}
 }

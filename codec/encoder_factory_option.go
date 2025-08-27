@@ -12,9 +12,9 @@ func EncoderFactoryOptionLatest[T EncoderFactoryOption](s []EncoderFactoryOption
 	return types.EncoderFactoryOptionLatest[T](s)
 }
 
-type EncoderFactoryOptionFrameSource struct {
+type EncoderFactoryOptionGetDecoderer struct {
 	EncoderFactoryOptionCommons
-	FrameSource
+	GetDecoderer
 }
 
 type EncoderFactoryOptionOnlyDummy struct {

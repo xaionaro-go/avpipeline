@@ -12,11 +12,3 @@ func setFinalizerFree[T interface{ Free() }](
 ) {
 	internal.SetFinalizerFree(ctx, freer)
 }
-
-func setFinalizer[T any](
-	ctx context.Context,
-	obj T,
-	callback func(T),
-) {
-	internal.SetFinalizer(ctx, obj, callback)
-}

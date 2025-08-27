@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func (e *Decoder) setLowLatencyMediacodec(
+func (e *DecoderLocked) setLowLatencyMediacodec(
 	ctx context.Context,
 	v bool,
 ) error {

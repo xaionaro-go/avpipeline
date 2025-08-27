@@ -95,6 +95,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 	procNodeEndCtx := ctx
 	for {
+		pktCh, frameCh := n.Processor.OutputPacketChan(), n.Processor.OutputFrameChan()
+		n.updateProcInfo(ctx)
 		select {
 		case <-procNodeEndCtx.Done():
 			logger.Debugf(ctx, "Serve[%s]: initiating closing", nodeKey)
@@ -114,7 +116,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			if err != nil {
 				sendErr(err)
 			}
-		case pkt, ok := <-n.Processor.OutputPacketChan():
+		case pkt, ok := <-pktCh:
 			if !ok {
 				sendErr(io.EOF)
 				return
@@ -159,7 +161,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Packets },
 				)
 			})
-		case f, ok := <-n.Processor.OutputFrameChan():
+		case f, ok := <-frameCh:
 			if !ok {
 				sendErr(io.EOF)
 				return
@@ -211,6 +213,10 @@ func pushFurther[
 	outputObjPtr := OP(ptr(outputObj))
 
 	ctx = belt.WithField(ctx, "stream_index", outputObjPtr.GetStreamIndex())
+	n.updateProcInfoLocked(ctx)
+	n.ProcessingState.IsProcessing = true
+	defer func() { n.ProcessingState.IsProcessing = false }()
+	n.ProcessingState.InputSent.Store(false)
 
 	objSize := uint64(outputObjPtr.GetSize())
 	n.BytesCountWrote.Add(objSize)
@@ -294,6 +300,9 @@ func pushFurther[
 					}
 				}
 				logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+
+				// to make sure the next node is recognized as not drained before we notify that our node drained
+				pushTo.Node.NotifyInputSent()
 			}
 		})
 	}

@@ -53,8 +53,8 @@ func NewBasicKernel[H CustomHandler](
 	ctx context.Context,
 	handler H,
 ) *Base[H] {
-	logger.Tracef(ctx, "NewCustom")
-	defer func() { logger.Tracef(ctx, "/NewCustom") }()
+	logger.Tracef(ctx, "NewBasicKernel")
+	defer func() { logger.Tracef(ctx, "/NewBasicKernel") }()
 	k := &Base[H]{
 		Handler:         handler,
 		ClosureSignaler: closuresignaler.New(),

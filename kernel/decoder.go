@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
@@ -29,6 +30,7 @@ type Decoder[DF codec.DecoderFactory] struct {
 	OutputCodecParameters map[int]*astiav.CodecParameters
 
 	FormatContext *astiav.FormatContext
+	IsDirtyValue  atomic.Bool
 }
 
 var _ Abstract = (*Decoder[codec.DecoderFactory])(nil)
@@ -133,7 +135,7 @@ func (d *Decoder[DF]) sendInputPacket(
 		logger.Tracef(ctx, "input packet: dur:%d; res:%s", input.Duration(), input.GetResolution())
 	}
 
-	if !encoderCopyTime {
+	if !encoderForceCopyTime {
 		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())
 	}
 
@@ -145,73 +147,73 @@ func (d *Decoder[DF]) sendInputPacket(
 		return fmt.Errorf("unable to decode the packet: %w", err)
 	}
 
-	for {
-		shouldContinue, err := func() (bool, error) {
-			f := frame.Pool.Get()
-			err := decoder.ReceiveFrame(ctx, f)
-			if err != nil {
-				frame.Pool.Pool.Put(f)
-				isEOF := errors.Is(err, astiav.ErrEof)
-				isEAgain := errors.Is(err, astiav.ErrEagain)
-				logger.Tracef(ctx, "decoder.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
-				if isEOF || isEAgain {
-					return false, nil
-				}
-				return false, fmt.Errorf("unable to receive a frame from the decoder: %w", err)
-			}
-			logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame")
-
-			timeBase := input.Stream.TimeBase()
-			if timeBase.Num() == 0 {
-				return false, fmt.Errorf("internal error: TimeBase is not set")
-			}
-			f.SetPictureType(astiav.PictureTypeNone)
-			if f.Pts() == astiav.NoPtsValue {
-				if decoderDebug {
-					logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", input.Packet.Pts())
-				}
-				f.SetPts(input.Packet.Pts())
-			}
-			if f.Duration() <= 0 {
-				if decoderDebug {
-					logger.Tracef(ctx, "setting frame duration from packet duration: %d", input.Packet.Duration())
-				}
-				f.SetDuration(input.Packet.Duration())
-			}
-			frameToSend := frame.BuildOutput(
-				f,
-				input.Packet.Pos(),
-				frame.BuildStreamInfo(
-					d.asSource(decoder),
-					d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
-					input.StreamIndex(), sourceNbStreams(ctx, input.Source),
-					input.Stream.Duration(),
-					input.Stream.AvgFrameRate(),
-					timeBase,
-					input.Packet.Duration(),
-					input.PipelineSideData,
-				),
-			)
-			ret, err := true, nil
-			d.Locker.UDo(ctx, func() {
-				select {
-				case <-ctx.Done():
-					ret, err = false, ctx.Err()
-					return
-				case outputFramesCh <- frameToSend:
-				}
-			})
-			return ret, err
-		}()
-		if err != nil {
-			return err
-		}
-		if !shouldContinue {
-			break
-		}
+	err = d.drain(ctx, outputFramesCh, decoder.Drain, input, input.Stream)
+	if err != nil {
+		return fmt.Errorf("unable to drain the decoder: %w", err)
 	}
 
 	return nil
+}
+
+func (d *Decoder[DF]) drain(
+	ctx context.Context,
+	outputFramesCh chan<- frame.Output,
+	decoderDrainFn func(context.Context, codec.CallbackFrameReceiver) error,
+	input packet.Input,
+	outputStream *astiav.Stream,
+) (_err error) {
+	logger.Tracef(ctx, "drain")
+	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
+	return decoderDrainFn(ctx, func(
+		ctx context.Context,
+		decoder *codec.DecoderLocked,
+		caps astiav.CodecCapabilities,
+		f *astiav.Frame,
+	) error {
+		logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame")
+
+		timeBase := input.Stream.TimeBase()
+		if timeBase.Num() == 0 {
+			return fmt.Errorf("internal error: TimeBase is not set")
+		}
+		f.SetPictureType(astiav.PictureTypeNone)
+		if f.Pts() == astiav.NoPtsValue {
+			if decoderDebug {
+				logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", input.Packet.Pts())
+			}
+			f.SetPts(input.Packet.Pts())
+		}
+		if f.Duration() <= 0 {
+			if decoderDebug {
+				logger.Tracef(ctx, "setting frame duration from packet duration: %d", input.Packet.Duration())
+			}
+			f.SetDuration(input.Packet.Duration())
+		}
+		frameToSend := frame.BuildOutput(
+			f,
+			input.Packet.Pos(),
+			frame.BuildStreamInfo(
+				d.asSource(decoder.AsUnlocked()),
+				d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
+				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
+				input.Stream.Duration(),
+				input.Stream.AvgFrameRate(),
+				timeBase,
+				input.Packet.Duration(),
+				input.PipelineSideData,
+			),
+		)
+		var err error
+		d.Locker.UDo(ctx, func() {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				return
+			case outputFramesCh <- frameToSend:
+			}
+		})
+		return err
+	})
 }
 
 type decoderAsSource[DF codec.DecoderFactory] struct {
@@ -220,6 +222,11 @@ type decoderAsSource[DF codec.DecoderFactory] struct {
 }
 
 var _ frame.Source = (*decoderAsSource[codec.DecoderFactory])(nil)
+var _ codec.GetDecoderer = (*decoderAsSource[codec.DecoderFactory])(nil)
+
+func (d *decoderAsSource[DF]) String() string {
+	return d.Decoder.String()
+}
 
 func (d *decoderAsSource[DF]) GetDecoder() *codec.Decoder {
 	return d.Decoder
@@ -235,7 +242,7 @@ func (d *Decoder[DF]) asSource(decoder *codec.Decoder) frame.Source {
 func (d *Decoder[DF]) getOutputCodecParameters(
 	ctx context.Context,
 	streamIndex int,
-	decoder *codec.Decoder,
+	decoder *codec.DecoderLocked,
 ) *astiav.CodecParameters {
 	if v, ok := d.OutputCodecParameters[streamIndex]; ok {
 		return v
@@ -314,5 +321,66 @@ func (d *Decoder[DF]) reset(
 		}
 	}
 
+	return errors.Join(errs...)
+}
+
+func (d *Decoder[DF]) IsDirty(
+	ctx context.Context,
+) bool {
+	if d.IsDirtyValue.Load() {
+		return true
+	}
+	return xsync.DoA1R1(ctx, &d.Locker, d.isDirtyLocked, ctx)
+}
+
+func (d *Decoder[DF]) isDirtyLocked(
+	ctx context.Context,
+) (_ret bool) {
+	logger.Debugf(ctx, "isDirty")
+	defer func() { logger.Debugf(ctx, "/isDirty: %v", _ret) }()
+	defer func() { d.IsDirtyValue.Store(_ret) }()
+	for _, decoder := range d.Decoders {
+		if decoder.IsDirty(ctx) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Decoder[DF]) Flush(
+	ctx context.Context,
+	outputFrameCh chan<- frame.Output,
+) (_err error) {
+	logger.Debugf(ctx, "flush()")
+	defer func() { logger.Debugf(ctx, "/flush(): %v", _err) }()
+	if d.IsClosed() {
+		return io.ErrClosedPipe
+	}
+
+	return xsync.DoA2R1(ctx, &d.Locker, d.flush, ctx, outputFrameCh)
+}
+
+func (d *Decoder[DF]) flush(
+	ctx context.Context,
+	outputFrameCh chan<- frame.Output,
+) (_err error) {
+	logger.Tracef(ctx, "flush()")
+	defer func() { logger.Tracef(ctx, "/flush(): %v", _err) }()
+
+	var errs []error
+	for streamIndex, decoder := range d.Decoders {
+		err := decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) error {
+			return d.drain(
+				ctx,
+				outputFrameCh,
+				decoder.Flush,
+				packet.Input{},
+				d.FormatContext.Streams()[streamIndex],
+			)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to drain the decoder for stream #%d: %w", streamIndex, err))
+		}
+	}
 	return errors.Join(errs...)
 }

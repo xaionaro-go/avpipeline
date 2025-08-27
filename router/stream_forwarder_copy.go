@@ -279,3 +279,15 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushPacketsTo() <-cha
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return fwd.Output.GetChangeChanPushFramesTo()
 }
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanDrained() <-chan struct{} {
+	return fwd.Output.GetChangeChanDrained()
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsDrained(ctx context.Context) bool {
+	return fwd.Input.IsDrained(ctx) && fwd.Output.IsDrained(ctx) && (fwd.AutoFixer == nil || fwd.AutoFixer.IsDrained(ctx))
+
+}
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) NotifyInputSent() {
+	fwd.Output.NotifyInputSent()
+}

@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/kernel"
@@ -40,6 +41,10 @@ type Abstract interface {
 	GetChangeChanIsServing() <-chan struct{}
 	GetChangeChanPushPacketsTo() <-chan struct{}
 	GetChangeChanPushFramesTo() <-chan struct{}
+
+	NotifyInputSent()
+	GetChangeChanDrained() <-chan struct{}
+	IsDrained(context.Context) bool
 }
 
 /* for easy copy-paste
@@ -149,11 +154,14 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputFrameFilter  framefiltercondition.Condition
 	Locker            xsync.Mutex
 	IsServingValue    bool
+	IsDrainedValue    atomic.Bool
+	ProcessingState   ProcessingState
 	Config            Config
 
 	ChangeChanIsServing     *chan struct{}
 	ChangeChanPushPacketsTo *chan struct{}
 	ChangeChanPushFramesTo  *chan struct{}
+	ChangeChanDrained       *chan struct{}
 
 	CustomData C
 }
@@ -183,14 +191,16 @@ func NewWithCustomData[C any, T processor.Abstract](
 	processor T,
 	opts ...Option,
 ) *NodeWithCustomData[C, T] {
-	return &NodeWithCustomData[C, T]{
+	n := &NodeWithCustomData[C, T]{
 		Statistics:              &Statistics{},
 		Processor:               processor,
 		ChangeChanIsServing:     ptr(make(chan struct{})),
 		ChangeChanPushPacketsTo: ptr(make(chan struct{})),
 		ChangeChanPushFramesTo:  ptr(make(chan struct{})),
+		ChangeChanDrained:       ptr(make(chan struct{})),
 		Config:                  Options(opts).config(),
 	}
+	return n
 }
 
 func NewWithCustomDataFromKernel[C any, T kernel.Abstract](
@@ -230,9 +240,7 @@ func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
 	if n == nil {
 		return nil
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() processor.Abstract {
-		return n.Processor
-	})
+	return n.Processor
 }
 
 func (n *NodeWithCustomData[C, T]) GetPushPacketsTos() PushPacketsTos {

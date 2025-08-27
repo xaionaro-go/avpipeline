@@ -9,7 +9,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
-func (d *Decoder) setLowLatencyMediacodec(
+func (d *DecoderLocked) setLowLatencyMediacodec(
 	ctx context.Context,
 	v bool,
 ) error {

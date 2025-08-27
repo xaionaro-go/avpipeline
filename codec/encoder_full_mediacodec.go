@@ -11,7 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/quality"
 )
 
-func (e *EncoderFull) setQualityMediacodec(
+func (e *EncoderFullLocked) setQualityMediacodec(
 	ctx context.Context,
 	q Quality,
 ) error {
@@ -24,7 +24,7 @@ func (e *EncoderFull) setQualityMediacodec(
 	}
 }
 
-func (e *EncoderFull) setQualityMediacodecConstantBitrate(
+func (e *EncoderFullLocked) setQualityMediacodecConstantBitrate(
 	ctx context.Context,
 	q quality.ConstantBitrate,
 ) error {

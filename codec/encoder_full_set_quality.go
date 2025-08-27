@@ -18,10 +18,10 @@ func (e *EncoderFull) SetQuality(
 ) (_err error) {
 	logger.Debugf(ctx, "SetQuality(ctx, %#+v)", q)
 	defer func() { logger.Tracef(ctx, "/SetQuality(ctx, %#+v): %v", q, _err) }()
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.setQualityLocked, ctx, q, when)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.unlocked().SetQuality, ctx, q, when)
 }
 
-func (e *EncoderFull) setQualityLocked(
+func (e *EncoderFullLocked) SetQuality(
 	ctx context.Context,
 	q Quality,
 	when condition.Condition,
@@ -29,7 +29,7 @@ func (e *EncoderFull) setQualityLocked(
 	if when == nil {
 		return e.setQualityNow(ctx, q)
 	}
-	logger.Tracef(ctx, "setQualityLocked(): will set the new quality when condition '%s' is satisfied", when)
+	logger.Tracef(ctx, "SetQuality(): will set the new quality when condition '%s' is satisfied", when)
 	e.Next.Set(SwitchEncoderParams{
 		When:    when,
 		Quality: q,
@@ -37,7 +37,7 @@ func (e *EncoderFull) setQualityLocked(
 	return nil
 }
 
-func (e *EncoderFull) setQualityNow(
+func (e *EncoderFullLocked) setQualityNow(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {
@@ -69,7 +69,7 @@ func (e *EncoderFull) setQualityNow(
 	return e.setQualityGeneric(ctx, q)
 }
 
-func (e *EncoderFull) setQualityGeneric(
+func (e *EncoderFullLocked) setQualityGeneric(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {
@@ -96,7 +96,7 @@ func (e *EncoderFull) setQualityGeneric(
 	}
 }
 
-func (e *EncoderFull) setQualityCodecReinit(
+func (e *EncoderFullLocked) setQualityCodecReinit(
 	ctx context.Context,
 	q Quality,
 ) (_err error) {

@@ -2,7 +2,7 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.24.2
 
-replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250822190616-666bb00322f2
+replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250827215010-b3faac76f258
 
 require (
 	github.com/anthonynsimon/bild v0.14.0
@@ -52,7 +52,6 @@ require (
 
 require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
-	github.com/MathisWellmann/go_ehlers_indicators v0.0.0-20201119191707-bdc7bd10003c
 	github.com/dustin/go-humanize v1.0.1
 	github.com/go-ng/container v0.0.0-20220615121757-4740bf4bbc52
 	github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 // indirect

@@ -2,27 +2,12 @@ package codec
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
 )
 
-type Decoder struct {
-	*Codec
-}
-
-type DecoderInput struct {
-	CodecName          Name
-	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	Options            *astiav.Dictionary
-	Flags              int
-}
+type Decoder DecoderLocked
 
 func NewDecoder(
 	ctx context.Context,
@@ -51,76 +36,69 @@ func NewDecoder(
 	if err != nil {
 		return nil, err
 	}
-	return &Decoder{c}, nil
+	return &Decoder{Codec: c}, nil
+}
+
+func (d *Decoder) unlocked() *DecoderLocked {
+	return (*DecoderLocked)(d)
 }
 
 func (d *Decoder) String() string {
-	return fmt.Sprintf("Decoder(%s)", d.codec.Name())
+	return d.unlocked().String()
 }
 
 func (d *Decoder) SendPacket(
 	ctx context.Context,
 	p *astiav.Packet,
 ) error {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() error {
-		return d.codecContext.SendPacket(p)
-	})
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().SendPacket, ctx, p)
 }
 
 func (d *Decoder) ReceiveFrame(
 	ctx context.Context,
 	f *astiav.Frame,
 ) error {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() error {
-		return d.codecContext.ReceiveFrame(f)
-	})
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().ReceiveFrame, ctx, f)
 }
 
 func (d *Decoder) GetQuality(
 	ctx context.Context,
 ) Quality {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() Quality {
-		bitRate := d.codecContext.BitRate()
-		if bitRate != 0 {
-			return quality.ConstantBitrate(d.codecContext.BitRate())
-		}
-		return nil
-	})
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().GetQuality, ctx)
 }
 
 func (d *Decoder) SetLowLatency(
 	ctx context.Context,
 	v bool,
 ) (_err error) {
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() (_err error) {
-		codecName := d.codec.Name()
-		logger.Debugf(ctx, "SetLowLatency(ctx): %s:%v: %v", codecName, d.InitParams.HardwareDeviceType, v)
-		defer func() {
-			logger.Debugf(ctx, "/SetLowLatency(ctx): %s:%v: %v: %v", codecName, d.InitParams.HardwareDeviceType, v, _err)
-		}()
-		defer func() {
-			if _err != nil {
-				_err = fmt.Errorf("%s: %w", codecName, _err)
-			}
-		}()
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().SetLowLatency, ctx, v)
+}
 
-		codecWords := strings.Split(codecName, "_")
-		if len(codecWords) != 2 {
-			return d.setLowLatencyGeneric(ctx, v)
-		}
-		codecModifier := codecWords[1]
-		switch strings.ToLower(codecModifier) {
-		case "mediacodec":
-			return d.setLowLatencyMediacodec(ctx, v)
-		}
-		return d.setLowLatencyGeneric(ctx, v)
+func (d *Decoder) Flush(
+	ctx context.Context,
+	callback CallbackFrameReceiver,
+) error {
+	return xsync.DoA2R1(ctx, &d.locker, d.unlocked().Flush, ctx, callback)
+}
+
+func (d *Decoder) Drain(
+	ctx context.Context,
+	callback CallbackFrameReceiver,
+) error {
+	return xsync.DoA2R1(ctx, &d.locker, d.unlocked().Drain, ctx, callback)
+}
+
+func (d *Decoder) LockDo(
+	ctx context.Context,
+	callback func(context.Context, *DecoderLocked) error,
+) error {
+	return xsync.DoR1(ctx, &d.locker, func() error {
+		return callback(ctx, d.unlocked())
 	})
 }
 
-func (d *Decoder) setLowLatencyGeneric(
+func (d *Decoder) IsDirty(
 	ctx context.Context,
-	v bool,
-) error {
-	logger.Infof(ctx, "SetLowLatency (Generic): %v", v)
-	return fmt.Errorf("not implemented, yet")
+) bool {
+	return d.IsDirtyValue.Load()
 }

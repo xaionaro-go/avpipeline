@@ -118,12 +118,14 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 }
 
 func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
-	return xsync.DoR1(context.TODO(), &c.locker, func() error {
-		if c.codecContext == nil {
-			return fmt.Errorf("c.codecContext == nil")
-		}
-		return c.codecContext.ToCodecParameters(cp)
-	})
+	return xsync.DoA1R1(context.TODO(), &c.locker, c.toCodecParametersLocked, cp)
+}
+
+func (c *Codec) toCodecParametersLocked(cp *astiav.CodecParameters) (_err error) {
+	if c.codecContext == nil {
+		return fmt.Errorf("c.codecContext == nil")
+	}
+	return c.codecContext.ToCodecParameters(cp)
 }
 
 func (c *Codec) Reset(ctx context.Context) (_err error) {

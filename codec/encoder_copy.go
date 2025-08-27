@@ -82,6 +82,18 @@ func (EncoderCopy) GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat {
 	return nil
 }
 
+func (EncoderCopy) Flush(ctx context.Context, callback CallbackPacketReceiver) error {
+	return nil
+}
+
+func (EncoderCopy) Drain(ctx context.Context, callback CallbackPacketReceiver) error {
+	return nil
+}
+
+func (EncoderCopy) IsDirty() bool {
+	return false
+}
+
 func IsEncoderCopy(encoder Encoder) bool {
 	_, ok := encoder.(EncoderCopy)
 	return ok

@@ -208,6 +208,8 @@ func (r *Recoder[DF, EF]) process(
 	logger.Tracef(ctx, "process")
 	defer func() { logger.Tracef(ctx, "/process: %v", _err) }()
 
+	// try copying first (e.g. in case '-c:v copy' is used):
+
 	err := r.Encoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 	switch {
 	case err == nil:
@@ -216,6 +218,25 @@ func (r *Recoder[DF, EF]) process(
 	default:
 		return fmt.Errorf("unable to encode the packet: %w", err)
 	}
+
+	// OK, this is a not a case for a copying, we have to actually decode and then encode:
+
+	return r.decoderToEncoder(ctx, func(
+		ctx context.Context,
+		outputFramesCh chan<- frame.Output,
+	) error {
+		return r.Decoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
+	}, outputPacketsCh, outputFramesCh)
+}
+
+func (r *Recoder[DF, EF]) decoderToEncoder(
+	ctx context.Context,
+	decodeFn func(ctx context.Context, outputFramesCh chan<- frame.Output) error,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) (_ret error) {
+	logger.Tracef(ctx, "recode")
+	defer func() { logger.Tracef(ctx, "/recode: %v", _ret) }()
 
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer func() {
@@ -257,7 +278,7 @@ func (r *Recoder[DF, EF]) process(
 		}
 	})
 
-	err = r.Decoder.SendInputPacket(ctx, input, outputPacketsCh, framesCh)
+	err := decodeFn(ctx, framesCh)
 	close(framesCh)
 	wg.Wait()
 	if encoderError != nil {
@@ -268,6 +289,7 @@ func (r *Recoder[DF, EF]) process(
 	}
 
 	return nil
+
 }
 
 func (r *Recoder[DF, EF]) SendInputFrame(
@@ -340,6 +362,49 @@ func (r *Recoder[DF, EF]) Reset(
 	}
 	if err := r.Decoder.Reset(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Recoder[DF, EF]) IsDirty(
+	ctx context.Context,
+) bool {
+	var wg sync.WaitGroup
+	var r0, r1 bool
+	wg.Add(1)
+	observability.Go(context.Background(), func(ctx context.Context) {
+		defer wg.Done()
+		r0 = r.Decoder.IsDirty(ctx)
+	})
+	wg.Add(1)
+	observability.Go(context.Background(), func(ctx context.Context) {
+		defer wg.Done()
+		r1 = r.Encoder.IsDirty(ctx)
+	})
+	wg.Wait()
+	return r0 || r1
+}
+
+func (r *Recoder[DF, EF]) Flush(
+	ctx context.Context,
+	outputPacketCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) (_err error) {
+	logger.Debugf(ctx, "Flush")
+	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
+	var errs []error
+
+	if err := r.decoderToEncoder(ctx, func(
+		ctx context.Context,
+		outputFramesCh chan<- frame.Output,
+	) error {
+		return r.Decoder.Flush(ctx, outputFramesCh)
+	}, outputPacketCh, outputFramesCh); err != nil {
+		errs = append(errs, fmt.Errorf("unable to flush the decoder: %w", err))
+	}
+
+	if err := r.Encoder.Flush(ctx, outputPacketCh, outputFramesCh); err != nil {
+		errs = append(errs, fmt.Errorf("unable to flush the encoder: %w", err))
 	}
 	return errors.Join(errs...)
 }

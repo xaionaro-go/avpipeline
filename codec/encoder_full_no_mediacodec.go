@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func (e *EncoderFull) setQualityMediacodec(
+func (e *EncoderFullLocked) setQualityMediacodec(
 	ctx context.Context,
 	q Quality,
 ) error {

@@ -1,9 +1,9 @@
 package frame
 
 import (
-	"github.com/xaionaro-go/avpipeline/codec"
+	"fmt"
 )
 
 type Source interface {
-	codec.FrameSource
+	fmt.Stringer
 }

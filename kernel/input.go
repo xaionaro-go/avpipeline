@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"reflect"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -30,7 +31,9 @@ type InputConfig struct {
 	CustomOptions  types.DictionaryItems
 	RecvBufferSize uint
 	AsyncOpen      bool
-	OnOpened       func(context.Context, *Input) error
+	OnPostOpen     func(context.Context, *Input) error
+	OnPreClose     func(context.Context, *Input) error
+	KeepOpen       bool
 }
 
 type Input struct {
@@ -44,6 +47,10 @@ type Input struct {
 	ID        InputID
 	URL       string
 	URLParsed *url.URL
+
+	KeepOpen   bool
+	OnPreClose func(context.Context, *Input) error
+	WaitGroup  sync.WaitGroup
 }
 
 var _ Abstract = (*Input)(nil)
@@ -72,6 +79,9 @@ func NewInputFromURL(
 
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
+
+		KeepOpen:   cfg.KeepOpen,
+		OnPreClose: cfg.OnPreClose,
 	}
 
 	var formatName string
@@ -164,8 +174,8 @@ func (i *Input) doOpen(
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
 	}
 
-	if cfg.OnOpened != nil {
-		cfg.OnOpened(ctx, i)
+	if cfg.OnPostOpen != nil {
+		cfg.OnPostOpen(ctx, i)
 	}
 	close(i.initialized)
 
@@ -181,6 +191,13 @@ func (i *Input) Close(
 		return nil
 	}
 	i.ClosureSignaler.Close(ctx)
+	i.WaitGroup.Wait()
+	if i.KeepOpen { // it means it won't be closed automatically, thus we should close it here, since this was a manual Close()
+		if fn := i.OnPreClose; fn != nil {
+			fn(ctx, i)
+		}
+		i.FormatContext.CloseInput()
+	}
 	return nil
 }
 
@@ -208,6 +225,9 @@ func (i *Input) Generate(
 ) (_err error) {
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
+	i.WaitGroup.Add(1)
+	defer i.WaitGroup.Done()
+
 	defer func() {
 		i.ClosureSignaler.Close(ctx)
 	}()
@@ -218,7 +238,13 @@ func (i *Input) Generate(
 	case <-i.initialized:
 	}
 
-	defer i.FormatContext.CloseInput()
+	if !i.KeepOpen {
+		defer i.FormatContext.CloseInput()
+		if fn := i.OnPreClose; fn != nil {
+			defer fn(ctx, i)
+		}
+	}
+
 	observability.Go(ctx, func(ctx context.Context) {
 		<-ctx.Done()
 		logger.Debugf(ctx, "interrupting IO")

@@ -152,3 +152,15 @@ func (a *AutoFixerWithCustomData[T]) GetChangeChanPushPacketsTo() <-chan struct{
 func (a *AutoFixerWithCustomData[T]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return a.Output().GetChangeChanPushFramesTo()
 }
+
+func (a *AutoFixerWithCustomData[T]) GetChangeChanDrained() <-chan struct{} {
+	return node.CombineGetChangeChanDrained(context.Background(), a.MapStreamIndicesNode, a.AutoHeadersNode)
+}
+
+func (a *AutoFixerWithCustomData[T]) NotifyInputSent() {
+	a.Input().NotifyInputSent()
+}
+
+func (a *AutoFixerWithCustomData[T]) IsDrained(ctx context.Context) bool {
+	return node.CombineIsDrained(ctx, a.MapStreamIndicesNode, a.AutoHeadersNode)
+}

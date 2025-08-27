@@ -23,13 +23,15 @@ type BaseWithFormatContext[H CustomHandlerWithContextFormat] struct {
 }
 
 var _ types.Abstract = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+var _ packet.Source = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+var _ packet.Sink = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
 
 func NewKernelWithFormatContext[H CustomHandlerWithContextFormat](
 	ctx context.Context,
 	handler H,
 ) *BaseWithFormatContext[H] {
-	logger.Tracef(ctx, "NewPassthroughWithFormatContext")
-	defer func() { logger.Tracef(ctx, "/NewPassthroughWithFormatContext") }()
+	logger.Tracef(ctx, "NewKernelWithFormatContext")
+	defer func() { logger.Tracef(ctx, "/NewKernelWithFormatContext") }()
 	k := &BaseWithFormatContext[H]{
 		Base:          NewBasicKernel(ctx, handler),
 		FormatContext: astiav.AllocFormatContext(),

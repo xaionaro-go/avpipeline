@@ -549,6 +549,40 @@ func (s *StreamMux[C]) WaitForStop(
 	return nil
 }
 
+func (s *StreamMux[C]) WaitForActiveOutput(
+	ctx context.Context,
+) *Output {
+	t := time.NewTicker(100 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			output := s.GetActiveOutput(ctx)
+			if output != nil {
+				return output
+			}
+		}
+	}
+}
+
+func (s *StreamMux[C]) waitForActiveOutputLocked(
+	ctx context.Context,
+) *Output {
+	t := time.NewTicker(100 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			output := s.getActiveOutputLocked(ctx)
+			if output != nil {
+				return output
+			}
+		}
+	}
+}
+
 func (s *StreamMux[C]) GetActiveOutput(
 	ctx context.Context,
 ) *Output {
@@ -655,7 +689,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 
 	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
-	activeOutput := s.GetActiveOutput(ctx)
+	activeOutput := s.WaitForActiveOutput(ctx)
 	bytesInputReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
 	bytesOutputReadTotalPrev := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
 	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
@@ -667,7 +701,10 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			return ctx.Err()
 		case tsNext = <-t.C:
 			duration := tsNext.Sub(tsPrev)
-			activeOutput := s.GetActiveOutput(ctx)
+			activeOutput := s.WaitForActiveOutput(ctx)
+			assert(ctx, activeOutput != nil)
+			assert(ctx, activeOutput.OutputNode != nil)
+			assert(ctx, activeOutput.OutputNode.GetStatistics() != nil)
 			bytesInputReadTotalNext := int64(s.GetStatistics().BytesCountRead.Load())
 			bytesOutputReadTotalNext := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
 

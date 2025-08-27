@@ -3,6 +3,7 @@ package autoheaders
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -109,6 +110,14 @@ func (h *AutoHeaders) detectAppropriateFixerKernel(
 ) (_ret kerneltypes.Abstract, _err error) {
 	logger.Debugf(ctx, "detectAppropriateFixerKernel: %v", input.Source)
 	defer func() { logger.Debugf(ctx, "/detectAppropriateFixerKernel: %s: %v %v", input.Source, _ret, _err) }()
+
+	defer func() {
+		if r := recover(); r != nil {
+			_err = fmt.Errorf("panic: %v: %s", r, debug.Stack())
+			_ret = nil
+			logger.Errorf(ctx, "%v", _err)
+		}
+	}()
 
 	logger.Debugf(ctx, "detecting for: %s %s", input.Source, h.Sink)
 	var inputFormatName string

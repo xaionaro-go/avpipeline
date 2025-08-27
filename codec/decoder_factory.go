@@ -139,10 +139,10 @@ func (f *NaiveDecoderFactory) getResources(
 	timeBase astiav.Rational,
 	opts []EncoderFactoryOption,
 ) (_ret *Resources) {
-	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionFrameSource](opts); ok {
-		frameSource := v.FrameSource
-		if frameSource != nil {
-			d := frameSource.GetDecoder()
+	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionGetDecoderer](opts); ok {
+		getDecoderer := v.GetDecoderer
+		if getDecoderer != nil {
+			d := getDecoderer.GetDecoder()
 			logger.Debugf(ctx, "got the decoder from frame source: %v", d)
 			for _, decoder := range f.VideoDecoders {
 				if decoder == d {

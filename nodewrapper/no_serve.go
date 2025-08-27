@@ -115,3 +115,15 @@ func (n *NoServe[T]) GetChangeChanPushPacketsTo() <-chan struct{} {
 func (n *NoServe[T]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return n.Node.GetChangeChanPushFramesTo()
 }
+
+func (n *NoServe[T]) GetChangeChanDrained() <-chan struct{} {
+	return n.Node.GetChangeChanDrained()
+}
+
+func (n *NoServe[T]) NotifyInputSent() {
+	n.Node.NotifyInputSent()
+}
+
+func (n *NoServe[T]) IsDrained(ctx context.Context) bool {
+	return n.Node.IsDrained(ctx)
+}

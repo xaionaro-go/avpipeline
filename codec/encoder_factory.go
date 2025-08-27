@@ -80,7 +80,7 @@ func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
 	return findEncoderCodec(0, f.AudioCodec).ID()
 }
 
-type FrameSource interface {
+type GetDecoderer interface {
 	GetDecoder() *Decoder
 }
 
