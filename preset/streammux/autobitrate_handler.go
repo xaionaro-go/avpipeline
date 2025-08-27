@@ -110,7 +110,7 @@ func DefaultAutoBitrateConfig(
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
 
-		BitRateIncreaseSlowdown:             time.Second * 1,
+		BitRateIncreaseSlowdown:             time.Second * 3 / 4, // essentially just skip one iteration of increasing after a decrease (to dumpen oscillations)
 		ResolutionSlowdownDurationUpgrade:   time.Minute,
 		ResolutionSlowdownDurationDowngrade: time.Second * 10,
 	}
