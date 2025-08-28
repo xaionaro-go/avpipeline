@@ -14,8 +14,6 @@ type StreamInfo struct {
 	CodecParameters  *astiav.CodecParameters // TODO: remove this from here
 	StreamIndex      int
 	StreamsCount     int
-	StreamDuration   int64
-	AvgFrameRate     astiav.Rational
 	TimeBase         astiav.Rational
 	Duration         int64
 	PipelineSideData types.PipelineSideData
@@ -25,8 +23,6 @@ func BuildStreamInfo(
 	source Source,
 	codecParameters *astiav.CodecParameters,
 	streamIndex, streamsCount int,
-	streamDuration int64,
-	avgFrameRate astiav.Rational,
 	timeBase astiav.Rational,
 	duration int64,
 	pipelineSideData types.PipelineSideData,
@@ -36,8 +32,6 @@ func BuildStreamInfo(
 		CodecParameters:  codecParameters,
 		StreamIndex:      streamIndex,
 		StreamsCount:     streamsCount,
-		StreamDuration:   streamDuration,
-		AvgFrameRate:     avgFrameRate,
 		TimeBase:         timeBase,
 		Duration:         duration,
 		PipelineSideData: pipelineSideData,
@@ -105,10 +99,6 @@ func (f *Commons) SetDTS(v int64) {
 
 func (f *Commons) GetPTSAsDuration() time.Duration {
 	return avconv.Duration(f.Frame.Pts(), f.TimeBase)
-}
-
-func (f *Commons) GetStreamDurationAsDuration() time.Duration {
-	return avconv.Duration(f.StreamDuration, f.TimeBase)
 }
 
 func (f *Commons) GetResolution() codectypes.Resolution {

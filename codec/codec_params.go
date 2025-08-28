@@ -13,7 +13,7 @@ type CodecParams struct {
 	HardwareDeviceName HardwareDeviceName
 	TimeBase           astiav.Rational
 	Options            *astiav.Dictionary
-	Flags              int
+	HWDevFlags         int
 }
 
 func (p CodecParams) Clone(ctx context.Context) CodecParams {

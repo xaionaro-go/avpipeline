@@ -248,6 +248,7 @@ func (p *FromKernel[T]) Flush(
 		case <-t.C:
 		}
 	}
+	logger.Tracef(ctx, "running the actual Flush()")
 
 	return flusher.Flush(ctx, p.OutputPacketCh, p.OutputFrameCh)
 }

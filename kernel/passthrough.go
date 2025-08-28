@@ -32,7 +32,6 @@ func (Passthrough) SendInputFrame(
 ) error {
 	outputFramesCh <- frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.Pos,
 		input.StreamInfo,
 	)
 	return nil

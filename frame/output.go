@@ -12,12 +12,10 @@ type Output Commons
 
 func BuildOutput(
 	f *astiav.Frame,
-	pos int64,
 	streamInfo *StreamInfo,
 ) Output {
 	return Output{
 		Frame:      f,
-		Pos:        pos,
 		StreamInfo: streamInfo,
 	}
 }
@@ -76,10 +74,6 @@ func (f *Output) SetDTS(v int64) {
 
 func (f *Output) GetPTSAsDuration() time.Duration {
 	return (*Commons)(f).GetPTSAsDuration()
-}
-
-func (f *Output) GetStreamDurationAsDuration() time.Duration {
-	return (*Commons)(f).GetStreamDurationAsDuration()
 }
 
 func (f *Output) GetPipelineSideData() types.PipelineSideData {

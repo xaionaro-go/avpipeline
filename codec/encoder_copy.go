@@ -94,6 +94,10 @@ func (EncoderCopy) IsDirty() bool {
 	return false
 }
 
+func (EncoderCopy) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
+	return fn(ctx, EncoderCopy{})
+}
+
 func IsEncoderCopy(encoder Encoder) bool {
 	_, ok := encoder.(EncoderCopy)
 	return ok

@@ -124,7 +124,6 @@ func (k *Base[H]) SendInputFrame(
 
 	outFrame := frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.Pos,
 		input.StreamInfo,
 	)
 

@@ -342,14 +342,11 @@ func (m *MapStreamIndices) sendInputFrame(
 
 		outFrame := frame.BuildOutput(
 			frame.CloneAsReferenced(input.Frame),
-			input.Pos,
 			frame.BuildStreamInfo(
 				input.Source,
 				input.CodecParameters,
 				outputStream.Index(),
 				len(m.outputStreams),
-				input.StreamDuration,
-				input.AvgFrameRate,
 				input.TimeBase,
 				input.StreamInfo.Duration,
 				input.PipelineSideData,

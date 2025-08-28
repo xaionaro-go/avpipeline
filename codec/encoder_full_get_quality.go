@@ -11,10 +11,10 @@ import (
 func (e *EncoderFull) GetQuality(
 	ctx context.Context,
 ) Quality {
-	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.getQualityLocked, ctx)
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.asLocked().GetQuality, ctx)
 }
 
-func (e *EncoderFull) getQualityLocked(
+func (e *EncoderFullLocked) GetQuality(
 	ctx context.Context,
 ) Quality {
 	if e.codecContext == nil {

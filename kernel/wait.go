@@ -98,7 +98,6 @@ func (w *Wait) sendInputFrame(
 ) error {
 	output := frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.Pos,
 		input.StreamInfo,
 	)
 	shouldWait := w.FrameCondition != nil && w.FrameCondition.Match(ctx, input)

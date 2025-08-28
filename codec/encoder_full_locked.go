@@ -76,7 +76,7 @@ func newEncoderFullUnlocked(
 	return e, nil
 }
 
-func (e *EncoderFullLocked) AsUnlocked() *EncoderFull {
+func (e *EncoderFullLocked) Aslocked() *EncoderFull {
 	return (*EncoderFull)(e)
 }
 
@@ -268,9 +268,15 @@ func (e *EncoderFullLocked) SanityCheck(
 func (e *EncoderFullLocked) Flush(
 	ctx context.Context,
 	callback CallbackPacketReceiver,
-) error {
+) (_err error) {
 	logger.Tracef(ctx, "Flush")
 	defer func() { logger.Tracef(ctx, "/Flush") }()
+
+	defer func() {
+		if _err == nil {
+			e.IsDirtyValue.Store(false)
+		}
+	}()
 
 	caps := e.codec.Capabilities()
 	logger.Tracef(ctx, "Capabilities: %08x", caps)
@@ -302,7 +308,6 @@ func (e *EncoderFullLocked) Flush(
 		}
 	}
 
-	e.IsDirtyValue.Store(false)
 	return nil
 }
 
@@ -348,4 +353,8 @@ func (e *EncoderFullLocked) Drain(
 
 func (e *EncoderFullLocked) IsDirty() bool {
 	return e.IsDirtyValue.Load()
+}
+
+func (e *EncoderFullLocked) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
+	return fn(ctx, e)
 }

@@ -28,6 +28,10 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
+const (
+	e2eNvencEnable = true
+)
+
 func must[T any](v T, err error) T {
 	if err != nil {
 		panic(err)
@@ -153,6 +157,11 @@ func runTest(
 		outputFactory,
 	))
 
+	vcodecName := codectypes.Name(codecID.String())
+	if e2eNvencEnable {
+		vcodecName += "_nvenc"
+	}
+
 	require.NoError(t, streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
 		AudioTrackConfigs: []streammuxtypes.AudioTrackConfig{{
 			InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
@@ -162,7 +171,7 @@ func runTest(
 		VideoTrackConfigs: []streammuxtypes.VideoTrackConfig{{
 			InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 			OutputTrackIDs: []int{0},
-			CodecName:      codectypes.Name(codecID.String()),
+			CodecName:      vcodecName,
 			Resolution:     codectypes.Resolution{Width: 1920, Height: 1080},
 		}},
 	}))

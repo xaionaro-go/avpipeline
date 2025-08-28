@@ -9,7 +9,7 @@ import (
 func (e *EncoderFull) GetResolution(
 	ctx context.Context,
 ) *Resolution {
-	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.unlocked().GetResolution, ctx)
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &e.locker, e.asLocked().GetResolution, ctx)
 }
 
 func (e *EncoderFullLocked) GetResolution(
