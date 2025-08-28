@@ -1,6 +1,10 @@
 package streammux
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -22,4 +26,14 @@ func (s *StreamMux[C]) OutputFrameChan() <-chan frame.Output {
 }
 func (s *StreamMux[C]) ErrorChan() <-chan error {
 	panic("not implemented")
+}
+func (s *StreamMux[C]) Flush(ctx context.Context) error {
+	var errs []error
+	for _, n := range s.Nodes(ctx) {
+		err := n.GetProcessor().Flush(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to flush node %q: %w", n.String(), err))
+		}
+	}
+	return errors.Join(errs...)
 }

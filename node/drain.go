@@ -45,8 +45,8 @@ func CombineIsDrained(
 	ctx context.Context,
 	nodes ...Abstract,
 ) (_ret bool) {
-	logger.Tracef(ctx, "CombineIsDrained")
-	defer func() { logger.Tracef(ctx, "/CombineIsDrained: %v", _ret) }()
+	logger.Tracef(ctx, "CombineIsDrained (nodes: %v)", nodes)
+	defer func() { logger.Tracef(ctx, "/CombineIsDrained (nodes: %v): %v", nodes, _ret) }()
 	for _, n := range nodes {
 		if !n.IsDrained(ctx) {
 			logger.Tracef(ctx, "node %v:%p is not drained", n, n)
@@ -112,6 +112,8 @@ func (n *NodeWithCustomData[C, T]) calculateIfDrained(ctx context.Context) bool 
 func (n *NodeWithCustomData[C, T]) updateProcInfoLocked(
 	ctx context.Context,
 ) {
+	logger.Tracef(ctx, "updateProcInfoLocked: %v", n)
+	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v", n) }()
 	proc := n.Processor
 	n.ProcessingState.InputSent.Store(false)
 	n.ProcessingState.PendingPackets = len(proc.InputPacketChan())

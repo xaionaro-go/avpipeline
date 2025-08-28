@@ -127,3 +127,9 @@ func (n *NoServe[T]) NotifyInputSent() {
 func (n *NoServe[T]) IsDrained(ctx context.Context) bool {
 	return n.Node.IsDrained(ctx)
 }
+
+func (n *NoServe[T]) Flush(
+	ctx context.Context,
+) error {
+	return n.Node.Flush(ctx)
+}

@@ -19,6 +19,8 @@ import (
 )
 
 type Abstract interface {
+	fmt.Stringer
+
 	Serve(context.Context, ServeConfig, chan<- Error)
 
 	IsServing() bool
@@ -45,6 +47,7 @@ type Abstract interface {
 	NotifyInputSent()
 	GetChangeChanDrained() <-chan struct{}
 	IsDrained(context.Context) bool
+	Flush(context.Context) error
 }
 
 /* for easy copy-paste
@@ -526,4 +529,8 @@ func (n *NodeWithCustomData[C, T]) GetChangeChanPushPacketsTo() <-chan struct{} 
 
 func (n *NodeWithCustomData[C, T]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return *xatomic.LoadPointer(&n.ChangeChanPushFramesTo)
+}
+
+func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
+	return n.Processor.Flush(ctx)
 }

@@ -5,7 +5,5 @@ import (
 )
 
 type IsDirtier interface {
-	IsDirty(
-		ctx context.Context,
-	) bool
+	IsDirty(ctx context.Context) bool
 }

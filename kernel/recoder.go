@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"sync"
 
 	"github.com/asticode/go-astiav"
@@ -278,8 +279,11 @@ func (r *Recoder[DF, EF]) decoderToEncoder(
 		}
 	})
 
-	err := decodeFn(ctx, framesCh)
-	close(framesCh)
+	var err error
+	func() {
+		defer close(framesCh)
+		err = decodeFn(ctx, framesCh)
+	}()
 	wg.Wait()
 	if encoderError != nil {
 		return fmt.Errorf("got an error from the encoder: %w", encoderError)
@@ -368,7 +372,9 @@ func (r *Recoder[DF, EF]) Reset(
 
 func (r *Recoder[DF, EF]) IsDirty(
 	ctx context.Context,
-) bool {
+) (_ret bool) {
+	logger.Tracef(ctx, "IsDirty")
+	defer func() { logger.Tracef(ctx, "/IsDirty: %v", _ret) }()
 	var wg sync.WaitGroup
 	var r0, r1 bool
 	wg.Add(1)
@@ -385,6 +391,8 @@ func (r *Recoder[DF, EF]) IsDirty(
 	return r0 || r1
 }
 
+var _ Flusher = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+
 func (r *Recoder[DF, EF]) Flush(
 	ctx context.Context,
 	outputPacketCh chan<- packet.Output,
@@ -397,8 +405,14 @@ func (r *Recoder[DF, EF]) Flush(
 	if err := r.decoderToEncoder(ctx, func(
 		ctx context.Context,
 		outputFramesCh chan<- frame.Output,
-	) error {
-		return r.Decoder.Flush(ctx, outputFramesCh)
+	) (_err error) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				_err = fmt.Errorf("panic: %v:\n%s", r, debug.Stack())
+			}
+		}()
+		return r.Decoder.Flush(ctx, outputPacketCh, outputFramesCh)
 	}, outputPacketCh, outputFramesCh); err != nil {
 		errs = append(errs, fmt.Errorf("unable to flush the decoder: %w", err))
 	}

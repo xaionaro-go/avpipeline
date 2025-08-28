@@ -2,6 +2,7 @@ package streammux
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
@@ -51,7 +52,7 @@ func (s *StreamMux[C]) Serve(
 				logger.Tracef(ctx, "got error from rawErrCh: %v", nodeErr)
 				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData]); ok {
 					output := customDataer.GetCustomData().Output
-					assert(ctx, output != nil)
+					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
 					assert(ctx, s.OutputSwitch != nil)
 					if int32(output.ID) != s.OutputSwitch.CurrentValue.Load() {
 						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)

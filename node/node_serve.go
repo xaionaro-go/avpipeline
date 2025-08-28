@@ -95,6 +95,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 
 	procNodeEndCtx := ctx
 	for {
+		logger.Tracef(ctx, "Serve[%s]: an iteration started", nodeKey)
 		pktCh, frameCh := n.Processor.OutputPacketChan(), n.Processor.OutputFrameChan()
 		n.updateProcInfo(ctx)
 		select {

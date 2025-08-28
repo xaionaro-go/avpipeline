@@ -937,6 +937,8 @@ func (e *Encoder[EF]) isDirty(ctx context.Context) (_ret bool) {
 	return false
 }
 
+var _ Flusher = (*Encoder[codec.EncoderFactory])(nil)
+
 func (r *Encoder[EF]) Flush(
 	ctx context.Context,
 	outputPacketCh chan<- packet.Output,
@@ -957,7 +959,13 @@ func (e *Encoder[EF]) flush(
 
 	var errs []error
 	for streamIndex, encoder := range e.encoders {
-		err := e.drain(ctx, outputPacketCh, encoder.Flush, frame.Input{}, e.outputStreams[streamIndex])
+		err := e.drain(
+			ctx,
+			outputPacketCh,
+			encoder.Flush,
+			frame.Input{StreamInfo: &frame.StreamInfo{}},
+			e.outputStreams[streamIndex],
+		)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush the encoder for stream #%d: %w", streamIndex, err))
 		}

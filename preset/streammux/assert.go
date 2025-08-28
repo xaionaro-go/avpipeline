@@ -2,9 +2,8 @@ package streammux
 
 import (
 	"context"
-	"runtime/debug"
 
-	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/internal"
 )
 
 func must[T any](v T, err error) T {
@@ -20,8 +19,10 @@ func assertNoError(err error) {
 	}
 }
 
-func assert(ctx context.Context, condition bool) {
-	if !condition {
-		logger.Fatalf(ctx, "assertion failed: %s", debug.Stack())
-	}
+func assert(
+	ctx context.Context,
+	mustBeTrue bool,
+	extraArgs ...any,
+) {
+	internal.Assert(ctx, mustBeTrue, extraArgs)
 }

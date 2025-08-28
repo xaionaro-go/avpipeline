@@ -68,3 +68,7 @@ func (a *AutoFixerWithCustomData[T]) NotifyAboutPacketSource(
 ) error {
 	return a.MapStreamIndicesNode.Processor.Kernel.NotifyAboutPacketSource(ctx, source)
 }
+
+func (a *AutoFixerWithCustomData[T]) Flush(ctx context.Context) error {
+	return nil
+}

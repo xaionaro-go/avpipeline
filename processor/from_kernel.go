@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astikit"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
@@ -224,4 +225,29 @@ var _ GetKerneler = (*FromKernel[kernel.Abstract])(nil)
 
 func (p *FromKernel[T]) GetKernel() kernel.Abstract {
 	return p.Kernel
+}
+
+func (p *FromKernel[T]) Flush(
+	ctx context.Context,
+) error {
+	flusher, ok := any(p.Kernel).(kernel.Flusher)
+	if !ok {
+		return nil // no internal buffers to flush
+	}
+
+	// TODO: find a better solution:
+	t := time.NewTicker(10 * time.Millisecond)
+	defer t.Stop()
+	for {
+		if len(p.InputPacketCh) == 0 && len(p.InputFrameCh) == 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+
+	return flusher.Flush(ctx, p.OutputPacketCh, p.OutputFrameCh)
 }

@@ -192,7 +192,7 @@ func newOutput[C any](
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
 			inputNode.Processor.GetPacketSource(),
 			recoderKernel.Decoder,
-			OutputCustomData{Output: o},
+			OutputCustomData{},
 		),
 		RecoderNode: node.NewWithCustomDataFromKernel[OutputCustomData](
 			ctx,
@@ -205,7 +205,7 @@ func newOutput[C any](
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
-			OutputCustomData{Output: o},
+			OutputCustomData{},
 		),
 		OutputSyncer: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
@@ -216,8 +216,10 @@ func newOutput[C any](
 		FPSFractionGetter: FPSFractionGetter,
 	}
 	o.InputFilter.CustomData = OutputCustomData{Output: o}
+	o.InputFixer.SetCustomData(OutputCustomData{Output: o})
 	o.RecoderNode.CustomData = OutputCustomData{Output: o}
 	o.MapIndices.CustomData = OutputCustomData{Output: o}
+	o.OutputFixer.SetCustomData(OutputCustomData{Output: o})
 	o.OutputSyncer.CustomData = OutputCustomData{Output: o}
 
 	if outputReuseDecoderResources {
@@ -269,6 +271,13 @@ func logIfError(ctx context.Context, err error) {
 		return
 	}
 	logger.Errorf(ctx, "got an error: %v", err)
+}
+
+func (o *Output) String() string {
+	if o == nil {
+		return "streammux.Output(nil)"
+	}
+	return fmt.Sprintf("StreamMux.Outputs[%d]", o.ID)
 }
 
 func (o *Output) initFPSFractioner(ctx context.Context) {

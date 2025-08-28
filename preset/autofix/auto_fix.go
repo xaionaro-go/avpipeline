@@ -85,6 +85,13 @@ func NewWithCustomData[T any](
 	return a
 }
 
+func (a *AutoFixerWithCustomData[T]) SetCustomData(v T) {
+	a.MapStreamIndicesNode.CustomData = v
+	if a.AutoHeadersNode != nil {
+		a.AutoHeadersNode.CustomData = v
+	}
+}
+
 func (a *AutoFixerWithCustomData[T]) Input() node.Abstract {
 	if a.AutoHeadersNode != nil {
 		return a.AutoHeadersNode

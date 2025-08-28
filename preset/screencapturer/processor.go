@@ -42,3 +42,7 @@ func (a *ScreenCapturer[C]) OutputFrameChan() <-chan frame.Output {
 func (a *ScreenCapturer[C]) ErrorChan() <-chan error {
 	panic("not supported")
 }
+
+func (a *ScreenCapturer[C]) Flush(ctx context.Context) error {
+	return nil
+}

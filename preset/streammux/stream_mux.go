@@ -690,6 +690,13 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
 	activeOutput := s.WaitForActiveOutput(ctx)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	assert(ctx, activeOutput != nil)
+	assert(ctx, activeOutput.OutputNode != nil)
 	bytesInputReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
 	bytesOutputReadTotalPrev := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
 	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
@@ -702,6 +709,11 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 		case tsNext = <-t.C:
 			duration := tsNext.Sub(tsPrev)
 			activeOutput := s.WaitForActiveOutput(ctx)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			assert(ctx, activeOutput != nil)
 			assert(ctx, activeOutput.OutputNode != nil)
 			assert(ctx, activeOutput.OutputNode.GetStatistics() != nil)

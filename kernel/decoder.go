@@ -147,7 +147,7 @@ func (d *Decoder[DF]) sendInputPacket(
 		return fmt.Errorf("unable to decode the packet: %w", err)
 	}
 
-	err = d.drain(ctx, outputFramesCh, decoder.Drain, input, input.Stream)
+	err = d.drain(ctx, outputFramesCh, decoder.Drain, input)
 	if err != nil {
 		return fmt.Errorf("unable to drain the decoder: %w", err)
 	}
@@ -160,7 +160,6 @@ func (d *Decoder[DF]) drain(
 	outputFramesCh chan<- frame.Output,
 	decoderDrainFn func(context.Context, codec.CallbackFrameReceiver) error,
 	input packet.Input,
-	outputStream *astiav.Stream,
 ) (_err error) {
 	logger.Tracef(ctx, "drain")
 	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
@@ -347,8 +346,11 @@ func (d *Decoder[DF]) isDirtyLocked(
 	return false
 }
 
+var _ Flusher = (*Decoder[codec.DecoderFactory])(nil)
+
 func (d *Decoder[DF]) Flush(
 	ctx context.Context,
+	_ chan<- packet.Output,
 	outputFrameCh chan<- frame.Output,
 ) (_err error) {
 	logger.Debugf(ctx, "flush()")
@@ -375,7 +377,6 @@ func (d *Decoder[DF]) flush(
 				outputFrameCh,
 				decoder.Flush,
 				packet.Input{},
-				d.FormatContext.Streams()[streamIndex],
 			)
 		})
 		if err != nil {

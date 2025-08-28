@@ -291,3 +291,7 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsDrained(ctx context.Context) boo
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) NotifyInputSent() {
 	fwd.Output.NotifyInputSent()
 }
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) Flush(ctx context.Context) error {
+	return fwd.Output.Flush(ctx)
+}

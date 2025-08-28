@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -17,6 +18,8 @@ type Abstract interface {
 	InputFrameChan() chan<- frame.Input
 	OutputFrameChan() <-chan frame.Output
 	ErrorChan() <-chan error
+
+	Flush(ctx context.Context) error
 }
 
 /* for easier copy&paste:

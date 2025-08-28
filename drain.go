@@ -2,6 +2,7 @@ package avpipeline
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -25,6 +26,9 @@ func Drain(
 		defer func() { logger.Debugf(ctx, "/draining %v: %v", n, _err) }()
 		if setBlockInput != nil {
 			node.SetBlockInput(ctx, *setBlockInput, n)
+		}
+		if err := n.Flush(ctx); err != nil {
+			return fmt.Errorf("unable to flush internal buffers of %v: %w", n, err)
 		}
 		for {
 			ch := n.GetChangeChanDrained()
