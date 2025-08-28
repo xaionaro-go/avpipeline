@@ -532,5 +532,10 @@ func (n *NodeWithCustomData[C, T]) GetChangeChanPushFramesTo() <-chan struct{} {
 }
 
 func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
-	return n.Processor.Flush(ctx)
+	err := n.Processor.Flush(ctx)
+	if err != nil {
+		return err
+	}
+	n.updateProcInfo(ctx)
+	return nil
 }

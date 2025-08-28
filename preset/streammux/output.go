@@ -179,9 +179,7 @@ func newOutput[C any](
 		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", outputNode)
 	}
 
-	var o *Output
-
-	o = &Output{
+	o := &Output{
 		ID: outputID,
 		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),

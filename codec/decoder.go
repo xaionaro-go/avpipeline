@@ -25,7 +25,7 @@ func NewDecoder(
 			HardwareDeviceName: decInput.HardwareDeviceName,
 			TimeBase:           astiav.NewRational(0, 0),
 			Options:            decInput.Options,
-			Flags:              decInput.Flags,
+			HWDevFlags:         decInput.Flags,
 		},
 		ReusableResources: nil,
 	}
@@ -39,53 +39,53 @@ func NewDecoder(
 	return &Decoder{Codec: c}, nil
 }
 
-func (d *Decoder) unlocked() *DecoderLocked {
+func (d *Decoder) locked() *DecoderLocked {
 	return (*DecoderLocked)(d)
 }
 
 func (d *Decoder) String() string {
-	return d.unlocked().String()
+	return d.locked().String()
 }
 
 func (d *Decoder) SendPacket(
 	ctx context.Context,
 	p *astiav.Packet,
 ) error {
-	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().SendPacket, ctx, p)
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.locked().SendPacket, ctx, p)
 }
 
 func (d *Decoder) ReceiveFrame(
 	ctx context.Context,
 	f *astiav.Frame,
 ) error {
-	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().ReceiveFrame, ctx, f)
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.locked().ReceiveFrame, ctx, f)
 }
 
 func (d *Decoder) GetQuality(
 	ctx context.Context,
 ) Quality {
-	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().GetQuality, ctx)
+	return xsync.DoA1R1(xsync.WithNoLogging(ctx, true), &d.locker, d.locked().GetQuality, ctx)
 }
 
 func (d *Decoder) SetLowLatency(
 	ctx context.Context,
 	v bool,
 ) (_err error) {
-	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.unlocked().SetLowLatency, ctx, v)
+	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.locked().SetLowLatency, ctx, v)
 }
 
 func (d *Decoder) Flush(
 	ctx context.Context,
 	callback CallbackFrameReceiver,
 ) error {
-	return xsync.DoA2R1(ctx, &d.locker, d.unlocked().Flush, ctx, callback)
+	return xsync.DoA2R1(ctx, &d.locker, d.locked().Flush, ctx, callback)
 }
 
 func (d *Decoder) Drain(
 	ctx context.Context,
 	callback CallbackFrameReceiver,
 ) error {
-	return xsync.DoA2R1(ctx, &d.locker, d.unlocked().Drain, ctx, callback)
+	return xsync.DoA2R1(ctx, &d.locker, d.locked().Drain, ctx, callback)
 }
 
 func (d *Decoder) LockDo(
@@ -93,7 +93,7 @@ func (d *Decoder) LockDo(
 	callback func(context.Context, *DecoderLocked) error,
 ) error {
 	return xsync.DoR1(ctx, &d.locker, func() error {
-		return callback(ctx, d.unlocked())
+		return callback(ctx, d.locked())
 	})
 }
 

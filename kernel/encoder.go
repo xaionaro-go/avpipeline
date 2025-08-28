@@ -2,9 +2,11 @@ package kernel
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/resampler"
 	"github.com/xaionaro-go/avpipeline/scaler"
+	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -49,6 +52,41 @@ type Encoder[EF codec.EncoderFactory] struct {
 
 var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
 var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
+
+// TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
+type frameInfo struct {
+	PTS         int64
+	DTS         int64
+	TimeBase    astiav.Rational
+	Duration    int64
+	StreamIndex int
+}
+
+func (p *frameInfo) Bytes() []byte {
+	b := make([]byte, 48)
+	binary.NativeEndian.PutUint64(b[0:8], uint64(p.PTS))
+	binary.NativeEndian.PutUint64(b[8:16], uint64(p.DTS))
+	binary.NativeEndian.PutUint64(b[16:24], uint64(p.TimeBase.Num()))
+	binary.NativeEndian.PutUint64(b[24:32], uint64(p.TimeBase.Den()))
+	binary.NativeEndian.PutUint64(b[32:40], uint64(p.Duration))
+	binary.NativeEndian.PutUint64(b[40:48], uint64(p.StreamIndex))
+	return b
+}
+
+func frameInfoFromBytes(b []byte) *frameInfo {
+	if len(b) < 48 {
+		return nil
+	}
+	num := int(binary.NativeEndian.Uint64(b[16:24]))
+	den := int(binary.NativeEndian.Uint64(b[24:32]))
+	return &frameInfo{
+		PTS:         int64(binary.NativeEndian.Uint64(b[0:8])),
+		DTS:         int64(binary.NativeEndian.Uint64(b[8:16])),
+		TimeBase:    astiav.NewRational(num, den),
+		Duration:    int64(binary.NativeEndian.Uint64(b[32:40])),
+		StreamIndex: int(binary.NativeEndian.Uint64(b[40:48])),
+	}
+}
 
 type streamEncoder struct {
 	codec.Encoder
@@ -314,25 +352,6 @@ func (e *Encoder[EF]) SendInputPacket(
 	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-// TODO: should I just delete this function? astiav.CodecParameters can be reused
-// without reallocation if no edit happens (and it already work that way before).
-func fixCodecParameters(
-	ctx context.Context,
-	orig *astiav.CodecParameters,
-	_ astiav.Rational,
-) *astiav.CodecParameters {
-	cp := astiav.AllocCodecParameters()
-	setFinalizerFree(ctx, cp)
-	orig.Copy(cp)
-	if cp.FrameRate().Float64() < 1 {
-		logger.Errorf(ctx, "unable to detect the FPS")
-	}
-
-	// TODO: add any fixes required
-
-	return cp
-}
-
 func (e *Encoder[EF]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
@@ -346,11 +365,10 @@ func (e *Encoder[EF]) sendInputPacket(
 	if encoder == nil {
 		input.Stream.AvgFrameRate()
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		codecParams := fixCodecParameters(ctx, input.CodecParameters(), input.Stream.AvgFrameRate())
 		err := e.initEncoderAndOutputFor(
 			ctx,
 			input.GetStreamIndex(),
-			codecParams,
+			input.CodecParameters(),
 			input.GetStream().TimeBase(),
 			nil,
 		)
@@ -418,11 +436,10 @@ func (e *Encoder[EF]) sendInputFrame(
 	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
 	if encoder == nil {
 		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		codecParams := fixCodecParameters(ctx, input.CodecParameters, input.AvgFrameRate)
 		err := e.initEncoderAndOutputFor(
 			ctx,
 			input.StreamIndex,
-			codecParams,
+			input.CodecParameters,
 			input.GetTimeBase(),
 			input.Source,
 		)
@@ -465,7 +482,6 @@ func (e *Encoder[EF]) sendInputFrame(
 				err = ctx.Err()
 			case outputFramesCh <- frame.BuildOutput(
 				frame.CloneAsReferenced(input.Frame),
-				input.Pos,
 				input.StreamInfo,
 			):
 			}
@@ -505,17 +521,42 @@ func (e *Encoder[EF]) sendInputFrame(
 		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
 	}
 
+	if len(fittedFrames) == 0 {
+		logger.Tracef(ctx, "the frame was dropped by the fitter")
+		return nil
+	}
+
+	frameInfo := frameInfo{
+		PTS:         input.Pts(),
+		DTS:         input.PktDts(),
+		Duration:    input.Frame.Duration(),
+		StreamIndex: input.StreamIndex,
+	}
 	for _, fittedFrame := range fittedFrames {
 		if encoderDebug {
 			logger.Tracef(ctx, "fitted frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
 		}
+		if fittedFrame.Pts() != consts.NoPTSValue {
+			frameInfo.PTS = fittedFrame.Pts()
+		}
+		if fittedFrame.PktDts() != consts.NoPTSValue {
+			frameInfo.DTS = fittedFrame.PktDts()
+		}
+		if fittedFrame.Duration() > 0 {
+			frameInfo.Duration = fittedFrame.Duration()
+		}
+		if frameInfo.TimeBase.Num() == 0 {
+			frameInfo.TimeBase = input.GetTimeBase()
+		}
+
+		fittedFrame.SetOpaque(frameInfo.Bytes())
 		err := encoder.SendFrame(ctx, fittedFrame)
 		if err != nil {
 			return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
 		}
 	}
 
-	err = e.drain(ctx, outputPacketsCh, encoder.Drain, input, outputStream)
+	err = e.drain(ctx, outputPacketsCh, encoder.Drain, outputStream, frameInfo)
 	if err != nil {
 		return fmt.Errorf("unable to drain: %w", err)
 	}
@@ -527,8 +568,8 @@ func (e *Encoder[EF]) drain(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	encoderDrainFn func(context.Context, codec.CallbackPacketReceiver) error,
-	input frame.Input,
 	outputStream *astiav.Stream,
+	frameInfo frameInfo,
 ) (_err error) {
 	logger.Tracef(ctx, "drain")
 	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
@@ -541,24 +582,29 @@ func (e *Encoder[EF]) drain(
 		pkt *astiav.Packet,
 	) error {
 		packetCount++
-		logger.Tracef(ctx, "encoder.ReceivePacket(): got the %dth %s packet, resulting size: %d (pts: %d)", packetCount, outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts())
+		opaque := pkt.Opaque()
+		logger.Tracef(ctx, "encoder.ReceivePacket(): got the %dth %s packet, resulting size: %d (pts: %d); opaque size: %d", packetCount, outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts(), len(opaque))
 
 		pkt.SetStreamIndex(outputStream.Index())
 
-		if caps&astiav.CodecCapabilityDr1 != 0 || encoderForceCopyTime {
-			if input.Frame != nil {
-				logger.Tracef(ctx, "setting manually the packet timestamps")
-				// get rid of this copying below. We should calculate these values
-				// from scratch, instead of just copying them.
-				if pkt.Duration() <= 0 {
-					pkt.SetDuration(input.Frame.Duration())
-				}
-				pkt.SetDts(input.PktDts())
-				pkt.SetPts(input.Pts())
-				pkt.RescaleTs(input.TimeBase, outputStream.TimeBase())
-			} else {
-				logger.Errorf(ctx, "input.Frame is nil, cannot copy time info to the packet")
+		if opaque != nil {
+			frameInfoPtr := frameInfoFromBytes(opaque)
+			if frameInfoPtr == nil {
+				return fmt.Errorf("unable to parse the frame info from the packet opaque data: %v", opaque)
 			}
+			frameInfo = *frameInfoPtr
+		}
+
+		if caps&astiav.CodecCapabilityDr1 != 0 || encoderForceCopyTime {
+			logger.Tracef(ctx, "setting manually the packet timestamps")
+			// get rid of this copying below. We should calculate these values
+			// from scratch, instead of just copying them.
+			if pkt.Duration() <= 0 {
+				pkt.SetDuration(frameInfo.Duration)
+			}
+			pkt.SetDts(frameInfo.DTS)
+			pkt.SetPts(frameInfo.PTS)
+			pkt.RescaleTs(frameInfo.TimeBase, outputStream.TimeBase())
 		}
 
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
@@ -575,7 +621,7 @@ func (e *Encoder[EF]) drain(
 
 		var err error
 		encoder.UnlockDo(ctx, func(ctx context.Context) {
-			err = e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh)
+			err = e.send(ctx, pkt, nil, outputStream, outputPacketsCh)
 		})
 		if err != nil {
 			return fmt.Errorf("unable to send a packet: %w", err)
@@ -861,11 +907,10 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 					continue
 				}
 				changed = true
-				codecParams := fixCodecParameters(ctx, inputStream.CodecParameters(), inputStream.AvgFrameRate())
 				err := e.initEncoderAndOutputFor(
 					ctx,
 					inputStream.Index(),
-					codecParams,
+					inputStream.CodecParameters(),
 					inputStream.TimeBase(),
 					nil,
 				)
@@ -939,7 +984,7 @@ func (e *Encoder[EF]) isDirty(ctx context.Context) (_ret bool) {
 
 var _ Flusher = (*Encoder[codec.EncoderFactory])(nil)
 
-func (r *Encoder[EF]) Flush(
+func (e *Encoder[EF]) Flush(
 	ctx context.Context,
 	outputPacketCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
@@ -947,32 +992,57 @@ func (r *Encoder[EF]) Flush(
 	logger.Debugf(ctx, "Flush")
 	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
 
-	return xsync.DoA2R1(ctx, &r.Locker, r.flush, ctx, outputPacketCh)
-}
+	defer func() {
+		if _err == nil {
+			e.isDirtyCache.Store(false)
+		}
+	}()
 
-func (e *Encoder[EF]) flush(
-	ctx context.Context,
-	outputPacketCh chan<- packet.Output,
-) (_err error) {
-	logger.Tracef(ctx, "flush")
-	defer func() { logger.Tracef(ctx, "/flush: %v", _err) }()
+	errCh := make(chan error, 1)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		e.Locker.Do(ctx, func() {
+			for streamIndex, encoder := range e.encoders {
+				wg.Add(1)
+				streamIndex, encoder := streamIndex, encoder
+				ctx := belt.WithField(ctx, "stream_index", streamIndex)
+				ctx = belt.WithField(ctx, "encoder", encoder)
+				observability.Go(ctx, func(ctx context.Context) {
+					defer wg.Done()
+					err := encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+						return xsync.DoR1(ctx, &e.Locker, func() error {
+							return e.drain(
+								ctx,
+								outputPacketCh,
+								encoder.Flush,
+								e.outputStreams[streamIndex],
+								frameInfo{
+									StreamIndex: streamIndex,
+								},
+							)
+						})
+					})
+					if err != nil {
+						errCh <- fmt.Errorf("unable to flush the encoder for stream #%d: %w", streamIndex, err)
+					}
+				})
+			}
+		})
+	})
+	observability.Go(ctx, func(ctx context.Context) {
+		wg.Wait()
+		close(errCh)
+	})
 
 	var errs []error
-	for streamIndex, encoder := range e.encoders {
-		err := e.drain(
-			ctx,
-			outputPacketCh,
-			encoder.Flush,
-			frame.Input{StreamInfo: &frame.StreamInfo{}},
-			e.outputStreams[streamIndex],
-		)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to flush the encoder for stream #%d: %w", streamIndex, err))
-		}
+	for err := range errCh {
+		errs = append(errs, err)
 	}
 	if errs != nil {
 		return errors.Join(errs...)
 	}
-	e.isDirtyCache.Store(false)
 	return nil
 }

@@ -60,8 +60,9 @@ func CombineGetChangeChanDrained(
 	ctx context.Context,
 	nodes ...Abstract,
 ) <-chan struct{} {
+	logger.Tracef(ctx, "CombineGetChangeChanDrained (nodes: %v)", nodes)
 	if len(nodes) == 0 {
-		return nil
+		panic("no nodes provides")
 	}
 	if len(nodes) == 1 {
 		logger.Tracef(ctx, "CombineGetChangeChanDrained: single node: %v:%p", nodes[0], nodes[0])
@@ -70,20 +71,22 @@ func CombineGetChangeChanDrained(
 	ctx, cancelFn := context.WithCancel(ctx)
 	for _, n := range nodes {
 		logger.Tracef(ctx, "CombineGetChangeChanDrained: adding node: %v:%p", n, n)
+		n, ch := n, n.GetChangeChanDrained()
 		observability.Go(ctx, func(ctx context.Context) {
 			defer cancelFn()
 			defer logger.Tracef(ctx, "CombineGetChangeChanDrained: node done: %v:%p", n, n)
 			select {
 			case <-ctx.Done():
-			case <-n.GetChangeChanDrained():
+			case <-ch:
 			}
+			ch = n.GetChangeChanDrained()
 		})
 	}
 	return ctx.Done()
 }
 
 func (n *NodeWithCustomData[C, T]) resetChangeChanDrainedChanNow() {
-	xatomic.StorePointer(&n.ChangeChanDrained, ptr(make(chan struct{})))
+	close(*xatomic.SwapPointer(&n.ChangeChanDrained, ptr(make(chan struct{}))))
 }
 
 func (n *NodeWithCustomData[C, T]) NotifyInputSent() {
@@ -112,8 +115,8 @@ func (n *NodeWithCustomData[C, T]) calculateIfDrained(ctx context.Context) bool 
 func (n *NodeWithCustomData[C, T]) updateProcInfoLocked(
 	ctx context.Context,
 ) {
-	logger.Tracef(ctx, "updateProcInfoLocked: %v", n)
-	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v", n) }()
+	logger.Tracef(ctx, "updateProcInfoLocked: %v:%p", n, n)
+	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v:%p: %v", n, n, &n.ProcessingState) }()
 	proc := n.Processor
 	n.ProcessingState.InputSent.Store(false)
 	n.ProcessingState.PendingPackets = len(proc.InputPacketChan())

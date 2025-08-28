@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
@@ -154,7 +155,12 @@ func (a *AutoFixerWithCustomData[T]) GetChangeChanPushFramesTo() <-chan struct{}
 }
 
 func (a *AutoFixerWithCustomData[T]) GetChangeChanDrained() <-chan struct{} {
-	return node.CombineGetChangeChanDrained(context.Background(), a.MapStreamIndicesNode, a.AutoHeadersNode)
+	logger.Tracef(context.Background(), "GetChangeChanDrained")
+	return node.CombineGetChangeChanDrained(
+		context.Background(),
+		a.MapStreamIndicesNode,
+		a.AutoHeadersNode,
+	)
 }
 
 func (a *AutoFixerWithCustomData[T]) NotifyInputSent() {

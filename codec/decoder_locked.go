@@ -105,9 +105,15 @@ func (d *DecoderLocked) setLowLatencyGeneric(
 func (d *DecoderLocked) Flush(
 	ctx context.Context,
 	callback CallbackFrameReceiver,
-) error {
+) (_err error) {
 	logger.Tracef(ctx, "Flush")
 	defer func() { logger.Tracef(ctx, "/Flush") }()
+
+	defer func() {
+		if _err == nil {
+			d.IsDirtyValue.Store(false)
+		}
+	}()
 
 	caps := d.codec.Capabilities()
 	logger.Tracef(ctx, "Capabilities: %08x", caps)
@@ -128,7 +134,6 @@ func (d *DecoderLocked) Flush(
 		return fmt.Errorf("unable to drain: %w", err)
 	}
 
-	d.IsDirtyValue.Store(false)
 	return nil
 }
 

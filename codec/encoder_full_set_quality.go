@@ -18,7 +18,7 @@ func (e *EncoderFull) SetQuality(
 ) (_err error) {
 	logger.Debugf(ctx, "SetQuality(ctx, %#+v)", q)
 	defer func() { logger.Tracef(ctx, "/SetQuality(ctx, %#+v): %v", q, _err) }()
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.unlocked().SetQuality, ctx, q, when)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.asLocked().SetQuality, ctx, q, when)
 }
 
 func (e *EncoderFullLocked) SetQuality(

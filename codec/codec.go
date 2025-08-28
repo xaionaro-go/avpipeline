@@ -205,15 +205,15 @@ func newCodec(
 	hardwareDeviceName := params.HardwareDeviceName
 	timeBase := params.TimeBase
 	options := params.Options
-	flags := params.Flags
+	hwDevFlags := params.HWDevFlags
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
 	ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 
-	logger.Tracef(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags)
+	logger.Tracef(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, hwDevFlags)
 	defer func() {
-		logger.Tracef(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, flags, _ret, _err)
+		logger.Tracef(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, hwDevFlags, _ret, _err)
 	}()
 	c := &Codec{
 		codecInternals: &codecInternals{
@@ -374,7 +374,7 @@ func newCodec(
 			hardwareDeviceType,
 			hardwareDeviceName,
 			options,
-			flags,
+			hwDevFlags,
 			reusableResources,
 		)
 		switch {
@@ -439,6 +439,22 @@ func newCodec(
 	if setSetPktTimeBase {
 		c.codecContext.SetPktTimeBase(timeBase)
 	}
+	flags := 0 |
+		astiav.CodecContextFlags(astiav.CodecContextFlagLowDelay) | // this is a streaming focused library
+		astiav.CodecContextFlags(astiav.CodecContextFlagClosedGop) // to make sure we can route dynamically without issues
+	if c.codec.Capabilities()&astiav.CodecCapabilityDelay != 0 {
+		if isEncoder && c.codec.Capabilities()&astiav.CodecCapabilityEncoderReorderedOpaque == 0 {
+			logger.Warnf(ctx, "codec '%s' has 'delay' capability, but doesn't have 'encoder_reordered_opaque' capability, so it is not supported by avpipeline", c.codec.Name())
+		} else {
+			// avpipeline uses the opaque field to store packet info when dealing with delayed frames:
+			flags |= astiav.CodecContextFlags(astiav.CodecContextFlagCopyOpaque)
+		}
+	}
+	flags2 := 0 |
+		astiav.CodecContextFlags2(astiav.CodecFlag2LocalHeader) | // to make sure we can route dynamically without issues
+		astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
+	c.codecContext.SetFlags(flags)
+	c.codecContext.SetFlags2(flags2)
 
 	if isEncoder {
 		if timeBase.Num() == 0 {
@@ -481,12 +497,12 @@ func (c *Codec) initHardware(
 	hardwareDeviceType globaltypes.HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
 	options *astiav.Dictionary,
-	flags int,
+	hwDevFlags int,
 	reusableResources *Resources,
 ) (_err error) {
-	logger.Tracef(ctx, "initHardware(%s, '%s', %#+v, %X)", hardwareDeviceType, hardwareDeviceName, options, flags)
+	logger.Tracef(ctx, "initHardware(%s, '%s', %#+v, %X)", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags)
 	defer func() {
-		logger.Tracef(ctx, "/initHardware(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, flags, _err)
+		logger.Tracef(ctx, "/initHardware(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags, _err)
 	}()
 	err := c.initHardwarePixelFormat(ctx, hardwareDeviceType)
 	if err != nil {
@@ -502,7 +518,7 @@ func (c *Codec) initHardware(
 		hardwareDeviceType,
 		hardwareDeviceName,
 		options,
-		flags,
+		hwDevFlags,
 		reusableResources,
 	)
 	if err != nil {
@@ -560,7 +576,7 @@ func (c *Codec) initHardwareDeviceContext(
 	hardwareDeviceType HardwareDeviceType,
 	hardwareDeviceName HardwareDeviceName,
 	options *astiav.Dictionary,
-	flags int,
+	hwDevFlags int,
 	reusableResources *Resources,
 ) error {
 	if reusableResources != nil {
@@ -582,7 +598,7 @@ func (c *Codec) initHardwareDeviceContext(
 		astiav.HardwareDeviceType(hardwareDeviceType),
 		string(hardwareDeviceName),
 		options,
-		flags,
+		hwDevFlags,
 	)
 	if err != nil {
 		return fmt.Errorf("unable to create hardware (%s:%s) device context: %w", hardwareDeviceType, hardwareDeviceName, err)

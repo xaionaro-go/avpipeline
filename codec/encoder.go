@@ -43,6 +43,7 @@ type Encoder interface {
 	Drain(ctx context.Context, callback CallbackPacketReceiver) error
 	IsDirty() bool
 	GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat
+	LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error
 }
 type EncoderInput = resourcegetter.Input
 

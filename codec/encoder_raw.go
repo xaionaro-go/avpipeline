@@ -94,6 +94,10 @@ func (EncoderRaw) IsDirty() bool {
 	return false
 }
 
+func (EncoderRaw) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
+	return fn(ctx, EncoderRaw{})
+}
+
 func IsEncoderRaw(encoder Encoder) bool {
 	_, ok := encoder.(EncoderRaw)
 	return ok

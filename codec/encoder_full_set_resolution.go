@@ -16,7 +16,7 @@ func (e *EncoderFull) SetResolution(
 ) (_err error) {
 	logger.Debugf(ctx, "SetResolution(ctx, %v)", res)
 	defer func() { logger.Tracef(ctx, "/SetResolution(ctx, %v): %v", res, _err) }()
-	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.unlocked().SetResolution, ctx, res, when)
+	return xsync.DoA3R1(xsync.WithNoLogging(ctx, true), &e.locker, e.asLocked().SetResolution, ctx, res, when)
 }
 
 func (e *EncoderFullLocked) SetResolution(

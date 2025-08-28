@@ -78,10 +78,6 @@ func (f *Input) GetPTSAsDuration() time.Duration {
 	return (*Commons)(f).GetPTSAsDuration()
 }
 
-func (f *Input) GetStreamDurationAsDuration() time.Duration {
-	return (*Commons)(f).GetStreamDurationAsDuration()
-}
-
 func (f *Input) GetPipelineSideData() types.PipelineSideData {
 	return f.PipelineSideData
 }

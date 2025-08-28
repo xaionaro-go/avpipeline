@@ -117,7 +117,6 @@ func (k *NodeKernel) sendInputFrame(
 
 	outFrame := frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
-		input.Pos,
 		input.StreamInfo,
 	)
 	select {

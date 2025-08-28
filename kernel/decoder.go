@@ -2,9 +2,11 @@ package kernel
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -14,12 +16,46 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
+)
+
+const (
+	DecoderMaxPacketInfoStorageSize = 1024
 )
 
 const (
 	decoderDebug = true
 )
+
+// TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
+type packetInfo struct {
+	PTS         int64
+	DTS         int64
+	Duration    int64
+	StreamIndex int
+}
+
+func (p *packetInfo) Bytes() []byte {
+	b := make([]byte, 40)
+	binary.NativeEndian.PutUint64(b[0:8], uint64(p.PTS))
+	binary.NativeEndian.PutUint64(b[8:16], uint64(p.DTS))
+	binary.NativeEndian.PutUint64(b[24:32], uint64(p.Duration))
+	binary.NativeEndian.PutUint64(b[32:40], uint64(p.StreamIndex))
+	return b
+}
+
+func packetInfoFromBytes(b []byte) *packetInfo {
+	if len(b) < 40 {
+		return nil
+	}
+	return &packetInfo{
+		PTS:         int64(binary.NativeEndian.Uint64(b[0:8])),
+		DTS:         int64(binary.NativeEndian.Uint64(b[8:16])),
+		Duration:    int64(binary.NativeEndian.Uint64(b[24:32])),
+		StreamIndex: int(binary.NativeEndian.Uint64(b[32:40])),
+	}
+}
 
 type Decoder[DF codec.DecoderFactory] struct {
 	*closuresignaler.ClosureSignaler
@@ -28,9 +64,10 @@ type Decoder[DF codec.DecoderFactory] struct {
 	Locker                xsync.Mutex
 	Decoders              map[int]*codec.Decoder
 	OutputCodecParameters map[int]*astiav.CodecParameters
+	StreamInfo            map[int]*frame.StreamInfo
 
 	FormatContext *astiav.FormatContext
-	IsDirtyValue  atomic.Bool
+	IsDirtyCache  atomic.Bool
 }
 
 var _ Abstract = (*Decoder[codec.DecoderFactory])(nil)
@@ -46,6 +83,7 @@ func NewDecoder[DF codec.DecoderFactory](
 		Decoders:              map[int]*codec.Decoder{},
 		FormatContext:         astiav.AllocFormatContext(),
 		OutputCodecParameters: map[int]*astiav.CodecParameters{},
+		StreamInfo:            map[int]*frame.StreamInfo{},
 	}
 	setFinalizerFree(ctx, d.FormatContext)
 	return d
@@ -125,41 +163,76 @@ func (d *Decoder[DF]) sendInputPacket(
 	input packet.Input,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	decoder, err := d.getStreamDecoder(ctx, input.Stream)
+	streamDecoder, err := d.getStreamDecoder(ctx, input.Stream)
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
-	ctx = belt.WithField(ctx, "decoder", decoder)
+	ctx = belt.WithField(ctx, "decoder", streamDecoder)
 
 	if decoderDebug {
 		logger.Tracef(ctx, "input packet: dur:%d; res:%s", input.Duration(), input.GetResolution())
 	}
 
+	timeBase := input.Stream.TimeBase()
+	if timeBase.Num() == 0 {
+		return fmt.Errorf("internal error: TimeBase is not set")
+	}
+
 	if !encoderForceCopyTime {
-		input.Packet.RescaleTs(input.Stream.TimeBase(), decoder.TimeBase())
+		input.Packet.RescaleTs(input.Stream.TimeBase(), streamDecoder.TimeBase())
 	}
 
-	if err := decoder.SendPacket(ctx, input.Packet); err != nil {
-		logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
-		if errors.Is(err, astiav.ErrEagain) {
-			return nil
+	return streamDecoder.LockDo(ctx, func(
+		ctx context.Context,
+		decoder *codec.DecoderLocked,
+	) (_err error) {
+		streamIndex := input.StreamIndex()
+
+		streamInfo := d.StreamInfo[streamIndex]
+		if streamInfo == nil {
+			streamInfo = &frame.StreamInfo{
+				Source:           d.asSource(decoder.AsUnlocked()),
+				CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
+				StreamIndex:      streamIndex,
+				StreamsCount:     sourceNbStreams(ctx, input.Source),
+				TimeBase:         timeBase,
+				Duration:         input.Packet.Duration(),
+				PipelineSideData: nil,
+			}
+			d.StreamInfo[streamIndex] = streamInfo
 		}
-		return fmt.Errorf("unable to decode the packet: %w", err)
-	}
 
-	err = d.drain(ctx, outputFramesCh, decoder.Drain, input)
-	if err != nil {
-		return fmt.Errorf("unable to drain the decoder: %w", err)
-	}
+		packetInfo := packetInfo{
+			PTS:         input.Packet.Pts(),
+			DTS:         input.Packet.Dts(),
+			Duration:    input.Packet.Duration(),
+			StreamIndex: streamIndex,
+		}
 
-	return nil
+		input.Packet.SetOpaque(packetInfo.Bytes())
+
+		if err := decoder.SendPacket(ctx, input.Packet); err != nil {
+			logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
+			/*if errors.Is(err, astiav.ErrEagain) {
+				return nil
+			}*/
+			return fmt.Errorf("unable to decode the packet: %w", err)
+		}
+
+		err = d.drain(ctx, outputFramesCh, decoder.Drain, packetInfo)
+		if err != nil {
+			return fmt.Errorf("unable to drain the decoder: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func (d *Decoder[DF]) drain(
 	ctx context.Context,
 	outputFramesCh chan<- frame.Output,
 	decoderDrainFn func(context.Context, codec.CallbackFrameReceiver) error,
-	input packet.Input,
+	packetInfo packetInfo,
 ) (_err error) {
 	logger.Tracef(ctx, "drain")
 	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
@@ -169,38 +242,42 @@ func (d *Decoder[DF]) drain(
 		caps astiav.CodecCapabilities,
 		f *astiav.Frame,
 	) error {
-		logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame")
+		ctx = belt.WithField(ctx, "decoder", decoder)
+		opaque := f.Opaque()
+		logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame (opaque len: %d)", len(opaque))
 
-		timeBase := input.Stream.TimeBase()
-		if timeBase.Num() == 0 {
-			return fmt.Errorf("internal error: TimeBase is not set")
-		}
 		f.SetPictureType(astiav.PictureTypeNone)
+
+		if len(opaque) > 0 {
+			packetInfoPtr := packetInfoFromBytes(f.Opaque())
+			if packetInfoPtr == nil {
+				return fmt.Errorf("unable to get packet info from frame opaque data: %v", f.Opaque())
+			}
+			packetInfo = *packetInfoPtr
+		}
+		logger.Tracef(ctx, "decoder.ReceiveFrame(): packetInfo: %+v", packetInfo)
+
+		streamInfo := d.StreamInfo[packetInfo.StreamIndex]
+		if streamInfo == nil {
+			return fmt.Errorf("unable to find stream info for stream index %d", packetInfo.StreamIndex)
+		}
+
 		if f.Pts() == astiav.NoPtsValue {
 			if decoderDebug {
-				logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", input.Packet.Pts())
+				logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", packetInfo.PTS)
 			}
-			f.SetPts(input.Packet.Pts())
+			f.SetPts(packetInfo.PTS)
 		}
+
 		if f.Duration() <= 0 {
 			if decoderDebug {
-				logger.Tracef(ctx, "setting frame duration from packet duration: %d", input.Packet.Duration())
+				logger.Tracef(ctx, "setting frame duration from packet duration: %d", packetInfo.Duration)
 			}
-			f.SetDuration(input.Packet.Duration())
+			f.SetDuration(packetInfo.Duration)
 		}
 		frameToSend := frame.BuildOutput(
 			f,
-			input.Packet.Pos(),
-			frame.BuildStreamInfo(
-				d.asSource(decoder.AsUnlocked()),
-				d.getOutputCodecParameters(ctx, input.StreamIndex(), decoder),
-				input.StreamIndex(), sourceNbStreams(ctx, input.Source),
-				input.Stream.Duration(),
-				input.Stream.AvgFrameRate(),
-				timeBase,
-				input.Packet.Duration(),
-				input.PipelineSideData,
-			),
+			streamInfo,
 		)
 		var err error
 		d.Locker.UDo(ctx, func() {
@@ -326,7 +403,7 @@ func (d *Decoder[DF]) reset(
 func (d *Decoder[DF]) IsDirty(
 	ctx context.Context,
 ) bool {
-	if d.IsDirtyValue.Load() {
+	if d.IsDirtyCache.Load() {
 		return true
 	}
 	return xsync.DoA1R1(ctx, &d.Locker, d.isDirtyLocked, ctx)
@@ -337,7 +414,7 @@ func (d *Decoder[DF]) isDirtyLocked(
 ) (_ret bool) {
 	logger.Debugf(ctx, "isDirty")
 	defer func() { logger.Debugf(ctx, "/isDirty: %v", _ret) }()
-	defer func() { d.IsDirtyValue.Store(_ret) }()
+	defer func() { d.IsDirtyCache.Store(_ret) }()
 	for _, decoder := range d.Decoders {
 		if decoder.IsDirty(ctx) {
 			return true
@@ -353,35 +430,64 @@ func (d *Decoder[DF]) Flush(
 	_ chan<- packet.Output,
 	outputFrameCh chan<- frame.Output,
 ) (_err error) {
-	logger.Debugf(ctx, "flush()")
-	defer func() { logger.Debugf(ctx, "/flush(): %v", _err) }()
+	logger.Debugf(ctx, "Flush()")
+	defer func() { logger.Debugf(ctx, "/Flush(): %v", _err) }()
+
 	if d.IsClosed() {
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA2R1(ctx, &d.Locker, d.flush, ctx, outputFrameCh)
-}
+	defer func() {
+		if _err == nil {
+			d.IsDirtyCache.Store(false)
+		}
+	}()
 
-func (d *Decoder[DF]) flush(
-	ctx context.Context,
-	outputFrameCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "flush()")
-	defer func() { logger.Tracef(ctx, "/flush(): %v", _err) }()
+	errCh := make(chan error, 1)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		d.Locker.Do(ctx, func() {
+			for streamIndex, decoder := range d.Decoders {
+				wg.Add(1)
+				streamIndex, decoder := streamIndex, decoder
+				ctx := belt.WithField(ctx, "stream_index", streamIndex)
+				ctx = belt.WithField(ctx, "decoder", decoder)
+				observability.Go(ctx, func(ctx context.Context) {
+					defer wg.Done()
+					err := decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) error {
+						return xsync.DoR1(ctx, &d.Locker, func() error {
+							return d.drain(
+								ctx,
+								outputFrameCh,
+								decoder.Flush,
+								packetInfo{
+									StreamIndex: streamIndex,
+								},
+							)
+						})
+					})
+					if err != nil {
+						errCh <- fmt.Errorf("unable to drain the decoder for stream #%d: %w", streamIndex, err)
+					}
+				})
+			}
+		})
+	})
+
+	observability.Go(ctx, func(ctx context.Context) {
+		wg.Wait()
+		close(errCh)
+	})
 
 	var errs []error
-	for streamIndex, decoder := range d.Decoders {
-		err := decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) error {
-			return d.drain(
-				ctx,
-				outputFrameCh,
-				decoder.Flush,
-				packet.Input{},
-			)
-		})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to drain the decoder for stream #%d: %w", streamIndex, err))
-		}
+	for err := range errCh {
+		errs = append(errs, err)
 	}
-	return errors.Join(errs...)
+	if errs != nil {
+		return errors.Join(errs...)
+	}
+	return nil
 }

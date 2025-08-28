@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
@@ -29,11 +30,26 @@ func (s *StreamMux[C]) ErrorChan() <-chan error {
 }
 func (s *StreamMux[C]) Flush(ctx context.Context) error {
 	var errs []error
-	for _, n := range s.Nodes(ctx) {
+	nodes := s.Nodes(ctx)
+	for idx, n := range nodes {
 		err := n.GetProcessor().Flush(ctx)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush node %q: %w", n.String(), err))
+			continue
 		}
+		for {
+			logger.Tracef(ctx, "waiting for drain of %v:%p", n, n)
+			ch := n.GetChangeChanDrained()
+			if n.IsDrained(ctx) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ch:
+			}
+		}
+		_ = idx // for debugger
 	}
 	return errors.Join(errs...)
 }
