@@ -253,7 +253,6 @@ func newOutput[C any](
 					return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes <= 0
 				}),
 				extrapacketcondition.PushQueueSize(
-					o.RecoderNode,
 					o.OutputNode,
 					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
 				),
@@ -639,6 +638,8 @@ func (o *Output) GetKey() OutputKey {
 }
 
 func (o *Output) Nodes() []node.Abstract {
+	// the order must be the same as the packets/frames flow,
+	// otherwise flushing/draining will deadlock
 	return []node.Abstract{
 		o.InputFilter,
 		o.InputFixer,

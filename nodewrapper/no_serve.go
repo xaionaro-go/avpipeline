@@ -9,6 +9,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -80,8 +81,8 @@ func (n *NoServe[T]) IsServing() bool {
 	return n.Node.IsServing()
 }
 
-func (n *NoServe[T]) GetStatistics() *node.Statistics {
-	return n.Node.GetStatistics()
+func (n *NoServe[T]) GetCountersPtr() *nodetypes.Counters {
+	return n.Node.GetCountersPtr()
 }
 
 func (n *NoServe[T]) GetProcessor() processor.Abstract {
@@ -118,10 +119,6 @@ func (n *NoServe[T]) GetChangeChanPushFramesTo() <-chan struct{} {
 
 func (n *NoServe[T]) GetChangeChanDrained() <-chan struct{} {
 	return n.Node.GetChangeChanDrained()
-}
-
-func (n *NoServe[T]) NotifyInputSent() {
-	n.Node.NotifyInputSent()
 }
 
 func (n *NoServe[T]) IsDrained(ctx context.Context) bool {

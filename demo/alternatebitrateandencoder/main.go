@@ -200,12 +200,12 @@ func main() {
 				return
 			}
 		case <-statusTicker.C:
-			inputStats := inputNode.GetStats()
+			inputStats := inputNode.GetCountersPtr()
 			inputStatsJSON, err := json.Marshal(inputStats)
 			if err != nil {
 				l.Fatal(err)
 			}
-			outputStats := finalNode.GetPushPacketsTos()[0].Node.GetStatistics()
+			outputStats := finalNode.GetPushPacketsTos()[0].Node.GetCountersPtr()
 			outputStatsJSON, err := json.Marshal(outputStats)
 			if err != nil {
 				l.Fatal(err)

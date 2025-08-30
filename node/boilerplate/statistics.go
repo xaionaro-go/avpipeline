@@ -1,13 +1,13 @@
 package boilerplate
 
 import (
-	"github.com/xaionaro-go/avpipeline/node"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 )
 
-type Statistics struct {
-	node.Statistics
+type Counters struct {
+	*nodetypes.Counters
 }
 
-func (n *Statistics) GetStatistics() *node.Statistics {
-	return &n.Statistics
+func (n *Counters) CountersPtr() *nodetypes.Counters {
+	return nodetypes.NewCounters()
 }

@@ -72,3 +72,7 @@ func (a *AutoFixerWithCustomData[T]) NotifyAboutPacketSource(
 func (a *AutoFixerWithCustomData[T]) Flush(ctx context.Context) error {
 	return nil
 }
+
+func (a *AutoFixerWithCustomData[T]) CountersPtr() *processor.Counters {
+	return a.Output().GetProcessor().CountersPtr()
+}

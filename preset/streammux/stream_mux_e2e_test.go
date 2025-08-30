@@ -24,6 +24,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/streammux"
 	streammuxtypes "github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 )
@@ -199,6 +200,10 @@ func runTest(
 		case <-ctx.Done():
 			require.NoError(t, ctx.Err())
 		case inputCh <- p:
+			streamMux.GetCountersPtr().Packets.Received.Increment(
+				globaltypes.MediaType(p.GetMediaType()),
+				uint64(p.Packet.Size()),
+			)
 		}
 	}
 

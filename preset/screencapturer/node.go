@@ -10,8 +10,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -101,21 +101,21 @@ func (a *ScreenCapturer[C]) IsServing() bool {
 	return a.Input().IsServing() && a.Output().IsServing()
 }
 
-func (a *ScreenCapturer[C]) GetStatistics() *node.Statistics {
-	inputStats := a.Input().GetStatistics().Convert()
-	outputStats := a.Output().GetStatistics().Convert()
-	return node.FromProcessingStatistics(&node.ProcessingStatistics{
-		BytesCountRead:  inputStats.BytesCountRead,
-		BytesCountWrote: outputStats.BytesCountWrote,
-		Packets: types.ProcessingFramesOrPacketsStatistics{
-			Read:  inputStats.Packets.Read,
-			Wrote: outputStats.Packets.Wrote,
+func (a *ScreenCapturer[C]) GetCountersPtr() *nodetypes.Counters {
+	inputStats := a.Input().GetCountersPtr()
+	outputStats := a.Output().GetCountersPtr()
+	return &nodetypes.Counters{
+		Packets: nodetypes.CountersSection{
+			Missed:   inputStats.Packets.Missed,
+			Received: inputStats.Packets.Received,
+			Sent:     outputStats.Packets.Sent,
 		},
-		Frames: types.ProcessingFramesOrPacketsStatistics{
-			Read:  inputStats.Frames.Read,
-			Wrote: outputStats.Frames.Wrote,
+		Frames: nodetypes.CountersSection{
+			Missed:   inputStats.Frames.Missed,
+			Received: inputStats.Frames.Received,
+			Sent:     outputStats.Frames.Sent,
 		},
-	})
+	}
 }
 
 func (a *ScreenCapturer[C]) GetProcessor() processor.Abstract {
@@ -156,8 +156,4 @@ func (a *ScreenCapturer[C]) GetChangeChanDrained() <-chan struct{} {
 
 func (a *ScreenCapturer[C]) IsDrained(ctx context.Context) bool {
 	return node.CombineIsDrained(ctx, a.InputNode, a.DecoderNode)
-}
-
-func (a *ScreenCapturer[C]) NotifyInputSent() {
-	a.Input().NotifyInputSent()
 }

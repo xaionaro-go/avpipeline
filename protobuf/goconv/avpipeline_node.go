@@ -17,7 +17,7 @@ func NodeToGRPC(n node.Abstract) *avpipelinegrpc.Node {
 		Type:        fmt.Sprintf("%T", n),
 		Description: fmt.Sprintf("%s", n),
 		IsServing:   n.IsServing(),
-		Statistics:  NodeStatisticsToGRPC(n.GetStatistics()),
+		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), n.GetProcessor().CountersPtr()),
 	}
 
 	var currentLayer []node.Abstract

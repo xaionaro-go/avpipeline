@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -244,10 +245,6 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsServing() bool {
 	return fwd.Output.IsServing()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetStatistics() *node.Statistics {
-	return fwd.Output.GetStatistics()
-}
-
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetProcessor() processor.Abstract {
 	return fwd.Output.GetProcessor()
 }
@@ -285,13 +282,23 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanDrained() <-chan stru
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsDrained(ctx context.Context) bool {
-	return fwd.Input.IsDrained(ctx) && fwd.Output.IsDrained(ctx) && (fwd.AutoFixer == nil || fwd.AutoFixer.IsDrained(ctx))
-
-}
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) NotifyInputSent() {
-	fwd.Output.NotifyInputSent()
+	return (fwd.AutoFixer == nil || fwd.AutoFixer.IsDrained(ctx)) && fwd.Output.IsDrained(ctx)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) Flush(ctx context.Context) error {
-	return fwd.Output.Flush(ctx)
+	if fwd.AutoFixer != nil {
+		err := fwd.AutoFixer.Flush(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to flush autofixer: %w", err)
+		}
+	}
+	err := fwd.Output.Flush(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to flush output: %w", err)
+	}
+	return nil
+}
+
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetCountersPtr() *nodetypes.Counters {
+	return fwd.Output.GetCountersPtr()
 }

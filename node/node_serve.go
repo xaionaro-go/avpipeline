@@ -7,7 +7,6 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -15,26 +14,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/node/filter"
 	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
-
-func incrementCounters(
-	s *FramesOrPacketsStatisticsSection,
-	mediaType astiav.MediaType,
-) {
-	switch mediaType {
-	case astiav.MediaTypeVideo:
-		s.Video.Add(1)
-	case astiav.MediaTypeAudio:
-		s.Audio.Add(1)
-	default:
-		s.Other.Add(1)
-	}
-}
 
 func (n *NodeWithCustomData[C, T]) Serve(
 	ctx context.Context,
@@ -159,7 +146,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					func(p processor.Abstract) chan<- packet.Input { return p.InputPacketChan() },
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
-					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Packets },
+					func(s *types.Counters) *types.CountersSection { return &s.Packets },
 				)
 			})
 		case f, ok := <-frameCh:
@@ -185,7 +172,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					func(p processor.Abstract) chan<- frame.Input { return p.InputFrameChan() },
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
-					func(s *Statistics) *FramesOrPacketsStatistics { return &s.Frames },
+					func(s *types.Counters) *types.CountersSection { return &s.Frames },
 				)
 			})
 		}
@@ -208,22 +195,23 @@ func pushFurther[
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
 	poolPutOutput func(O),
-	getFramesOrPacketsStats func(*Statistics) *FramesOrPacketsStatistics,
+	getFramesOrPacketsStats func(s *types.Counters) *types.CountersSection,
 ) {
 	defer poolPutOutput(outputObj)
 	outputObjPtr := OP(ptr(outputObj))
 
+	stats := n.GetCountersPtr()
+
 	ctx = belt.WithField(ctx, "stream_index", outputObjPtr.GetStreamIndex())
-	n.updateProcInfoLocked(ctx)
-	n.ProcessingState.IsProcessing = true
-	defer func() { n.ProcessingState.IsProcessing = false }()
-	n.ProcessingState.InputSent.Store(false)
 
 	objSize := uint64(outputObjPtr.GetSize())
-	n.BytesCountWrote.Add(objSize)
 
 	mediaType := outputObjPtr.GetMediaType()
-	incrementCounters(&getFramesOrPacketsStats(n.Statistics).Wrote, mediaType)
+	defer func() {
+		getFramesOrPacketsStats(stats).Sent.Increment(globaltypes.MediaType(mediaType), objSize)
+	}()
+
+	n.updateProcInfoLocked(ctx)
 
 	if len(pushTos) == 0 {
 		var zeroValue O
@@ -260,16 +248,13 @@ func pushFurther[
 					return
 				}
 
-				dstStats := pushTo.Node.GetStatistics()
-				dstPacketsOrFramesStats := getFramesOrPacketsStats(dstStats)
+				dstCounters := getFramesOrPacketsStats(pushTo.Node.GetCountersPtr())
 				isPushed := false
 				defer func() {
 					if isPushed {
-						dstStats.BytesCountRead.Add(objSize)
-						incrementCounters(&dstPacketsOrFramesStats.Read, mediaType)
+						dstCounters.Received.Increment(globaltypes.MediaType(mediaType), objSize)
 					} else {
-						dstStats.BytesCountMissed.Add(objSize)
-						incrementCounters(&dstPacketsOrFramesStats.Missed, mediaType)
+						dstCounters.Missed.Increment(globaltypes.MediaType(mediaType), objSize)
 					}
 				}()
 
@@ -301,9 +286,6 @@ func pushFurther[
 					}
 				}
 				logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-
-				// to make sure the next node is recognized as not drained before we notify that our node drained
-				pushTo.Node.NotifyInputSent()
 			}
 		})
 	}

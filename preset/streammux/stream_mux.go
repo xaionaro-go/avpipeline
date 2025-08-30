@@ -24,10 +24,12 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -60,7 +62,7 @@ type StreamMux[C any] struct {
 	PrevMeasuredOutputID            atomic.Uint64
 
 	// to become a fake node myself:
-	nodeboilerplate.Statistics
+	nodeboilerplate.Counters
 	nodeboilerplate.InputFilter
 
 	startedCh *chan struct{}
@@ -428,22 +430,16 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 
 func (s *StreamMux[C]) GetAllStats(
 	ctx context.Context,
-) map[string]*node.ProcessingStatistics {
+) map[string]globaltypes.Statistics {
 	return xsync.DoA1R1(ctx, &s.Locker, s.getAllStatsLocked, ctx)
 }
 
 func (s *StreamMux[C]) getAllStatsLocked(
 	_ context.Context,
-) map[string]*node.ProcessingStatistics {
-	m := map[string]*node.ProcessingStatistics{}
+) map[string]globaltypes.Statistics {
+	m := map[string]globaltypes.Statistics{}
 	tryGetStats := func(key string, n node.Abstract) {
-		getter, ok := n.(interface {
-			GetStats() *node.ProcessingStatistics
-		})
-		if !ok {
-			return
-		}
-		m[key] = getter.GetStats()
+		m[key] = nodetypes.ToStatistics(n.GetCountersPtr(), n.GetProcessor().CountersPtr())
 	}
 	tryGetStats("Input", s.InputNode)
 	for outputKey, output := range s.OutputsMap {
@@ -697,8 +693,14 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 	}
 	assert(ctx, activeOutput != nil)
 	assert(ctx, activeOutput.OutputNode != nil)
-	bytesInputReadTotalPrev := int64(s.InputNode.Statistics.BytesCountRead.Load())
-	bytesOutputReadTotalPrev := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
+	inputCounters := s.InputNode.GetCountersPtr()
+	inputPacketsBytes := inputCounters.Packets.Received.TotalBytes()
+	inputFramesBytes := inputCounters.Frames.Received.TotalBytes()
+	bytesInputReadTotalPrev := int64(inputPacketsBytes + inputFramesBytes)
+	outputCounters := activeOutput.OutputNode.GetCountersPtr()
+	outputPacketsBytes := outputCounters.Packets.Received.TotalBytes()
+	outputFramesBytes := outputCounters.Frames.Received.TotalBytes()
+	bytesOutputReadTotalPrev := int64(outputPacketsBytes + outputFramesBytes)
 	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
 	tsPrev := time.Now()
 	for {
@@ -716,9 +718,17 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			}
 			assert(ctx, activeOutput != nil)
 			assert(ctx, activeOutput.OutputNode != nil)
-			assert(ctx, activeOutput.OutputNode.GetStatistics() != nil)
-			bytesInputReadTotalNext := int64(s.GetStatistics().BytesCountRead.Load())
-			bytesOutputReadTotalNext := int64(activeOutput.OutputNode.GetStatistics().BytesCountRead.Load())
+			assert(ctx, activeOutput.OutputNode.GetCountersPtr() != nil)
+
+			inputCounters := s.InputNode.GetCountersPtr()
+			inputPacketsBytes := inputCounters.Packets.Received.TotalBytes()
+			inputFramesBytes := inputCounters.Frames.Received.TotalBytes()
+			bytesInputReadTotalNext := int64(inputPacketsBytes + inputFramesBytes)
+
+			outputCounters := activeOutput.OutputNode.GetCountersPtr()
+			outputPacketsBytes := outputCounters.Packets.Received.TotalBytes()
+			outputFramesBytes := outputCounters.Frames.Received.TotalBytes()
+			bytesOutputReadTotalNext := int64(outputPacketsBytes + outputFramesBytes)
 
 			bytesInputRead := bytesInputReadTotalNext - bytesInputReadTotalPrev
 			bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())

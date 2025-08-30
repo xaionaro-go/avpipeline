@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -26,6 +27,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	avptypes "github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
@@ -376,18 +378,12 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 
 func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 	ctx context.Context,
-) map[string]*node.ProcessingStatistics {
-	m := map[string]*node.ProcessingStatistics{
-		"Recoder": s.NodeRecoder.GetStats(),
+) map[string]globaltypes.Statistics {
+	m := map[string]globaltypes.Statistics{
+		"Recoder": nodetypes.ToStatistics(s.NodeRecoder.GetCountersPtr(), s.NodeRecoder.GetProcessor().CountersPtr()),
 	}
 	tryGetStats := func(key string, n node.Abstract) {
-		getter, ok := n.(interface {
-			GetStats() *node.ProcessingStatistics
-		})
-		if !ok {
-			return
-		}
-		m[key] = getter.GetStats()
+		m[key] = nodetypes.ToStatistics(n.GetCountersPtr(), n.GetProcessor().CountersPtr())
 	}
 	tryGetStats("Input", s.MapInputStreamIndicesNode)
 	for idx, output := range s.Outputs {

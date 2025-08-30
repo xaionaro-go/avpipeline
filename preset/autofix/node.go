@@ -11,8 +11,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -105,21 +105,21 @@ func (a *AutoFixerWithCustomData[T]) IsServing() bool {
 	return a.Input().IsServing() && a.Output().IsServing()
 }
 
-func (a *AutoFixerWithCustomData[T]) GetStatistics() *node.Statistics {
-	inputStats := a.Input().GetStatistics().Convert()
-	outputStats := a.Output().GetStatistics().Convert()
-	return node.FromProcessingStatistics(&node.ProcessingStatistics{
-		BytesCountRead:  inputStats.BytesCountRead,
-		BytesCountWrote: outputStats.BytesCountWrote,
-		Packets: types.ProcessingFramesOrPacketsStatistics{
-			Read:  inputStats.Packets.Read,
-			Wrote: outputStats.Packets.Wrote,
+func (a *AutoFixerWithCustomData[T]) GetCountersPtr() *nodetypes.Counters {
+	inputStats := a.Input().GetCountersPtr()
+	outputStats := a.Output().GetCountersPtr()
+	return &nodetypes.Counters{
+		Packets: nodetypes.CountersSection{
+			Missed:   inputStats.Packets.Missed,
+			Received: inputStats.Packets.Received,
+			Sent:     outputStats.Packets.Sent,
 		},
-		Frames: types.ProcessingFramesOrPacketsStatistics{
-			Read:  inputStats.Frames.Read,
-			Wrote: outputStats.Frames.Wrote,
+		Frames: nodetypes.CountersSection{
+			Missed:   inputStats.Frames.Missed,
+			Received: inputStats.Frames.Received,
+			Sent:     outputStats.Frames.Sent,
 		},
-	})
+	}
 }
 
 func (a *AutoFixerWithCustomData[T]) GetProcessor() processor.Abstract {
@@ -161,10 +161,6 @@ func (a *AutoFixerWithCustomData[T]) GetChangeChanDrained() <-chan struct{} {
 		a.MapStreamIndicesNode,
 		a.AutoHeadersNode,
 	)
-}
-
-func (a *AutoFixerWithCustomData[T]) NotifyInputSent() {
-	a.Input().NotifyInputSent()
 }
 
 func (a *AutoFixerWithCustomData[T]) IsDrained(ctx context.Context) bool {

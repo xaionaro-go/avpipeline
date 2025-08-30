@@ -14,6 +14,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/xsync"
 )
@@ -32,8 +33,8 @@ type Abstract interface {
 	AddPushFramesTo(dst Abstract, conds ...framefiltercondition.Condition)
 	SetPushFramesTos(PushFramesTos)
 
-	GetStatistics() *Statistics
 	GetProcessor() processor.Abstract
+	GetCountersPtr() *types.Counters
 
 	GetInputPacketFilter() packetfiltercondition.Condition
 	SetInputPacketFilter(packetfiltercondition.Condition)
@@ -44,7 +45,6 @@ type Abstract interface {
 	GetChangeChanPushPacketsTo() <-chan struct{}
 	GetChangeChanPushFramesTo() <-chan struct{}
 
-	NotifyInputSent()
 	GetChangeChanDrained() <-chan struct{}
 	IsDrained(context.Context) bool
 	Flush(context.Context) error
@@ -149,8 +149,8 @@ type GetCustomDataer[C any] interface {
 }
 
 type NodeWithCustomData[C any, T processor.Abstract] struct {
-	*Statistics
 	Processor         T
+	Counters          *types.Counters
 	PushPacketsTos    PushPacketsTos
 	PushFramesTos     PushFramesTos
 	InputPacketFilter packetfiltercondition.Condition
@@ -158,7 +158,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	Locker            xsync.Mutex
 	IsServingValue    bool
 	IsDrainedValue    atomic.Bool
-	ProcessingState   ProcessingState
+	IsProcessorDirty  bool
 	Config            Config
 
 	ChangeChanIsServing     *chan struct{}
@@ -195,13 +195,13 @@ func NewWithCustomData[C any, T processor.Abstract](
 	opts ...Option,
 ) *NodeWithCustomData[C, T] {
 	n := &NodeWithCustomData[C, T]{
-		Statistics:              &Statistics{},
 		Processor:               processor,
 		ChangeChanIsServing:     ptr(make(chan struct{})),
 		ChangeChanPushPacketsTo: ptr(make(chan struct{})),
 		ChangeChanPushFramesTo:  ptr(make(chan struct{})),
 		ChangeChanDrained:       ptr(make(chan struct{})),
 		Config:                  Options(opts).config(),
+		Counters:                types.NewCounters(),
 	}
 	return n
 }
@@ -230,12 +230,6 @@ func (n *NodeWithCustomData[C, T]) IsServing() bool {
 	}
 	return xsync.DoR1(context.TODO(), &n.Locker, func() bool {
 		return n.IsServingValue
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) GetStatistics() *Statistics {
-	return xsync.DoR1(context.TODO(), &n.Locker, func() *Statistics {
-		return n.Statistics
 	})
 }
 
@@ -531,11 +525,6 @@ func (n *NodeWithCustomData[C, T]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return *xatomic.LoadPointer(&n.ChangeChanPushFramesTo)
 }
 
-func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
-	err := n.Processor.Flush(ctx)
-	if err != nil {
-		return err
-	}
-	n.updateProcInfo(ctx)
-	return nil
+func (n *NodeWithCustomData[C, T]) GetCountersPtr() *types.Counters {
+	return n.Counters
 }

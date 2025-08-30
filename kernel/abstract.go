@@ -9,9 +9,9 @@ import (
 )
 
 type Abstract = types.Abstract
-type IsDirtier = types.IsDirtier
 
 type Flusher interface {
+	IsDirty(ctx context.Context) bool
 	Flush(
 		ctx context.Context,
 		outputPacketCh chan<- packet.Output,

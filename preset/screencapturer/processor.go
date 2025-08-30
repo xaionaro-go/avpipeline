@@ -46,3 +46,7 @@ func (a *ScreenCapturer[C]) ErrorChan() <-chan error {
 func (a *ScreenCapturer[C]) Flush(ctx context.Context) error {
 	return nil
 }
+
+func (a *ScreenCapturer[C]) CountersPtr() *processor.Counters {
+	return a.Output().GetProcessor().CountersPtr()
+}

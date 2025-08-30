@@ -2,22 +2,17 @@ package node
 
 import (
 	"context"
-	"sync/atomic"
+	"fmt"
+	"time"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/logger"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	"github.com/xaionaro-go/observability"
 )
-
-type ProcessingState struct {
-	PendingPackets   int
-	PendingFrames    int
-	IsProcessorDirty bool
-	IsProcessing     bool
-	InputSent        atomic.Bool
-}
 
 func SetBlockInput(
 	ctx context.Context,
@@ -86,14 +81,8 @@ func CombineGetChangeChanDrained(
 }
 
 func (n *NodeWithCustomData[C, T]) resetChangeChanDrainedChanNow() {
+	logger.Tracef(context.Background(), "resetChangeChanDrainedChanNow: %v:%p", n, n)
 	close(*xatomic.SwapPointer(&n.ChangeChanDrained, ptr(make(chan struct{}))))
-}
-
-func (n *NodeWithCustomData[C, T]) NotifyInputSent() {
-	n.ProcessingState.InputSent.Store(true)
-	if n.IsDrainedValue.Swap(false) {
-		n.resetChangeChanDrainedChanNow()
-	}
 }
 
 func (n *NodeWithCustomData[C, T]) GetChangeChanDrained() <-chan struct{} {
@@ -104,28 +93,59 @@ func (n *NodeWithCustomData[C, T]) IsDrained(ctx context.Context) bool {
 	return n.IsDrainedValue.Load()
 }
 
+func allWentInAndOut(
+	ctx context.Context,
+	nodeCounters *types.CountersSection,
+	procCounters *processortypes.CountersSection,
+) bool {
+	// the reverse order here is important, it guarantees we cannot falsely claim
+	// something is drained due to a race condition:
+	sent := nodeCounters.Sent.ToStats()
+	generated := procCounters.Generated.ToStats()
+	processed := procCounters.Processed.ToStats()
+	received := nodeCounters.Received.ToStats()
+
+	videoOK := sent.Video.Count == generated.Video.Count && processed.Video.Count == received.Video.Count
+	audioOK := sent.Audio.Count == generated.Audio.Count && processed.Audio.Count == received.Audio.Count
+	otherOK := sent.Other.Count == generated.Other.Count && processed.Other.Count == received.Other.Count
+	unknownOK := sent.Unknown.Count == generated.Unknown.Count && processed.Unknown.Count == received.Unknown.Count
+	logger.Tracef(
+		ctx,
+		"allWentInAndOut: videoOK=%v (%d=?=%d; %d=?=%d); audioOK=%v (%d=?=%d; %d=?=%d); otherOK=%v (%d=?=%d; %d=?=%d); unknownOK=%v (%d=?=%d; %d=?=%d)",
+		videoOK, sent.Video.Count, generated.Video.Count, processed.Video.Count, received.Video.Count,
+		audioOK, sent.Audio.Count, generated.Audio.Count, processed.Audio.Count, received.Audio.Count,
+		otherOK, sent.Other.Count, generated.Other.Count, processed.Other.Count, received.Other.Count,
+		unknownOK, sent.Unknown.Count, generated.Unknown.Count, processed.Unknown.Count, received.Unknown.Count,
+	)
+	return videoOK && audioOK && otherOK && unknownOK
+}
+
 func (n *NodeWithCustomData[C, T]) calculateIfDrained(ctx context.Context) bool {
-	return n.ProcessingState.PendingPackets == 0 &&
-		n.ProcessingState.PendingFrames == 0 &&
-		!n.ProcessingState.InputSent.Load() &&
-		!n.ProcessingState.IsProcessing &&
-		!n.ProcessingState.IsProcessorDirty
+	if isDirtier, ok := any(n.Processor).(processor.Flusher); ok {
+		if isDirtier.IsDirty(ctx) {
+			logger.Tracef(ctx, "node %v:%p is dirty", n, n)
+			return false
+		}
+	}
+
+	procCounters := n.Processor.CountersPtr()
+	allWentInAndOut := allWentInAndOut(ctx,
+		&n.Counters.Packets,
+		&procCounters.Packets,
+	) && allWentInAndOut(ctx,
+		&n.Counters.Frames,
+		&procCounters.Frames,
+	)
+	logger.Tracef(ctx, "node %v:%p allWentInAndOut=%v", n, n, allWentInAndOut)
+	return allWentInAndOut
 }
 
 func (n *NodeWithCustomData[C, T]) updateProcInfoLocked(
 	ctx context.Context,
 ) {
 	logger.Tracef(ctx, "updateProcInfoLocked: %v:%p", n, n)
-	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v:%p: %v", n, n, &n.ProcessingState) }()
-	proc := n.Processor
-	n.ProcessingState.InputSent.Store(false)
-	n.ProcessingState.PendingPackets = len(proc.InputPacketChan())
-	n.ProcessingState.PendingFrames = len(proc.InputFrameChan())
-	if isDirtier, ok := any(n.Processor).(processor.IsDirtier); ok {
-		n.ProcessingState.IsProcessorDirty = isDirtier.IsDirty(ctx)
-	} else {
-		n.ProcessingState.IsProcessorDirty = false
-	}
+	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v:%p: %v", n, n, n.IsDrainedValue.Load()) }()
+
 	newIsDrained := n.calculateIfDrained(ctx)
 	prevIsDrained := n.IsDrainedValue.Swap(newIsDrained)
 	if prevIsDrained != newIsDrained {
@@ -158,4 +178,32 @@ func WaitForDrain(
 		case <-ch:
 		}
 	}
+}
+
+func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
+	flusher, ok := any(n.Processor).(processor.Flusher)
+	if !ok {
+		return nil
+	}
+
+	for {
+		err := processor.DrainInput(ctx, n.Processor)
+		if err != nil {
+			return fmt.Errorf("unable to drain input of %v: %w", n, err)
+		}
+
+		err = flusher.Flush(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to flush internal buffers of %v: %w", n, err)
+		}
+
+		n.updateProcInfoLocked(ctx)
+		if n.IsDrained(ctx) {
+			break
+		}
+		logger.Warnf(ctx, "%v is not drained after flush, retrying", n)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return nil
 }

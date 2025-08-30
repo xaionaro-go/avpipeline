@@ -8,29 +8,34 @@ message Node {
     string type = 2;
     string description = 3;
     bool isServing = 4;
-    NodeStatistics statistics = 5;
+    NodeCounters counters = 5;
     repeated Node TODO_publishingNodes = 6; // is not currently reported
     repeated Node consumingNodes = 7;
 }
 
-message NodeStatistics {
-    uint64 bytesCountRead = 1;
-    uint64 bytesCountWrote = 2;
-    FramesOrPacketsStatistics packets = 3;
-    FramesOrPacketsStatistics frames = 4;
+message NodeCounters {
+    NodeCountersSection packets = 1;
+    NodeCountersSection frames = 2;
 }
 
-message FramesOrPacketsStatistics {
-    FramesOrPacketsStatisticsSection read = 3;
-    FramesOrPacketsStatisticsSection missed = 4;
-    FramesOrPacketsStatisticsSection wrote = 5;
+message NodeCountersSection {
+    NodeCountersSubsection received = 1;
+    NodeCountersSubsection processed = 2;
+    NodeCountersSubsection missed = 3;
+    NodeCountersSubsection generated = 4;
+    NodeCountersSubsection sent = 5;
 }
 
-message FramesOrPacketsStatisticsSection {
-    uint64 unknown = 1;
-    uint64 other = 2;
-    uint64 video = 3;
-    uint64 audio = 4;
+message NodeCountersSubsection {
+    NodeCountersItem unknown = 1;
+    NodeCountersItem other = 2;
+    NodeCountersItem video = 3;
+    NodeCountersItem audio = 4;
+}
+
+message NodeCountersItem {
+    uint64 count = 1;
+    uint64 bytes = 2;
 }
 
 message Object {

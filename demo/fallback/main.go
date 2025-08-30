@@ -251,16 +251,16 @@ func main() {
 				return
 			}
 		case <-statusTicker.C:
-			inputMainStats := inputMainNode.GetStats()
-			inputMainStatsJSON, err := json.Marshal(inputMainStats.Packets.Wrote)
+			inputMainStats := inputMainNode.GetCountersPtr()
+			inputMainStatsJSON, err := json.Marshal(inputMainStats.Packets.Sent)
 			assert(ctx, err == nil, err)
 
-			inputFallbackStats := inputFallbackNode.GetStats()
-			inputFallbackStatsJSON, err := json.Marshal(inputFallbackStats.Packets.Wrote)
+			inputFallbackStats := inputFallbackNode.GetCountersPtr()
+			inputFallbackStatsJSON, err := json.Marshal(inputFallbackStats.Packets.Sent)
 			assert(ctx, err == nil, err)
 
-			outputStats := outputNode.GetStats()
-			outputStatsJSON, err := json.Marshal(outputStats.Packets.Read)
+			outputStats := outputNode.GetCountersPtr()
+			outputStatsJSON, err := json.Marshal(outputStats.Packets.Received)
 			assert(ctx, err == nil, err)
 
 			fmt.Printf("input-main:%s + input-fallback:%s -> output:%s\n", inputMainStatsJSON, inputFallbackStatsJSON, outputStatsJSON)

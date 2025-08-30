@@ -232,6 +232,9 @@ func (i *Input) Generate(
 		i.ClosureSignaler.Close(ctx)
 	}()
 
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

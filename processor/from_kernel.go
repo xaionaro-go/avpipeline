@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/asticode/go-astikit"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
@@ -13,6 +12,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -20,9 +21,14 @@ type FromKernel[T kernel.Abstract] struct {
 	*ChanStruct
 	Kernel T
 
+	preOutputPacketsCh chan packet.Output
+	preOutputFramesCh  chan frame.Output
+
 	closeOnce sync.Once
 	closer    *astikit.Closer
 	OnClosed  func(context.Context) error
+
+	CountersStorage *Counters
 }
 
 type GetPacketSourcer interface {
@@ -57,7 +63,12 @@ func NewFromKernel[T kernel.Abstract](
 			cfg.ErrorQueue,
 		),
 		Kernel: kernel,
-		closer: astikit.NewCloser(),
+
+		preOutputPacketsCh: make(chan packet.Output, 1),
+		preOutputFramesCh:  make(chan frame.Output, 1),
+
+		CountersStorage: processortypes.NewCounters(),
+		closer:          astikit.NewCloser(),
 	}
 	p.startProcessing(ctx)
 	return p
@@ -71,6 +82,45 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 
 	ctx, cancelFn := context.WithCancel(ctx)
 	var wg sync.WaitGroup
+
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case outputPacket, ok := <-p.preOutputPacketsCh:
+				if !ok {
+					return
+				}
+				mediaType := outputPacket.GetMediaType()
+				objSize := uint64(outputPacket.GetSize())
+				p.CountersStorage.Packets.Generated.Increment(globaltypes.MediaType(mediaType), objSize)
+				p.OutputPacketCh <- outputPacket
+			}
+		}
+	})
+
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case outputFrame, ok := <-p.preOutputFramesCh:
+				if !ok {
+					return
+				}
+				mediaType := outputFrame.GetMediaType()
+				objSize := uint64(outputFrame.GetSize())
+				p.CountersStorage.Frames.Generated.Increment(globaltypes.MediaType(mediaType), objSize)
+				p.OutputFrameCh <- outputFrame
+			}
+		}
+	})
+
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer observability.Go(ctx, func(ctx context.Context) {
@@ -90,7 +140,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		swg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer swg.Done()
-			err := p.Kernel.Generate(ctx, p.OutputPacketCh, p.OutputFrameCh)
+			err := p.Kernel.Generate(ctx, p.preOutputPacketsCh, p.preOutputFramesCh)
 			logger.Tracef(ctx, "p.Kernel[%T].Generate: %v", p, err)
 			if err != nil {
 				p.ErrorCh <- fmt.Errorf(
@@ -101,7 +151,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		})
 
 		logger.Tracef(ctx, "ReaderLoop[%s]", p)
-		err := ReaderLoop(ctx, p.InputPacketCh, p.InputFrameCh, p.Kernel, p.OutputPacketCh, p.OutputFrameCh)
+		err := readerLoop(ctx, p.InputPacketCh, p.InputFrameCh, p.Kernel, p.preOutputPacketsCh, p.preOutputFramesCh, p.CountersStorage)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
 		if err != nil {
 			errCh <- err
@@ -135,6 +185,8 @@ func (p *FromKernel[T]) addToCloser(callback func()) {
 func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	logger.Debugf(ctx, "closing %T", p.Kernel)
 	defer func() {
+		close(p.preOutputPacketsCh)
+		close(p.preOutputFramesCh)
 		close(p.OutputPacketCh)
 		close(p.OutputFrameCh)
 	}()
@@ -150,15 +202,6 @@ func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func (p *FromKernel[T]) SendOutput(
-	ctx context.Context,
-	outputPacket packet.Output,
-) {
-	logger.Tracef(ctx, "SendOutput[%T]", p.Kernel)
-	defer func() { logger.Tracef(ctx, "/SendOutput[%T]", p.Kernel) }()
-	p.OutputPacketCh <- outputPacket
 }
 
 func (p *FromKernel[T]) InputPacketChan() chan<- packet.Input {
@@ -227,6 +270,19 @@ func (p *FromKernel[T]) GetKernel() kernel.Abstract {
 	return p.Kernel
 }
 
+func (p *FromKernel[T]) CountersPtr() *Counters {
+	return p.CountersStorage
+}
+
+var _ Flusher = (*FromKernel[kernel.Abstract])(nil)
+
+func (p *FromKernel[T]) IsDirty(ctx context.Context) bool {
+	if isDirtier, ok := any(p.Kernel).(kernel.Flusher); ok {
+		return isDirtier.IsDirty(ctx)
+	}
+	return false
+}
+
 func (p *FromKernel[T]) Flush(
 	ctx context.Context,
 ) error {
@@ -235,20 +291,5 @@ func (p *FromKernel[T]) Flush(
 		return nil // no internal buffers to flush
 	}
 
-	// TODO: find a better solution:
-	t := time.NewTicker(10 * time.Millisecond)
-	defer t.Stop()
-	for {
-		if len(p.InputPacketCh) == 0 && len(p.InputFrameCh) == 0 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-		}
-	}
-	logger.Tracef(ctx, "running the actual Flush()")
-
-	return flusher.Flush(ctx, p.OutputPacketCh, p.OutputFrameCh)
+	return flusher.Flush(ctx, p.preOutputPacketsCh, p.preOutputFramesCh)
 }

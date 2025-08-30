@@ -10,6 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
 )
@@ -138,10 +139,6 @@ func (s *StreamMux[C]) IsDrained(ctx context.Context) bool {
 	return node.CombineIsDrained(ctx, s.Nodes(ctx)...)
 }
 
-func (s *StreamMux[C]) NotifyInputSent() {
-	s.InputNode.NotifyInputSent()
-}
-
 func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 	nodes := []node.Abstract{
 		s.InputNode,
@@ -152,4 +149,21 @@ func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 		}
 	})
 	return nodes
+}
+
+func (s *StreamMux[C]) GetCountersPtr() *nodetypes.Counters {
+	inputStats := s.InputNode.GetCountersPtr()
+
+	return &nodetypes.Counters{
+		Packets: nodetypes.CountersSection{
+			Missed:   inputStats.Packets.Missed,
+			Received: inputStats.Packets.Received,
+			// TODO: add sum of all outputs as Sent
+		},
+		Frames: nodetypes.CountersSection{
+			Missed:   inputStats.Frames.Missed,
+			Received: inputStats.Frames.Received,
+			// TODO: add sum of all outputs as Sent
+		},
+	}
 }
