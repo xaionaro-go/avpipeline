@@ -1,6 +1,8 @@
 package packet
 
 import (
+	"runtime"
+
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/pool"
 )
@@ -13,6 +15,7 @@ var Pool = pool.NewPool(
 
 func CopyReferenced(dst, src *astiav.Packet) {
 	dst.Ref(src)
+	runtime.KeepAlive(src)
 }
 
 func CloneAsReferenced(src *astiav.Packet) *astiav.Packet {
@@ -23,6 +26,7 @@ func CloneAsReferenced(src *astiav.Packet) *astiav.Packet {
 
 func CopyWritable(dst, src *astiav.Packet) {
 	dst.Ref(src)
+	runtime.KeepAlive(src)
 	err := dst.MakeWritable()
 	if err != nil {
 		panic(err)

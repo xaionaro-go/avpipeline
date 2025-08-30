@@ -3,6 +3,7 @@ package avpipeline
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -74,7 +75,7 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 	ctx, cancelFn := context.WithCancel(ctx)
 
 	n := first
-	errCh := make(chan node.Error, 1000)
+	errCh := make(chan node.Error, 10000)
 	for range connsCount - 1 {
 		next := node.NewFromKernel(ctx, kernel.Passthrough{})
 		n.AddPushPacketsTo(next)
@@ -117,8 +118,7 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 	}
 	pkt.Packet = packet.Pool.Get()
 	pkt.Packet.MakeWritable()
-	pkt.Packet.FromData(make([]byte, 2000))
-	pkt.Packet.SetSize(2000)
+	pkt.Packet.SetSize(0)
 
 	b.SetBytes(2000) // approx size of one packet (usually 200-20000 bytes; with ~20000 being on the rarer side)
 	b.ResetTimer()
@@ -127,4 +127,5 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 		inCh <- pkt
 		counters.Increment(globaltypes.MediaTypeUnknown, 2000)
 	}
+	runtime.KeepAlive(pkt)
 }
