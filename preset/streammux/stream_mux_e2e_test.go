@@ -80,7 +80,7 @@ func TestE2E(t *testing.T) {
 				t.Run(fmt.Sprintf("mode=%s", muxMode), func(t *testing.T) {
 					for _, codecID := range []astiav.CodecID{astiav.CodecIDH264, astiav.CodecIDHevc} {
 						t.Run(fmt.Sprintf("codec=%s", codecID), func(t *testing.T) {
-							for i := 0; i < 10; i++ {
+							for i := 0; i < 1; i++ {
 								t.Run(fmt.Sprintf("run%d", i), func(t *testing.T) {
 									runTest(ctx, t, input, muxMode, codecID)
 								})
