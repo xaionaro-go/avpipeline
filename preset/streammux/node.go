@@ -84,6 +84,18 @@ func (s *StreamMux[C]) IsServing() bool {
 	return s.InputNode.IsServing()
 }
 
+func (n *StreamMux[C]) OriginalNodeAbstract() node.Abstract {
+	origN := n.OriginalNode()
+	if origN == nil {
+		return nil
+	}
+	return origN
+}
+
+func (n *StreamMux[C]) OriginalNode() *NodeInput[C] {
+	return n.InputNode
+}
+
 func (s *StreamMux[C]) GetPushPacketsTos() node.PushPacketsTos {
 	return nil
 }

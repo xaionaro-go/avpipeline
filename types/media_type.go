@@ -20,3 +20,22 @@ func MediaTypes() []MediaType {
 		MediaTypeSubtitle,
 	}
 }
+
+func (t MediaType) String() string {
+	switch t {
+	case MediaTypeAttachment:
+		return "attachment"
+	case MediaTypeAudio:
+		return "audio"
+	case MediaTypeData:
+		return "data"
+	case MediaTypeSubtitle:
+		return "subtitle"
+	case MediaTypeVideo:
+		return "video"
+	case MediaTypeUnknown:
+		return "unknown"
+	default:
+		return "MediaType(" + string(int(t)) + ")"
+	}
+}

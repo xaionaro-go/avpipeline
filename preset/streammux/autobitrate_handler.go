@@ -355,7 +355,7 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 
 	now := time.Now()
 	if req.BitRate > types.Ubps(oldBitRate) && now.Sub(h.lastBitRateDecreaseTS) < h.BitRateIncreaseSlowdown {
-		logger.Tracef(ctx, "bitrate increase is slowed down since the last bitrate decrease was at %v (now: %v); skipping the increase")
+		logger.Tracef(ctx, "bitrate increase is slowed down since the last bitrate decrease was at %v (now: %v); skipping the increase", h.lastBitRateDecreaseTS, now)
 		return nil
 	}
 	if req.BitRate < types.Ubps(oldBitRate) {
@@ -364,20 +364,20 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 
 	if h.currentResolutionChangeRequest != nil {
 		switch {
-		case uint64(req.BitRate) > actualOutputBitrate && !h.currentResolutionChangeRequest.IsUpgrade:
+		case uint64(req.BitRate) > oldBitRate && !h.currentResolutionChangeRequest.IsUpgrade:
 			// we are increasing bitrate while a downgrade is in progress; cancel the downgrade
-			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate")
+			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate: %d > %d", uint64(req.BitRate), oldBitRate)
 			h.currentResolutionChangeRequest = nil
-		case uint64(req.BitRate) < actualOutputBitrate && h.currentResolutionChangeRequest.IsUpgrade:
+		case uint64(req.BitRate) < oldBitRate && h.currentResolutionChangeRequest.IsUpgrade:
 			// we are decreasing bitrate while an upgrade is in progress; cancel the upgrade
-			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate")
+			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate: %d < %d", uint64(req.BitRate), oldBitRate)
 			h.currentResolutionChangeRequest = nil
 		}
 	}
 
 	inputBitRate := h.StreamMux.CurrentInputBitRate.Load()
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
-		logger.Tracef(ctx, "AutoByPass is enabled: %d %d %d", oldBitRate, req.BitRate, inputBitRate)
+		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(inputBitRate))
 		if h.isBypassEnabled(ctx) {
 			if uint64(req.BitRate) < inputBitRate {
 				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
@@ -568,6 +568,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	}
 
 	if isCritical {
+		logger.Debugf(ctx, "critical resolution change request: cancelling any previous resolution change request")
 		h.currentResolutionChangeRequest = nil
 	} else {
 		now := time.Now()
@@ -578,7 +579,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 				StartedAt: now,
 				LatestAt:  now,
 			}
-			logger.Debugf(ctx, "started resolution change request: %v", h.currentResolutionChangeRequest)
+			logger.Debugf(ctx, "started resolution change request: %v (prev: %v, isUpgrade: %v)", h.currentResolutionChangeRequest, prevRequest, isUpgrade)
 			return nil
 		}
 		prevRequest.LatestAt = now

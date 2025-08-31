@@ -24,6 +24,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
+	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -32,6 +33,10 @@ import (
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
+)
+
+const (
+	switchTimeout = time.Hour
 )
 
 type StreamMux[C any] struct {
@@ -108,7 +113,7 @@ func NewWithCustomData[C any](
 	}
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
 	s.CurrentInputBitRate.Store(math.MaxUint64)
-	s.initSwitches()
+	s.initSwitches(ctx)
 
 	if autoBitRate != nil {
 		logger.Tracef(ctx, "enabling automatic bitrate control")
@@ -126,28 +131,46 @@ func NewWithCustomData[C any](
 	return s, nil
 }
 
-func (s *StreamMux[C]) initSwitches() {
+func (s *StreamMux[C]) initSwitches(
+	ctx context.Context,
+) {
 	s.OutputSwitch.SetKeepUnless(packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.IsKeyFrame(true),
 	})
 
-	s.OutputSwitch.Flags.Set(barrierstategetter.SwitchFlagFirstPacketAfterSwitchPassBothOutputs)
+	s.OutputSwitch.SetOnBeforeSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+		logger.Debugf(ctx, "s.OutputSwitch.SetOnBeforeSwitch: %d -> %d", from, to)
+		outputNext := xsync.DoR1(ctx, &s.Locker, func() *Output {
+			return s.Outputs[to]
+		})
+		outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
+	})
 	s.OutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+		logger.Debugf(ctx, "s.OutputSwitch.SetOnAfterSwitch: %d -> %d", from, to)
+		outputPrev := xsync.DoR1(ctx, &s.Locker, func() *Output {
+			return s.Outputs[from]
+		})
+		outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is inactive"))
+
 		observability.Go(ctx, func(ctx context.Context) {
-			output := xsync.DoR1(ctx, &s.Locker, func() *Output {
-				return s.Outputs[from]
-			})
-			err := output.Flush(ctx)
-			if err != nil {
-				logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
+			{
+				ctx, cancelFn := context.WithTimeout(ctx, switchTimeout)
+				defer cancelFn()
+				err := outputPrev.FlushAfterFilter(ctx)
+				if err != nil {
+					logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
+				}
 			}
 			logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
-			err = s.OutputSyncer.SetValue(ctx, to)
+			err := s.OutputSyncer.SetValue(ctx, to)
 			logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
 		})
 	})
 	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
+
+	logger.Tracef(ctx, "o.OutputSwitch: %p", s.OutputSwitch)
+	logger.Tracef(ctx, "o.OutputSyncer: %p", s.OutputSyncer)
 }
 
 func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
@@ -179,6 +202,14 @@ func (s *StreamMux[C]) setPreferredOutput(
 	defer func() { logger.Tracef(ctx, "/setPreferredOutput(ctx, %s): %v", outputKey, _err) }()
 
 	output := s.OutputsMap[outputKey]
+
+	// the order is important to avoid race conditions:
+	id1 := s.OutputSyncer.GetValue(ctx)
+	id0 := s.OutputSwitch.GetValue(ctx)
+	if id0 != id1 {
+		return fmt.Errorf("an output switch process is already in progress (from %d to %d)", id0, id1)
+	}
+
 	err := s.OutputSwitch.SetValue(ctx, int32(output.ID))
 	if err != nil {
 		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
-	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
@@ -20,6 +19,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -226,6 +226,7 @@ func newOutput[C any](
 	o.initFPSFractioner(ctx)
 
 	// wiring
+
 	var inputFixer, outputFixer node.Abstract
 	inputFixer, outputFixer = o.InputFixer, o.OutputFixer
 	if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
@@ -260,6 +261,11 @@ func newOutput[C any](
 		}},
 	)
 
+	// logging
+
+	logger.Tracef(ctx, "o.InputFilter.Processor.Kernel.Handler.Condition: %p", o.InputFilter.Processor.Kernel.Handler.Condition)
+	logger.Tracef(ctx, "o.OutputSyncer.Processor.Kernel.Handler.Condition: %p", o.OutputSyncer.Processor.Kernel.Handler.Condition)
+
 	return o, nil
 }
 
@@ -275,6 +281,13 @@ func (o *Output) String() string {
 		return "streammux.Output(nil)"
 	}
 	return fmt.Sprintf("StreamMux.Outputs[%d]", o.ID)
+}
+
+func (o *Output) FirstNodeAfterFilter() node.Abstract {
+	if o.InputFixer != nil {
+		return o.InputFixer
+	}
+	return o.RecoderNode
 }
 
 func (o *Output) initFPSFractioner(ctx context.Context) {
@@ -394,7 +407,9 @@ func (o *Output) Close(ctx context.Context) (_err error) {
 	defer func() { logger.Tracef(ctx, "/Output.Close(): %v", _err) }()
 	var errs []error
 
-	if err := o.Flush(ctx); err != nil {
+	o.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Static(false))
+	o.FirstNodeAfterFilter().SetInputFrameFilter(framefiltercondition.Static(false))
+	if err := o.FlushAfterFilter(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
 	}
 	if err := o.InputFilter.GetProcessor().Close(ctx); err != nil {
@@ -430,14 +445,51 @@ func (o *Output) Output() node.Abstract {
 }
 
 func (o *Output) Flush(ctx context.Context) (_err error) {
-	proc := o.RecoderNode.Processor
-	err := proc.Flush(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to flush the recoder kernel: %w", err)
+	logger.Tracef(ctx, "Output[%d].Flush()", o.ID)
+	defer func() { logger.Tracef(ctx, "/Output[%d].Flush(): %v", o.ID, _err) }()
+	for _, n := range o.Nodes() {
+		logger.Tracef(ctx, "draining the inputs of %s:%p", n, n)
+		err := processor.DrainInput(ctx, n.GetProcessor())
+		if err != nil {
+			return fmt.Errorf("unable to drain input of %s: %w", n, err)
+		}
+
+		logger.Tracef(ctx, "flushing %s:%p", n, n)
+		err = n.Flush(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to flush %s: %w", n, err)
+		}
+
+		logger.Tracef(ctx, "waiting for drain of %s:%p", n, n)
+		err = node.WaitForDrain(ctx, n)
+		if err != nil {
+			return fmt.Errorf("unable to wait for drain the output %d: %w", o.ID, err)
+		}
 	}
-	err = avpipeline.WaitForDrain(ctx, o.Nodes()...)
-	if err != nil {
-		return fmt.Errorf("unable to wait for drain the output %d: %w", o.ID, err)
+	return nil
+}
+
+func (o *Output) FlushAfterFilter(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Output[%d].FlushAfterFilter()", o.ID)
+	defer func() { logger.Tracef(ctx, "/Output[%d].FlushAfterFilter(): %v", o.ID, _err) }()
+	for _, n := range o.NodesAfterFilter() {
+		logger.Tracef(ctx, "draining the inputs of %s:%p", n, n)
+		err := processor.DrainInput(ctx, n.GetProcessor())
+		if err != nil {
+			return fmt.Errorf("unable to drain input of %s: %w", n, err)
+		}
+
+		logger.Tracef(ctx, "flushing %s:%p", n, n)
+		err = n.Flush(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to flush %s: %w", n, err)
+		}
+
+		logger.Tracef(ctx, "waiting for drain of %s:%p", n, n)
+		err = node.WaitForDrain(ctx, n)
+		if err != nil {
+			return fmt.Errorf("unable to wait for drain the output %d: %w", o.ID, err)
+		}
 	}
 	return nil
 }
@@ -640,13 +692,22 @@ func (o *Output) GetKey() OutputKey {
 func (o *Output) Nodes() []node.Abstract {
 	// the order must be the same as the packets/frames flow,
 	// otherwise flushing/draining will deadlock
-	return []node.Abstract{
+	result := []node.Abstract{
 		o.InputFilter,
-		o.InputFixer,
+	}
+	if o.InputFixer != nil {
+		result = append(result, o.InputFixer)
+	}
+	result = append(result,
 		o.RecoderNode,
 		o.MapIndices,
 		o.OutputFixer,
 		o.OutputSyncer,
 		o.OutputNode,
-	}
+	)
+	return result
+}
+
+func (o *Output) NodesAfterFilter() []node.Abstract {
+	return o.Nodes()[1:]
 }

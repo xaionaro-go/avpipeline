@@ -62,11 +62,6 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 	bitRateDiff := derivativeGap.Tobps()                 // b/s
 	newBitRate := max(Ubps(req.CurrentBitrateSetting)+bitRateDiff, 1)
 
-	if newBitRate > req.CurrentBitrateSetting && req.ActualOutputBitrate < req.CurrentBitrateSetting*0.8 {
-		logger.Tracef(ctx, "CalculateBitRate: we calculated an increase of bitrate, but the actual bitrate is below the current setting; which means that we are still congested; so reducing the bitrate to the actual output bitrate (* 0.9)")
-		return BitRateChangeRequest{BitRate: req.ActualOutputBitrate * 0.9, IsCritical: false}
-	}
-
 	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, gapB=%s, queueDerivative=%s, desiredDerivative=%s, derivativeGap=%s, bitRateDiff=%s, newBitRate=%s, currentBitRateSetting=%s, actualOutputBitrate=%s",
 		queueDuration, gap, gapB, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate, Ubps(req.CurrentBitrateSetting), Ubps(req.ActualOutputBitrate),
 	)
