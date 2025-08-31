@@ -359,7 +359,7 @@ func (o *Output) Close(
 				defer func() {
 					r := recover()
 					if r != nil {
-						result = append(result, fmt.Errorf("got panic: %v:\n%s\n", r, debug.Stack()))
+						result = append(result, fmt.Errorf("got panic: %v:\n%s\n\r", r, debug.Stack()))
 					}
 				}()
 				logger.Debugf(ctx, "writing the trailer")
