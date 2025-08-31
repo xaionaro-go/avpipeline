@@ -195,6 +195,25 @@ func pushFurther[
 		return
 	}
 
+	if len(pushTos) == 1 {
+		pushTo := pushTos[0]
+		n.Locker.ManualUnlock(ctx)
+		defer n.Locker.ManualLock(ctx)
+		pushToDestination[P, I, C, O, OP, CD](
+			ctx,
+			n,
+			outputObj,
+			pushTo,
+			serveConfig,
+			buildInput,
+			getInputCondition,
+			getPushChan,
+			getFramesOrPacketsStats,
+			poolPutInput,
+		)
+		return
+	}
+
 	var wg sync.WaitGroup
 	defer func() {
 		n.Locker.UDo(ctx, wg.Wait)
