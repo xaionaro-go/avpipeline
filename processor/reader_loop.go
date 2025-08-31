@@ -74,6 +74,10 @@ func readerLoop(
 		}
 	}()
 
+	defer func() {
+		logger.Debugf(ctx, "ReaderLoop[%s]: closing/flushing (%v)", _err)
+	}()
+
 	ch := kernel.CloseChan()
 	for {
 		select {
@@ -86,6 +90,7 @@ func readerLoop(
 		case pkt, ok := <-inputPacketsChan:
 			if !ok {
 				if inputFramesChan == nil {
+					logger.Debugf(ctx, "the frames input channels is closed")
 					return io.EOF
 				}
 				inputPacketsChan = nil
@@ -103,6 +108,7 @@ func readerLoop(
 		case f, ok := <-inputFramesChan:
 			if !ok {
 				if inputPacketsChan == nil {
+					logger.Debugf(ctx, "the packets input channels is closed")
 					return io.EOF
 				}
 				inputFramesChan = nil

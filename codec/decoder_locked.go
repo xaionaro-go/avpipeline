@@ -107,11 +107,14 @@ func (d *DecoderLocked) Flush(
 	callback CallbackFrameReceiver,
 ) (_err error) {
 	logger.Tracef(ctx, "Flush")
-	defer func() { logger.Tracef(ctx, "/Flush") }()
+	defer func() { logger.Tracef(ctx, "/Flush: %v", _err) }()
 
 	defer func() {
 		if _err == nil {
-			d.IsDirtyValue.Store(false)
+			if d.IsDirtyValue.Load() {
+				logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", d)
+				d.IsDirtyValue.Store(false)
+			}
 		}
 	}()
 
@@ -125,7 +128,12 @@ func (d *DecoderLocked) Flush(
 
 	logger.Tracef(ctx, "sending the FLUSH REQUEST pseudo-packet")
 	err := d.codecContext.SendPacket(nilPacket)
-	if err != nil {
+	switch {
+	case err == nil:
+		// flushing had just been initiated
+	case errors.Is(err, astiav.ErrEof):
+		return nil // the decoder is already flushed
+	default:
 		return fmt.Errorf("unable to send the FLUSH REQUEST pseudo-packet: %w", err)
 	}
 
@@ -154,8 +162,17 @@ func (d *DecoderLocked) Drain(
 			frame.Pool.Pool.Put(f)
 			isEOF := errors.Is(err, astiav.ErrEof)
 			isEAgain := errors.Is(err, astiav.ErrEagain)
+			// isEOF means that the decoder has been fully flushed
+			// isEAgain means that there are no more frames to receive right now
 			logger.Tracef(ctx, "decoder.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
-			if isEOF || isEAgain {
+			if isEOF {
+				d.IsDirtyValue.Store(false)
+				return nil
+			}
+			if isEAgain {
+				if caps&astiav.CodecCapabilityDelay == 0 {
+					d.IsDirtyValue.Store(false)
+				}
 				return nil
 			}
 			return fmt.Errorf("unable to receive a frame from the decoder: %w", err)

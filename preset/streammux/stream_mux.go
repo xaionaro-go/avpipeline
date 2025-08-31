@@ -181,12 +181,13 @@ func (s *StreamMux[C]) initSwitches() {
 					return
 				}
 
-				s.Locker.Do(ctx, func() {
-					err := s.Outputs[from].Flush(ctx)
-					if err != nil {
-						logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
-					}
+				output := xsync.DoR1(ctx, &s.Locker, func() *Output {
+					return s.Outputs[from]
 				})
+				err := output.Flush(ctx)
+				if err != nil {
+					logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
+				}
 			}
 		})
 	})

@@ -36,7 +36,7 @@ func NewEncoder(
 	if err != nil {
 		return nil, err
 	}
-	return e.Aslocked(), nil
+	return e.AsLocked(), nil
 }
 
 func (e *EncoderFull) asLocked() *EncoderFullLocked {
@@ -91,14 +91,18 @@ func (e *EncoderFull) SanityCheck(
 func (e *EncoderFull) Flush(
 	ctx context.Context,
 	callback CallbackPacketReceiver,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "Flush")
+	defer func() { logger.Tracef(ctx, "/Flush: %v", _err) }()
 	return xsync.DoA2R1(ctx, &e.locker, e.asLocked().Flush, ctx, callback)
 }
 
 func (e *EncoderFull) Drain(
 	ctx context.Context,
 	callback CallbackPacketReceiver,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "Drain")
+	defer func() { logger.Tracef(ctx, "/Drain: %v", _err) }()
 	return xsync.DoA2R1(ctx, &e.locker, e.asLocked().Drain, ctx, callback)
 }
 
@@ -106,7 +110,9 @@ func (e *EncoderFull) IsDirty() bool {
 	return e.IsDirtyValue.Load()
 }
 
-func (e *EncoderFull) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
+func (e *EncoderFull) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) (_err error) {
+	logger.Tracef(ctx, "LockDo")
+	defer func() { logger.Tracef(ctx, "/LockDo: %v", _err) }()
 	return xsync.DoR1(ctx, &e.locker, func() error {
 		return fn(ctx, e.asLocked())
 	})

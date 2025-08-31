@@ -187,6 +187,7 @@ func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
 	}
 
 	for {
+		// this is not required to satisfy "Flush", but we defensively drain the input:
 		err := processor.DrainInput(ctx, n.Processor)
 		if err != nil {
 			return fmt.Errorf("unable to drain input of %v: %w", n, err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ type EncoderFullLocked struct {
 	InitTS            time.Time
 	Next              typing.Optional[SwitchEncoderParams]
 	IsDirtyValue      atomic.Bool
+	CallCount         atomic.Int64
 }
 
 func newEncoderFullUnlocked(
@@ -76,7 +78,7 @@ func newEncoderFullUnlocked(
 	return e, nil
 }
 
-func (e *EncoderFullLocked) Aslocked() *EncoderFull {
+func (e *EncoderFullLocked) AsLocked() *EncoderFull {
 	return (*EncoderFull)(e)
 }
 
@@ -106,6 +108,7 @@ func (e *EncoderFullLocked) SendFrame(
 	ctx context.Context,
 	f *astiav.Frame,
 ) (_err error) {
+	defer e.checkCallCount(ctx)()
 	logger.Tracef(ctx, "SendFrame")
 	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
 	if encoderDebug {
@@ -240,12 +243,11 @@ func (e *EncoderFullLocked) reinitEncoder(
 
 	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was is closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
 
-	// keeping the locker from the old codec to make sure everybody who is already locked
-	// will get relevant stuff when it will get unlocked
-	oldCodec := e.EncoderFullBackend
-	oldCodec.codecInternals = newEncoder.codecInternals
-	newEncoder.EncoderFullBackend = oldCodec
-	*e = *newEncoder
+	e.codecInternals = newEncoder.codecInternals
+	e.InitTS = newEncoder.InitTS
+	e.Quality = newEncoder.Quality
+	e.ReusableResources = newEncoder.ReusableResources
+	e.Next = newEncoder.Next
 	e.IsDirtyValue.Store(false)
 	return nil
 }
@@ -269,12 +271,16 @@ func (e *EncoderFullLocked) Flush(
 	ctx context.Context,
 	callback CallbackPacketReceiver,
 ) (_err error) {
+	defer e.checkCallCount(ctx)()
 	logger.Tracef(ctx, "Flush")
-	defer func() { logger.Tracef(ctx, "/Flush") }()
+	defer func() { logger.Tracef(ctx, "/Flush: %v", _err) }()
 
 	defer func() {
 		if _err == nil {
-			e.IsDirtyValue.Store(false)
+			if e.IsDirtyValue.Load() {
+				logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", e)
+				e.IsDirtyValue.Store(false)
+			}
 		}
 	}()
 
@@ -288,7 +294,12 @@ func (e *EncoderFullLocked) Flush(
 
 	logger.Tracef(ctx, "sending the FLUSH REQUEST pseudo-frame")
 	err := e.codecContext.SendFrame(nil)
-	if err != nil {
+	switch {
+	case err == nil:
+		// flushing had just been initiated
+	case errors.Is(err, astiav.ErrEof):
+		return nil // the encoder is already flushed
+	default:
 		return fmt.Errorf("unable to send the FLUSH REQUEST pseudo-frame: %w", err)
 	}
 
@@ -326,10 +337,19 @@ func (e *EncoderFullLocked) Drain(
 		if err != nil {
 			isEOF := errors.Is(err, astiav.ErrEof)
 			isEAgain := errors.Is(err, astiav.ErrEagain)
-			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
+			// isEOF means that the decoder has been fully flushed
+			// isEAgain means that there are no more frames to receive right now
 			packet.Pool.Pool.Put(pkt)
-			if isEOF || isEAgain {
-				break
+			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
+			if isEOF {
+				e.IsDirtyValue.Store(false)
+				return nil
+			}
+			if isEAgain {
+				if caps&astiav.CodecCapabilityDelay == 0 {
+					e.IsDirtyValue.Store(false)
+				}
+				return nil
 			}
 			return fmt.Errorf("unable receive the packet from the encoder: %w", err)
 		}
@@ -343,12 +363,6 @@ func (e *EncoderFullLocked) Drain(
 			return fmt.Errorf("unable to process the packet: %w", err)
 		}
 	}
-
-	if caps&astiav.CodecCapabilityDelay == 0 {
-		e.IsDirtyValue.Store(false)
-	}
-
-	return nil
 }
 
 func (e *EncoderFullLocked) IsDirty() bool {
@@ -357,4 +371,16 @@ func (e *EncoderFullLocked) IsDirty() bool {
 
 func (e *EncoderFullLocked) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
 	return fn(ctx, e)
+}
+
+func (e *EncoderFullLocked) checkCallCount(ctx context.Context) context.CancelFunc {
+	if e.CallCount.Add(1) > 1 {
+		s := make([]byte, 10<<20)
+		n := runtime.Stack(s, true)
+		s = s[:n]
+		panic(fmt.Sprintf("concurrent call detected to EncoderFullLocked methods, this is a bug:\n%s", s))
+	}
+	return func() {
+		e.CallCount.Add(-1)
+	}
 }

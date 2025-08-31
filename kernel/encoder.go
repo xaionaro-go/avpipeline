@@ -349,42 +349,40 @@ func (e *Encoder[EF]) SendInputPacket(
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
-	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
-}
-
-func (e *Encoder[EF]) sendInputPacket(
-	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
-) (_err error) {
 	ctx = belt.WithField(ctx, "mode", "packet")
-
-	encoder := e.encoders[input.GetStreamIndex()]
-	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
-	if encoder == nil {
-		input.Stream.AvgFrameRate()
-		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		err := e.initEncoderAndOutputFor(
-			ctx,
-			input.GetStreamIndex(),
-			input.CodecParameters(),
-			input.GetStream().TimeBase(),
-			nil,
-		)
-		switch {
-		case err == nil:
-		case errors.As(err, &codec.ErrNotDummy{}):
-			return ErrNotCopyEncoder{}
-		default:
-			return fmt.Errorf("unable to update outputs (packet): %w", err)
+	streamEncoder, err := xsync.DoR2(xsync.WithNoLogging(ctx, true), &e.Locker, func() (*streamEncoder, error) {
+		streamEncoder := e.encoders[input.GetStreamIndex()]
+		logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), streamEncoder)
+		if streamEncoder == nil {
+			input.Stream.AvgFrameRate()
+			logger.Debugf(ctx, "an encoder is not initialized, yet")
+			err := e.initEncoderAndOutputFor(
+				ctx,
+				input.GetStreamIndex(),
+				input.CodecParameters(),
+				input.GetStream().TimeBase(),
+				nil,
+			)
+			switch {
+			case err == nil:
+			case errors.As(err, &codec.ErrNotDummy{}):
+				return nil, ErrNotCopyEncoder{}
+			default:
+				return nil, fmt.Errorf("unable to update outputs (packet): %w", err)
+			}
+			streamEncoder = e.encoders[input.GetStreamIndex()]
 		}
-		encoder = e.encoders[input.GetStreamIndex()]
-	}
-	assert(ctx, encoder != nil)
-	ctx = belt.WithField(ctx, "encoder", encoder)
+		assert(ctx, streamEncoder != nil)
+		return streamEncoder, nil
+	})
 
-	if !codec.IsEncoderCopy(encoder.Encoder) {
+	if err != nil {
+		return fmt.Errorf("unable to get the encoder for stream index %d: %w", input.GetStreamIndex(), err)
+	}
+
+	ctx = belt.WithField(ctx, "encoder", streamEncoder.Encoder)
+
+	if !codec.IsEncoderCopy(streamEncoder.Encoder) {
 		return ErrNotCopyEncoder{}
 	}
 
@@ -394,12 +392,17 @@ func (e *Encoder[EF]) sendInputPacket(
 		}
 	}
 
-	outputStream := e.outputStreams[input.GetStreamIndex()]
-	assert(ctx, outputStream != nil)
+	outputStream := xsync.DoR1(ctx, &e.Locker, func() *astiav.Stream {
+		outputStream := e.outputStreams[input.GetStreamIndex()]
+		assert(ctx, outputStream != nil, "outputStream != nil")
+		return outputStream
+	})
+
 	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	if err := e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh); err != nil {
+	err = e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh)
+	if err != nil {
 		return fmt.Errorf("unable to send a packet: %w", err)
 	}
 	return nil
@@ -417,62 +420,57 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA4R1(xsync.WithNoLogging(ctx, true), &e.Locker, e.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
-}
-
-func (e *Encoder[EF]) sendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
 	ctx = belt.WithField(ctx, "mode", "frame")
 	ctx = belt.WithField(ctx, "media_type", input.GetMediaType())
+	ctx = belt.WithField(ctx, "stream_index", input.GetStreamIndex())
+	ctx = xsync.WithNoLogging(ctx, true)
 
-	logger.Tracef(ctx, "sendInputFrame")
-	defer func() { logger.Tracef(ctx, "/sendInputFrame: %v", _err) }()
-
-	encoder := e.encoders[input.GetStreamIndex()]
-	logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), encoder)
-	if encoder == nil {
-		logger.Debugf(ctx, "an encoder is not initialized, yet")
-		err := e.initEncoderAndOutputFor(
-			ctx,
-			input.StreamIndex,
-			input.CodecParameters,
-			input.GetTimeBase(),
-			input.Source,
-		)
-		if err != nil {
-			return fmt.Errorf("unable to update outputs (frame): %w", err)
+	streamEncoder, err := xsync.DoR2(ctx, &e.Locker, func() (*streamEncoder, error) {
+		streamEncoder := e.encoders[input.GetStreamIndex()]
+		logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), streamEncoder)
+		if streamEncoder == nil {
+			logger.Debugf(ctx, "an encoder is not initialized, yet")
+			err := e.initEncoderAndOutputFor(
+				ctx,
+				input.StreamIndex,
+				input.CodecParameters,
+				input.GetTimeBase(),
+				input.Source,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("unable to update outputs (frame): %w", err)
+			}
+			streamEncoder = e.encoders[input.GetStreamIndex()]
+			if encoderWriteHeaderOnFinishedGettingStreams && len(e.encoders) == input.StreamsCount {
+				logger.Debugf(ctx, "writing the header")
+				err := e.outputFormatContext.WriteHeader(nil)
+				if err != nil {
+					return nil, fmt.Errorf("unable to write header: %w", err)
+				}
+				e.headerIsWritten = true
+			}
 		}
-		encoder = e.encoders[input.GetStreamIndex()]
-		if encoderWriteHeaderOnFinishedGettingStreams && len(e.encoders) == input.StreamsCount {
+		assert(ctx, streamEncoder != nil)
+
+		ctx = belt.WithField(ctx, "encoder", streamEncoder)
+
+		if encoderDebug {
+			logger.Tracef(ctx, "input frame: dur:%d; res:%dx%d", input.Frame.Duration(), input.Frame.Width(), input.Frame.Height())
+		}
+
+		if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
 			logger.Debugf(ctx, "writing the header")
 			err := e.outputFormatContext.WriteHeader(nil)
 			if err != nil {
-				return fmt.Errorf("unable to write header: %w", err)
+				return nil, fmt.Errorf("unable to write header: %w", err)
 			}
 			e.headerIsWritten = true
 		}
-	}
-	assert(ctx, encoder != nil)
-	ctx = belt.WithField(ctx, "encoder", encoder)
 
-	if encoderDebug {
-		logger.Tracef(ctx, "input frame: dur:%d; res:%dx%d", input.Frame.Duration(), input.Frame.Width(), input.Frame.Height())
-	}
+		return streamEncoder, nil
+	})
 
-	if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
-		logger.Debugf(ctx, "writing the header")
-		err := e.outputFormatContext.WriteHeader(nil)
-		if err != nil {
-			return fmt.Errorf("unable to write header: %w", err)
-		}
-		e.headerIsWritten = true
-	}
-
-	if codec.IsEncoderRaw(encoder.Encoder) {
+	if codec.IsEncoderRaw(streamEncoder.Encoder) {
 		var err error
 		e.Locker.UDo(xsync.WithNoLogging(ctx, true), func() {
 			select {
@@ -489,21 +487,30 @@ func (e *Encoder[EF]) sendInputFrame(
 		return err
 	}
 
-	outputStream := e.outputStreams[input.GetStreamIndex()]
-	assert(ctx, outputStream != nil, "outputStream != nil")
+	outputStream := xsync.DoR1(ctx, &e.Locker, func() *astiav.Stream {
+		outputStream := e.outputStreams[input.GetStreamIndex()]
+		assert(ctx, outputStream != nil, "outputStream != nil")
+		return outputStream
+	})
+
 	if enableStreamCodecParametersUpdates {
-		if getInitTSer, ok := encoder.Encoder.(interface{ GetInitTS() time.Time }); ok {
-			initTS := getInitTSer.GetInitTS()
-			if encoder.LastInitTS.Before(initTS) {
-				logger.Debugf(ctx, "updating the codec parameters")
-				encoder.ToCodecParameters(outputStream.CodecParameters())
-				encoder.LastInitTS = initTS
+		streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+			getInitTSer, ok := streamEncoder.Encoder.(interface{ GetInitTS() time.Time })
+			if !ok {
+				return nil
 			}
-		}
+			initTS := getInitTSer.GetInitTS()
+			if streamEncoder.LastInitTS.Before(initTS) {
+				logger.Debugf(ctx, "updating the codec parameters")
+				streamEncoder.Encoder.ToCodecParameters(outputStream.CodecParameters())
+				streamEncoder.LastInitTS = initTS
+			}
+			return nil
+		})
 	}
 
 	if encoderDebug {
-		if encoder, ok := encoder.Encoder.(interface {
+		if encoder, ok := streamEncoder.Encoder.(interface {
 			SanityCheck(ctx context.Context) error
 		}); ok {
 			if err := encoder.SanityCheck(ctx); err != nil {
@@ -513,10 +520,10 @@ func (e *Encoder[EF]) sendInputFrame(
 	}
 
 	outputMediaType := outputStream.CodecParameters().MediaType()
-	encoderMediaType := encoder.MediaType()
+	encoderMediaType := streamEncoder.Encoder.MediaType()
 	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
-	fittedFrames, err := encoder.fitFrameForEncoding(ctx, input)
+	fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
 	if err != nil {
 		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
 	}
@@ -532,36 +539,38 @@ func (e *Encoder[EF]) sendInputFrame(
 		Duration:    input.Frame.Duration(),
 		StreamIndex: input.StreamIndex,
 	}
-	for _, fittedFrame := range fittedFrames {
-		if encoderDebug {
-			logger.Tracef(ctx, "fitted frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
-		}
-		if fittedFrame.Pts() != consts.NoPTSValue {
-			frameInfo.PTS = fittedFrame.Pts()
-		}
-		if fittedFrame.PktDts() != consts.NoPTSValue {
-			frameInfo.DTS = fittedFrame.PktDts()
-		}
-		if fittedFrame.Duration() > 0 {
-			frameInfo.Duration = fittedFrame.Duration()
-		}
-		if frameInfo.TimeBase.Num() == 0 {
-			frameInfo.TimeBase = input.GetTimeBase()
+	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+		for _, fittedFrame := range fittedFrames {
+			if encoderDebug {
+				logger.Tracef(ctx, "fitted frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
+			}
+			if fittedFrame.Pts() != consts.NoPTSValue {
+				frameInfo.PTS = fittedFrame.Pts()
+			}
+			if fittedFrame.PktDts() != consts.NoPTSValue {
+				frameInfo.DTS = fittedFrame.PktDts()
+			}
+			if fittedFrame.Duration() > 0 {
+				frameInfo.Duration = fittedFrame.Duration()
+			}
+			if frameInfo.TimeBase.Num() == 0 {
+				frameInfo.TimeBase = input.GetTimeBase()
+			}
+
+			fittedFrame.SetOpaque(frameInfo.Bytes())
+			err := encoder.SendFrame(ctx, fittedFrame)
+			if err != nil {
+				return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
+			}
 		}
 
-		fittedFrame.SetOpaque(frameInfo.Bytes())
-		err := encoder.SendFrame(ctx, fittedFrame)
+		err = e.drain(ctx, outputPacketsCh, encoder.Drain, outputStream, frameInfo)
 		if err != nil {
-			return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
+			return fmt.Errorf("unable to drain: %w", err)
 		}
-	}
 
-	err = e.drain(ctx, outputPacketsCh, encoder.Drain, outputStream, frameInfo)
-	if err != nil {
-		return fmt.Errorf("unable to drain: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (e *Encoder[EF]) drain(
@@ -619,10 +628,7 @@ func (e *Encoder[EF]) drain(
 			}
 		}
 
-		var err error
-		encoder.UnlockDo(ctx, func(ctx context.Context) {
-			err = e.send(ctx, pkt, nil, outputStream, outputPacketsCh)
-		})
+		err := e.send(ctx, pkt, nil, outputStream, outputPacketsCh)
 		if err != nil {
 			return fmt.Errorf("unable to send a packet: %w", err)
 		}
@@ -870,15 +876,13 @@ func (e *Encoder[EF]) send(
 	defer func() { logger.Tracef(ctx, "/send: %v %v", outPktWrapped.CodecParameters().MediaType(), _err) }()
 
 	var err error
-	e.Locker.UDo(xsync.WithNoLogging(ctx, true), func() {
-		select {
-		case <-e.ClosureSignaler.CloseChan():
-			err = io.ErrClosedPipe
-		case <-ctx.Done():
-			err = ctx.Err()
-		case out <- outPktWrapped:
-		}
-	})
+	select {
+	case <-e.ClosureSignaler.CloseChan():
+		err = io.ErrClosedPipe
+	case <-ctx.Done():
+		err = ctx.Err()
+	case out <- outPktWrapped:
+	}
 	return err
 }
 
@@ -1012,19 +1016,15 @@ func (e *Encoder[EF]) Flush(
 				ctx = belt.WithField(ctx, "encoder", encoder)
 				observability.Go(ctx, func(ctx context.Context) {
 					defer wg.Done()
-					err := encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
-						return xsync.DoR1(ctx, &e.Locker, func() error {
-							return e.drain(
-								ctx,
-								outputPacketCh,
-								encoder.Flush,
-								e.outputStreams[streamIndex],
-								frameInfo{
-									StreamIndex: streamIndex,
-								},
-							)
-						})
-					})
+					err := e.drain(
+						ctx,
+						outputPacketCh,
+						encoder.Flush,
+						e.outputStreams[streamIndex],
+						frameInfo{
+							StreamIndex: streamIndex,
+						},
+					)
 					if err != nil {
 						errCh <- fmt.Errorf("unable to flush the encoder for stream #%d: %w", streamIndex, err)
 					}
