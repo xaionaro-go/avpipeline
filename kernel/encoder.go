@@ -472,18 +472,16 @@ func (e *Encoder[EF]) SendInputFrame(
 
 	if codec.IsEncoderRaw(streamEncoder.Encoder) {
 		var err error
-		e.Locker.UDo(xsync.WithNoLogging(ctx, true), func() {
-			select {
-			case <-e.ClosureSignaler.CloseChan():
-				err = io.ErrClosedPipe
-			case <-ctx.Done():
-				err = ctx.Err()
-			case outputFramesCh <- frame.BuildOutput(
-				frame.CloneAsReferenced(input.Frame),
-				input.StreamInfo,
-			):
-			}
-		})
+		select {
+		case <-e.ClosureSignaler.CloseChan():
+			err = io.ErrClosedPipe
+		case <-ctx.Done():
+			err = ctx.Err()
+		case outputFramesCh <- frame.BuildOutput(
+			frame.CloneAsReferenced(input.Frame),
+			input.StreamInfo,
+		):
+		}
 		return err
 	}
 
