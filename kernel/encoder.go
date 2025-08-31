@@ -32,6 +32,7 @@ const (
 	encoderCopyTimeAfterScaling                = true
 	encoderDTSHigherPTSCorrect                 = false
 	encoderDebug                               = true
+	encoderExtraDefensive                      = false
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -523,6 +524,13 @@ func (e *Encoder[EF]) SendInputFrame(
 	encoderMediaType := streamEncoder.Encoder.MediaType()
 	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
+	if encoderExtraDefensive {
+		if isEmptyFrame(ctx, input) {
+			logger.Errorf(ctx, "the input frame is empty; dropping it")
+			return nil
+		}
+	}
+
 	fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
 	if err != nil {
 		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
@@ -571,6 +579,27 @@ func (e *Encoder[EF]) SendInputFrame(
 
 		return nil
 	})
+}
+
+func isEmptyFrame(
+	ctx context.Context,
+	input frame.Input,
+) (_ret bool) {
+	defer func() { logger.Tracef(ctx, "/isEmptyFrame: %v", _ret) }()
+	if input.Frame == nil {
+		return true
+	}
+	switch input.GetMediaType() {
+	case astiav.MediaTypeVideo:
+		if input.Frame.Width() <= 0 || input.Frame.Height() <= 0 {
+			return true
+		}
+	case astiav.MediaTypeAudio:
+		if input.Frame.NbSamples() <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Encoder[EF]) drain(
