@@ -344,6 +344,7 @@ func (e *Encoder[EF]) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "encoder", e)
 	logger.Tracef(ctx, "SendInputPacket: %s", input.GetMediaType())
 	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input.GetMediaType(), _err) }()
 	if e.IsClosed() {
@@ -420,6 +421,7 @@ func (e *Encoder[EF]) SendInputFrame(
 		return io.ErrClosedPipe
 	}
 
+	ctx = belt.WithField(ctx, "encoder", e)
 	ctx = belt.WithField(ctx, "mode", "frame")
 	ctx = belt.WithField(ctx, "media_type", input.GetMediaType())
 	ctx = belt.WithField(ctx, "stream_index", input.GetStreamIndex())
@@ -433,7 +435,7 @@ func (e *Encoder[EF]) SendInputFrame(
 			err := e.initEncoderAndOutputFor(
 				ctx,
 				input.StreamIndex,
-				input.CodecParameters,
+				fixCodecParameters(ctx, input.CodecParameters),
 				input.GetTimeBase(),
 				input.Source,
 			)
@@ -900,6 +902,7 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 	logger.Tracef(ctx, "NotifyAboutPacketSource: %s", source)
 	defer func() { logger.Tracef(ctx, "/NotifyAboutPacketSource: %s", source) }()
 	var errs []error
+	ctx = belt.WithField(ctx, "encoder", e)
 	ctx = belt.WithField(ctx, "source", source)
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		e.Locker.Do(ctx, func() {
@@ -1043,4 +1046,19 @@ func (e *Encoder[EF]) Flush(
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+func fixCodecParameters(
+	ctx context.Context,
+	params *astiav.CodecParameters,
+) *astiav.CodecParameters {
+	if params == nil {
+		return nil
+	}
+
+	cp := astiav.AllocCodecParameters()
+	setFinalizerFree(ctx, cp)
+	params.Copy(cp)
+	cp.SetCodecID(astiav.CodecIDNone)
+	return cp
 }

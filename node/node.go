@@ -203,6 +203,7 @@ func NewWithCustomData[C any, T processor.Abstract](
 		Config:                  Options(opts).config(),
 		Counters:                types.NewCounters(),
 	}
+	n.IsDrainedValue.Store(true)
 	return n
 }
 
@@ -411,8 +412,7 @@ func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(cond framefiltercondition
 
 func (n *NodeWithCustomData[C, T]) String() string {
 	nodeString := n.Processor.String()
-	cdStringer, ok := any(n.CustomData).(fmt.Stringer)
-	if ok {
+	if cdStringer, _ := any(n.CustomData).(fmt.Stringer); cdStringer != nil {
 		return fmt.Sprintf("%s:%s", nodeString, cdStringer)
 	}
 	return nodeString

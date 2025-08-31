@@ -569,6 +569,7 @@ func (o *Output) SendInputPacket(
 	if err != nil {
 		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
+	assert(ctx, outputStream != nil)
 
 	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
 		return o.send(ctx, pkt, inputPkt.Source, inputPkt.Stream, outputStream)

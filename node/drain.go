@@ -45,7 +45,7 @@ func CombineIsDrained(
 	defer func() { logger.Tracef(ctx, "/CombineIsDrained (nodes: %v): %v", nodes, _ret) }()
 	for _, n := range nodes {
 		if !n.IsDrained(ctx) {
-			logger.Tracef(ctx, "node %v:%p is not drained", n, n)
+			logger.Tracef(ctx, "CombineIsDrained: node %v:%p is not drained (%T)", n, n, n)
 			return false
 		}
 	}

@@ -207,7 +207,9 @@ func newCodec(
 	options := params.Options
 	hwDevFlags := params.HWDevFlags
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
-	ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
+	if codecParameters.CodecID() != astiav.CodecIDNone {
+		ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
+	}
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 
@@ -425,6 +427,23 @@ func newCodec(
 		)
 	case astiav.MediaTypeAudio:
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
+		if options != nil {
+			if v := options.Get("ac", nil, 0); v != nil {
+				logger.Debugf(ctx, "ac option is set to '%s'", v.Value())
+				channels, err := strconv.ParseInt(v.Value(), 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse ac option value '%s' as int: %w", v.Value(), err)
+				}
+				switch channels {
+				case 1:
+					c.codecContext.SetChannelLayout(astiav.ChannelLayoutMono)
+				case 2:
+					c.codecContext.SetChannelLayout(astiav.ChannelLayoutStereo)
+				default:
+					return nil, fmt.Errorf("unsupported ac option value '%s'", v.Value())
+				}
+			}
+		}
 		c.codecContext.SetSampleRate(codecParameters.SampleRate())
 		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
 		logger.Tracef(ctx, "sample_rate: %d", c.codecContext.SampleRate())

@@ -317,13 +317,6 @@ func (s *StreamMux[C]) enableRecodingBypassLocked(
 	}
 	s.OutputIDBeforeBypass = output.ID
 
-	for idx := range s.RecodingConfig.VideoTrackConfigs {
-		s.RecodingConfig.VideoTrackConfigs[idx].CodecName = codectypes.Name(codec.NameCopy)
-	}
-	for idx := range s.RecodingConfig.AudioTrackConfigs {
-		s.RecodingConfig.AudioTrackConfigs[idx].CodecName = codectypes.Name(codec.NameCopy)
-	}
-
 	return nil
 }
 
@@ -355,12 +348,13 @@ func (s *StreamMux[C]) SetRecoderConfig(
 ) (_err error) {
 	logger.Tracef(ctx, "SetRecoderConfig(ctx, %#+v)", cfg)
 	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
-	return xsync.DoA2R1(ctx, &s.Locker, s.setRecoderConfigLocked, ctx, cfg)
+	return xsync.DoA3R1(ctx, &s.Locker, s.setRecoderConfigLocked, ctx, cfg, true)
 }
 
 func (s *StreamMux[C]) setRecoderConfigLocked(
 	ctx context.Context,
 	cfg types.RecoderConfig,
+	persistent bool,
 ) (_err error) {
 	logger.Tracef(ctx, "setRecoderConfigLocked: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/setRecoderConfigLocked: %#+v: %v", cfg, _err) }()
@@ -396,7 +390,9 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
 	}
 
-	s.RecodingConfig = cfg
+	if persistent {
+		s.RecodingConfig = cfg
+	}
 	return nil
 }
 
@@ -561,6 +557,7 @@ func (s *StreamMux[C]) getActiveOutputLocked(
 	ctx context.Context,
 ) *Output {
 	outputID := s.OutputSwitch.CurrentValue.Load()
+	logger.Tracef(ctx, "getActiveOutputLocked: outputID=%d", outputID)
 	if int(outputID) < 0 || int(outputID) >= len(s.Outputs) {
 		return nil
 	}
@@ -634,7 +631,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	videoCfg.CodecName = videoCodec
 	cfg.VideoTrackConfigs[0] = videoCfg
 
-	return s.setRecoderConfigLocked(ctx, cfg)
+	return s.setRecoderConfigLocked(ctx, cfg, false)
 }
 
 func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {

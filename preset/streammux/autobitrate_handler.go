@@ -530,7 +530,6 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		curVCodecName = codec.NameCopy
 	} else {
 		encCtx := encV.CodecContext()
-		//curCodecName = codec.Name(encCtx.
 		curRes = codec.Resolution{
 			Width:  uint32(encCtx.Width()),
 			Height: uint32(encCtx.Height()),
@@ -538,9 +537,19 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		curVCodecName = codec.Name(encV.Codec().Name())
 		curACodecName = codec.Name(encA.Codec().Name())
 	}
+	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)
 
 	if outputKey == nil {
 		outputKey = ptr(h.StreamMux.GetBestNotBypassOutput(ctx).GetKey())
+		logger.Tracef(ctx, "using best not-bypass output key: %v", outputKey)
+		origConfig := h.StreamMux.GetRecoderConfig(ctx)
+		logger.Tracef(ctx, "original recoder config: %+v", origConfig)
+		if len(origConfig.VideoTrackConfigs) > 0 {
+			outputKey.VideoCodec = codectypes.Name(origConfig.VideoTrackConfigs[0].CodecName)
+		}
+		if len(origConfig.AudioTrackConfigs) > 0 {
+			outputKey.AudioCodec = codectypes.Name(origConfig.AudioTrackConfigs[0].CodecName)
+		}
 	} else {
 		if outputKey.AudioCodec == "" {
 			outputKey.AudioCodec = codectypes.Name(curACodecName)
@@ -552,6 +561,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 			outputKey.Resolution = curRes
 		}
 	}
+	logger.Tracef(ctx, "target output key: %v", outputKey)
 
 	outputCur := h.StreamMux.GetActiveOutput(ctx)
 
