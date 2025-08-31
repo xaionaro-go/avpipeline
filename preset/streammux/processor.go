@@ -9,6 +9,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/processor"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 var _ processor.Abstract = (*StreamMux[struct{}])(nil)
@@ -45,13 +46,10 @@ func (s *StreamMux[C]) Flush(ctx context.Context) error {
 func (s *StreamMux[C]) CountersPtr() *processortypes.Counters {
 	inputCounters := s.Input().GetProcessor().CountersPtr()
 	return &processortypes.Counters{
-		Packets: processortypes.CountersSection{
-			Processed: inputCounters.Packets.Processed,
-			// TODO: add a sum of all outputs as Generated
+		Processed: globaltypes.CountersSection{
+			Packets: inputCounters.Processed.Packets,
+			Frames:  inputCounters.Processed.Frames,
 		},
-		Frames: processortypes.CountersSection{
-			Processed: inputCounters.Frames.Processed,
-			// TODO: add a sum of all outputs as Generated
-		},
+		// TODO: add a sum of all outputs as Generated
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -95,29 +96,33 @@ func (n *NodeWithCustomData[C, T]) IsDrained(ctx context.Context) bool {
 
 func allWentInAndOut(
 	ctx context.Context,
-	nodeCounters *types.CountersSection,
-	procCounters *processortypes.CountersSection,
+	nodeCounters *types.Counters,
+	procCounters *processortypes.Counters,
 ) bool {
-	// the reverse order here is important, it guarantees we cannot falsely claim
-	// something is drained due to a race condition:
-	sent := nodeCounters.Sent.ToStats()
-	generated := procCounters.Generated.ToStats()
-	processed := procCounters.Processed.ToStats()
-	received := nodeCounters.Received.ToStats()
+	for subSectionID := globaltypes.UndefinedSubSectionID + 1; subSectionID < globaltypes.EndOfCountersSubSectionID; subSectionID++ {
+		for _, mediaType := range globaltypes.MediaTypes() {
 
-	videoOK := sent.Video.Count == generated.Video.Count && processed.Video.Count == received.Video.Count
-	audioOK := sent.Audio.Count == generated.Audio.Count && processed.Audio.Count == received.Audio.Count
-	otherOK := sent.Other.Count == generated.Other.Count && processed.Other.Count == received.Other.Count
-	unknownOK := sent.Unknown.Count == generated.Unknown.Count && processed.Unknown.Count == received.Unknown.Count
-	logger.Tracef(
-		ctx,
-		"allWentInAndOut: videoOK=%v (%d=?=%d; %d=?=%d); audioOK=%v (%d=?=%d; %d=?=%d); otherOK=%v (%d=?=%d; %d=?=%d); unknownOK=%v (%d=?=%d; %d=?=%d)",
-		videoOK, sent.Video.Count, generated.Video.Count, processed.Video.Count, received.Video.Count,
-		audioOK, sent.Audio.Count, generated.Audio.Count, processed.Audio.Count, received.Audio.Count,
-		otherOK, sent.Other.Count, generated.Other.Count, processed.Other.Count, received.Other.Count,
-		unknownOK, sent.Unknown.Count, generated.Unknown.Count, processed.Unknown.Count, received.Unknown.Count,
-	)
-	return videoOK && audioOK && otherOK && unknownOK
+			// the reverse order here is important, it guarantees we cannot falsely claim
+			// something is drained due to a race condition:
+			sent := nodeCounters.Sent.Get(subSectionID).Get(mediaType).Count.Load()
+			generated := procCounters.Generated.Get(subSectionID).Get(mediaType).Count.Load()
+			processed := procCounters.Processed.Get(subSectionID).Get(mediaType).Count.Load()
+			received := nodeCounters.Received.Get(subSectionID).Get(mediaType).Count.Load()
+
+			if sent != generated || processed != received {
+				logger.Tracef(
+					ctx,
+					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; received=%#+v",
+					subSectionID, mediaType,
+					sent, generated, processed, received,
+				)
+				return false
+			}
+
+		}
+	}
+
+	return true
 }
 
 func (n *NodeWithCustomData[C, T]) calculateIfDrained(ctx context.Context) bool {
@@ -130,11 +135,8 @@ func (n *NodeWithCustomData[C, T]) calculateIfDrained(ctx context.Context) bool 
 
 	procCounters := n.Processor.CountersPtr()
 	allWentInAndOut := allWentInAndOut(ctx,
-		&n.Counters.Packets,
-		&procCounters.Packets,
-	) && allWentInAndOut(ctx,
-		&n.Counters.Frames,
-		&procCounters.Frames,
+		n.Counters,
+		procCounters,
 	)
 	logger.Tracef(ctx, "node %v:%p allWentInAndOut=%v", n, n, allWentInAndOut)
 	return allWentInAndOut
@@ -144,7 +146,9 @@ func (n *NodeWithCustomData[C, T]) updateProcInfoLocked(
 	ctx context.Context,
 ) {
 	logger.Tracef(ctx, "updateProcInfoLocked: %v:%p", n, n)
-	defer func() { logger.Tracef(ctx, "/updateProcInfoLocked: %v:%p: %v", n, n, n.IsDrainedValue.Load()) }()
+	defer func() {
+		logger.Tracef(ctx, "/updateProcInfoLocked: %v:%p: isDrained:%v", n, n, n.IsDrainedValue.Load())
+	}()
 
 	newIsDrained := n.calculateIfDrained(ctx)
 	prevIsDrained := n.IsDrainedValue.Swap(newIsDrained)

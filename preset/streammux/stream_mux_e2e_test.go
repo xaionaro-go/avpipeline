@@ -200,7 +200,7 @@ func runTest(
 		case <-ctx.Done():
 			require.NoError(t, ctx.Err())
 		case inputCh <- p:
-			streamMux.GetCountersPtr().Packets.Received.Increment(
+			streamMux.GetCountersPtr().Received.Packets.Increment(
 				globaltypes.MediaType(p.GetMediaType()),
 				uint64(p.Packet.Size()),
 			)
@@ -253,7 +253,7 @@ func runTest(
 		case <-ctx.Done():
 			require.NoError(t, ctx.Err())
 		case inputCh <- p:
-			streamMux.GetCountersPtr().Packets.Received.Increment(
+			streamMux.GetCountersPtr().Received.Packets.Increment(
 				globaltypes.MediaType(p.GetMediaType()),
 				uint64(p.Packet.Size()),
 			)

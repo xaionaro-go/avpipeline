@@ -24,16 +24,16 @@ type StatisticsSubSection struct {
 }
 
 type StatisticsSection struct {
-	Missed    StatisticsSubSection
-	Received  StatisticsSubSection
-	Processed StatisticsSubSection
-	Generated StatisticsSubSection
-	Sent      StatisticsSubSection
+	Packets StatisticsSubSection
+	Frames  StatisticsSubSection
 }
 
 type Statistics struct {
-	Packets StatisticsSection
-	Frames  StatisticsSection
+	Missed    StatisticsSection
+	Received  StatisticsSection
+	Processed StatisticsSection
+	Generated StatisticsSection
+	Sent      StatisticsSection
 }
 
 type CountersItem struct {
@@ -45,9 +45,10 @@ func NewCountersItem() *CountersItem {
 	return &CountersItem{}
 }
 
-func (c *CountersItem) Increment(msgSize uint64) {
+func (c *CountersItem) Increment(msgSize uint64) *CountersItem {
 	c.Count.Add(1)
 	c.Bytes.Add(msgSize)
+	return c
 }
 
 func (c *CountersItem) ToStats() StatisticsItem {
@@ -73,15 +74,19 @@ func NewCountersSubSection() CountersSubSection {
 	}
 }
 
-func (s *CountersSubSection) Increment(mediaType MediaType, msgSize uint64) {
+func (s *CountersSubSection) Get(mediaType MediaType) *CountersItem {
 	switch mediaType {
 	case MediaTypeVideo:
-		s.Video.Increment(msgSize)
+		return s.Video
 	case MediaTypeAudio:
-		s.Audio.Increment(msgSize)
+		return s.Audio
 	default:
-		s.Other.Increment(msgSize)
+		return s.Other
 	}
+}
+
+func (s *CountersSubSection) Increment(mediaType MediaType, msgSize uint64) *CountersItem {
+	return s.Get(mediaType).Increment(msgSize)
 }
 
 func (s *CountersSubSection) TotalCount() uint64 {
@@ -118,4 +123,72 @@ func (s StatisticsSubSection) ToCounters() *CountersSubSection {
 	stats.Other = s.Other.ToCounters()
 	stats.Unknown = s.Unknown.ToCounters()
 	return stats
+}
+
+type CountersSection struct {
+	Packets CountersSubSection
+	Frames  CountersSubSection
+}
+
+func NewCountersSection() CountersSection {
+	return CountersSection{
+		Packets: NewCountersSubSection(),
+		Frames:  NewCountersSubSection(),
+	}
+}
+
+func (s *CountersSection) ToStats() StatisticsSection {
+	return StatisticsSection{
+		Packets: s.Packets.ToStats(),
+		Frames:  s.Frames.ToStats(),
+	}
+}
+
+func (s StatisticsSection) ToCounters() *CountersSection {
+	stats := &CountersSection{}
+	stats.Packets = *s.Packets.ToCounters()
+	stats.Frames = *s.Frames.ToCounters()
+	return stats
+}
+
+func (s *CountersSection) TotalCount() uint64 {
+	var total uint64
+	total += s.Packets.TotalCount()
+	total += s.Frames.TotalCount()
+	return total
+}
+
+func (s *CountersSection) TotalBytes() uint64 {
+	var total uint64
+	total += s.Packets.TotalBytes()
+	total += s.Frames.TotalBytes()
+	return total
+}
+
+type CountersSubSectionID int
+
+const (
+	UndefinedSubSectionID CountersSubSectionID = CountersSubSectionID(iota)
+	CountersSubSectionIDPackets
+	CountersSubSectionIDFrames
+	EndOfCountersSubSectionID
+)
+
+func (s *CountersSection) Increment(
+	subSection CountersSubSectionID,
+	mediaType MediaType,
+	msgSize uint64,
+) *CountersItem {
+	return s.Get(subSection).Get(mediaType).Increment(msgSize)
+}
+
+func (s *CountersSection) Get(id CountersSubSectionID) *CountersSubSection {
+	switch id {
+	case CountersSubSectionIDPackets:
+		return &s.Packets
+	case CountersSubSectionIDFrames:
+		return &s.Frames
+	default:
+		return nil
+	}
 }

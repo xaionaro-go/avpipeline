@@ -35,8 +35,8 @@ func (c *PushQueueSizeCond) Match(
 ) bool {
 	nodeStats := c.NodeSink.GetCountersPtr()
 	procStats := c.NodeSink.GetProcessor().CountersPtr()
-	totalReceived := nodeStats.Packets.Received.TotalBytes() + nodeStats.Frames.Received.TotalBytes()
-	totalProcessed := procStats.Packets.Processed.TotalBytes() + procStats.Frames.Processed.TotalBytes()
+	totalReceived := nodeStats.Received.TotalBytes()
+	totalProcessed := procStats.Processed.TotalBytes()
 	queueSizeBytes := totalReceived - totalProcessed
 	if proc, ok := c.NodeSink.GetProcessor().(processor.GetInternalQueueSizer); ok {
 		if internalQueue := proc.GetInternalQueueSize(ctx); internalQueue != nil {

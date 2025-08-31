@@ -4,7 +4,7 @@ import (
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
-	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 func NodeCountersToGRPC(
@@ -15,34 +15,33 @@ func NodeCountersToGRPC(
 		return nil
 	}
 	return &avpipelinegrpc.NodeCounters{
-		Packets: CountersSectionToGRPC(&nc.Packets, &pc.Packets),
-		Frames:  CountersSectionToGRPC(&nc.Frames, &pc.Frames),
+		Received:  CountersSectionToGRPC(&nc.Received),
+		Processed: CountersSectionToGRPC(&pc.Processed),
+		Missed:    CountersSectionToGRPC(&nc.Missed),
+		Generated: CountersSectionToGRPC(&pc.Generated),
+		Sent:      CountersSectionToGRPC(&nc.Sent),
 	}
 }
 
 func CountersSectionToGRPC(
-	nc *nodetypes.CountersSection,
-	pc *processortypes.CountersSection,
+	counters *globaltypes.CountersSection,
 ) *avpipelinegrpc.NodeCountersSection {
-	if nc == nil {
-		return nil
-	}
-	return &avpipelinegrpc.NodeCountersSection{
-		Received:  CountersSubsectionToGRPC(&nc.Received),
-		Processed: CountersSubsectionToGRPC(&pc.Processed),
-		Missed:    CountersSubsectionToGRPC(&nc.Missed),
-		Generated: CountersSubsectionToGRPC(&pc.Generated),
-		Sent:      CountersSubsectionToGRPC(&nc.Sent),
-	}
-}
-
-func CountersSubsectionToGRPC(
-	counters *types.CountersSubSection,
-) *avpipelinegrpc.NodeCountersSubsection {
 	if counters == nil {
 		return nil
 	}
-	return &avpipelinegrpc.NodeCountersSubsection{
+	return &avpipelinegrpc.NodeCountersSection{
+		Packets: CountersSubSectionToGRPC(&counters.Packets),
+		Frames:  CountersSubSectionToGRPC(&counters.Frames),
+	}
+}
+
+func CountersSubSectionToGRPC(
+	counters *globaltypes.CountersSubSection,
+) *avpipelinegrpc.NodeCountersSubSection {
+	if counters == nil {
+		return nil
+	}
+	return &avpipelinegrpc.NodeCountersSubSection{
 		Unknown: CountersItemToGRPC(counters.Unknown),
 		Other:   CountersItemToGRPC(counters.Other),
 		Video:   CountersItemToGRPC(counters.Video),
@@ -50,7 +49,7 @@ func CountersSubsectionToGRPC(
 	}
 }
 
-func CountersItemToGRPC(item *types.CountersItem) *avpipelinegrpc.NodeCountersItem {
+func CountersItemToGRPC(item *globaltypes.CountersItem) *avpipelinegrpc.NodeCountersItem {
 	if item == nil {
 		return nil
 	}

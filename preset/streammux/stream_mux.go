@@ -695,13 +695,9 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 	assert(ctx, activeOutput != nil)
 	assert(ctx, activeOutput.OutputNode != nil)
 	inputCounters := s.InputNode.GetCountersPtr()
-	inputPacketsBytes := inputCounters.Packets.Received.TotalBytes()
-	inputFramesBytes := inputCounters.Frames.Received.TotalBytes()
-	bytesInputReadTotalPrev := int64(inputPacketsBytes + inputFramesBytes)
+	bytesInputReadTotalPrev := inputCounters.Received.TotalBytes()
 	outputCounters := activeOutput.OutputNode.GetCountersPtr()
-	outputPacketsBytes := outputCounters.Packets.Received.TotalBytes()
-	outputFramesBytes := outputCounters.Frames.Received.TotalBytes()
-	bytesOutputReadTotalPrev := int64(outputPacketsBytes + outputFramesBytes)
+	bytesOutputReadTotalPrev := outputCounters.Received.TotalBytes()
 	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
 	tsPrev := time.Now()
 	for {
@@ -722,14 +718,10 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			assert(ctx, activeOutput.OutputNode.GetCountersPtr() != nil)
 
 			inputCounters := s.InputNode.GetCountersPtr()
-			inputPacketsBytes := inputCounters.Packets.Received.TotalBytes()
-			inputFramesBytes := inputCounters.Frames.Received.TotalBytes()
-			bytesInputReadTotalNext := int64(inputPacketsBytes + inputFramesBytes)
+			bytesInputReadTotalNext := inputCounters.Received.TotalBytes()
 
 			outputCounters := activeOutput.OutputNode.GetCountersPtr()
-			outputPacketsBytes := outputCounters.Packets.Received.TotalBytes()
-			outputFramesBytes := outputCounters.Frames.Received.TotalBytes()
-			bytesOutputReadTotalNext := int64(outputPacketsBytes + outputFramesBytes)
+			bytesOutputReadTotalNext := outputCounters.Received.TotalBytes()
 
 			bytesInputRead := bytesInputReadTotalNext - bytesInputReadTotalPrev
 			bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())

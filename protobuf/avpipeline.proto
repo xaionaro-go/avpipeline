@@ -14,19 +14,19 @@ message Node {
 }
 
 message NodeCounters {
-    NodeCountersSection packets = 1;
-    NodeCountersSection frames = 2;
+    NodeCountersSection received = 1;
+    NodeCountersSection processed = 2;
+    NodeCountersSection missed = 3;
+    NodeCountersSection generated = 4;
+    NodeCountersSection sent = 5;
 }
 
 message NodeCountersSection {
-    NodeCountersSubsection received = 1;
-    NodeCountersSubsection processed = 2;
-    NodeCountersSubsection missed = 3;
-    NodeCountersSubsection generated = 4;
-    NodeCountersSubsection sent = 5;
+    NodeCountersSubSection packets = 1;
+    NodeCountersSubSection frames = 2;
 }
 
-message NodeCountersSubsection {
+message NodeCountersSubSection {
     NodeCountersItem unknown = 1;
     NodeCountersItem other = 2;
     NodeCountersItem video = 3;

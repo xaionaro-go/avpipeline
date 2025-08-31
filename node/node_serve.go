@@ -14,7 +14,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node/filter"
 	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
-	"github.com/xaionaro-go/avpipeline/node/types"
+	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	extraDebug = false
+	extraDebug = true
 )
 
 func (n *NodeWithCustomData[C, T]) Serve(
@@ -130,7 +130,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					getInputPacketChan,
 					poolPutPacketInput,
 					poolPutPacketOutput,
-					getPacketsStats,
+					globaltypes.CountersSubSectionIDPackets,
 				)
 			})
 		case f, ok := <-frameCh:
@@ -146,7 +146,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					getInputFrameChan,
 					poolPutFrameInput,
 					poolPutFrameOutput,
-					getFramesStats,
+					globaltypes.CountersSubSectionIDFrames,
 				)
 			})
 		}
@@ -169,7 +169,7 @@ func pushFurther[
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
 	poolPutOutput func(O),
-	getFramesOrPacketsStats func(s *types.Counters) *types.CountersSection,
+	countersSubSectionID globaltypes.CountersSubSectionID,
 ) {
 	defer poolPutOutput(outputObj)
 	outputObjPtr := OP(&outputObj)
@@ -184,7 +184,15 @@ func pushFurther[
 
 	mediaType := outputObjPtr.GetMediaType()
 	defer func() {
-		getFramesOrPacketsStats(stats).Sent.Increment(globaltypes.MediaType(mediaType), objSize)
+		nodeCountsItem := stats.Sent.Increment(countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
+		if extraDebug {
+			procCountsItem := n.Processor.CountersPtr().Generated.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType))
+			sentCount := nodeCountsItem.Count.Load()
+			generatedCount := procCountsItem.Count.Load()
+			if sentCount > generatedCount {
+				panic(fmt.Sprintf("sent more objects than generated, this is a bug: %d > %d (a possible issue: are you pushing data directly to processor's output chan? you should not; you should count the objects first)", sentCount, generatedCount))
+			}
+		}
 	}()
 
 	n.updateProcInfoLocked(ctx)
@@ -208,8 +216,8 @@ func pushFurther[
 			buildInput,
 			getInputCondition,
 			getPushChan,
-			getFramesOrPacketsStats,
 			poolPutInput,
+			countersSubSectionID,
 		)
 		return
 	}
@@ -231,8 +239,8 @@ func pushFurther[
 				buildInput,
 				getInputCondition,
 				getPushChan,
-				getFramesOrPacketsStats,
 				poolPutInput,
+				countersSubSectionID,
 			)
 		})
 	}
@@ -252,8 +260,8 @@ func pushToDestination[
 	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
 	getInputCondition func(Abstract) C,
 	getPushChan func(processor.Abstract) chan<- I,
-	getFramesOrPacketsStats func(s *types.Counters) *types.CountersSection,
 	poolPutInput func(I),
+	countersSubSectionID globaltypes.CountersSubSectionID,
 ) {
 	outputObjPtr := OP(&outputObj)
 	mediaType := outputObjPtr.GetMediaType()
@@ -279,9 +287,9 @@ func pushToDestination[
 			return
 		}
 
-		dstCounters := getFramesOrPacketsStats(pushTo.Node.GetCountersPtr())
+		dstCounters := pushTo.Node.GetCountersPtr()
 		isPushed := false
-		defer incrementReceived(dstCounters, &isPushed, globaltypes.MediaType(mediaType), objSize)
+		defer incrementReceived(dstCounters, &isPushed, countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 
 		inputCond := getInputCondition(pushTo.Node)
 		if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
@@ -380,10 +388,6 @@ func poolPutPacketOutput(p packet.Output) {
 	packet.Pool.Put(p.Packet)
 }
 
-func getPacketsStats(s *types.Counters) *types.CountersSection {
-	return &s.Packets
-}
-
 func poolPutFrameInput(f frame.Input) {
 	frame.Pool.Put(f.Frame)
 }
@@ -392,19 +396,16 @@ func poolPutFrameOutput(f frame.Output) {
 	frame.Pool.Put(f.Frame)
 }
 
-func getFramesStats(s *types.Counters) *types.CountersSection {
-	return &s.Frames
-}
-
 func incrementReceived(
-	dstCounters *types.CountersSection,
+	dstCounters *nodetypes.Counters,
 	isPushed *bool,
+	countersSubSectionID globaltypes.CountersSubSectionID,
 	mediaType globaltypes.MediaType,
 	objSize uint64,
 ) {
 	if *isPushed {
-		dstCounters.Received.Increment(mediaType, objSize)
+		dstCounters.Received.Increment(countersSubSectionID, mediaType, objSize)
 	} else {
-		dstCounters.Missed.Increment(mediaType, objSize)
+		dstCounters.Missed.Increment(countersSubSectionID, mediaType, objSize)
 	}
 }

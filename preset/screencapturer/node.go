@@ -105,16 +105,9 @@ func (a *ScreenCapturer[C]) GetCountersPtr() *nodetypes.Counters {
 	inputStats := a.Input().GetCountersPtr()
 	outputStats := a.Output().GetCountersPtr()
 	return &nodetypes.Counters{
-		Packets: nodetypes.CountersSection{
-			Missed:   inputStats.Packets.Missed,
-			Received: inputStats.Packets.Received,
-			Sent:     outputStats.Packets.Sent,
-		},
-		Frames: nodetypes.CountersSection{
-			Missed:   inputStats.Frames.Missed,
-			Received: inputStats.Frames.Received,
-			Sent:     outputStats.Frames.Sent,
-		},
+		Missed:   inputStats.Missed,
+		Received: inputStats.Received,
+		Sent:     outputStats.Sent,
 	}
 }
 

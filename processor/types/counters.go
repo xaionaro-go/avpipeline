@@ -3,76 +3,41 @@ package types
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type CountersSectionID int
 
 const (
-	CountersSectionIDPackets CountersSectionID = iota
-	CountersSectionIDFrames
+	CountersSectionIDProcessed CountersSectionID = iota
+	CountersSectionIDGenerated
 )
 
 type Counters struct {
-	Packets CountersSection
-	Frames  CountersSection
+	Processed globaltypes.CountersSection
+	Generated globaltypes.CountersSection
 }
 
 func NewCounters() *Counters {
 	return &Counters{
-		Packets: NewCountersSection(),
-		Frames:  NewCountersSection(),
+		Processed: globaltypes.NewCountersSection(),
+		Generated: globaltypes.NewCountersSection(),
 	}
 }
 
 func (c *Counters) Increment(
 	ctx context.Context,
 	section CountersSectionID,
-	mediaType types.MediaType,
+	subsection globaltypes.CountersSubSectionID,
+	mediaType globaltypes.MediaType,
 	msgSize uint64,
-) {
+) *globaltypes.CountersItem {
 	switch section {
-	case CountersSectionIDPackets:
-		incrementCountersInSection(&c.Packets.Processed, mediaType, msgSize)
-	case CountersSectionIDFrames:
-		incrementCountersInSection(&c.Frames.Processed, mediaType, msgSize)
+	case CountersSectionIDProcessed:
+		return c.Processed.Increment(subsection, mediaType, msgSize)
+	case CountersSectionIDGenerated:
+		return c.Generated.Increment(subsection, mediaType, msgSize)
 	default:
-		logger.Errorf(ctx, "unknown counters section: %d", section)
-	}
-}
-
-func incrementCountersInSection(
-	s *types.CountersSubSection,
-	mediaType types.MediaType,
-	msgSize uint64,
-) {
-	switch mediaType {
-	case types.MediaTypeVideo:
-		incrementInSubsection(s.Video, msgSize)
-	case types.MediaTypeAudio:
-		incrementInSubsection(s.Audio, msgSize)
-	default:
-		incrementInSubsection(s.Other, msgSize)
-	}
-}
-
-func incrementInSubsection(
-	s *types.CountersItem,
-	msgSize uint64,
-) {
-	s.Count.Add(1)
-	s.Bytes.Add(msgSize)
-}
-
-type CountersSection struct {
-	Processed types.CountersSubSection
-	Generated types.CountersSubSection
-}
-
-func NewCountersSection() CountersSection {
-	return CountersSection{
-		Processed: types.NewCountersSubSection(),
-		Generated: types.NewCountersSubSection(),
+		return nil
 	}
 }

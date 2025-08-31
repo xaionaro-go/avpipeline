@@ -133,7 +133,7 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 		<-recvNode.Processor.Kernel.Handler.FinishedCh
 	}()
 	inCh := first.Processor.InputPacketChan()
-	counters := first.GetCountersPtr().Packets.Received
+	counters := first.GetCountersPtr().Received.Packets
 	pkt := packet.Input{
 		StreamInfo: &packet.StreamInfo{},
 	}

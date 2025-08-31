@@ -96,7 +96,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 				}
 				mediaType := outputPacket.GetMediaType()
 				objSize := uint64(outputPacket.GetSize())
-				p.CountersStorage.Packets.Generated.Increment(globaltypes.MediaType(mediaType), objSize)
+				p.CountersStorage.Generated.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
 				p.OutputPacketCh <- outputPacket
 			}
 		}
@@ -115,7 +115,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 				}
 				mediaType := outputFrame.GetMediaType()
 				objSize := uint64(outputFrame.GetSize())
-				p.CountersStorage.Frames.Generated.Increment(globaltypes.MediaType(mediaType), objSize)
+				p.CountersStorage.Generated.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
 				p.OutputFrameCh <- outputFrame
 			}
 		}
@@ -151,7 +151,13 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		})
 
 		logger.Tracef(ctx, "ReaderLoop[%s]", p)
-		err := readerLoop(ctx, p.InputPacketCh, p.InputFrameCh, p.Kernel, p.preOutputPacketsCh, p.preOutputFramesCh, p.CountersStorage)
+		err := readerLoop(
+			ctx,
+			p.InputPacketCh, p.InputFrameCh,
+			p.Kernel,
+			p.preOutputPacketsCh, p.preOutputFramesCh,
+			p.CountersStorage,
+		)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
 		if err != nil {
 			errCh <- err

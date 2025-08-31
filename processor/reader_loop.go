@@ -44,7 +44,7 @@ func readerLoop(
 				objSize := uint64(pkt.GetSize())
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, pkt)
 				err := kernel.SendInputPacket(ctx, pkt, outputPacketsCh, outputFramesCh)
-				countersPtr.Packets.Processed.Increment(globaltypes.MediaType(mediaType), objSize)
+				countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, pkt, err)
 				if err != nil {
 					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send packet: %v", kernel, err)
@@ -62,7 +62,7 @@ func readerLoop(
 				objSize := uint64(f.GetSize())
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, f)
 				err := kernel.SendInputFrame(ctx, f, outputPacketsCh, outputFramesCh)
-				countersPtr.Frames.Processed.Increment(globaltypes.MediaType(mediaType), objSize)
+				countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, f, err)
 				if err != nil {
 					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send frame: %v", kernel, err)
@@ -100,7 +100,7 @@ func readerLoop(
 			objSize := uint64(pkt.GetSize())
 			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, pkt)
 			err := kernel.SendInputPacket(ctx, pkt, outputPacketsCh, outputFramesCh)
-			countersPtr.Packets.Processed.Increment(globaltypes.MediaType(mediaType), objSize)
+			countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
 			logger.Tracef(ctx, "ReaderLoop[%s]: sent %#+v: %v", kernel, pkt, err)
 			if err != nil {
 				return fmt.Errorf("unable to send packet: %w", err)
@@ -118,7 +118,7 @@ func readerLoop(
 			objSize := uint64(f.GetSize())
 			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, f)
 			err := kernel.SendInputFrame(ctx, f, outputPacketsCh, outputFramesCh)
-			countersPtr.Frames.Processed.Increment(globaltypes.MediaType(mediaType), objSize)
+			countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
 			logger.Tracef(ctx, "ReaderLoop[%s]: sent %#+v: %v", kernel, f, err)
 			if err != nil {
 				return fmt.Errorf("unable to send frame: %w", err)

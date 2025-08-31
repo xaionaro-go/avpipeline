@@ -11,3 +11,12 @@ const (
 	MediaTypeUnknown    = MediaType(-0x1)
 	MediaTypeVideo      = MediaType(0x0)
 )
+
+func MediaTypes() []MediaType {
+	return []MediaType{
+		MediaTypeUnknown,
+		MediaTypeVideo,
+		MediaTypeAudio,
+		MediaTypeSubtitle,
+	}
+}

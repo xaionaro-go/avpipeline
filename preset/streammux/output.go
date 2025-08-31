@@ -431,7 +431,7 @@ func (o *Output) Output() node.Abstract {
 
 func (o *Output) Flush(ctx context.Context) (_err error) {
 	proc := o.RecoderNode.Processor
-	err := proc.Kernel.Flush(ctx, proc.OutputPacketCh, proc.OutputFrameCh)
+	err := proc.Flush(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to flush the recoder kernel: %w", err)
 	}
