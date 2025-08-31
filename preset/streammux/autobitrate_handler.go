@@ -248,19 +248,19 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		h.lastBitRate = h.StreamMux.CurrentOutputBitRate.Load()
 	}
 
-	encoder := h.StreamMux.GetVideoEncoder(ctx)
-	if encoder == nil {
+	encoderV, _ := h.StreamMux.GetEncoders(ctx)
+	if encoderV == nil {
 		logger.Warnf(ctx, "unable to get encoder")
 		return
 	}
 
 	var curReqBitRate uint64
-	if codec.IsEncoderCopy(encoder) {
+	if codec.IsEncoderCopy(encoderV) {
 		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
 		curReqBitRate = h.StreamMux.CurrentInputBitRate.Load()
 	} else {
 		logger.Tracef(ctx, "getting current bitrate from the encoder")
-		q := encoder.GetQuality(ctx)
+		q := encoderV.GetQuality(ctx)
 		if q, ok := q.(quality.ConstantBitrate); ok {
 			curReqBitRate = uint64(q)
 		} else {
@@ -307,11 +307,11 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 func (h *AutoBitRateHandler[C]) isBypassEnabled(
 	ctx context.Context,
 ) bool {
-	encoder := h.StreamMux.GetVideoEncoder(ctx)
-	if encoder == nil {
+	encoderV, _ := h.StreamMux.GetEncoders(ctx)
+	if encoderV == nil {
 		return false
 	}
-	return codec.IsEncoderCopy(encoder)
+	return codec.IsEncoderCopy(encoderV)
 }
 
 func (h *AutoBitRateHandler[C]) enableBypass(
@@ -419,13 +419,13 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
-	encoder := h.StreamMux.GetVideoEncoder(ctx)
-	if encoder == nil {
+	encoderV, _ := h.StreamMux.GetEncoders(ctx)
+	if encoderV == nil {
 		logger.Warnf(ctx, "unable to get encoder")
 		return
 	}
 
-	res := encoder.GetResolution(ctx)
+	res := encoderV.GetResolution(ctx)
 	if res == nil {
 		return fmt.Errorf("unable to get current resolution")
 	}
@@ -441,7 +441,7 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 	}
 
 	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v); max:%d, min:%d, in:%d", oldBitRate, clampedBitRate, resCfg, maxBitRate, h.MinBitRate, inputBitRate)
-	if err := encoder.SetQuality(ctx, quality.ConstantBitrate(clampedBitRate), nil); err != nil {
+	if err := encoderV.SetQuality(ctx, quality.ConstantBitrate(clampedBitRate), nil); err != nil {
 		return fmt.Errorf("unable to set bitrate to %d: %w", clampedBitRate, err)
 	}
 
@@ -458,13 +458,13 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%d, isCritical=%t): %v", bitrate, isCritical, _err)
 	}()
 
-	encoder := h.StreamMux.GetVideoEncoder(ctx)
-	if encoder == nil {
+	encoderV, _ := h.StreamMux.GetEncoders(ctx)
+	if encoderV == nil {
 		logger.Warnf(ctx, "unable to get encoder")
 		return
 	}
 
-	res := encoder.GetResolution(ctx)
+	res := encoderV.GetResolution(ctx)
 	if res == nil {
 		return fmt.Errorf("unable to get current resolution")
 	}
@@ -522,19 +522,21 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		logger.Tracef(ctx, "/setOutput: %v, %d (isCritical:%t): %v", outputKey, bitrate, isCritical, _err)
 	}()
 
-	enc := h.StreamMux.GetVideoEncoder(ctx)
+	encV, encA := h.StreamMux.GetEncoders(ctx)
 	var curACodecName, curVCodecName codec.Name
 	var curRes codec.Resolution
-	if codec.IsEncoderCopy(enc) {
+	if codec.IsEncoderCopy(encV) {
 		curACodecName = codec.NameCopy
 		curVCodecName = codec.NameCopy
 	} else {
-		encCtx := enc.CodecContext()
+		encCtx := encV.CodecContext()
 		//curCodecName = codec.Name(encCtx.
 		curRes = codec.Resolution{
 			Width:  uint32(encCtx.Width()),
 			Height: uint32(encCtx.Height()),
 		}
+		curVCodecName = codec.Name(encV.Codec().Name())
+		curACodecName = codec.Name(encA.Codec().Name())
 	}
 
 	if outputKey == nil {

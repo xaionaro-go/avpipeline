@@ -611,9 +611,9 @@ func (s *StreamMux[C]) setResolutionBitRateCodec(
 	videoCodec codectypes.Name,
 	audioCodec codectypes.Name,
 ) (_err error) {
-	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, %s, %s", res, bitrate, videoCodec, audioCodec)
+	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, '%s', '%s'", res, bitrate, videoCodec, audioCodec)
 	defer func() {
-		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, %s, %s: %v", res, bitrate, videoCodec, audioCodec, _err)
+		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, '%s', '%s': %v", res, bitrate, videoCodec, audioCodec, _err)
 	}()
 	return xsync.DoR1(ctx, &s.Locker, func() error {
 		return s.setResolutionBitRateCodecLocked(ctx, res, bitrate, videoCodec, audioCodec)
@@ -644,10 +644,10 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	}
 
 	if videoCfg.Resolution == res && videoCfg.CodecName == videoCodec && audioCfg.CodecName == audioCodec {
-		logger.Tracef(ctx, "the config is already set to %v %s %s", res, videoCodec, audioCodec)
-		encoder := s.getVideoEncoderLocked(ctx)
-		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoder) {
-			logger.Errorf(ctx, "the video codec is set to %s, but the encoder is %s", videoCodec, encoder)
+		logger.Tracef(ctx, "the config is already set to %v '%s' '%s'", res, videoCodec, audioCodec)
+		encoderV, _ := s.getVideoEncoderLocked(ctx)
+		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoderV) {
+			logger.Errorf(ctx, "the video codec is set to '%s', but the encoder is %s", videoCodec, encoderV)
 		} else {
 			videoCfg.AverageBitRate = bitrate
 			cfg.VideoTrackConfigs[0] = videoCfg
@@ -791,22 +791,34 @@ func (s *StreamMux[C]) getBestNotBypassOutputLocked(
 	return nil
 }
 
-func (s *StreamMux[C]) GetVideoEncoder(
+func (s *StreamMux[C]) GetEncoders(
 	ctx context.Context,
-) codec.Encoder {
-	return xsync.DoA1R1(ctx, &s.Locker, s.getVideoEncoderLocked, ctx)
+) (codec.Encoder, codec.Encoder) {
+	return xsync.DoA1R2(ctx, &s.Locker, s.getVideoEncoderLocked, ctx)
 }
 
 func (s *StreamMux[C]) getVideoEncoderLocked(
 	ctx context.Context,
-) codec.Encoder {
+) (codec.Encoder, codec.Encoder) {
 	o := s.getActiveOutputLocked(ctx)
 	if o == nil {
-		return nil
+		return nil, nil
 	}
-	encoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
-	if len(encoders) != 1 {
-		return nil
+
+	var (
+		vEnc codec.Encoder
+		aEnc codec.Encoder
+	)
+
+	vEncoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
+	if len(vEncoders) == 1 {
+		vEnc = vEncoders[0]
 	}
-	return encoders[0]
+
+	aEncoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.AudioEncoders
+	if len(aEncoders) == 1 {
+		aEnc = aEncoders[0]
+	}
+
+	return vEnc, aEnc
 }
