@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -364,13 +363,7 @@ func (m *MapStreamIndices) sendInputFrame(
 }
 
 func (m *MapStreamIndices) String() string {
-	ctx := context.TODO()
-	if !m.Locker.ManualTryRLock(ctx) {
-		return "MapStreamIndices"
-	}
-	defer m.Locker.ManualRUnlock(ctx)
-	b, _ := json.Marshal(m.PacketStreamMap)
-	return fmt.Sprintf("MapStreamIndices(%s)", b)
+	return "MapStreamIndices"
 }
 
 func (m *MapStreamIndices) Close(ctx context.Context) error {
