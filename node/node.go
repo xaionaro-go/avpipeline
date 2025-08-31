@@ -381,10 +381,9 @@ func (n *NodeWithCustomData[C, T]) GetInputPacketFilter() (_ret packetfiltercond
 		return packetfiltercondition.Static(false)
 	}
 	ctx := context.TODO()
-	n.Locker.Do(ctx, func() {
-		_ret = n.InputPacketFilter
-	})
-	return
+	n.Locker.ManualLock(ctx)
+	defer n.Locker.ManualUnlock(ctx)
+	return n.InputPacketFilter
 }
 
 func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {

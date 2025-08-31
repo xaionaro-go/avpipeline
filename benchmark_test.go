@@ -75,19 +75,19 @@ goos: linux
 goarch: amd64
 pkg: github.com/xaionaro-go/avpipeline
 cpu: AMD Ryzen 9 5900X 12-Core Processor
-BenchmarkPipeline/connections=1-24         	 238009	     5141 ns/op	389.00 MB/s	    370 B/op	     13 allocs/op
-BenchmarkPipeline/connections=2-24         	 164480	     7414 ns/op	269.77 MB/s	    722 B/op	     25 allocs/op
-BenchmarkPipeline/connections=4-24         	 122740	     9751 ns/op	205.11 MB/s	   1428 B/op	     50 allocs/op
-BenchmarkPipeline/connections=8-24         	  72518	    14592 ns/op	137.06 MB/s	   2846 B/op	     99 allocs/op
-BenchmarkPipeline/connections=16-24        	  52832	    25968 ns/op	 77.02 MB/s	   5713 B/op	    197 allocs/op
-BenchmarkPipeline/connections=32-24        	  29403	    49245 ns/op	 40.61 MB/s	  11496 B/op	    395 allocs/op
-BenchmarkPipeline/connections=64-24        	  16123	    86001 ns/op	 23.26 MB/s	  23011 B/op	    791 allocs/op
-BenchmarkPipeline/connections=128-24       	   7092	   172285 ns/op	 11.61 MB/s	  46035 B/op	   1583 allocs/op
-BenchmarkPipeline/connections=256-24       	   3273	   400394 ns/op	  5.00 MB/s	  93062 B/op	   3183 allocs/op
-BenchmarkPipeline/connections=512-24       	   1051	  1115880 ns/op	  1.79 MB/s	 193321 B/op	   6484 allocs/op
-BenchmarkPipeline/connections=1024-24      	    258	  4119088 ns/op	  0.49 MB/s	 436327 B/op	  13765 allocs/op
+BenchmarkPipeline/connections=1-24         	 257566	     4833 ns/op	413.81 MB/s	    182 B/op	      9 allocs/op
+BenchmarkPipeline/connections=2-24         	 163645	     7209 ns/op	277.45 MB/s	    344 B/op	     17 allocs/op
+BenchmarkPipeline/connections=4-24         	 133818	     9845 ns/op	203.15 MB/s	    669 B/op	     34 allocs/op
+BenchmarkPipeline/connections=8-24         	  90391	    13693 ns/op	146.06 MB/s	   1317 B/op	     67 allocs/op
+BenchmarkPipeline/connections=16-24        	  44365	    23109 ns/op	 86.55 MB/s	   2625 B/op	    133 allocs/op
+BenchmarkPipeline/connections=32-24        	  34048	    40733 ns/op	 49.10 MB/s	   5363 B/op	    268 allocs/op
+BenchmarkPipeline/connections=64-24        	  15618	    78987 ns/op	 25.32 MB/s	  10895 B/op	    539 allocs/op
+BenchmarkPipeline/connections=128-24       	   7459	   163309 ns/op	 12.25 MB/s	  21278 B/op	   1069 allocs/op
+BenchmarkPipeline/connections=256-24       	   3307	   380568 ns/op	  5.26 MB/s	  43963 B/op	   2161 allocs/op
+BenchmarkPipeline/connections=512-24       	   1263	  1038802 ns/op	  1.93 MB/s	  93726 B/op	   4418 allocs/op
+BenchmarkPipeline/connections=1024-24      	    351	  3456949 ns/op	  0.58 MB/s	 217818 B/op	   9330 allocs/op
 PASS
-ok  	github.com/xaionaro-go/avpipeline	19.859s
+ok  	github.com/xaionaro-go/avpipeline	20.299s
 */
 
 func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {

@@ -128,9 +128,9 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					buildPacketInput,
 					getInputPacketFilter,
 					getInputPacketChan,
-					func(p packet.Input) { packet.Pool.Put(p.Packet) },
-					func(p packet.Output) { packet.Pool.Put(p.Packet) },
-					func(s *types.Counters) *types.CountersSection { return &s.Packets },
+					poolPutPacketInput,
+					poolPutPacketOutput,
+					getPacketsStats,
 				)
 			})
 		case f, ok := <-frameCh:
@@ -144,9 +144,9 @@ func (n *NodeWithCustomData[C, T]) Serve(
 					buildFrameInput,
 					getInputFrameFilter,
 					getInputFrameChan,
-					func(f frame.Input) { frame.Pool.Put(f.Frame) },
-					func(f frame.Output) { frame.Pool.Put(f.Frame) },
-					func(s *types.Counters) *types.CountersSection { return &s.Frames },
+					poolPutFrameInput,
+					poolPutFrameOutput,
+					getFramesStats,
 				)
 			})
 		}
@@ -281,13 +281,7 @@ func pushToDestination[
 
 		dstCounters := getFramesOrPacketsStats(pushTo.Node.GetCountersPtr())
 		isPushed := false
-		defer func() {
-			if isPushed {
-				dstCounters.Received.Increment(globaltypes.MediaType(mediaType), objSize)
-			} else {
-				dstCounters.Missed.Increment(globaltypes.MediaType(mediaType), objSize)
-			}
-		}()
+		defer incrementReceived(dstCounters, &isPushed, globaltypes.MediaType(mediaType), objSize)
 
 		inputCond := getInputCondition(pushTo.Node)
 		if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
@@ -376,4 +370,41 @@ func getInputFrameFilter(n Abstract) framecondition.Condition {
 
 func getInputFrameChan(p processor.Abstract) chan<- frame.Input {
 	return p.InputFrameChan()
+}
+
+func poolPutPacketInput(p packet.Input) {
+	packet.Pool.Put(p.Packet)
+}
+
+func poolPutPacketOutput(p packet.Output) {
+	packet.Pool.Put(p.Packet)
+}
+
+func getPacketsStats(s *types.Counters) *types.CountersSection {
+	return &s.Packets
+}
+
+func poolPutFrameInput(f frame.Input) {
+	frame.Pool.Put(f.Frame)
+}
+
+func poolPutFrameOutput(f frame.Output) {
+	frame.Pool.Put(f.Frame)
+}
+
+func getFramesStats(s *types.Counters) *types.CountersSection {
+	return &s.Frames
+}
+
+func incrementReceived(
+	dstCounters *types.CountersSection,
+	isPushed *bool,
+	mediaType globaltypes.MediaType,
+	objSize uint64,
+) {
+	if *isPushed {
+		dstCounters.Received.Increment(mediaType, objSize)
+	} else {
+		dstCounters.Missed.Increment(mediaType, objSize)
+	}
 }
