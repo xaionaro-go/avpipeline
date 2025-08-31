@@ -46,7 +46,7 @@ func (e *EncoderFull) asLocked() *EncoderFullLocked {
 func (e *EncoderFull) String() string {
 	ctx := context.TODO()
 	if !e.locker.ManualTryRLock(ctx) {
-		return "Encoder(<locked>)"
+		return "Encoder(<locked>; assuming: " + string(e.InitParams.CodecName) + ")"
 	}
 	defer e.locker.ManualRUnlock(ctx)
 	return e.asLocked().String()

@@ -37,6 +37,7 @@ import (
 
 const (
 	switchTimeout = time.Hour
+	switchDebug   = false
 )
 
 type StreamMux[C any] struct {
@@ -139,19 +140,23 @@ func (s *StreamMux[C]) initSwitches(
 		packetorframecondition.IsKeyFrame(true),
 	})
 
-	s.OutputSwitch.SetOnBeforeSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
-		logger.Debugf(ctx, "s.OutputSwitch.SetOnBeforeSwitch: %d -> %d", from, to)
-		outputNext := xsync.DoR1(ctx, &s.Locker, func() *Output {
-			return s.Outputs[to]
+	if switchDebug {
+		s.OutputSwitch.SetOnBeforeSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
+			logger.Debugf(ctx, "s.OutputSwitch.SetOnBeforeSwitch: %d -> %d", from, to)
+			outputNext := xsync.DoR1(ctx, &s.Locker, func() *Output {
+				return s.Outputs[to]
+			})
+			outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
 		})
-		outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
-	})
+	}
 	s.OutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		logger.Debugf(ctx, "s.OutputSwitch.SetOnAfterSwitch: %d -> %d", from, to)
 		outputPrev := xsync.DoR1(ctx, &s.Locker, func() *Output {
 			return s.Outputs[from]
 		})
-		outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is inactive"))
+		if switchDebug {
+			outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is inactive"))
+		}
 
 		observability.Go(ctx, func(ctx context.Context) {
 			{
