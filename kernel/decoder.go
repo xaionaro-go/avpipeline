@@ -64,7 +64,7 @@ type Decoder[DF codec.DecoderFactory] struct {
 	Locker                xsync.Mutex
 	Decoders              map[int]*codec.Decoder
 	OutputCodecParameters map[int]*astiav.CodecParameters
-	StreamInfo            map[int]*frame.StreamInfo
+	StreamInfo            xsync.Map[int, *frame.StreamInfo]
 
 	FormatContext *astiav.FormatContext
 	IsDirtyCache  atomic.Bool
@@ -83,7 +83,6 @@ func NewDecoder[DF codec.DecoderFactory](
 		Decoders:              map[int]*codec.Decoder{},
 		FormatContext:         astiav.AllocFormatContext(),
 		OutputCodecParameters: map[int]*astiav.CodecParameters{},
-		StreamInfo:            map[int]*frame.StreamInfo{},
 	}
 	setFinalizerFree(ctx, d.FormatContext)
 	return d
@@ -155,15 +154,9 @@ func (d *Decoder[DF]) SendInputPacket(
 		return io.ErrClosedPipe
 	}
 
-	return xsync.DoA3R1(ctx, &d.Locker, d.sendInputPacket, ctx, input, outputFramesCh)
-}
-
-func (d *Decoder[DF]) sendInputPacket(
-	ctx context.Context,
-	input packet.Input,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	streamDecoder, err := d.getStreamDecoder(ctx, input.Stream)
+	streamDecoder, err := xsync.DoR2(ctx, &d.Locker, func() (*codec.Decoder, error) {
+		return d.getStreamDecoder(ctx, input.Stream)
+	})
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
 	}
@@ -182,16 +175,15 @@ func (d *Decoder[DF]) sendInputPacket(
 		input.Packet.RescaleTs(input.Stream.TimeBase(), streamDecoder.TimeBase())
 	}
 
+	streamIndex := input.StreamIndex()
+
 	return streamDecoder.LockDo(ctx, func(
 		ctx context.Context,
 		decoder *codec.DecoderLocked,
 	) (_err error) {
-		streamIndex := input.StreamIndex()
-
-		streamInfo := d.StreamInfo[streamIndex]
-		if streamInfo == nil {
-			streamInfo = &frame.StreamInfo{
-				Source:           d.asSource(decoder.AsUnlocked()),
+		if _, ok := d.StreamInfo.Load(streamIndex); !ok {
+			streamInfo := &frame.StreamInfo{
+				Source:           d.asSource(streamDecoder),
 				CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
 				StreamIndex:      streamIndex,
 				StreamsCount:     sourceNbStreams(ctx, input.Source),
@@ -199,7 +191,7 @@ func (d *Decoder[DF]) sendInputPacket(
 				Duration:         input.Packet.Duration(),
 				PipelineSideData: nil,
 			}
-			d.StreamInfo[streamIndex] = streamInfo
+			d.StreamInfo.Store(streamIndex, streamInfo)
 		}
 
 		packetInfo := packetInfo{
@@ -257,8 +249,8 @@ func (d *Decoder[DF]) drain(
 		}
 		logger.Tracef(ctx, "decoder.ReceiveFrame(): packetInfo: %+v", packetInfo)
 
-		streamInfo := d.StreamInfo[packetInfo.StreamIndex]
-		if streamInfo == nil {
+		streamInfo, ok := d.StreamInfo.Load(packetInfo.StreamIndex)
+		if !ok {
 			return fmt.Errorf("unable to find stream info for stream index %d", packetInfo.StreamIndex)
 		}
 
@@ -279,16 +271,12 @@ func (d *Decoder[DF]) drain(
 			f,
 			streamInfo,
 		)
-		var err error
-		d.Locker.UDo(ctx, func() {
-			select {
-			case <-ctx.Done():
-				err = ctx.Err()
-				return
-			case outputFramesCh <- frameToSend:
-			}
-		})
-		return err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case outputFramesCh <- frameToSend:
+		}
+		return nil
 	})
 }
 
@@ -457,18 +445,14 @@ func (d *Decoder[DF]) Flush(
 				ctx = belt.WithField(ctx, "decoder", decoder)
 				observability.Go(ctx, func(ctx context.Context) {
 					defer wg.Done()
-					err := decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) error {
-						return xsync.DoR1(ctx, &d.Locker, func() error {
-							return d.drain(
-								ctx,
-								outputFrameCh,
-								decoder.Flush,
-								packetInfo{
-									StreamIndex: streamIndex,
-								},
-							)
-						})
-					})
+					err := d.drain(
+						ctx,
+						outputFrameCh,
+						decoder.Flush,
+						packetInfo{
+							StreamIndex: streamIndex,
+						},
+					)
 					if err != nil {
 						errCh <- fmt.Errorf("unable to drain the decoder for stream #%d: %w", streamIndex, err)
 					}
