@@ -559,12 +559,18 @@ func (o *Output) SendInputPacket(
 
 	var (
 		outputStream *OutputStream
-		err          error
+		err          error = ErrNoSourceFormatContext{}
 	)
 	o.formatContextLocker.Do(ctx, func() {
 		inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.Stream, fmtCtx)
 		})
+		if err == (ErrNoSourceFormatContext{}) {
+			outputStream = o.OutputStreams[inputPkt.StreamIndex()]
+			if outputStream != nil {
+				err = nil
+			}
+		}
 	})
 	if err != nil {
 		return fmt.Errorf("unable to get the output stream: %w", err)
@@ -578,6 +584,12 @@ func (o *Output) SendInputPacket(
 		return err
 	}
 	return nil
+}
+
+type ErrNoSourceFormatContext struct{}
+
+func (e ErrNoSourceFormatContext) Error() string {
+	return "no source format context"
 }
 
 func (o *Output) SendInputFrame(
