@@ -183,4 +183,3 @@ func (k *Base[H]) Generate(
 
 	return nil
 }
-

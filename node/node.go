@@ -376,13 +376,15 @@ func (n *NodeWithCustomData[C, T]) SetPushFramesTos(s PushFramesTos) {
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputPacketFilter() packetfiltercondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputPacketFilter() (_ret packetfiltercondition.Condition) {
 	if n == nil {
 		return packetfiltercondition.Static(false)
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() packetfiltercondition.Condition {
-		return n.InputPacketFilter
+	ctx := context.TODO()
+	n.Locker.Do(ctx, func() {
+		_ret = n.InputPacketFilter
 	})
+	return
 }
 
 func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
@@ -391,13 +393,15 @@ func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(cond packetfilterconditi
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputFrameFilter() framefiltercondition.Condition {
+func (n *NodeWithCustomData[C, T]) GetInputFrameFilter() (_ret framefiltercondition.Condition) {
 	if n == nil {
 		return framefiltercondition.Static(false)
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() framefiltercondition.Condition {
-		return n.InputFrameFilter
+	ctx := context.TODO()
+	n.Locker.Do(ctx, func() {
+		_ret = n.InputFrameFilter
 	})
+	return
 }
 
 func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(cond framefiltercondition.Condition) {

@@ -23,6 +23,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+const (
+	extraDebug = false
+)
+
 func (n *NodeWithCustomData[C, T]) Serve(
 	ctx context.Context,
 	serveConfig ServeConfig,
@@ -120,30 +124,10 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			}
 			n.Locker.Do(ctx, func() {
 				pushFurther(
-					ctx, n, pkt, n.PushPacketsTos, serveConfig,
-					func(
-						ctx context.Context,
-						pkt packet.Output,
-						pushTo PushTo[packet.Input, packetcondition.Condition],
-					) []packet.Input {
-						var result []packet.Input
-						if n.Config.CacheHandler != nil {
-							pendingPackets, err := n.Config.CacheHandler.GetPendingPackets(ctx, pushTo)
-							if err != nil {
-								logger.Errorf(ctx, "unable to cache packet: %v", err)
-							}
-							if len(pendingPackets) > 0 {
-								return pendingPackets
-							}
-						}
-						result = append(result, packet.BuildInput(
-							packet.CloneAsReferenced(pkt.Packet),
-							pkt.StreamInfo,
-						))
-						return result
-					},
-					func(n Abstract) packetcondition.Condition { return n.GetInputPacketFilter() },
-					func(p processor.Abstract) chan<- packet.Input { return p.InputPacketChan() },
+					ctx, n, pkt, n.PushPacketsTos, &serveConfig,
+					buildPacketInput,
+					getInputPacketFilter,
+					getInputPacketChan,
 					func(p packet.Input) { packet.Pool.Put(p.Packet) },
 					func(p packet.Output) { packet.Pool.Put(p.Packet) },
 					func(s *types.Counters) *types.CountersSection { return &s.Packets },
@@ -156,20 +140,10 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			}
 			n.Locker.Do(ctx, func() {
 				pushFurther(
-					ctx, n, f, n.PushFramesTos, serveConfig,
-					func(
-						ctx context.Context,
-						f frame.Output,
-						pushTo PushTo[frame.Input, framecondition.Condition],
-					) []frame.Input {
-						return []frame.Input{frame.BuildInput(
-							frame.CloneAsReferenced(f.Frame),
-							f.Pos,
-							f.StreamInfo,
-						)}
-					},
-					func(n Abstract) framecondition.Condition { return n.GetInputFrameFilter() },
-					func(p processor.Abstract) chan<- frame.Input { return p.InputFrameChan() },
+					ctx, n, f, n.PushFramesTos, &serveConfig,
+					buildFrameInput,
+					getInputFrameFilter,
+					getInputFrameChan,
 					func(f frame.Input) { frame.Pool.Put(f.Frame) },
 					func(f frame.Output) { frame.Pool.Put(f.Frame) },
 					func(s *types.Counters) *types.CountersSection { return &s.Frames },
@@ -189,8 +163,8 @@ func pushFurther[
 	n *NodeWithCustomData[CD, P],
 	outputObj O,
 	pushTos []PushTo[I, C],
-	serveConfig ServeConfig,
-	buildInput func(context.Context, O, PushTo[I, C]) []I,
+	serveConfig *ServeConfig,
+	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
 	getInputCondition func(Abstract) C,
 	getPushChan func(processor.Abstract) chan<- I,
 	poolPutInput func(I),
@@ -198,11 +172,13 @@ func pushFurther[
 	getFramesOrPacketsStats func(s *types.Counters) *types.CountersSection,
 ) {
 	defer poolPutOutput(outputObj)
-	outputObjPtr := OP(ptr(outputObj))
+	outputObjPtr := OP(&outputObj)
 
 	stats := n.GetCountersPtr()
 
-	ctx = belt.WithField(ctx, "stream_index", outputObjPtr.GetStreamIndex())
+	if extraDebug {
+		ctx = belt.WithField(ctx, "stream_index", outputObjPtr.GetStreamIndex())
+	}
 
 	objSize := uint64(outputObjPtr.GetSize())
 
@@ -224,69 +200,161 @@ func pushFurther[
 		n.Locker.UDo(ctx, wg.Wait)
 	}()
 	for _, pushTo := range pushTos {
-		pushTo := pushTo
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			for _, inputObj := range buildInput(ctx, outputObj, pushTo) {
-				filterArg := filter.Input[I]{
-					Destination: pushTo.Node,
-					Input:       inputObj,
-				}
-				if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, filterArg) {
-					logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
-					continue
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if pushTo.Node == nil {
-					logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
-					return
-				}
-
-				dstCounters := getFramesOrPacketsStats(pushTo.Node.GetCountersPtr())
-				isPushed := false
-				defer func() {
-					if isPushed {
-						dstCounters.Received.Increment(globaltypes.MediaType(mediaType), objSize)
-					} else {
-						dstCounters.Missed.Increment(globaltypes.MediaType(mediaType), objSize)
-					}
-				}()
-
-				inputCond := getInputCondition(pushTo.Node)
-				if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
-					logger.Tracef(ctx, "input condition %s was not met", inputCond)
-					return
-				}
-
-				pushChan := getPushChan(pushTo.Node.GetProcessor())
-				logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-				if serveConfig.FrameDrop {
-					select {
-					case <-ctx.Done():
-						return
-					case pushChan <- inputObj:
-						isPushed = true
-					default:
-						logger.Errorf(ctx, "unable to push to %s: the queue is full", pushTo.Node)
-						poolPutInput(inputObj)
-						return
-					}
-				} else {
-					select {
-					case <-ctx.Done():
-						return
-					case pushChan <- inputObj:
-						isPushed = true
-					}
-				}
-				logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-			}
+			pushToDestination[P, I, C, O, OP, CD](
+				ctx,
+				n,
+				outputObj,
+				pushTo,
+				serveConfig,
+				buildInput,
+				getInputCondition,
+				getPushChan,
+				getFramesOrPacketsStats,
+				poolPutInput,
+			)
 		})
 	}
+}
+
+func pushToDestination[
+	P processor.Abstract,
+	I packetorframe.Input, C filter.Condition[I],
+	O packetorframe.Output, OP packetorframe.Pointer[O],
+	CD any,
+](
+	ctx context.Context,
+	n *NodeWithCustomData[CD, P],
+	outputObj O,
+	pushTo PushTo[I, C],
+	serveConfig *ServeConfig,
+	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
+	getInputCondition func(Abstract) C,
+	getPushChan func(processor.Abstract) chan<- I,
+	getFramesOrPacketsStats func(s *types.Counters) *types.CountersSection,
+	poolPutInput func(I),
+) {
+	outputObjPtr := OP(&outputObj)
+	mediaType := outputObjPtr.GetMediaType()
+	objSize := uint64(outputObjPtr.GetSize())
+
+	for _, inputObj := range buildInput(ctx, n, outputObj, pushTo) {
+		filterArg := filter.Input[I]{
+			Destination: pushTo.Node,
+			Input:       inputObj,
+		}
+		if any(pushTo.Condition) != nil && !pushTo.Condition.Match(ctx, filterArg) {
+			logger.Tracef(ctx, "push condition %s was not met", pushTo.Condition)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if pushTo.Node == nil {
+			logger.Errorf(ctx, "a nil Node in %s's PushTos", n)
+			return
+		}
+
+		dstCounters := getFramesOrPacketsStats(pushTo.Node.GetCountersPtr())
+		isPushed := false
+		defer func() {
+			if isPushed {
+				dstCounters.Received.Increment(globaltypes.MediaType(mediaType), objSize)
+			} else {
+				dstCounters.Missed.Increment(globaltypes.MediaType(mediaType), objSize)
+			}
+		}()
+
+		inputCond := getInputCondition(pushTo.Node)
+		if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
+			logger.Tracef(ctx, "input condition %s was not met", inputCond)
+			return
+		}
+
+		pushChan := getPushChan(pushTo.Node.GetProcessor())
+		logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+		if serveConfig.FrameDrop {
+			select {
+			case <-ctx.Done():
+				return
+			case pushChan <- inputObj:
+				isPushed = true
+			default:
+				logger.Errorf(ctx, "unable to push to %s: the queue is full", pushTo.Node)
+				poolPutInput(inputObj)
+				return
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case pushChan <- inputObj:
+				isPushed = true
+			}
+		}
+		logger.Tracef(ctx, "pushed to %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), outputObj, outputObjPtr.GetStreamIndex(), pushChan)
+	}
+}
+
+func buildPacketInput[
+	P processor.Abstract,
+	CD any,
+](
+	ctx context.Context,
+	n *NodeWithCustomData[CD, P],
+	pkt packet.Output,
+	pushTo PushTo[packet.Input, packetcondition.Condition],
+) []packet.Input {
+	var result []packet.Input
+	if n.Config.CacheHandler != nil {
+		pendingPackets, err := n.Config.CacheHandler.GetPendingPackets(ctx, pushTo)
+		if err != nil {
+			logger.Errorf(ctx, "unable to cache packet: %v", err)
+		}
+		if len(pendingPackets) > 0 {
+			return pendingPackets
+		}
+	}
+	result = append(result, packet.BuildInput(
+		packet.CloneAsReferenced(pkt.Packet),
+		pkt.StreamInfo,
+	))
+	return result
+}
+
+func buildFrameInput[
+	P processor.Abstract,
+	CD any,
+](
+	ctx context.Context,
+	_ *NodeWithCustomData[CD, P],
+	f frame.Output,
+	pushTo PushTo[frame.Input, framecondition.Condition],
+) []frame.Input {
+	return []frame.Input{frame.BuildInput(
+		frame.CloneAsReferenced(f.Frame),
+		f.Pos,
+		f.StreamInfo,
+	)}
+}
+
+func getInputPacketFilter(n Abstract) packetcondition.Condition {
+	return n.GetInputPacketFilter()
+}
+
+func getInputPacketChan(p processor.Abstract) chan<- packet.Input {
+	return p.InputPacketChan()
+}
+
+func getInputFrameFilter(n Abstract) framecondition.Condition {
+	return n.GetInputFrameFilter()
+}
+
+func getInputFrameChan(p processor.Abstract) chan<- frame.Input {
+	return p.InputFrameChan()
 }
