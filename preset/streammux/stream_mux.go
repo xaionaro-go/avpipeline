@@ -132,87 +132,22 @@ func (s *StreamMux[C]) initSwitches() {
 		packetorframecondition.IsKeyFrame(true),
 	})
 
-	var (
-		prevDataLocker sync.Mutex
-		prevOutputID   int32
-	)
-
-	type switchNotifierPacket struct {
-		SwitchFromOutputID int32
-	}
-
-	// We want to notify the OutputSyncer that it needs to switch to the next output, and
-	// send a packet that would notify that there are no packets left in the previous chain.
 	s.OutputSwitch.Flags.Set(barrierstategetter.SwitchFlagFirstPacketAfterSwitchPassBothOutputs)
 	s.OutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
-		logger.Debugf(ctx, "prevDataLocker.Lock()")
-		prevDataLocker.Lock()
-		prevOutputID = from
-		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
-		err := s.OutputSyncer.SetValue(ctx, to)
-		logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
-
-		// this will be our notification packet (that nothing is left in the previous chain):
-		in.Packet.SetFlags(in.Packet.Flags().Add(astiav.PacketFlagKey))
-		in.Packet.PipelineSideData = append(in.Packet.PipelineSideData, switchNotifierPacket{
-			SwitchFromOutputID: from,
-		})
-
-		// just in case let's make sure we will not block forever:
 		observability.Go(ctx, func(ctx context.Context) {
-			t := time.NewTicker(100 * time.Millisecond)
-			deadline := time.NewTimer(time.Second)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-deadline.C:
-					logger.Debugf(ctx, "giving up waiting for the previous output chain to be flushed")
-					s.OutputSyncer.CommitMutex.Do(ctx, func() {
-						s.OutputSyncer.CurrentValue.Store(to)
-						prevDataLocker.Unlock()
-					})
-				case <-t.C:
-				}
-
-				if prevDataLocker.TryLock() {
-					prevDataLocker.Unlock()
-					return
-				}
-
-				output := xsync.DoR1(ctx, &s.Locker, func() *Output {
-					return s.Outputs[from]
-				})
-				err := output.Flush(ctx)
-				if err != nil {
-					logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
-				}
+			output := xsync.DoR1(ctx, &s.Locker, func() *Output {
+				return s.Outputs[from]
+			})
+			err := output.Flush(ctx)
+			if err != nil {
+				logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
 			}
+			logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
+			err = s.OutputSyncer.SetValue(ctx, to)
+			logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
 		})
 	})
-
-	// Waiting for the "last packet" notification to reach the OutputSyncer on the active
-	// output chain, since we want to make the final switch only after the last packet in the
-	// chain is processed.
-	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagForbidTakeoverInKeepUnless)
-	s.OutputSyncer.SetKeepUnless(
-		packetorframecondition.And{
-			packetorframecondition.HasPipelineSideData(switchNotifierPacket{
-				SwitchFromOutputID: prevOutputID,
-			}),
-			// unlocking prevDataLocker if ready to switch to the next output
-			packetorframecondition.Function(func(ctx context.Context, in packetorframe.InputUnion) bool {
-				if s.OutputSyncer.CurrentValue.Load() == prevOutputID {
-					logger.Debugf(ctx, "prevDataLocker.Unlock()")
-					prevDataLocker.Unlock()
-				}
-				return true
-			}),
-		},
-	)
-	// keep/hold the traffic flowing to the next output if the OutputSyncer is not switched yet
-	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagNextOutputStateBlock)
+	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
 }
 
 func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {

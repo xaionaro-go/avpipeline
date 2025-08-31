@@ -11,6 +11,9 @@ const (
 
 	// If set then the state of the next output will be "block".
 	SwitchFlagNextOutputStateBlock
+
+	// If set then the state of all inactive outputs will be "block".
+	SwitchFlagInactiveBlock
 )
 
 func (f SwitchFlags) HasAll(flag SwitchFlags) bool {

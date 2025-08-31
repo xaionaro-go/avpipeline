@@ -22,6 +22,7 @@ const (
 	SwitchFlagFirstPacketAfterSwitchPassBothOutputs = types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs
 	SwitchFlagForbidTakeoverInKeepUnless            = types.SwitchFlagForbidTakeoverInKeepUnless
 	SwitchFlagNextOutputStateBlock                  = types.SwitchFlagNextOutputStateBlock
+	SwitchFlagInactiveBlock                         = types.SwitchFlagInactiveBlock
 )
 
 type State = types.State
@@ -191,6 +192,9 @@ func (s *SwitchOutput) GetState(
 			if s.Flags.HasAny(types.SwitchFlagNextOutputStateBlock) {
 				return types.StateBlock, s.GetChangeChan()
 			}
+		}
+		if s.Flags.HasAny(types.SwitchFlagInactiveBlock) {
+			return types.StateBlock, s.GetChangeChan()
 		}
 		return types.StateDrop, s.GetChangeChan()
 	}
