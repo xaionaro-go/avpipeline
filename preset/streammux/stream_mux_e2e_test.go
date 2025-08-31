@@ -81,7 +81,7 @@ func TestE2E(t *testing.T) {
 					for _, codecID := range []astiav.CodecID{astiav.CodecIDH264, astiav.CodecIDHevc} {
 						t.Run(fmt.Sprintf("codec=%s", codecID), func(t *testing.T) {
 							for i := 0; i < 1; i++ {
-								t.Run(fmt.Sprintf("run%d", i), func(t *testing.T) {
+								t.Run(fmt.Sprintf("run=%d", i), func(t *testing.T) {
 									runTest(ctx, t, input, muxMode, codecID)
 								})
 							}
@@ -191,10 +191,10 @@ func runTest(
 		defer streamMux.Close(ctx)
 		streamMux.Serve(ctx, node.ServeConfig{}, errCh)
 	})
+	inputCh := streamMux.GetProcessor().InputPacketChan()
 
 	// simple test:
 
-	inputCh := streamMux.GetProcessor().InputPacketChan()
 	for _, p := range input {
 		select {
 		case <-ctx.Done():
@@ -228,6 +228,36 @@ func runTest(
 		avpipeline.Drain(ctx, ptr(true), streamMux)
 		avpipeline.Drain(ctx, nil, streamMux)
 		avpipeline.SetBlockInput(ctx, false, streamMux)
+	}
+
+	drain()
+
+	for idx, p := range input {
+		if idx == len(input)/2 {
+			err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
+				AudioTrackConfigs: []streammuxtypes.AudioTrackConfig{{
+					InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+					OutputTrackIDs: []int{0},
+					CodecName:      "aac",
+				}},
+				VideoTrackConfigs: []streammuxtypes.VideoTrackConfig{{
+					InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+					OutputTrackIDs: []int{0},
+					CodecName:      vcodecName,
+					Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
+				}},
+			})
+			require.NoError(t, err)
+		}
+		select {
+		case <-ctx.Done():
+			require.NoError(t, ctx.Err())
+		case inputCh <- p:
+			streamMux.GetCountersPtr().Packets.Received.Increment(
+				globaltypes.MediaType(p.GetMediaType()),
+				uint64(p.Packet.Size()),
+			)
+		}
 	}
 
 	drain()

@@ -134,6 +134,9 @@ func (d *DecoderLocked) Flush(
 		return fmt.Errorf("unable to drain: %w", err)
 	}
 
+	logger.Tracef(ctx, "flushing buffers")
+	d.codecContext.FlushBuffers()
+
 	return nil
 }
 
