@@ -32,7 +32,7 @@ const (
 	encoderCopyTimeAfterScaling                = true
 	encoderDTSHigherPTSCorrect                 = false
 	encoderDebug                               = true
-	encoderExtraDefensive                      = false
+	encoderExtraDefensive                      = true
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -458,7 +458,7 @@ func (e *Encoder[EF]) SendInputFrame(
 		ctx = belt.WithField(ctx, "encoder", streamEncoder)
 
 		if encoderDebug {
-			logger.Tracef(ctx, "input frame: dur:%d; res:%dx%d", input.Frame.Duration(), input.Frame.Width(), input.Frame.Height())
+			logger.Tracef(ctx, "input frame: %s: %s: dur:%d; res:%dx%d, samples:%d", input.GetMediaType(), input.CodecParameters.CodecID(), input.Frame.Duration(), input.Frame.Width(), input.Frame.Height(), input.Frame.NbSamples())
 		}
 
 		if encoderWriteHeaderOnFinishedGettingStreams && !e.headerIsWritten && len(e.encoders) == input.StreamsCount {
@@ -521,10 +521,12 @@ func (e *Encoder[EF]) SendInputFrame(
 	}
 
 	outputMediaType := outputStream.CodecParameters().MediaType()
-	encoderMediaType := streamEncoder.Encoder.MediaType()
-	assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
-
 	if encoderExtraDefensive {
+		inputMediaType := input.GetMediaType()
+		encoderMediaType := streamEncoder.Encoder.MediaType()
+		assert(ctx, inputMediaType == encoderMediaType, inputMediaType, encoderMediaType)
+		assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
+
 		if isEmptyFrame(ctx, input) {
 			logger.Errorf(ctx, "the input frame is empty; dropping it")
 			return nil

@@ -658,7 +658,9 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 func (s *TranscoderWithPassthrough[C, P]) Wait(
 	ctx context.Context,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "Wait")
+	defer func() { logger.Tracef(ctx, "/Wait: %v", _err) }()
 	s.waitGroup.Wait()
 	return nil
 }
