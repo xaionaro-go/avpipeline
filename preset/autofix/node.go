@@ -109,9 +109,10 @@ func (a *AutoFixerWithCustomData[T]) GetCountersPtr() *nodetypes.Counters {
 	inputStats := a.Input().GetCountersPtr()
 	outputStats := a.Output().GetCountersPtr()
 	return &nodetypes.Counters{
-		Missed:   inputStats.Missed,
-		Received: inputStats.Received,
-		Sent:     outputStats.Sent,
+		Addressed: inputStats.Addressed,
+		Missed:    inputStats.Missed,
+		Received:  inputStats.Received,
+		Sent:      outputStats.Sent,
 	}
 }
 

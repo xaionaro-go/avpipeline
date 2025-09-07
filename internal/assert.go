@@ -17,9 +17,9 @@ func Assert(
 	}
 
 	if len(extraArgs) == 0 {
-		logger.Panicf(ctx, "assertion failed: %s", debug.Stack())
+		logger.Panicf(ctx, "assertion failed:\n%s", debug.Stack())
 		return
 	}
 
-	logger.Panic(ctx, "assertion failed:\n", string(debug.Stack()), "\nExtra args:", extraArgs, "\n")
+	logger.Panic(ctx, "assertion failed:\nExtra args:", extraArgs, "\n", string(debug.Stack()))
 }

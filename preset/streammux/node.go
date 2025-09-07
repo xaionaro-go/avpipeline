@@ -167,8 +167,9 @@ func (s *StreamMux[C]) GetCountersPtr() *nodetypes.Counters {
 	inputStats := s.InputNode.GetCountersPtr()
 
 	return &nodetypes.Counters{
-		Missed:   inputStats.Missed,
-		Received: inputStats.Received,
+		Addressed: inputStats.Addressed,
+		Missed:    inputStats.Missed,
+		Received:  inputStats.Received,
 		// TODO: add sum of all outputs as Sent
 	}
 }

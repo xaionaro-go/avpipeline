@@ -107,14 +107,18 @@ func allWentInAndOut(
 			sent := nodeCounters.Sent.Get(subSectionID).Get(mediaType).Count.Load()
 			generated := procCounters.Generated.Get(subSectionID).Get(mediaType).Count.Load()
 			processed := procCounters.Processed.Get(subSectionID).Get(mediaType).Count.Load()
-			received := nodeCounters.Received.Get(subSectionID).Get(mediaType).Count.Load()
+			addressed := nodeCounters.Addressed.Get(subSectionID).Get(mediaType).Count.Load()
+			if extraDefensiveChecks {
+				assert(ctx, addressed >= processed, addressed, processed)
+				assert(ctx, generated >= sent, generated, sent)
+			}
 
-			if sent != generated || processed != received {
+			if sent != generated || processed != addressed {
 				logger.Tracef(
 					ctx,
-					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; received=%#+v",
+					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; addressed=%#+v",
 					subSectionID, mediaType,
-					sent, generated, processed, received,
+					sent, generated, processed, addressed,
 				)
 				return false
 			}

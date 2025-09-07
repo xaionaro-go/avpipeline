@@ -6,16 +6,18 @@ import (
 )
 
 type Counters struct {
-	Missed   globaltypes.CountersSection
-	Received globaltypes.CountersSection
-	Sent     globaltypes.CountersSection
+	Addressed globaltypes.CountersSection
+	Received  globaltypes.CountersSection
+	Missed    globaltypes.CountersSection
+	Sent      globaltypes.CountersSection
 }
 
 func NewCounters() *Counters {
 	return &Counters{
-		Missed:   globaltypes.NewCountersSection(),
-		Received: globaltypes.NewCountersSection(),
-		Sent:     globaltypes.NewCountersSection(),
+		Addressed: globaltypes.NewCountersSection(),
+		Received:  globaltypes.NewCountersSection(),
+		Missed:    globaltypes.NewCountersSection(),
+		Sent:      globaltypes.NewCountersSection(),
 	}
 }
 
@@ -24,9 +26,10 @@ func ToStatistics(nc *Counters, pc *processortypes.Counters) globaltypes.Statist
 		return globaltypes.Statistics{}
 	}
 	return globaltypes.Statistics{
+		Addressed: nc.Addressed.ToStats(),
 		Received:  nc.Received.ToStats(),
-		Processed: pc.Processed.ToStats(),
 		Missed:    nc.Missed.ToStats(),
+		Processed: pc.Processed.ToStats(),
 		Generated: pc.Generated.ToStats(),
 		Sent:      nc.Sent.ToStats(),
 	}
@@ -36,14 +39,17 @@ type SectionID int
 
 const (
 	UndefinedSectionID = SectionID(iota)
+	SectionIDAddressed
 	SectionIDMissed
 	SectionIDReceived
 	SectionIDSent
 	EndOfSectionID
 )
 
-func (counters *Counters) GetSectionByID(id SectionID) *globaltypes.CountersSection {
+func (counters *Counters) Get(id SectionID) *globaltypes.CountersSection {
 	switch id {
+	case SectionIDAddressed:
+		return &counters.Addressed
 	case SectionIDMissed:
 		return &counters.Missed
 	case SectionIDReceived:

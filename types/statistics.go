@@ -29,6 +29,7 @@ type StatisticsSection struct {
 }
 
 type Statistics struct {
+	Addressed StatisticsSection
 	Missed    StatisticsSection
 	Received  StatisticsSection
 	Processed StatisticsSection

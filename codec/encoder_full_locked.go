@@ -241,7 +241,7 @@ func (e *EncoderFullLocked) reinitEncoder(
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
 	}
 
-	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was is closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
+	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
 
 	e.codecInternals = newEncoder.codecInternals
 	e.InitTS = newEncoder.InitTS

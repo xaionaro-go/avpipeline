@@ -24,7 +24,8 @@ import (
 )
 
 const (
-	extraDebug = true
+	extraDebug           = true
+	extraDefensiveChecks = true
 )
 
 func (n *NodeWithCustomData[C, T]) Serve(
@@ -289,6 +290,10 @@ func pushToDestination[
 
 		dstCounters := pushTo.Node.GetCountersPtr()
 		isPushed := false
+		if extraDefensiveChecks {
+			assert(ctx, dstCounters.Addressed.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType)) != nil, countersSubSectionID, mediaType, objSize)
+		}
+		dstCounters.Addressed.Increment(countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 		defer incrementReceived(dstCounters, &isPushed, countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 
 		inputCond := getInputCondition(pushTo.Node)
