@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 type MediaType int
 
 const (
@@ -36,6 +38,6 @@ func (t MediaType) String() string {
 	case MediaTypeUnknown:
 		return "unknown"
 	default:
-		return "MediaType(" + string(int(t)) + ")"
+		return "MediaType(" + fmt.Sprintf("%d", int(t)) + ")"
 	}
 }

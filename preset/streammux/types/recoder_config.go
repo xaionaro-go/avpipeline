@@ -15,6 +15,7 @@ type InputAudioTrackConfig struct {
 type InputVideoTrackConfig struct {
 	CodecName  codectypes.Name       `yaml:"codec_name"`
 	Resolution codectypes.Resolution `yaml:"resolution"`
+	FrameRate  types.Rational        `yaml:"fps"`
 }
 
 type OutputAudioTrackConfig struct {

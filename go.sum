@@ -23,6 +23,8 @@ github.com/anthonynsimon/bild v0.14.0 h1:IFRkmKdNdqmexXHfEU7rPlAmdUZ8BDZEGtGHDnG
 github.com/anthonynsimon/bild v0.14.0/go.mod h1:hcvEAyBjTW69qkKJTfpcDQ83sSZHxwOunsseDfeQhUs=
 github.com/asticode/go-astikit v0.55.0 h1:jdR6djfjAF2SwtFu1hzwkenCRejzOZUREsr3xPAPHeg=
 github.com/asticode/go-astikit v0.55.0/go.mod h1:fV43j20UZYfXzP9oBn33udkvCvDvCDhzjVqoLFuuYZE=
+github.com/av-elier/go-decimal-to-rational v0.0.0-20250603203441-f39a07f43ff3 h1:/YU0DeJ1G3zn93Yk2ziNZdG7Q0w9KNfw/JmPNJ4IVDI=
+github.com/av-elier/go-decimal-to-rational v0.0.0-20250603203441-f39a07f43ff3/go.mod h1:GnsWLsBM/Ru0k9GBU9jUFqf35G9c5/EPQfvoV4IPPzA=
 github.com/campoy/embedmd v1.0.0 h1:V4kI2qTJJLf4J29RzI/MAt2c3Bl4dQSYPuflzwFH2hY=
 github.com/campoy/embedmd v1.0.0/go.mod h1:oxyr9RCiSXg0M3VJ3ks0UGfp98BpSSGr0kpiX3MzVl8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

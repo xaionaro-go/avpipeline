@@ -24,8 +24,8 @@ const (
 	HardwareDeviceTypeVulkan       = HardwareDeviceType(0xb)
 )
 
-func (t HardwareDeviceType) String() string {
-	switch t {
+func (r HardwareDeviceType) String() string {
+	switch r {
 	case HardwareDeviceTypeCUDA:
 		return "cuda"
 	case HardwareDeviceTypeDRM:
@@ -51,7 +51,7 @@ func (t HardwareDeviceType) String() string {
 	case HardwareDeviceTypeVulkan:
 		return "vulkan"
 	}
-	return fmt.Sprintf("unknown_%X", int64(t))
+	return fmt.Sprintf("unknown_%X", int64(r))
 }
 
 func HardwareDeviceTypeFromString(s string) HardwareDeviceType {
@@ -69,12 +69,12 @@ func HardwareDeviceTypeFromString(s string) HardwareDeviceType {
 	return -1
 }
 
-func (t *HardwareDeviceType) UnmarshalYAML(b []byte) error {
+func (r *HardwareDeviceType) UnmarshalYAML(b []byte) error {
 	devType := string(b)
 	devType = strings.Trim(strings.ToLower(devType), " \"\n\t\r")
 	for candidate := range HardwareDeviceType(0xf) {
 		if strings.ToLower(candidate.String()) == devType {
-			*t = candidate
+			*r = candidate
 			return nil
 		}
 	}
@@ -82,6 +82,6 @@ func (t *HardwareDeviceType) UnmarshalYAML(b []byte) error {
 	return fmt.Errorf("unknown hardware device type: '%s'", devType)
 }
 
-func (t HardwareDeviceType) MarshalYAML() ([]byte, error) {
-	return json.Marshal(t.String())
+func (r HardwareDeviceType) MarshalYAML() ([]byte, error) {
+	return json.Marshal(r.String())
 }

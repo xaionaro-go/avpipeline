@@ -52,6 +52,7 @@ require (
 
 require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
+	github.com/av-elier/go-decimal-to-rational v0.0.0-20250603203441-f39a07f43ff3
 	github.com/dustin/go-humanize v1.0.1
 	github.com/go-ng/container v0.0.0-20220615121757-4740bf4bbc52
 	github.com/go-ng/slices v0.0.0-20230703171042-6195d35636a2 // indirect
