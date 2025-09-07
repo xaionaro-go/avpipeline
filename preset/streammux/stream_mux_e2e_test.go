@@ -2,6 +2,7 @@ package streammux_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -198,14 +199,14 @@ func runTest(
 	// simple test:
 
 	for _, p := range input {
+		mediaType := globaltypes.MediaType(p.GetMediaType())
+		pktSize := uint64(p.Packet.Size())
+		streamMux.GetCountersPtr().Addressed.Packets.Increment(mediaType, pktSize)
 		select {
 		case <-ctx.Done():
 			require.NoError(t, ctx.Err())
 		case inputCh <- p:
-			streamMux.GetCountersPtr().Received.Packets.Increment(
-				globaltypes.MediaType(p.GetMediaType()),
-				uint64(p.Packet.Size()),
-			)
+			streamMux.GetCountersPtr().Received.Packets.Increment(mediaType, pktSize)
 		}
 	}
 
@@ -236,23 +237,34 @@ func runTest(
 
 	for idx, p := range input {
 		if idx == len(input)/2 {
-			err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
-				Output: streammuxtypes.RecoderOutputConfig{
-					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
-						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-						OutputTrackIDs: []int{0},
-						CodecName:      vcodecName,
-						Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
-					}},
-					AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
-						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-						OutputTrackIDs: []int{1},
-						CodecName:      "aac",
-					}},
-				},
-			})
-			require.NoError(t, err)
+			for {
+				err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
+					Output: streammuxtypes.RecoderOutputConfig{
+						VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+							InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+							OutputTrackIDs: []int{0},
+							CodecName:      vcodecName,
+							Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
+						}},
+						AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+							InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+							OutputTrackIDs: []int{1},
+							CodecName:      "aac",
+						}},
+					},
+				})
+				if errors.As(err, &streammux.ErrSwitchAlreadyInProgress{}) {
+					logger.Warnf(ctx, "SetRecoderConfig: switch in progress: %v; retrying in 1 second", err)
+					time.Sleep(time.Second)
+					continue
+				}
+				require.NoError(t, err)
+				break
+			}
 		}
+		mediaType := globaltypes.MediaType(p.GetMediaType())
+		pktSize := uint64(p.Packet.Size())
+		streamMux.GetCountersPtr().Addressed.Packets.Increment(mediaType, pktSize)
 		select {
 		case <-ctx.Done():
 			require.NoError(t, ctx.Err())

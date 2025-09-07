@@ -216,7 +216,7 @@ func (s *StreamMux[C]) setPreferredOutput(
 	id1 := s.OutputSyncer.GetValue(ctx)
 	id0 := s.OutputSwitch.GetValue(ctx)
 	if id0 != id1 {
-		return fmt.Errorf("an output switch process is already in progress (from %d to %d)", id0, id1)
+		return ErrSwitchAlreadyInProgress{OutputIDCurrent: id0, OutputIDNext: id1}
 	}
 
 	err := s.OutputSwitch.SetValue(ctx, int32(output.ID))
