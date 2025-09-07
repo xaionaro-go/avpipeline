@@ -32,7 +32,7 @@ type EncoderFullLocked struct {
 	CallCount         atomic.Int64
 }
 
-func newEncoderFullUnlocked(
+func newEncoderFullLocked(
 	ctx context.Context,
 	params CodecParams,
 	overrideQuality Quality,
@@ -113,7 +113,7 @@ func (e *EncoderFullLocked) SendFrame(
 	f *astiav.Frame,
 ) (_err error) {
 	defer e.checkCallCount(ctx)()
-	logger.Tracef(ctx, "SendFrame")
+	logger.Tracef(ctx, "SendFrame: pts:%d, pixel_format:%s", f.Pts(), f.PixelFormat())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
 	if encoderDebug {
 		if e.codecContext.Framerate().Float64() == 0 && f.Duration() == 0 {
@@ -221,7 +221,7 @@ func (e *EncoderFullLocked) reinitEncoder(
 	if e.ReusableResources != nil {
 		opts = append(opts, EncoderFactoryOptionReusableResources{Resources: e.ReusableResources})
 	}
-	newEncoder, err := newEncoderFullUnlocked(ctx, e.InitParams, e.Quality, opts...)
+	newEncoder, err := newEncoderFullLocked(ctx, e.InitParams, e.Quality, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
 	}

@@ -32,7 +32,7 @@ func NewEncoder(
 			return nil, ErrNotDummy{}
 		}
 	}
-	e, err := newEncoderFullUnlocked(ctx, params, nil, opts...)
+	e, err := newEncoderFullLocked(ctx, params, nil, opts...)
 	if err != nil {
 		return nil, err
 	}

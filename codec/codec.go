@@ -15,6 +15,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/unsafetools"
 	"github.com/xaionaro-go/xsync"
@@ -44,7 +45,7 @@ type codecInternals struct {
 	hardwarePixelFormat   astiav.PixelFormat
 	hardwareContextType   hardwareContextType
 	closer                *astikit.Closer
-	quirks                Quirks
+	_                     Quirks // unused, yet
 }
 
 type Codec struct {
@@ -107,6 +108,7 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	defer func() {
 		c.codec = nil
 		c.codecContext = nil
+		c.closer = nil
 	}()
 	if c.closer == nil {
 		return nil
@@ -116,8 +118,8 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 		logger.Errorf(ctx, "unable to reset the codec: %v", err)
 	}
 	logger.Debugf(ctx, "closing the codec internals")
+	belt.Flush(ctx) // we want to flush the logs before a SEGFAULT-risky operation:
 	err := c.closer.Close()
-	c.closer = nil
 	return err
 }
 
@@ -144,7 +146,29 @@ func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	if c.codecContext == nil {
 		return fmt.Errorf("codec is closed")
 	}
-	c.codecContext.FlushBuffers()
+	if !c.IsEncoder {
+		c.codecContext.FlushBuffers()
+		return
+	}
+
+	c.codecContext.SendFrame(nil)
+	for {
+		pkt := packet.Pool.Get()
+		err := c.codecContext.ReceivePacket(pkt)
+		packet.Pool.Put(pkt)
+		logger.Warnf(ctx, "codec contained a packet")
+		if err != nil {
+			logger.Debugf(ctx, "ReceivePacket loop finished with: %v", err)
+			break
+		}
+	}
+	caps := c.codec.Capabilities()
+	logger.Tracef(ctx, "Capabilities: %08x", caps)
+	if caps&astiav.CodecCapabilityEncoderFlush != 0 {
+		logger.Tracef(ctx, "flushing buffers")
+		c.codecContext.FlushBuffers()
+	}
+
 	return nil
 }
 
@@ -248,6 +272,11 @@ func newCodec(
 			return
 		}
 		logger.Errorf(ctx, "got an error: %v", err)
+	}
+
+	if !isEncoder && hardwareDeviceType == globaltypes.HardwareDeviceTypeCUDA {
+		logger.Warnf(ctx, "hardware decoding using CUDA is not supported, yet")
+		hardwareDeviceType = globaltypes.HardwareDeviceTypeNone
 	}
 
 	isHW := false
@@ -427,13 +456,22 @@ func newCodec(
 		logger.Tracef(ctx, "resolution: %dx%d", codecParameters.Width(), codecParameters.Height())
 		c.codecContext.SetWidth(codecParameters.Width())
 		c.codecContext.SetHeight(codecParameters.Height())
-		if forcePixelFormat != astiav.PixelFormatNone {
+		if forcePixelFormat != 0 {
+			logger.Tracef(ctx, "forcing pixel format to %s", forcePixelFormat)
 			c.codecContext.SetPixelFormat(forcePixelFormat)
 		}
 		if c.codecContext.PixelFormat() == astiav.PixelFormatNone {
-			c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
+			logger.Tracef(ctx, "pixel format is not set")
+			switch hardwareDeviceType {
+			case globaltypes.HardwareDeviceTypeCUDA:
+				logger.Debugf(ctx, "is CUDA, so applying NV12 pixel format")
+				c.codecContext.SetPixelFormat(astiav.PixelFormatNv12)
+			default:
+				c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
+			}
 		}
 		if c.codecContext.PixelFormat() == astiav.PixelFormatNone {
+			logger.Warnf(ctx, "pixel format is not set, so applying the first supported one")
 			if pixFmts := c.codec.PixelFormats(); len(pixFmts) > 0 {
 				c.codecContext.SetPixelFormat(pixFmts[0])
 			}
@@ -442,8 +480,9 @@ func newCodec(
 		c.codecContext.SetGopSize(int(gopSize))
 		c.codecContext.SetSampleAspectRatio(codecParameters.SampleAspectRatio())
 		logger.Tracef(ctx,
-			"pixel_format: %s; frame_rate: %s",
+			"pixel_format: %s; frame_rate: %s; device_type: %s; hw_pixel_format: %s",
 			c.codecContext.PixelFormat(), c.codecContext.Framerate(),
+			hardwareDeviceType, c.hardwarePixelFormat,
 		)
 	case astiav.MediaTypeAudio:
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
@@ -552,10 +591,6 @@ func (c *Codec) initHardware(
 		return fmt.Errorf("unable to init hardware pixel format: %w", err)
 	}
 
-	if c.hardwareContextType == hardwareContextTypeFrames {
-		return ErrNotImplemented{Err: fmt.Errorf("hardware context type 'frames' is not implemented")}
-	}
-
 	err = c.initHardwareDeviceContext(
 		ctx,
 		hardwareDeviceType,
@@ -577,7 +612,8 @@ func (c *Codec) initHardwarePixelFormat(
 	hardwareDeviceType HardwareDeviceType,
 ) (_err error) {
 	logger.Tracef(ctx, "initHardwarePixelFormat")
-	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v", _err) }()
+	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v", c.hardwarePixelFormat, _err) }()
+
 	for _, hwCfgs := range c.codec.HardwareConfigs() {
 		logger.Tracef(ctx, "hw config: %v %v %v", hwCfgs.PixelFormat(), hwCfgs.MethodFlags(), hwCfgs.HardwareDeviceType())
 		if hwCfgs.HardwareDeviceType() != astiav.HardwareDeviceType(hardwareDeviceType) {
@@ -587,6 +623,7 @@ func (c *Codec) initHardwarePixelFormat(
 		switch {
 		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx):
 			c.hardwareContextType = hardwareContextTypeFrames
+			continue // TODO: implement this
 		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx):
 			c.hardwareContextType = hardwareContextTypeDevice
 		default:
@@ -597,9 +634,14 @@ func (c *Codec) initHardwarePixelFormat(
 		break
 	}
 
-	if c.hardwarePixelFormat == astiav.PixelFormatNone {
+	if c.hardwareContextType == undefinedHardwareContextType {
 		return fmt.Errorf("hardware device type '%v' is not supported", hardwareDeviceType)
 	}
+
+	if c.hardwarePixelFormat == astiav.PixelFormatNone {
+		return nil
+	}
+
 	c.codecContext.SetPixelFormatCallback(func(pfs []astiav.PixelFormat) astiav.PixelFormat {
 		for _, pf := range pfs {
 			if pf == c.hardwarePixelFormat {
@@ -621,7 +663,11 @@ func (c *Codec) initHardwareDeviceContext(
 	options *astiav.Dictionary,
 	hwDevFlags int,
 	reusableResources *Resources,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "initHardwareDeviceContext(%s, '%s', %#+v, %X)", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags)
+	defer func() {
+		logger.Tracef(ctx, "/initHardwareDeviceContext(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags, _err)
+	}()
 	if reusableResources != nil {
 		// TODO: add a check if we can reuse the hardware device context; for example, we
 		//       might've been asked to use another device at all

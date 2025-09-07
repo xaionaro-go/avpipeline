@@ -160,8 +160,10 @@ func runTest(
 	))
 
 	var vcodecName codectypes.Name
+	var hardwareDeviceType codec.HardwareDeviceType
 	if e2eNvencEnable {
 		vcodecName = codectypes.Name(codecID.String()) + "_nvenc"
+		hardwareDeviceType = globaltypes.HardwareDeviceTypeCUDA
 	} else {
 		vcodecName = "libx264"
 	}
@@ -169,10 +171,11 @@ func runTest(
 	require.NoError(t, streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
 		Output: streammuxtypes.RecoderOutputConfig{
 			VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
-				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-				OutputTrackIDs: []int{0},
-				CodecName:      vcodecName,
-				Resolution:     codectypes.Resolution{Width: 1920, Height: 1080},
+				InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
+				OutputTrackIDs:     []int{0},
+				CodecName:          vcodecName,
+				Resolution:         codectypes.Resolution{Width: 1920, Height: 1080},
+				HardwareDeviceType: hardwareDeviceType,
 			}},
 			AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
@@ -243,10 +246,11 @@ func runTest(
 				err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
 					Output: streammuxtypes.RecoderOutputConfig{
 						VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
-							InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-							OutputTrackIDs: []int{0},
-							CodecName:      vcodecName,
-							Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
+							InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
+							OutputTrackIDs:     []int{0},
+							CodecName:          vcodecName,
+							Resolution:         codectypes.Resolution{Width: 1280, Height: 720},
+							HardwareDeviceType: hardwareDeviceType,
 						}},
 						AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
 							InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
