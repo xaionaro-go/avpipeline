@@ -164,17 +164,19 @@ func runTest(
 	}
 
 	require.NoError(t, streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
-		VideoTrackConfigs: []streammuxtypes.VideoTrackConfig{{
-			InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-			OutputTrackIDs: []int{0},
-			CodecName:      vcodecName,
-			Resolution:     codectypes.Resolution{Width: 1920, Height: 1080},
-		}},
-		AudioTrackConfigs: []streammuxtypes.AudioTrackConfig{{
-			InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-			OutputTrackIDs: []int{1},
-			CodecName:      "aac",
-		}},
+		Output: streammuxtypes.RecoderOutputConfig{
+			VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+				OutputTrackIDs: []int{0},
+				CodecName:      vcodecName,
+				Resolution:     codectypes.Resolution{Width: 1920, Height: 1080},
+			}},
+			AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+				OutputTrackIDs: []int{1},
+				CodecName:      "aac",
+			}},
+		},
 	}))
 
 	require.NotNil(t, streamMux.GetActiveOutput(ctx))
@@ -235,17 +237,19 @@ func runTest(
 	for idx, p := range input {
 		if idx == len(input)/2 {
 			err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
-				VideoTrackConfigs: []streammuxtypes.VideoTrackConfig{{
-					InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-					OutputTrackIDs: []int{0},
-					CodecName:      vcodecName,
-					Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
-				}},
-				AudioTrackConfigs: []streammuxtypes.AudioTrackConfig{{
-					InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-					OutputTrackIDs: []int{1},
-					CodecName:      "aac",
-				}},
+				Output: streammuxtypes.RecoderOutputConfig{
+					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs: []int{0},
+						CodecName:      vcodecName,
+						Resolution:     codectypes.Resolution{Width: 1280, Height: 720},
+					}},
+					AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs: []int{1},
+						CodecName:      "aac",
+					}},
+				},
 			})
 			require.NoError(t, err)
 		}

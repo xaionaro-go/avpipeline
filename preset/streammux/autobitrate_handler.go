@@ -544,11 +544,11 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		logger.Tracef(ctx, "using best not-bypass output key: %v", outputKey)
 		origConfig := h.StreamMux.GetRecoderConfig(ctx)
 		logger.Tracef(ctx, "original recoder config: %+v", origConfig)
-		if len(origConfig.VideoTrackConfigs) > 0 {
-			outputKey.VideoCodec = codectypes.Name(origConfig.VideoTrackConfigs[0].CodecName)
+		if len(origConfig.Output.VideoTrackConfigs) > 0 {
+			outputKey.VideoCodec = codectypes.Name(origConfig.Output.VideoTrackConfigs[0].CodecName)
 		}
-		if len(origConfig.AudioTrackConfigs) > 0 {
-			outputKey.AudioCodec = codectypes.Name(origConfig.AudioTrackConfigs[0].CodecName)
+		if len(origConfig.Output.AudioTrackConfigs) > 0 {
+			outputKey.AudioCodec = codectypes.Name(origConfig.Output.AudioTrackConfigs[0].CodecName)
 		}
 	} else {
 		if outputKey.AudioCodec == "" {

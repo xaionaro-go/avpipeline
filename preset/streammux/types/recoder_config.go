@@ -7,7 +7,17 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type AudioTrackConfig struct {
+type InputAudioTrackConfig struct {
+	CodecName  codectypes.Name `yaml:"codec_name"`
+	SampleRate uint32          `yaml:"sample_rate"`
+}
+
+type InputVideoTrackConfig struct {
+	CodecName  codectypes.Name       `yaml:"codec_name"`
+	Resolution codectypes.Resolution `yaml:"resolution"`
+}
+
+type OutputAudioTrackConfig struct {
 	InputTrackIDs   []int           `yaml:"input_track_ids"`
 	OutputTrackIDs  []int           `yaml:"output_track_ids"`
 	CodecName       codectypes.Name `yaml:"codec_name"`
@@ -17,7 +27,7 @@ type AudioTrackConfig struct {
 }
 
 // TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)
-type VideoTrackConfig struct {
+type OutputVideoTrackConfig struct {
 	InputTrackIDs      []int                 `yaml:"input_track_ids"`
 	OutputTrackIDs     []int                 `yaml:"output_track_ids"`
 	CodecName          codectypes.Name       `yaml:"codec_name"`
@@ -31,18 +41,28 @@ type VideoTrackConfig struct {
 }
 
 // TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)
-func (cfg *VideoTrackConfig) GetDecoderHardwareDeviceType() HardwareDeviceType {
+func (cfg *OutputVideoTrackConfig) GetDecoderHardwareDeviceType() HardwareDeviceType {
 	return cfg.HardwareDeviceType
 }
 
 // TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)
-func (cfg *VideoTrackConfig) GetDecoderHardwareDeviceName() HardwareDeviceName {
+func (cfg *OutputVideoTrackConfig) GetDecoderHardwareDeviceName() HardwareDeviceName {
 	return cfg.HardwareDeviceName
 }
 
 type RecoderConfig struct {
-	AudioTrackConfigs []AudioTrackConfig `yaml:"audio_track_configs"`
-	VideoTrackConfigs []VideoTrackConfig `yaml:"video_track_configs"`
+	Input  *RecoderInputConfig `yaml:"input"`
+	Output RecoderOutputConfig `yaml:"output"`
+}
+
+type RecoderInputConfig struct {
+	AudioTrackConfigs []InputAudioTrackConfig `yaml:"audio_track_configs"`
+	VideoTrackConfigs []InputVideoTrackConfig `yaml:"video_track_configs"`
+}
+
+type RecoderOutputConfig struct {
+	AudioTrackConfigs []OutputAudioTrackConfig `yaml:"audio_track_configs"`
+	VideoTrackConfigs []OutputVideoTrackConfig `yaml:"video_track_configs"`
 }
 
 type DictionaryItem = types.DictionaryItem

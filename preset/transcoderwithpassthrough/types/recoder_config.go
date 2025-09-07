@@ -5,8 +5,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type AudioTrackConfig = streammuxtypes.AudioTrackConfig
-type VideoTrackConfig = streammuxtypes.VideoTrackConfig
+type AudioTrackConfig = streammuxtypes.OutputAudioTrackConfig
+type VideoTrackConfig = streammuxtypes.OutputVideoTrackConfig
 type RecoderConfig = streammuxtypes.RecoderConfig
 type DictionaryItem = types.DictionaryItem
 type DictionaryItems = types.DictionaryItems

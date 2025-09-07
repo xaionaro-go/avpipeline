@@ -503,14 +503,14 @@ func OutputKeyFromRecoderConfig(
 	}
 
 	var audioCodec codec.Name
-	if len(c.AudioTrackConfigs) > 0 {
-		audioCodec = codec.Name(c.AudioTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+	if len(c.Output.AudioTrackConfigs) > 0 {
+		audioCodec = codec.Name(c.Output.AudioTrackConfigs[0].CodecName).Canonicalize(ctx, true)
 	}
 	var videoCodec codec.Name
 	var resolution codec.Resolution
-	if len(c.VideoTrackConfigs) > 0 {
-		videoCodec = codec.Name(c.VideoTrackConfigs[0].CodecName).Canonicalize(ctx, true)
-		resolution = c.VideoTrackConfigs[0].Resolution
+	if len(c.Output.VideoTrackConfigs) > 0 {
+		videoCodec = codec.Name(c.Output.VideoTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+		resolution = c.Output.VideoTrackConfigs[0].Resolution
 	}
 	return OutputKey{
 		AudioCodec: codectypes.Name(audioCodec),
@@ -541,10 +541,10 @@ func (o *Output) reconfigureDecoder(
 ) (_err error) {
 	logger.Tracef(ctx, "reconfigureDecoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureDecoder: %#+v: %v", cfg, _err) }()
-	if len(cfg.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
+	if len(cfg.Output.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	videoCfg := cfg.VideoTrackConfigs[0]
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
 
 	decoder := o.RecoderNode.Processor.Kernel.Decoder
 	decoderFactory := decoder.DecoderFactory
@@ -577,15 +577,15 @@ func (o *Output) reconfigureEncoder(
 ) (_err error) {
 	logger.Tracef(ctx, "reconfigureEncoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureEncoder: %#+v: %v", cfg, _err) }()
-	if len(cfg.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
+	if len(cfg.Output.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	videoCfg := cfg.VideoTrackConfigs[0]
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
 
-	if len(cfg.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
+	if len(cfg.Output.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
 	}
-	audioCfg := cfg.AudioTrackConfigs[0]
+	audioCfg := cfg.Output.AudioTrackConfigs[0]
 
 	encoderFactory := o.RecoderNode.Processor.Kernel.EncoderFactory
 

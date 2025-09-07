@@ -62,13 +62,13 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 		delete(s.AudioIndexMap, k)
 	}
 
-	for _, cfg := range s.StreamForward.RecodingConfig.VideoTrackConfigs {
+	for _, cfg := range s.StreamForward.RecodingConfig.Output.VideoTrackConfigs {
 		for _, inputVideoTrackID := range cfg.InputTrackIDs {
 			s.VideoIndexMap[inputVideoTrackID] = cfg.OutputTrackIDs
 		}
 	}
 
-	for _, cfg := range s.StreamForward.RecodingConfig.AudioTrackConfigs {
+	for _, cfg := range s.StreamForward.RecodingConfig.Output.AudioTrackConfigs {
 		for _, inputAudioTrackID := range cfg.InputTrackIDs {
 			s.AudioIndexMap[inputAudioTrackID] = cfg.OutputTrackIDs
 		}

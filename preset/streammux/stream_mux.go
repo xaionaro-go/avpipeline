@@ -596,15 +596,15 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	audioCodec codectypes.Name,
 ) (_err error) {
 	cfg := s.getRecoderConfigLocked(ctx)
-	if len(cfg.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.AudioTrackConfigs))
+	if len(cfg.Output.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.Output.AudioTrackConfigs))
 	}
-	audioCfg := cfg.AudioTrackConfigs[0]
+	audioCfg := cfg.Output.AudioTrackConfigs[0]
 
-	if len(cfg.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.VideoTrackConfigs))
+	if len(cfg.Output.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.Output.VideoTrackConfigs))
 	}
-	videoCfg := cfg.VideoTrackConfigs[0]
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
 
 	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
 		// TODO: this should not be here, it should be somewhere else.
@@ -618,18 +618,18 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 			logger.Errorf(ctx, "the video codec is set to '%s', but the encoder is %s", videoCodec, encoderV)
 		} else {
 			videoCfg.AverageBitRate = bitrate
-			cfg.VideoTrackConfigs[0] = videoCfg
+			cfg.Output.VideoTrackConfigs[0] = videoCfg
 			return nil
 		}
 	}
 
 	audioCfg.CodecName = audioCodec
-	cfg.AudioTrackConfigs[0] = audioCfg
+	cfg.Output.AudioTrackConfigs[0] = audioCfg
 
 	videoCfg.Resolution = res
 	videoCfg.AverageBitRate = bitrate
 	videoCfg.CodecName = videoCodec
-	cfg.VideoTrackConfigs[0] = videoCfg
+	cfg.Output.VideoTrackConfigs[0] = videoCfg
 
 	return s.setRecoderConfigLocked(ctx, cfg, false)
 }

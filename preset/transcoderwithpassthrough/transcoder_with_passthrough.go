@@ -137,8 +137,8 @@ func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
 		return s.RecodingConfig
 	}
 	cpy := s.RecodingConfig
-	cpy.VideoTrackConfigs = slices.Clone(cpy.VideoTrackConfigs)
-	cpy.VideoTrackConfigs[0].CodecName = codectypes.Name(codec.NameCopy)
+	cpy.Output.VideoTrackConfigs = slices.Clone(cpy.Output.VideoTrackConfigs)
+	cpy.Output.VideoTrackConfigs[0].CodecName = codectypes.Name(codec.NameCopy)
 	return cpy
 }
 
@@ -170,11 +170,11 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 ) (_err error) {
 	logger.Tracef(ctx, "configureRecoder(ctx, %#+v)", cfg)
 	defer func() { logger.Tracef(ctx, "/configureRecoder(ctx, %#+v): %v", cfg, _err) }()
-	if len(cfg.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.VideoTrackConfigs))
+	if len(cfg.Output.VideoTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	if len(cfg.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.AudioTrackConfigs))
+	if len(cfg.Output.AudioTrackConfigs) != 1 {
+		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
 	}
 	if s.Recoder == nil {
 		if err := s.initRecoder(ctx, cfg); err != nil {
@@ -182,10 +182,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
 		}
 		return nil
 	}
-	if codec.Name(cfg.AudioTrackConfigs[0].CodecName) != codec.NameCopy {
-		return fmt.Errorf("we currently do not support reconfiguring audio recoding with codec '%s' (!= 'copy')", cfg.AudioTrackConfigs[0].CodecName)
+	if codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName) != codec.NameCopy {
+		return fmt.Errorf("we currently do not support reconfiguring audio recoding with codec '%s' (!= 'copy')", cfg.Output.AudioTrackConfigs[0].CodecName)
 	}
-	if codec.Name(cfg.VideoTrackConfigs[0].CodecName) == codec.NameCopy {
+	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) == codec.NameCopy {
 		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -213,11 +213,11 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		videoResolution *codec.Resolution
 	)
 
-	if bitRate := cfg.VideoTrackConfigs[0].AverageBitRate; bitRate > 0 {
+	if bitRate := cfg.Output.VideoTrackConfigs[0].AverageBitRate; bitRate > 0 {
 		videoQuality = quality.ConstantBitrate(bitRate)
 	}
 
-	if res := cfg.VideoTrackConfigs[0].Resolution; res != (codec.Resolution{}) {
+	if res := cfg.Output.VideoTrackConfigs[0].Resolution; res != (codec.Resolution{}) {
 		videoResolution = &res
 	}
 
@@ -226,8 +226,8 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
-				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
+				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
 				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
 					err := d.SetLowLatency(ctx, true)
 					if err != nil {
@@ -238,15 +238,15 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		),
 		codec.NewNaiveEncoderFactory(ctx,
 			&codec.NaiveEncoderFactoryParams{
-				VideoCodec:            codec.Name(cfg.VideoTrackConfigs[0].CodecName),
-				AudioCodec:            codec.Name(cfg.AudioTrackConfigs[0].CodecName),
-				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.VideoTrackConfigs[0].HardwareDeviceName),
-				VideoOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.VideoTrackConfigs[0].CustomOptions)),
-				AudioOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.AudioTrackConfigs[0].CustomOptions)),
+				VideoCodec:            codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName),
+				AudioCodec:            codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName),
+				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
+				VideoOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.VideoTrackConfigs[0].CustomOptions)),
+				AudioOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.AudioTrackConfigs[0].CustomOptions)),
 				VideoQuality:          videoQuality,
 				VideoResolution:       videoResolution,
-				VideoAverageFrameRate: astiav.NewRational(int(cfg.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),
+				VideoAverageFrameRate: astiav.NewRational(int(cfg.Output.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),
 			},
 		),
 		nil,
@@ -266,12 +266,12 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
 
 	encoderFactory := s.Recoder.EncoderFactory
-	if codec.Name(cfg.VideoTrackConfigs[0].CodecName) != encoderFactory.VideoCodec {
-		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
+	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) != encoderFactory.VideoCodec {
+		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.Output.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
 	}
 
 	err := xsync.DoR1(ctx, &s.Recoder.EncoderFactory.Locker, func() error {
-		videoCfg := cfg.VideoTrackConfigs[0]
+		videoCfg := cfg.Output.VideoTrackConfigs[0]
 		if len(s.Recoder.EncoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
@@ -363,8 +363,8 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	if err != nil {
 		return fmt.Errorf("unable to switch the pre-filter to passthrough: %w", err)
 	}
-	s.FilterThrottle.BitrateAveragingPeriod = cfg.VideoTrackConfigs[0].AveragingPeriod
-	s.FilterThrottle.AverageBitRate = cfg.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
+	s.FilterThrottle.BitrateAveragingPeriod = cfg.Output.VideoTrackConfigs[0].AveragingPeriod
+	s.FilterThrottle.AverageBitRate = cfg.Output.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
 
 	if switchState == 0 { // was in the recoding state
 		// to avoid the recoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.

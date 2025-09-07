@@ -65,13 +65,13 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 					for _, stream := range fmtCtx.Streams() {
 						switch stream.CodecParameters().MediaType() {
 						case astiav.MediaTypeVideo:
-							recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
+							recoderConfig.Output.VideoTrackConfigs = append(recoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      codectypes.Name(codec.NameCopy),
 							})
 						case astiav.MediaTypeAudio:
-							recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
+							recoderConfig.Output.AudioTrackConfigs = append(recoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      codectypes.Name(codec.NameCopy),
@@ -81,14 +81,14 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 				})
 			}
 		}
-		if len(recoderConfig.AudioTrackConfigs) == 0 && len(recoderConfig.VideoTrackConfigs) == 0 {
+		if len(recoderConfig.Output.AudioTrackConfigs) == 0 && len(recoderConfig.Output.VideoTrackConfigs) == 0 {
 			logger.Errorf(ctx, "no audio/video tracks defined, adding one of each just to make it work")
-			recoderConfig.VideoTrackConfigs = append(recoderConfig.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
+			recoderConfig.Output.VideoTrackConfigs = append(recoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{0},
 				CodecName:      codectypes.Name(codec.NameCopy),
 			})
-			recoderConfig.AudioTrackConfigs = append(recoderConfig.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
+			recoderConfig.Output.AudioTrackConfigs = append(recoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{1},
 				CodecName:      codectypes.Name(codec.NameCopy),
