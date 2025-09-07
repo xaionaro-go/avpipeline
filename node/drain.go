@@ -19,7 +19,12 @@ func SetBlockInput(
 	ctx context.Context,
 	blocked bool,
 	node Abstract,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "SetBlockInput(%v, %p:%p:%v)", blocked, node, node.GetProcessor(), node)
+	defer func() {
+		logger.Debugf(ctx, "/SetBlockInput(%v, %p:%p:%v): %v", blocked, node, node.GetProcessor(), node, _err)
+	}()
+
 	cond := node.GetInputPacketFilter()
 	condPause, ok := cond.(*packetfiltercondition.PauseCond)
 	if !ok {
@@ -107,18 +112,19 @@ func allWentInAndOut(
 			sent := nodeCounters.Sent.Get(subSectionID).Get(mediaType).Count.Load()
 			generated := procCounters.Generated.Get(subSectionID).Get(mediaType).Count.Load()
 			processed := procCounters.Processed.Get(subSectionID).Get(mediaType).Count.Load()
+			missed := nodeCounters.Missed.Get(subSectionID).Get(mediaType).Count.Load()
 			addressed := nodeCounters.Addressed.Get(subSectionID).Get(mediaType).Count.Load()
 			if extraDefensiveChecks {
-				assert(ctx, addressed >= processed, addressed, processed)
+				assert(ctx, addressed >= processed+missed, addressed, processed)
 				assert(ctx, generated >= sent, generated, sent)
 			}
 
-			if sent != generated || processed != addressed {
+			if sent != generated || processed+missed != addressed {
 				logger.Tracef(
 					ctx,
-					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; addressed=%#+v",
+					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; missed=%#+v; addressed=%#+v",
 					subSectionID, mediaType,
-					sent, generated, processed, addressed,
+					sent, generated, processed, missed, addressed,
 				)
 				return false
 			}

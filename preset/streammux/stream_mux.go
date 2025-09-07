@@ -800,8 +800,8 @@ func (s *StreamMux[C]) onInputPacket(
 	ctx context.Context,
 	pkt *packet.Input,
 ) (_err error) {
-	logger.Tracef(ctx, "onInputPacket: %s", pkt)
-	defer func() { logger.Tracef(ctx, "/onInputPacket: %s: %v", pkt, _err) }()
+	logger.Tracef(ctx, "onInputPacket: %v", pkt.GetPTS())
+	defer func() { logger.Tracef(ctx, "/onInputPacket: %v: %v", pkt.GetPTS(), _err) }()
 
 	if pkt.GetMediaType() != astiav.MediaTypeVideo {
 		return nil

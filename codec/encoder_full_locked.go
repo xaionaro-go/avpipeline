@@ -16,6 +16,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+const (
+	extraDefensiveChecks = true
+)
+
 var _ Encoder = (*EncoderFull)(nil)
 
 type EncoderFullLocked struct {
@@ -210,27 +214,8 @@ func (e *EncoderFullLocked) Close(ctx context.Context) (_err error) {
 func (e *EncoderFullLocked) reinitEncoder(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "reinitEncoder")
-	defer func() { logger.Tracef(ctx, "/reinitEncoder: %v", _err) }()
-
-	oldInternals := e.codecInternals
-	// We'd prefer to close the old encoder after the new one is created,
-	// but there is a bug in NVENC that sometimes leads to segfaults:
-	//#0  runtime.raise () at /usr/lib/go-1.24/src/runtime/sys_linux_amd64.s:154
-	//#1  0x0000000000460017 in runtime.raisebadsignal (sig=11, c=0x7da2d17e5510) at /usr/lib/go-1.24/src/runtime/signal_unix.go:1038
-	//#2  0x0000000000460285 in runtime.badsignal (sig=11, c=0x7da2d17e5510) at /usr/lib/go-1.24/src/runtime/signal_unix.go:1147
-	//#3  0x000000000045ef2b in runtime.sigtrampgo (sig=11, info=0x7da2d17e56b0, ctx=0x7da2d17e5580) at /usr/lib/go-1.24/src/runtime/signal_unix.go:468
-	//#4  0x0000000000487f46 in runtime.sigtramp () at /usr/lib/go-1.24/src/runtime/sys_linux_amd64.s:352
-	//#5  0x00007da478445810 in <signal handler called> () at /lib/x86_64-linux-gnu/libc.so.6
-	//#6  0x00007da3062199d1 in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
-	//#7  0x00007da306219b0a in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
-	//#8  0x00007da3062979a6 in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
-	//#9  0x00007da30629810d in ??? () at /lib/x86_64-linux-gnu/libnvcuvid.so.1
-	//#10 0x00007da4784a2ef1 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:448
-	//#11 0x00007da47853445c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
-	if err := oldInternals.closeLocked(ctx); err != nil {
-		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
-	}
+	logger.Debugf(ctx, "reinitEncoder")
+	defer func() { logger.Debugf(ctx, "/reinitEncoder: %v", _err) }()
 
 	var opts EncoderFactoryOptions
 	if e.ReusableResources != nil {
@@ -241,14 +226,19 @@ func (e *EncoderFullLocked) reinitEncoder(
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
 	}
 
-	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) was closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
+	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) is going to be closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
 
+	oldInternals := e.codecInternals
 	e.codecInternals = newEncoder.codecInternals
+	if err := oldInternals.closeLocked(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
+	}
+	e.IsDirtyValue.Store(false)
 	e.InitTS = newEncoder.InitTS
 	e.Quality = newEncoder.Quality
 	e.ReusableResources = newEncoder.ReusableResources
 	e.Next = newEncoder.Next
-	e.IsDirtyValue.Store(false)
+
 	return nil
 }
 
@@ -374,6 +364,9 @@ func (e *EncoderFullLocked) LockDo(ctx context.Context, fn func(context.Context,
 }
 
 func (e *EncoderFullLocked) checkCallCount(ctx context.Context) context.CancelFunc {
+	if !extraDefensiveChecks {
+		return func() {}
+	}
 	if e.CallCount.Add(1) > 1 {
 		s := make([]byte, 10<<20)
 		n := runtime.Stack(s, true)

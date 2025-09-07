@@ -34,6 +34,7 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	Filter framecondition.Condition
 
 	locker                  xsync.Mutex
+	flushLocker             xsync.Mutex
 	started                 bool
 	activeStreamsMap        map[int]struct{}
 	activeStreamsCount      uint
@@ -402,23 +403,26 @@ func (r *Recoder[DF, EF]) Flush(
 	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
 	var errs []error
 
-	if err := r.decoderToEncoder(ctx, func(
-		ctx context.Context,
-		outputFramesCh chan<- frame.Output,
-	) (_err error) {
-		defer func() {
-			r := recover()
-			if r != nil {
-				_err = fmt.Errorf("panic: %v:\n%s", r, debug.Stack())
-			}
-		}()
-		return r.Decoder.Flush(ctx, outputPacketCh, outputFramesCh)
-	}, outputPacketCh, outputFramesCh); err != nil {
-		errs = append(errs, fmt.Errorf("unable to flush the decoder: %w", err))
-	}
+	r.flushLocker.Do(ctx, func() {
+		if err := r.decoderToEncoder(ctx, func(
+			ctx context.Context,
+			outputFramesCh chan<- frame.Output,
+		) (_err error) {
+			defer func() {
+				r := recover()
+				if r != nil {
+					_err = fmt.Errorf("panic: %v:\n%s", r, debug.Stack())
+				}
+			}()
+			return r.Decoder.Flush(ctx, outputPacketCh, outputFramesCh)
+		}, outputPacketCh, outputFramesCh); err != nil {
+			errs = append(errs, fmt.Errorf("unable to flush the decoder: %w", err))
+		}
 
-	if err := r.Encoder.Flush(ctx, outputPacketCh, outputFramesCh); err != nil {
-		errs = append(errs, fmt.Errorf("unable to flush the encoder: %w", err))
-	}
+		if err := r.Encoder.Flush(ctx, outputPacketCh, outputFramesCh); err != nil {
+			errs = append(errs, fmt.Errorf("unable to flush the encoder: %w", err))
+		}
+	})
+
 	return errors.Join(errs...)
 }

@@ -27,6 +27,40 @@ func newNTSCRationalFromFloat64(f float64) *big.Rat {
 	return nil
 }
 
+func RationalFromApproxFloat64(fps float64) Rational {
+	var r Rational
+	if float64(int(fps)) == fps {
+		r.Num = int(fps)
+		r.Den = 1
+		return r
+	}
+	rat := newNTSCRationalFromFloat64(fps)
+	if rat == nil {
+		for _, order := range []float64{1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6} {
+			rat = dectofrac.NewRatP(fps, order)
+			if v, _ := rat.Float64(); v != math.Round(fps) {
+				break
+			}
+		}
+	}
+	r.Num = int(rat.Num().Int64())
+	r.Den = int(rat.Denom().Int64())
+	return r
+}
+
+func RationalFromFloat64(fps float64) Rational {
+	var r Rational
+	if float64(int(fps)) == fps {
+		r.Num = int(fps)
+		r.Den = 1
+		return r
+	}
+	rat := dectofrac.NewRatP(fps, 1e-6)
+	r.Num = int(rat.Num().Int64())
+	r.Den = int(rat.Denom().Int64())
+	return r
+}
+
 func RationalFromString(s string) (*Rational, error) {
 	var r Rational
 	switch {
@@ -41,35 +75,13 @@ func RationalFromString(s string) (*Rational, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse Rational from %q: %w", s, err)
 		}
-		if float64(int(fps)) == fps {
-			r.Num = int(fps)
-			r.Den = 1
-			return &r, nil
-		}
-		rat := newNTSCRationalFromFloat64(fps)
-		if rat == nil {
-			for _, order := range []float64{1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6} {
-				rat = dectofrac.NewRatP(fps, order)
-				if v, _ := rat.Float64(); v != math.Round(fps) {
-					break
-				}
-			}
-		}
-		r.Num = int(rat.Num().Int64())
-		r.Den = int(rat.Denom().Int64())
+		r = RationalFromApproxFloat64(fps)
 	default:
 		fps, err := strconv.ParseFloat(s, 64)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse Rational from %q: %w", s, err)
 		}
-		if float64(int(fps)) == fps {
-			r.Num = int(fps)
-			r.Den = 1
-			return &r, nil
-		}
-		rat := dectofrac.NewRatP(fps, 1e-6)
-		r.Num = int(rat.Num().Int64())
-		r.Den = int(rat.Denom().Int64())
+		r = RationalFromFloat64(fps)
 	}
 	if r.Den == 0 {
 		return nil, fmt.Errorf("denominator cannot be zero")

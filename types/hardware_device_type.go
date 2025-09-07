@@ -26,6 +26,8 @@ const (
 
 func (r HardwareDeviceType) String() string {
 	switch r {
+	case 0:
+		return "none"
 	case HardwareDeviceTypeCUDA:
 		return "cuda"
 	case HardwareDeviceTypeDRM:

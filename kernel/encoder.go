@@ -472,6 +472,9 @@ func (e *Encoder[EF]) SendInputFrame(
 
 		return streamEncoder, nil
 	})
+	if err != nil {
+		return fmt.Errorf("unable to get the encoder for stream index %d: %w", input.GetStreamIndex(), err)
+	}
 
 	if codec.IsEncoderRaw(streamEncoder.Encoder) {
 		var err error

@@ -159,9 +159,11 @@ func runTest(
 		outputFactory,
 	))
 
-	vcodecName := codectypes.Name(codecID.String())
+	var vcodecName codectypes.Name
 	if e2eNvencEnable {
-		vcodecName += "_nvenc"
+		vcodecName = codectypes.Name(codecID.String()) + "_nvenc"
+	} else {
+		vcodecName = "libx264"
 	}
 
 	require.NoError(t, streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{

@@ -634,7 +634,8 @@ func (o *Output) reconfigureEncoder(
 			if videoCfg.Resolution != (codectypes.Resolution{}) {
 				encoderFactory.VideoResolution = &videoCfg.Resolution
 			}
-			encoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
+			fps := globaltypes.RationalFromApproxFloat64(videoCfg.AverageFrameRate)
+			encoderFactory.VideoAverageFrameRate = astiav.NewRational(fps.Num, fps.Den)
 			encoderFactory.VideoAverageFrameRate.SetDen(1000)
 			return nil
 		}

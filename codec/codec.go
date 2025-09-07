@@ -110,9 +110,11 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	if c.closer == nil {
 		return nil
 	}
+	logger.Debugf(ctx, "resetting")
 	if err := c.reset(ctx); err != nil {
 		logger.Errorf(ctx, "unable to reset the codec: %v", err)
 	}
+	logger.Debugf(ctx, "closing the codec internals")
 	err := c.closer.Close()
 	c.closer = nil
 	return err
