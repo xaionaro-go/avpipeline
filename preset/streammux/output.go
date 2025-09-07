@@ -611,6 +611,13 @@ func (o *Output) reconfigureEncoder(
 
 	encoderFactory := o.RecoderNode.Processor.Kernel.EncoderFactory
 
+	var videoOptions globaltypes.DictionaryItems
+	videoOptions = append(videoOptions, globaltypes.DictionaryItems{
+		{Key: "forced-idr", Value: "1"},    // to avoid corruptions on switching the outputs
+		{Key: "intra-refresh", Value: "0"}, // to avoid corruptions on switching the outputs
+	}...)
+	videoOptions = append(videoOptions, convertCustomOptions(videoCfg.CustomOptions)...)
+
 	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
 		if len(encoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
@@ -618,7 +625,7 @@ func (o *Output) reconfigureEncoder(
 			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
 			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
 			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
-			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(videoCfg.CustomOptions))
+			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
 			encoderFactory.HardwareDeviceType = types.HardwareDeviceType(videoCfg.HardwareDeviceType)
 			if videoCfg.AverageBitRate != 0 {

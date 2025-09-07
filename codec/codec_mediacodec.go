@@ -28,6 +28,9 @@ func (c *Codec) ffAMediaFormatSetInt32(
 	key string,
 	value int32,
 ) (_err error) {
+	logger.Tracef(ctx, "ffAMediaFormatSetInt32(ctx, '%s', %d)", key, value)
+	defer func() { logger.Tracef(ctx, "/ffAMediaFormatSetInt32(ctx, '%s', %d): %v", key, value, _err) }()
+
 	mediaCodec := avmediacodec.WrapAVCodecContext(
 		xastiav.CFromAVCodecContext(c.codecContext),
 	).PrivData().Codec()
