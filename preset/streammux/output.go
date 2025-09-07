@@ -566,7 +566,17 @@ func (o *Output) reconfigureDecoder(
 	if len(cfg.Output.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	videoCfg := cfg.Output.VideoTrackConfigs[0]
+	videoCfg := cfg.Output.VideoTrackConfigs[0] // TODO: it should use cfg.Input!
+
+	var videoOptions globaltypes.DictionaryItems
+	for _, opt := range convertCustomOptions(videoCfg.CustomOptions) {
+		switch opt.Key {
+		case "create_window":
+			videoOptions = append(videoOptions, opt)
+		case "pixel_format":
+			videoOptions = append(videoOptions, opt)
+		}
+	}
 
 	decoder := o.RecoderNode.Processor.Kernel.Decoder
 	decoderFactory := decoder.DecoderFactory
@@ -576,6 +586,7 @@ func (o *Output) reconfigureDecoder(
 			logger.Debugf(ctx, "the decoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 			decoderFactory.HardwareDeviceType = videoCfg.GetDecoderHardwareDeviceType()
 			decoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.GetDecoderHardwareDeviceName())
+			decoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
 			return nil
 		}
 		if videoCfg.GetDecoderHardwareDeviceType() != types.HardwareDeviceType(decoderFactory.HardwareDeviceType) {
