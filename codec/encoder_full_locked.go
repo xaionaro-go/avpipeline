@@ -217,6 +217,10 @@ func (e *EncoderFullLocked) reinitEncoder(
 	logger.Debugf(ctx, "reinitEncoder")
 	defer func() { logger.Debugf(ctx, "/reinitEncoder: %v", _err) }()
 
+	if err := e.codecInternals.closeLocked(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
+	}
+
 	var opts EncoderFactoryOptions
 	if e.ReusableResources != nil {
 		opts = append(opts, EncoderFactoryOptionReusableResources{Resources: e.ReusableResources})
@@ -228,11 +232,7 @@ func (e *EncoderFullLocked) reinitEncoder(
 
 	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) is going to be closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
 
-	oldInternals := e.codecInternals
 	e.codecInternals = newEncoder.codecInternals
-	if err := oldInternals.closeLocked(ctx); err != nil {
-		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
-	}
 	e.IsDirtyValue.Store(false)
 	e.InitTS = newEncoder.InitTS
 	e.Quality = newEncoder.Quality

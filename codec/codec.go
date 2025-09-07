@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"runtime/debug"
 	"strconv"
@@ -116,6 +117,9 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "resetting")
 	if err := c.reset(ctx); err != nil {
 		logger.Errorf(ctx, "unable to reset the codec: %v", err)
+		if err == io.EOF {
+			return err
+		}
 	}
 	logger.Debugf(ctx, "closing the codec internals")
 	belt.Flush(ctx) // we want to flush the logs before a SEGFAULT-risky operation:
@@ -156,11 +160,18 @@ func (c *codecInternals) reset(ctx context.Context) (_err error) {
 		pkt := packet.Pool.Get()
 		err := c.codecContext.ReceivePacket(pkt)
 		packet.Pool.Put(pkt)
-		logger.Warnf(ctx, "codec contained a packet")
-		if err != nil {
-			logger.Debugf(ctx, "ReceivePacket loop finished with: %v", err)
-			break
+		switch err {
+		case nil:
+			logger.Warnf(ctx, "codec contained a packet")
+			continue
+		case astiav.ErrEof:
+			logger.Debugf(ctx, "ReceivePacket draining loop successfully finished")
+		case astiav.ErrEinval:
+			return io.EOF
+		default:
+			return fmt.Errorf("unable to receive packet: %w", err)
 		}
+		break
 	}
 	caps := c.codec.Capabilities()
 	logger.Tracef(ctx, "Capabilities: %08x", caps)

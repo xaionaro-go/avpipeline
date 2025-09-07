@@ -46,7 +46,7 @@ func ptr[T any](v T) *T {
 }
 
 func TestE2E(t *testing.T) {
-	loggerLevel := logger.LevelTrace
+	loggerLevel := logger.LevelWarning
 	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
 	l := logrus.Default().WithLevel(loggerLevel)
 	ctx := logger.CtxWithLogger(context.Background(), l)
