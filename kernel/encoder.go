@@ -899,7 +899,7 @@ func (e *Encoder[EF]) send(
 
 	if encoderDebug {
 		if outPktWrapped.Duration() <= 0 {
-			logger.Errorf(ctx, "packet duration is not set")
+			logger.Warnf(ctx, "packet duration is not set")
 		}
 	}
 
