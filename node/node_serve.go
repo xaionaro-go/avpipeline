@@ -6,6 +6,7 @@ import (
 	"io"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
@@ -86,11 +87,16 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	}()
 
 	procNodeEndCtx := ctx
+	t := time.NewTicker(100 * time.Millisecond)
+	defer t.Stop()
 	for {
 		logger.Tracef(ctx, "Serve[%s]: an iteration started", nodeKey)
 		pktCh, frameCh := n.Processor.OutputPacketChan(), n.Processor.OutputFrameChan()
 		n.updateProcInfo(ctx)
 		select {
+		case <-t.C:
+			// TODO: delete me
+			n.updateProcInfo(ctx)
 		case <-procNodeEndCtx.Done():
 			logger.Debugf(ctx, "Serve[%s]: initiating closing", nodeKey)
 			defer func() { logger.Debugf(ctx, "Serve[%s]: /closed", nodeKey) }()
