@@ -8,14 +8,15 @@ import (
 )
 
 type InputAudioTrackConfig struct {
+	TrackID    *int            `yaml:"track_id,omitempty"`
 	CodecName  codectypes.Name `yaml:"codec_name"`
 	SampleRate uint32          `yaml:"sample_rate"`
 }
 
 type InputVideoTrackConfig struct {
+	TrackID    *int                  `yaml:"track_id,omitempty"`
 	CodecName  codectypes.Name       `yaml:"codec_name"`
 	Resolution codectypes.Resolution `yaml:"resolution"`
-	FrameRate  types.Rational        `yaml:"fps"`
 }
 
 type OutputAudioTrackConfig struct {
