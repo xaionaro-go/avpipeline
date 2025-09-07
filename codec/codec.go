@@ -44,6 +44,7 @@ type codecInternals struct {
 	hardwarePixelFormat   astiav.PixelFormat
 	hardwareContextType   hardwareContextType
 	closer                *astikit.Closer
+	quirks                Quirks
 }
 
 type Codec struct {
@@ -502,6 +503,7 @@ func newCodec(
 		c.codecContext.SetExtraData(codecParameters.ExtraData())
 	}
 
+	c.setQuirks(ctx)
 	c.logHints(ctx)
 	logger.Tracef(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, options)
 	if err := c.codecContext.Open(c.codec, options); err != nil {
@@ -510,6 +512,9 @@ func newCodec(
 
 	setFinalizer(ctx, c.codecInternals, func(c *codecInternals) { c.closeLocked(ctx) })
 	return c, nil
+}
+
+func (c *Codec) setQuirks(ctx context.Context) {
 }
 
 func (c *Codec) logHints(ctx context.Context) {
