@@ -523,6 +523,12 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	}()
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)
+	if encV == nil {
+		return fmt.Errorf("unable to get video encoder")
+	}
+	if encA == nil {
+		return fmt.Errorf("unable to get audio encoder")
+	}
 	var curACodecName, curVCodecName codec.Name
 	var curRes codec.Resolution
 	if codec.IsEncoderCopy(encV) {

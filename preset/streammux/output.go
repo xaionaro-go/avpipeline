@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -49,6 +50,10 @@ type FPSFractionGetter interface {
 	GetFPSFraction(ctx context.Context) (num, den uint32)
 }
 
+type OutputStreamsIniter interface {
+	InitOutputStreams(ctx context.Context, receiver node.Abstract, outputKey OutputKey) error
+}
+
 type OutputCustomData struct {
 	*Output
 }
@@ -66,6 +71,7 @@ type Output struct {
 	OutputNode        node.Abstract
 	OutputNodeConfig  OutputConfig
 	FPSFractionGetter FPSFractionGetter
+	InitOnce          sync.Once
 }
 
 type OutputConfig struct {
@@ -132,7 +138,8 @@ func newOutput[C any](
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
 	streamIndexAssigner kernel.StreamIndexAssigner,
-	FPSFractionGetter FPSFractionGetter,
+	streamsIniter OutputStreamsIniter,
+	fpsFractionGetter FPSFractionGetter,
 ) (_ret *Output, _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
@@ -211,7 +218,7 @@ func newOutput[C any](
 		)),
 		OutputNode:        outputNode,
 		OutputNodeConfig:  outputConfig,
-		FPSFractionGetter: FPSFractionGetter,
+		FPSFractionGetter: fpsFractionGetter,
 	}
 	o.InputFilter.CustomData = OutputCustomData{Output: o}
 	o.InputFixer.SetCustomData(OutputCustomData{Output: o})
@@ -236,6 +243,21 @@ func newOutput[C any](
 	o.InputFilter.AddPushPacketsTo(
 		inputFixer,
 		packetfiltercondition.Packet{Condition: o.InputThrottler},
+		packetfiltercondition.Function(func(
+			ctx context.Context,
+			_ packetfiltercondition.Input,
+		) bool {
+			if streamsIniter == nil {
+				return true
+			}
+			o.InitOnce.Do(func() {
+				err := streamsIniter.InitOutputStreams(ctx, inputFixer, outputKey)
+				if err != nil {
+					logger.Errorf(ctx, "unable to init output streams: %v", err)
+				}
+			})
+			return true
+		}),
 	)
 	o.InputFixer.AddPushPacketsTo(o.RecoderNode)
 	o.RecoderNode.AddPushPacketsTo(

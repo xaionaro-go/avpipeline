@@ -32,11 +32,12 @@ func TestOutputNodes(t *testing.T) {
 	output, err := newOutput[struct{}](
 		ctx,
 		1,
-		newInputNode[struct{}](ctx),
+		newInputNode[struct{}](ctx, nil),
 		dummyOutputFactory{},
 		OutputKey{
 			Resolution: types.Resolution{Width: 1920, Height: 1080},
 		},
+		nil,
 		nil,
 		nil,
 		nil,

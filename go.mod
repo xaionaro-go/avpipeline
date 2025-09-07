@@ -1,6 +1,6 @@
 module github.com/xaionaro-go/avpipeline
 
-go 1.24.2
+go 1.24.4
 
 replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20250828234701-33c10cd451a6
 
@@ -42,8 +42,8 @@ require (
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
-	golang.org/x/image v0.25.0 // indirect
-	golang.org/x/net v0.39.0 // indirect
+	golang.org/x/image v0.27.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
@@ -72,4 +72,5 @@ require (
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
 	golang.org/x/sys v0.33.0
 	lukechampine.com/blake3 v1.4.0 // indirect
+	tailscale.com v1.86.5
 )

@@ -33,6 +33,7 @@ import (
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
+	"tailscale.com/util/ringbuffer"
 )
 
 const (
@@ -71,8 +72,10 @@ type StreamMux[C any] struct {
 	nodeboilerplate.Counters
 	nodeboilerplate.InputFilter
 
-	startedCh *chan struct{}
-	waitGroup sync.WaitGroup
+	// private:
+	startedCh     *chan struct{}
+	waitGroup     sync.WaitGroup
+	lastKeyFrames map[int]*ringbuffer.RingBuffer[packet.Input]
 }
 
 type OutputFactory interface {
@@ -103,15 +106,16 @@ func NewWithCustomData[C any](
 	outputFactory OutputFactory,
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
-		InputNode:     newInputNode[C](ctx),
 		OutputSwitch:  barrierstategetter.NewSwitch(),
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
 		OutputsMap:    map[OutputKey]*Output{},
 		MuxMode:       muxMode,
 
-		startedCh: ptr(make(chan struct{})),
+		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packet.Input]{},
+		startedCh:     ptr(make(chan struct{})),
 	}
+	s.InputNode = newInputNode[C](ctx, s)
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
 	s.CurrentInputBitRate.Store(math.MaxUint64)
 	s.initSwitches(ctx)
@@ -273,6 +277,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		s.OutputSwitch.Output(int32(outputID)),
 		s.OutputSyncer.Output(int32(outputID)),
 		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
+		s,
 		s,
 	)
 	if err != nil {
@@ -789,4 +794,80 @@ func (s *StreamMux[C]) getVideoEncoderLocked(
 	}
 
 	return vEnc, aEnc
+}
+
+func (s *StreamMux[C]) onInputPacket(
+	ctx context.Context,
+	pkt *packet.Input,
+) (_err error) {
+	logger.Tracef(ctx, "onInputPacket: %s", pkt)
+	defer func() { logger.Tracef(ctx, "/onInputPacket: %s: %v", pkt, _err) }()
+
+	if pkt.GetMediaType() != astiav.MediaTypeVideo {
+		return nil
+	}
+
+	isKey := pkt.Flags().Has(astiav.PacketFlagKey)
+	if !isKey {
+		return nil
+	}
+
+	streamIndex := pkt.StreamIndex()
+
+	s.Locker.Do(ctx, func() {
+		if s.lastKeyFrames[streamIndex] == nil {
+			s.lastKeyFrames[streamIndex] = ringbuffer.New[packet.Input](2)
+		}
+		s.lastKeyFrames[streamIndex].Add(packet.BuildInput(
+			packet.CloneAsReferenced(pkt.Packet),
+			pkt.StreamInfo,
+		))
+	})
+	return nil
+}
+
+func (s *StreamMux[C]) InitOutputStreams(
+	ctx context.Context,
+	receiver node.Abstract,
+	outputKey OutputKey,
+) (_err error) {
+	isBypass := outputKey.VideoCodec == codectypes.Name(codec.NameCopy)
+	logger.Debugf(ctx, "InitOutputStreams: isBypass:%v", isBypass)
+	defer func() { logger.Debugf(ctx, "/InitOutputStreams: isBypass:%v: %v", isBypass, _err) }()
+	if !isBypass {
+		return nil
+	}
+	return xsync.DoA2R1(ctx, &s.Locker, s.initOutputStreamsLocked, ctx, receiver)
+}
+
+func (s *StreamMux[C]) initOutputStreamsLocked(
+	ctx context.Context,
+	receiver node.Abstract,
+) (_err error) {
+	logger.Tracef(ctx, "initOutputStreamsLocked")
+	defer func() { logger.Tracef(ctx, "/initOutputStreamsLocked: %v", _err) }()
+	counters := receiver.GetCountersPtr()
+	inputCh := receiver.GetProcessor().InputPacketChan()
+	var streamIndices []int
+	for streamIndex := range s.lastKeyFrames {
+		streamIndices = append(streamIndices, streamIndex)
+	}
+	slices.Sort(streamIndices)
+	for _, streamIndex := range streamIndices {
+		buf := s.lastKeyFrames[streamIndex]
+		items := buf.GetAll()
+		logger.Debugf(ctx, "initOutputStreamsLocked: re-sending %d last keyframes for stream index %d", len(items), streamIndex)
+		for _, pkt := range items {
+			mediaType := globaltypes.MediaType(pkt.GetMediaType())
+			dataSize := uint64(len(pkt.Data()))
+			counters.Addressed.Packets.Get(mediaType).Increment(dataSize)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case inputCh <- pkt:
+			}
+			counters.Received.Packets.Get(mediaType).Increment(dataSize)
+		}
+	}
+	return nil
 }
