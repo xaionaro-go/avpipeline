@@ -14,7 +14,6 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
-	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
@@ -391,18 +390,6 @@ func newCodec(
 				options.Set("bitrate_mode", "cbr", 0) // TODO: do we need to deduplicate this with the line above?
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
-				if v := options.Get("priority", nil, 0); v != nil {
-					priority, err := strconv.ParseInt(v.Value(), 10, 64)
-					if err != nil {
-						logger.Warnf(ctx, "unable to parse priority option value '%s' as int: %v", v.Value(), err)
-					} else {
-						logIfError(c.ffAMediaFormatSetInt32(ctx, mediacodec.KEY_PRIORITY, int32(priority)))
-					}
-				}
-				if v := options.Get("forced-idr", nil, 0); v != nil && v.Value() != "0" {
-					logIfError(c.ffAMediaFormatSetInt32(ctx, mediacodec.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1))
-					logIfError(c.ffAMediaFormatSetInt32(ctx, mediacodec.KEY_INTRA_REFRESH_PERIOD, 0))
-				}
 				if options.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 					logIfError(options.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
