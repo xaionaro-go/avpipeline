@@ -175,3 +175,17 @@ const (
 	KEY_PICTURE_PROFILE_INSTANCE           = "picture-profile-instance"
 	KEY_FEATURE_                           = "feature-"
 )
+
+// see: https://developer.android.com/reference/android/media/MediaCodec
+const (
+	PARAMETER_KEY_HDR10_PLUS_INFO    = "hdr10-plus-info"
+	PARAMETER_KEY_LOW_LATENCY        = "low-latency"
+	PARAMETER_KEY_OFFSET_TIME        = "time-offset-us"
+	PARAMETER_KEY_QP_OFFSET_MAP      = "qp-offset-map"
+	PARAMETER_KEY_QP_OFFSET_RECTS    = "qp-offset-rects"
+	PARAMETER_KEY_REQUEST_SYNC_FRAME = "request-sync"
+	PARAMETER_KEY_SUSPEND            = "drop-input-frames"
+	PARAMETER_KEY_TUNNEL_PEEK        = "tunnel-peek"
+	PARAMETER_KEY_SUSPEND_TIME       = "drop-start-time-us"
+	PARAMETER_KEY_VIDEO_BITRATE      = "video-bitrate"
+)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/quality"
 )
@@ -28,7 +29,7 @@ func (e *EncoderFullLocked) setQualityMediacodecConstantBitrate(
 	ctx context.Context,
 	q quality.ConstantBitrate,
 ) error {
-	if err := e.ffAMediaFormatSetInt32(ctx, "video-bitrate", int32(q)); err != nil {
+	if err := e.ffAMediaFormatSetInt32(ctx, mediacodec.PARAMETER_KEY_VIDEO_BITRATE, int32(q)); err != nil {
 		return fmt.Errorf("unable to set video-bitrate: %w", err)
 	}
 

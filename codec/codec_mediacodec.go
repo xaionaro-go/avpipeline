@@ -34,8 +34,11 @@ func (c *Codec) ffAMediaFormatSetInt32(
 	mediaCodec := avmediacodec.WrapAVCodecContext(
 		xastiav.CFromAVCodecContext(c.codecContext),
 	).PrivData().Codec()
+	logger.Tracef(ctx, "obtained the mediaCodec: %p", mediaCodec)
 
 	mediaCodecFmt := mediaCodec.Format()
+	logger.Tracef(ctx, "obtained the mediaCodecFmt")
+
 	mediaCodecFmt.SetInt32(key, value)
 	result, err := mediaCodecFmt.GetInt32(key)
 	if err != nil {

@@ -6,6 +6,7 @@ package codec
 import (
 	"context"
 
+	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
@@ -18,5 +19,5 @@ func (d *DecoderLocked) setLowLatencyMediacodec(
 	if v {
 		i = 1
 	}
-	return d.ffAMediaFormatSetInt32(ctx, "low-latency", i)
+	return d.ffAMediaFormatSetInt32(ctx, mediacodec.PARAMETER_KEY_LOW_LATENCY, i)
 }
