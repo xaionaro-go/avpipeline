@@ -1010,8 +1010,8 @@ func (e *Encoder[EF]) IsDirty(ctx context.Context) (_ret bool) {
 }
 
 func (e *Encoder[EF]) isDirty(ctx context.Context) (_ret bool) {
-	logger.Debugf(ctx, "isDirty")
-	defer func() { logger.Debugf(ctx, "/isDirty: %v", _ret) }()
+	logger.Tracef(ctx, "isDirty")
+	defer func() { logger.Tracef(ctx, "/isDirty: %v", _ret) }()
 	defer func() { e.isDirtyCache.Store(_ret) }()
 	for _, encoder := range e.encoders {
 		if encoder.IsDirty() {

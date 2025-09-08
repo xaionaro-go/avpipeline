@@ -400,8 +400,8 @@ func (d *Decoder[DF]) IsDirty(
 func (d *Decoder[DF]) isDirtyLocked(
 	ctx context.Context,
 ) (_ret bool) {
-	logger.Debugf(ctx, "isDirty")
-	defer func() { logger.Debugf(ctx, "/isDirty: %v", _ret) }()
+	logger.Tracef(ctx, "isDirty")
+	defer func() { logger.Tracef(ctx, "/isDirty: %v", _ret) }()
 	defer func() { d.IsDirtyCache.Store(_ret) }()
 	for _, decoder := range d.Decoders {
 		if decoder.IsDirty(ctx) {
