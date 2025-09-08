@@ -386,8 +386,12 @@ func newCodec(
 			}
 			if codecParameters.BitRate() > 0 {
 				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
-				options.Set("rc", "cbr", 0)
-				options.Set("bitrate_mode", "cbr", 0) // TODO: do we need to deduplicate this with the line above?
+				if v := options.Get("rc", nil, 0); v == nil {
+					options.Set("rc", "vbr", 0)
+				}
+				if v := options.Get("bitrate_mode", nil, 0); v == nil {
+					options.Set("bitrate_mode", "vbr", 0) // TODO: do we need to deduplicate this with the line above?
+				}
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				if options.Get("pix_fmt", nil, 0) == nil {
