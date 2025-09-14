@@ -57,7 +57,7 @@ func (s *StreamMux[C]) Serve(
 					assert(ctx, s.OutputSwitch != nil)
 					if int32(output.ID) != s.OutputSwitch.CurrentValue.Load() {
 						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
-						delete(s.OutputsMap, output.GetKey())
+						s.OutputsMap.Delete(output.GetKey())
 						output.Close(ctx)
 						continue
 					}
@@ -156,9 +156,10 @@ func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 		s.InputNode,
 	}
 	s.Locker.Do(ctx, func() {
-		for _, output := range s.OutputsMap {
+		s.OutputsMap.Range(func(_ OutputKey, output *Output) bool {
 			nodes = append(nodes, output.Nodes()...)
-		}
+			return true
+		})
 	})
 	return nodes
 }

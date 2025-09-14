@@ -577,7 +577,13 @@ func (e *Encoder[EF]) SendInputFrame(
 			}
 		}
 
-		err = e.drain(ctx, outputPacketsCh, encoder.Drain, outputStream, frameInfo)
+		err = e.drain(
+			ctx,
+			outputPacketsCh,
+			encoder.Drain,
+			outputStream,
+			frameInfo,
+		)
 		if err != nil {
 			return fmt.Errorf("unable to drain: %w", err)
 		}

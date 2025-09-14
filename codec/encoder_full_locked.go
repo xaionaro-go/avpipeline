@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -262,8 +263,8 @@ func (e *EncoderFullLocked) Flush(
 	callback CallbackPacketReceiver,
 ) (_err error) {
 	defer e.checkCallCount(ctx)()
-	logger.Tracef(ctx, "Flush")
-	defer func() { logger.Tracef(ctx, "/Flush: %v", _err) }()
+	logger.Debugf(ctx, "Flush")
+	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
 
 	defer func() {
 		if _err == nil {
@@ -282,31 +283,38 @@ func (e *EncoderFullLocked) Flush(
 		return nil
 	}
 
+	if caps&astiav.CodecCapabilityEncoderFlush != 0 {
+		logger.Tracef(ctx, "flushing buffers")
+		e.codecContext.FlushBuffers()
+
+		err := e.Drain(ctx, callback)
+		if err != nil {
+			return fmt.Errorf("unable to drain after flushing buffers: %w", err)
+		}
+		return
+	}
+
 	logger.Tracef(ctx, "sending the FLUSH REQUEST pseudo-frame")
 	err := e.codecContext.SendFrame(nil)
 	switch {
 	case err == nil:
 		// flushing had just been initiated
 	case errors.Is(err, astiav.ErrEof):
-		return nil // the encoder is already flushed
+		// the encoder is already flushed
 	default:
 		return fmt.Errorf("unable to send the FLUSH REQUEST pseudo-frame: %w", err)
 	}
 
+	logger.Tracef(ctx, "waiting for the encoder to be flushed")
 	err = e.Drain(ctx, callback)
-	if err != nil {
+	if err != io.EOF {
 		return fmt.Errorf("unable to drain: %w", err)
 	}
 
-	if caps&astiav.CodecCapabilityEncoderFlush != 0 {
-		logger.Tracef(ctx, "flushing buffers")
-		e.codecContext.FlushBuffers()
-	} else {
-		logger.Warnf(ctx, "the encoder has no flush capability, reinitializing the encoder")
-		err := e.reinitEncoder(ctx)
-		if err != nil {
-			return fmt.Errorf("unable to reinit the encoder after draining: %w", err)
-		}
+	logger.Warnf(ctx, "the encoder has no flush capability, reinitializing the encoder")
+	err = e.reinitEncoder(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to reinit the encoder after draining: %w", err)
 	}
 
 	return nil
@@ -333,7 +341,7 @@ func (e *EncoderFullLocked) Drain(
 			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
 				e.IsDirtyValue.Store(false)
-				return nil
+				return io.EOF
 			}
 			if isEAgain {
 				if caps&astiav.CodecCapabilityDelay == 0 {

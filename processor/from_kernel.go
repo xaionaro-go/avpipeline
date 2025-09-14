@@ -86,6 +86,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
+		defer close(p.OutputPacketCh)
 		for {
 			select {
 			case <-ctx.Done():
@@ -105,6 +106,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
+		defer close(p.OutputFrameCh)
 		for {
 			select {
 			case <-ctx.Done():
@@ -193,8 +195,6 @@ func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	defer func() {
 		close(p.preOutputPacketsCh)
 		close(p.preOutputFramesCh)
-		close(p.OutputPacketCh)
-		close(p.OutputFrameCh)
 	}()
 
 	var errs []error

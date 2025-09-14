@@ -386,11 +386,18 @@ func newCodec(
 			}
 			if codecParameters.BitRate() > 0 {
 				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
+				rcMode := "vbr"
 				if v := options.Get("rc", nil, 0); v == nil {
-					options.Set("rc", "vbr", 0)
+					options.Set("rc", rcMode, 0)
 				}
 				if v := options.Get("bitrate_mode", nil, 0); v == nil {
-					options.Set("bitrate_mode", "vbr", 0) // TODO: do we need to deduplicate this with the line above?
+					options.Set("bitrate_mode", rcMode, 0) // TODO: do we need to deduplicate this with the line above?
+				}
+				if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+					// to allow low bitrates:
+					options.Set("qp_i_max", "60", 0)
+					options.Set("qp_p_max", "60", 0)
+					options.Set("qp_b_max", "60", 0)
 				}
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {

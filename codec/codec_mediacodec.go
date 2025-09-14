@@ -39,12 +39,18 @@ func (c *Codec) ffAMediaFormatSetInt32(
 	mediaCodecFmt := mediaCodec.Format()
 	logger.Tracef(ctx, "obtained the mediaCodecFmt")
 
-	mediaCodecFmt.SetInt32(key, value)
 	result, err := mediaCodecFmt.GetInt32(key)
 	if err != nil {
 		return fmt.Errorf("unable to get the current value of '%s': %w", key, err)
 	}
-	logger.Tracef(ctx, "resulting value: %d", result)
+	logger.Debugf(ctx, "%s: previous value: %d", key, result)
+
+	mediaCodecFmt.SetInt32(key, value)
+	result, err = mediaCodecFmt.GetInt32(key)
+	if err != nil {
+		return fmt.Errorf("unable to get the current value of '%s' (after setting it): %w", key, err)
+	}
+	logger.Debugf(ctx, "%s: resulting value: %d", key, result)
 	if result != value {
 		return fmt.Errorf("verification failed: requested value is %d, but the resulting value is %d", value, result)
 	}

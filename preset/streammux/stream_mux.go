@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -53,7 +52,8 @@ type StreamMux[C any] struct {
 	// nodes:
 	InputNode     *NodeInput[C]
 	Outputs       []*Output
-	OutputsMap    map[OutputKey]*Output
+	OutputsMap    xsync.Map[OutputKey, *Output]
+	OutputsLocker xsync.Mutex
 	OutputFactory OutputFactory
 
 	// aux
@@ -109,7 +109,6 @@ func NewWithCustomData[C any](
 		OutputSwitch:  barrierstategetter.NewSwitch(),
 		OutputSyncer:  barrierstategetter.NewSwitch(),
 		OutputFactory: outputFactory,
-		OutputsMap:    map[OutputKey]*Output{},
 		MuxMode:       muxMode,
 
 		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packet.Input]{},
@@ -147,7 +146,7 @@ func (s *StreamMux[C]) initSwitches(
 	if switchDebug {
 		s.OutputSwitch.SetOnBeforeSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 			logger.Debugf(ctx, "s.OutputSwitch.SetOnBeforeSwitch: %d -> %d", from, to)
-			outputNext := xsync.DoR1(ctx, &s.Locker, func() *Output {
+			outputNext := xsync.DoR1(ctx, &s.OutputsLocker, func() *Output {
 				return s.Outputs[to]
 			})
 			outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
@@ -155,7 +154,7 @@ func (s *StreamMux[C]) initSwitches(
 	}
 	s.OutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		logger.Debugf(ctx, "s.OutputSwitch.SetOnAfterSwitch: %d -> %d", from, to)
-		outputPrev := xsync.DoR1(ctx, &s.Locker, func() *Output {
+		outputPrev := xsync.DoR1(ctx, &s.OutputsLocker, func() *Output {
 			return s.Outputs[from]
 		})
 		if switchDebug {
@@ -190,11 +189,13 @@ func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 	if err := s.InputNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close the input node: %w", err))
 	}
-	for _, output := range s.Outputs {
-		if err := output.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("unable to close the output chain %d: %w", output.ID, err))
+	s.OutputsLocker.Do(ctx, func() {
+		for _, output := range s.Outputs {
+			if err := output.Close(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("unable to close the output chain %d: %w", output.ID, err))
+			}
 		}
-	}
+	})
 	if s.AutoBitRateHandler != nil {
 		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler: %w", err))
@@ -210,7 +211,7 @@ func (s *StreamMux[C]) setPreferredOutput(
 	logger.Tracef(ctx, "setPreferredOutput(ctx, %s)", outputKey)
 	defer func() { logger.Tracef(ctx, "/setPreferredOutput(ctx, %s): %v", outputKey, _err) }()
 
-	output := s.OutputsMap[outputKey]
+	output, _ := s.OutputsMap.Load(outputKey)
 
 	// the order is important to avoid race conditions:
 	id1 := s.OutputSyncer.GetValue(ctx)
@@ -227,14 +228,14 @@ func (s *StreamMux[C]) setPreferredOutput(
 	return nil
 }
 
-func (s *StreamMux[C]) InitOutput(
+func (s *StreamMux[C]) GetOrInitOutput(
 	ctx context.Context,
 	outputKey types.OutputKey,
 	opts ...InitOutputOption,
 ) (output *Output, _err error) {
-	logger.Tracef(ctx, "InitOutput(%#+v)", outputKey)
-	defer func() { logger.Tracef(ctx, "/InitOutput(%#+v): %v", outputKey, _err) }()
-	return xsync.DoA3R2(ctx, &s.Locker, s.getOrInitOutputLocked, ctx, outputKey, opts)
+	logger.Tracef(ctx, "GetOrInitOutput(%#+v)", outputKey)
+	defer func() { logger.Tracef(ctx, "/GetOrInitOutput(%#+v): %v", outputKey, _err) }()
+	return xsync.DoA3R2(ctx, &s.OutputsLocker, s.getOrInitOutputLocked, ctx, outputKey, opts)
 }
 
 func (s *StreamMux[C]) getOrInitOutputLocked(
@@ -249,9 +250,10 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		return nil, fmt.Errorf("output resolution is not set")
 	}
 
-	if output, ok := s.OutputsMap[outputKey]; ok {
+	if output, ok := s.OutputsMap.Load(outputKey); ok {
 		return output, nil
 	}
+
 	switch s.MuxMode {
 	case types.UndefinedMuxMode:
 		return nil, fmt.Errorf("mux mode is not defined")
@@ -284,7 +286,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		return nil, fmt.Errorf("unable to create an output: %w", err)
 	}
 	s.Outputs = append(s.Outputs, output)
-	s.OutputsMap[outputKey] = output
+	s.OutputsMap.Store(outputKey, output)
 	s.Input().AddPushPacketsTo(output.Input())
 	err = avpipeline.NotifyAboutPacketSources(ctx, s.InputNodeAsPacketSource, output.Input())
 	if err != nil {
@@ -404,7 +406,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 func (s *StreamMux[C]) GetAllStats(
 	ctx context.Context,
 ) map[string]globaltypes.Statistics {
-	return xsync.DoA1R1(ctx, &s.Locker, s.getAllStatsLocked, ctx)
+	return xsync.DoA1R1(ctx, &s.OutputsLocker, s.getAllStatsLocked, ctx)
 }
 
 func (s *StreamMux[C]) getAllStatsLocked(
@@ -415,14 +417,15 @@ func (s *StreamMux[C]) getAllStatsLocked(
 		m[key] = nodetypes.ToStatistics(n.GetCountersPtr(), n.GetProcessor().CountersPtr())
 	}
 	tryGetStats("Input", s.InputNode)
-	for outputKey, output := range s.OutputsMap {
+	s.OutputsMap.Range(func(outputKey OutputKey, output *Output) bool {
 		tryGetStats(fmt.Sprintf("Output(%s):InputFilter", outputKey), output.InputFilter)
 		tryGetStats(fmt.Sprintf("Output(%s):InputFixer", outputKey), output.InputFixer)
 		tryGetStats(fmt.Sprintf("Output(%s):RecoderNode", outputKey), output.RecoderNode)
 		tryGetStats(fmt.Sprintf("Output(%s):MapIndexes", outputKey), output.MapIndices)
 		tryGetStats(fmt.Sprintf("Output(%s):OutputFixer", outputKey), output.OutputFixer)
 		tryGetStats(fmt.Sprintf("Output(%s):OutputSyncFilter", outputKey), output.OutputSyncer)
-	}
+		return true
+	})
 	return m
 }
 
@@ -555,7 +558,7 @@ func (s *StreamMux[C]) waitForActiveOutputLocked(
 func (s *StreamMux[C]) GetActiveOutput(
 	ctx context.Context,
 ) *Output {
-	return xsync.DoA1R1(ctx, &s.Locker, s.getActiveOutputLocked, ctx)
+	return xsync.DoA1R1(ctx, &s.OutputsLocker, s.getActiveOutputLocked, ctx)
 }
 
 func (s *StreamMux[C]) getActiveOutputLocked(
@@ -747,19 +750,24 @@ func (s *StreamMux[C]) GetBestNotBypassOutput(
 ) (_ret *Output) {
 	logger.Tracef(ctx, "GetBestNotBypassOutput")
 	defer func() { logger.Tracef(ctx, "/GetBestNotBypassOutput: %v", _ret) }()
-	return xsync.DoA1R1(ctx, &s.Locker, s.getBestNotBypassOutputLocked, ctx)
+	return xsync.DoA1R1(ctx, &s.OutputsLocker, s.getBestNotBypassOutputLocked, ctx)
 }
 
 func (s *StreamMux[C]) getBestNotBypassOutputLocked(
 	ctx context.Context,
 ) (_ret *Output) {
-	outputKeys := OutputKeys(slices.Collect(maps.Keys(s.OutputsMap)))
+	var outputKeys OutputKeys
+	s.OutputsMap.Range(func(outputKey OutputKey, _ *Output) bool {
+		outputKeys = append(outputKeys, outputKey)
+		return true
+	})
 	outputKeys.Sort()
 	for _, outputKey := range outputKeys {
 		if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
 			continue
 		}
-		return s.OutputsMap[outputKey]
+		output, _ := s.OutputsMap.Load(outputKey)
+		return output
 	}
 	return nil
 }
