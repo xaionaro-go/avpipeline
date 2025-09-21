@@ -4,6 +4,10 @@ import "strings"
 
 type Quirks uint64
 
+const (
+	QuirkBuggyFlushBuffers Quirks = 1 << iota // TODO: delete me, if not set in codec.go
+)
+
 func (f Quirks) HasAll(flag Quirks) bool {
 	return f&flag == flag
 }

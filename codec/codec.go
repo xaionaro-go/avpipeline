@@ -46,7 +46,7 @@ type codecInternals struct {
 	hardwarePixelFormat   astiav.PixelFormat
 	hardwareContextType   hardwareContextType
 	closer                *astikit.Closer
-	_                     Quirks // unused, yet
+	quirks                Quirks
 }
 
 type Codec struct {
@@ -67,23 +67,27 @@ func (c *Codec) CodecContext() *astiav.CodecContext {
 }
 
 func (c *Codec) MediaType() astiav.MediaType {
-	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.MediaType {
-		if c.codecContext == nil {
-			logger.Errorf(context.TODO(), "codecContext == nil")
-			return astiav.MediaTypeUnknown
-		}
-		return c.codecContext.MediaType()
-	})
+	return xsync.DoR1(context.TODO(), &c.locker, c.mediaTypeLocked)
+}
+
+func (c *Codec) mediaTypeLocked() astiav.MediaType {
+	if c.codecContext == nil {
+		logger.Errorf(context.TODO(), "codecContext == nil")
+		return astiav.MediaTypeUnknown
+	}
+	return c.codecContext.MediaType()
 }
 
 func (c *Codec) TimeBase() astiav.Rational {
-	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.Rational {
-		if c.codecContext == nil {
-			logger.Errorf(context.TODO(), "codecContext == nil")
-			return astiav.Rational{}
-		}
-		return c.codecContext.TimeBase()
-	})
+	return xsync.DoR1(context.TODO(), &c.locker, c.timeBaseLocked)
+}
+
+func (c *Codec) timeBaseLocked() astiav.Rational {
+	if c.codecContext == nil {
+		logger.Errorf(context.TODO(), "codecContext == nil")
+		return astiav.Rational{}
+	}
+	return c.codecContext.TimeBase()
 }
 
 func (c *Codec) HardwareDeviceContext() *astiav.HardwareDeviceContext {
@@ -354,6 +358,9 @@ func newCodec(
 			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
 				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
 			}
+			logger.Debugf(ctx, "MediaCodec: enforcing NDK codec")
+			options.Set("ndk_codec", "1", 0) // NDK path
+			options.Set("ndk_async", "0", 0) // disable async (avoid restart-after-flush issue)
 		}
 
 		if isEncoder {
@@ -381,6 +388,9 @@ func newCodec(
 				bFrames, err = strconv.ParseInt(v.Value(), 10, 64)
 				logIfError(err)
 			}
+			if bFrames == 0 {
+				logIfError(options.Set("pts_as_dts", "1", 0))
+			}
 			if v := options.Get("forced-idr", nil, 0); v == nil {
 				logger.Debugf(ctx, "forced-idr is not set, defaulting to 1")
 				logIfError(options.Set("forced-idr", "1", 0))
@@ -397,6 +407,10 @@ func newCodec(
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
 				{
+					// TODO: delete this block, this is a temporary workaround
+					//       until it'll become clear how to bypass the quality floor
+					//       clamping of MediaCodec.
+
 					// to allow low bitrates:
 					h := codecParameters.Height()
 					switch {
@@ -584,8 +598,7 @@ func newCodec(
 	return c, nil
 }
 
-func (c *Codec) setQuirks(ctx context.Context) {
-}
+func (c *Codec) setQuirks(ctx context.Context) {}
 
 func (c *Codec) logHints(ctx context.Context) {
 	if strings.HasSuffix(c.codec.Name(), "_mediacodec") {

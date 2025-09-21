@@ -555,6 +555,7 @@ func (e *Encoder[EF]) SendInputFrame(
 		DTS:         input.PktDts(),
 		Duration:    input.Frame.Duration(),
 		StreamIndex: input.StreamIndex,
+		TimeBase:    input.GetTimeBase(),
 	}
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
 		for _, fittedFrame := range fittedFrames {
@@ -569,9 +570,6 @@ func (e *Encoder[EF]) SendInputFrame(
 			}
 			if fittedFrame.Duration() > 0 {
 				frameInfo.Duration = fittedFrame.Duration()
-			}
-			if frameInfo.TimeBase.Num() == 0 {
-				frameInfo.TimeBase = input.GetTimeBase()
 			}
 
 			fittedFrame.SetOpaque(frameInfo.Bytes())

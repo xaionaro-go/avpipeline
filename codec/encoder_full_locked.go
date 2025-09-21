@@ -31,6 +31,7 @@ type EncoderFullLocked struct {
 	Next              typing.Optional[SwitchEncoderParams]
 	IsDirtyValue      atomic.Bool
 	CallCount         atomic.Int64
+	ForceNextKeyFrame bool
 }
 
 func newEncoderFullLocked(
@@ -80,7 +81,15 @@ func newEncoderFullLocked(
 		ReusableResources:  reusableResources,
 		InitTS:             time.Now(),
 	}
+	switch e.MediaType() {
+	case astiav.MediaTypeVideo:
+		e.ForceNextKeyFrame = true
+	}
 	return e, nil
+}
+
+func (e *EncoderFullLocked) MediaType() astiav.MediaType {
+	return e.mediaTypeLocked()
 }
 
 func (e *EncoderFullLocked) AsLocked() *EncoderFull {
@@ -116,19 +125,36 @@ func (e *EncoderFullLocked) SendFrame(
 	defer e.checkCallCount(ctx)()
 	logger.Tracef(ctx, "SendFrame: pts:%d, pixel_format:%s", f.Pts(), f.PixelFormat())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
-	if encoderDebug {
-		if e.codecContext.Framerate().Float64() == 0 && f.Duration() == 0 {
-			logger.Errorf(ctx, "it is impossible to calculate the framerate, since it is not set on the encoder and the frame has no duration")
+
+	switch e.MediaType() {
+	case astiav.MediaTypeVideo:
+		if e.ForceNextKeyFrame {
+			e.ForceNextKeyFrame = false
+			if !f.Flags().Has(astiav.FrameFlagKey) {
+				logger.Debugf(ctx, "forcing the frame to be a keyframe")
+				f.SetFlags(f.Flags().Add(astiav.FrameFlagKey))
+				f.SetPictureType(astiav.PictureTypeI)
+				if f.Pts() == astiav.NoPtsValue {
+					return fmt.Errorf("cannot force the frame to be a keyframe: frame has no PTS")
+				}
+			}
+		}
+
+		if encoderDebug {
+			if e.codecContext.Framerate().Float64() == 0 && f.Duration() == 0 {
+				logger.Errorf(ctx, "it is impossible to calculate the framerate, since it is not set on the encoder and the frame has no duration")
+			}
+		}
+		if strings.HasSuffix(e.codec.Name(), "_nvenc") {
+			// NVENC has a bug that they ignore timestamps on frames,
+			// thus if we have variadic framerates, which somehow leads
+			// to abysmally small bitrate (at least in my case).
+			//
+			// See also https://video.stackexchange.com/questions/38096/vfr-input-h264-nvenc-output-bitrate-is-based-on-initial-frame-rate-when-i-wa
+			e.setFrameRateFromDuration(ctx, f)
 		}
 	}
-	if strings.HasSuffix(e.codec.Name(), "_nvenc") {
-		// NVENC has a bug that they ignore timestamps on frames,
-		// thus if we have variadic framerates, which somehow leads
-		// to abysmally small bitrate (at least in my case).
-		//
-		// See also https://video.stackexchange.com/questions/38096/vfr-input-h264-nvenc-output-bitrate-is-based-on-initial-frame-rate-when-i-wa
-		e.setFrameRateFromDuration(ctx, f)
-	}
+
 	e.IsDirtyValue.Store(true)
 	return e.codecContext.SendFrame(f)
 }
@@ -240,6 +266,11 @@ func (e *EncoderFullLocked) reinitEncoder(
 	e.ReusableResources = newEncoder.ReusableResources
 	e.Next = newEncoder.Next
 
+	switch e.MediaType() {
+	case astiav.MediaTypeVideo:
+		e.ForceNextKeyFrame = true
+	}
+
 	return nil
 }
 
@@ -267,11 +298,16 @@ func (e *EncoderFullLocked) Flush(
 	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
 
 	defer func() {
-		if _err == nil {
-			if e.IsDirtyValue.Load() {
-				logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", e)
-				e.IsDirtyValue.Store(false)
-			}
+		if _err != nil {
+			return
+		}
+		switch e.MediaType() {
+		case astiav.MediaTypeVideo:
+			e.ForceNextKeyFrame = true
+		}
+		if e.IsDirtyValue.Load() {
+			logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", e)
+			e.IsDirtyValue.Store(false)
 		}
 	}()
 
@@ -283,32 +319,31 @@ func (e *EncoderFullLocked) Flush(
 		return nil
 	}
 
-	if caps&astiav.CodecCapabilityEncoderFlush != 0 {
-		logger.Tracef(ctx, "flushing buffers")
-		e.codecContext.FlushBuffers()
-
-		err := e.Drain(ctx, callback)
-		if err != nil {
-			return fmt.Errorf("unable to drain after flushing buffers: %w", err)
-		}
-		return
+	err := e.Drain(ctx, callback)
+	if err != nil {
+		return fmt.Errorf("unable to pre-drain: %w", err)
 	}
 
 	logger.Tracef(ctx, "sending the FLUSH REQUEST pseudo-frame")
-	err := e.codecContext.SendFrame(nil)
+	err = e.codecContext.SendFrame(nil)
 	switch {
 	case err == nil:
 		// flushing had just been initiated
+		logger.Tracef(ctx, "waiting for the encoder to be flushed")
+		err = e.Drain(ctx, callback)
+		if err != io.EOF {
+			return fmt.Errorf("unable to drain: %w", err)
+		}
 	case errors.Is(err, astiav.ErrEof):
 		// the encoder is already flushed
 	default:
 		return fmt.Errorf("unable to send the FLUSH REQUEST pseudo-frame: %w", err)
 	}
 
-	logger.Tracef(ctx, "waiting for the encoder to be flushed")
-	err = e.Drain(ctx, callback)
-	if err != io.EOF {
-		return fmt.Errorf("unable to drain: %w", err)
+	if caps&astiav.CodecCapabilityEncoderFlush != 0 && !e.quirks.HasAny(QuirkBuggyFlushBuffers) {
+		logger.Tracef(ctx, "flushing buffers")
+		e.codecContext.FlushBuffers()
+		return
 	}
 
 	logger.Warnf(ctx, "the encoder has no flush capability, reinitializing the encoder")

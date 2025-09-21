@@ -62,10 +62,16 @@ type StreamMux[C any] struct {
 	OutputIDBeforeBypass    int
 
 	// measurements
-	CurrentInputBitRate             atomic.Uint64
-	CurrentOutputBitRate            atomic.Uint64
+	CurrentVideoInputBitRate        atomic.Uint64
+	CurrentVideoEncodedBitRate      atomic.Uint64
+	CurrentVideoOutputBitRate       atomic.Uint64
+	CurrentAudioInputBitRate        atomic.Uint64
+	CurrentAudioEncodedBitRate      atomic.Uint64
+	CurrentAudioOutputBitRate       atomic.Uint64
+	CurrentOtherInputBitRate        atomic.Uint64
+	CurrentOtherEncodedBitRate      atomic.Uint64
+	CurrentOtherOutputBitRate       atomic.Uint64
 	CurrentBitRateMeasurementsCount atomic.Uint64
-	PrevMeasuredOutputID            atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Counters
@@ -115,7 +121,9 @@ func NewWithCustomData[C any](
 	}
 	s.InputNode = newInputNode[C](ctx, s)
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
-	s.CurrentInputBitRate.Store(math.MaxUint64)
+	s.CurrentVideoInputBitRate.Store(math.MaxUint64)
+	s.CurrentAudioInputBitRate.Store(math.MaxUint64)
+	s.CurrentOtherInputBitRate.Store(math.MaxUint64)
 	s.initSwitches(ctx)
 
 	if autoBitRate != nil {
@@ -661,19 +669,15 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 
 	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
-	activeOutput := s.WaitForActiveOutput(ctx)
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	assert(ctx, activeOutput != nil)
-	assert(ctx, activeOutput.OutputNode != nil)
-	inputCounters := s.InputNode.GetCountersPtr()
-	bytesInputReadTotalPrev := inputCounters.Received.TotalBytes()
-	outputCounters := activeOutput.OutputNode.GetCountersPtr()
-	bytesOutputReadTotalPrev := outputCounters.Received.TotalBytes()
-	s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
+	var bytesVideoInputReadPrev uint64
+	var bytesVideoEncodedGenPrev uint64
+	var bytesVideoOutputReadPrev uint64
+	var bytesAudioInputReadPrev uint64
+	var bytesAudioEncodedGenPrev uint64
+	var bytesAudioOutputReadPrev uint64
+	var bytesOtherInputReadPrev uint64
+	var bytesOtherEncodedGenPrev uint64
+	var bytesOtherOutputReadPrev uint64
 	tsPrev := time.Now()
 	for {
 		var tsNext time.Time
@@ -682,53 +686,118 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			return ctx.Err()
 		case tsNext = <-t.C:
 			duration := tsNext.Sub(tsPrev)
-			activeOutput := s.WaitForActiveOutput(ctx)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			assert(ctx, activeOutput != nil)
-			assert(ctx, activeOutput.OutputNode != nil)
-			assert(ctx, activeOutput.OutputNode.GetCountersPtr() != nil)
 
 			inputCounters := s.InputNode.GetCountersPtr()
-			bytesInputReadTotalNext := inputCounters.Received.TotalBytes()
+			bytesVideoInputReadNext := inputCounters.Received.Packets.Video.Bytes.Load()
+			bytesAudioInputReadNext := inputCounters.Received.Packets.Audio.Bytes.Load()
+			bytesOtherInputReadNext := inputCounters.Received.Packets.Other.Bytes.Load()
 
-			outputCounters := activeOutput.OutputNode.GetCountersPtr()
-			bytesOutputReadTotalNext := outputCounters.Received.TotalBytes()
+			var bytesVideoEncodedGenNext uint64
+			var bytesVideoOutputReadNext uint64
+			var bytesAudioEncodedGenNext uint64
+			var bytesAudioOutputReadNext uint64
+			var bytesOtherEncodedGenNext uint64
+			var bytesOtherOutputReadNext uint64
+			s.OutputsMap.Range(func(outputKey OutputKey, output *Output) bool {
+				encoderCounters := output.RecoderNode.Processor.CountersPtr()
+				bytesVideoEncodedGenNext += encoderCounters.Generated.Packets.Video.Bytes.Load()
+				bytesAudioEncodedGenNext += encoderCounters.Generated.Packets.Audio.Bytes.Load()
+				bytesOtherEncodedGenNext += encoderCounters.Generated.Packets.Other.Bytes.Load()
+				outputCounters := output.OutputNode.GetCountersPtr()
+				bytesVideoOutputReadNext += outputCounters.Received.Packets.Video.Bytes.Load()
+				bytesAudioOutputReadNext += outputCounters.Received.Packets.Audio.Bytes.Load()
+				bytesOtherOutputReadNext += outputCounters.Received.Packets.Other.Bytes.Load()
+				return true
+			})
 
-			bytesInputRead := bytesInputReadTotalNext - bytesInputReadTotalPrev
-			bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
+			bytesVideoInputRead := bytesVideoInputReadNext - bytesVideoInputReadPrev
+			bitRateVideoInput := int(float64(bytesVideoInputRead*8) / duration.Seconds())
+			bytesAudioInputRead := bytesAudioInputReadNext - bytesAudioInputReadPrev
+			bitRateAudioInput := int(float64(bytesAudioInputRead*8) / duration.Seconds())
+			bytesOtherInputRead := bytesOtherInputReadNext - bytesOtherInputReadPrev
+			bitRateOtherInput := int(float64(bytesOtherInputRead*8) / duration.Seconds())
 
-			oldInputValue := s.CurrentInputBitRate.Load()
-			newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			logger.Debugf(ctx, "input bitrate: %d (%s): (%d-%d)*8/%v; setting %d as the new value",
-				bitRateInput, humanize.SI(float64(bitRateInput), "bps"),
-				bytesInputReadTotalNext, bytesInputReadTotalPrev, duration,
-				newInputValue,
+			oldVideoInputValue := s.CurrentVideoInputBitRate.Load()
+			newVideoInputValue := updateWithInertialValue(oldVideoInputValue, uint64(bitRateVideoInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldAudioInputValue := s.CurrentAudioInputBitRate.Load()
+			newAudioInputValue := updateWithInertialValue(oldAudioInputValue, uint64(bitRateAudioInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldOtherInputValue := s.CurrentOtherInputBitRate.Load()
+			newOtherInputValue := updateWithInertialValue(oldOtherInputValue, uint64(bitRateOtherInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			logger.Debugf(ctx, "input bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
+				bitRateVideoInput, bitRateAudioInput, bitRateOtherInput,
+				humanize.SI(float64(bitRateVideoInput), "bps"), humanize.SI(float64(bitRateAudioInput), "bps"), humanize.SI(float64(bitRateOtherInput), "bps"),
+				bytesVideoInputReadNext, bytesVideoInputReadPrev, duration,
+				bytesAudioInputReadNext, bytesAudioInputReadPrev, duration,
+				bytesOtherInputReadNext, bytesOtherInputReadPrev, duration,
+				newVideoInputValue, newAudioInputValue, newOtherInputValue,
 			)
-			s.CurrentInputBitRate.Store(newInputValue)
+			s.CurrentVideoInputBitRate.Store(newVideoInputValue)
+			s.CurrentAudioInputBitRate.Store(newAudioInputValue)
+			s.CurrentOtherInputBitRate.Store(newOtherInputValue)
 
-			bytesOutputRead := bytesOutputReadTotalNext - bytesOutputReadTotalPrev
-			bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
+			bytesVideoEncodedGen := bytesVideoEncodedGenNext - bytesVideoEncodedGenPrev
+			bytesAudioEncodedGen := bytesAudioEncodedGenNext - bytesAudioEncodedGenPrev
+			bytesOtherEncodedGen := bytesOtherEncodedGenNext - bytesOtherEncodedGenPrev
+			bitRateVideoEncoded := int(float64(bytesVideoEncodedGen*8) / duration.Seconds())
+			bitRateAudioEncoded := int(float64(bytesAudioEncodedGen*8) / duration.Seconds())
+			bitRateOtherEncoded := int(float64(bytesOtherEncodedGen*8) / duration.Seconds())
 
-			oldOutputValue := s.CurrentOutputBitRate.Load()
-			newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			logger.Debugf(ctx, "output bitrate: %d (%s): (%d-%d)*8/%v; setting %d as the new value",
-				bitRateOutput, humanize.SI(float64(bitRateOutput), "bps"),
-				bytesOutputReadTotalNext, bytesOutputReadTotalPrev, duration,
-				newOutputValue,
+			oldVideoEncodedValue := s.CurrentVideoEncodedBitRate.Load()
+			newVideoEncodedValue := updateWithInertialValue(oldVideoEncodedValue, uint64(bitRateVideoEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldAudioEncodedValue := s.CurrentAudioEncodedBitRate.Load()
+			newAudioEncodedValue := updateWithInertialValue(oldAudioEncodedValue, uint64(bitRateAudioEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldOtherEncodedValue := s.CurrentOtherEncodedBitRate.Load()
+			newOtherEncodedValue := updateWithInertialValue(oldOtherEncodedValue, uint64(bitRateOtherEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			logger.Debugf(ctx, "encoded bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d as the new value",
+				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded,
+				humanize.SI(float64(bitRateVideoEncoded), "bps"), humanize.SI(float64(bitRateAudioEncoded), "bps"), humanize.SI(float64(bitRateOtherEncoded), "bps"),
+				bytesVideoEncodedGenNext, bytesVideoEncodedGenPrev, duration,
+				bytesAudioEncodedGenNext, bytesAudioEncodedGenPrev, duration,
+				bytesOtherEncodedGenNext, bytesOtherEncodedGenPrev, duration,
+				newVideoEncodedValue, newAudioEncodedValue, newOtherEncodedValue,
 			)
-			if s.PrevMeasuredOutputID.Load() == uint64(activeOutput.ID) {
-				s.CurrentOutputBitRate.Store(newOutputValue)
-			} else {
-				s.PrevMeasuredOutputID.Store(uint64(activeOutput.ID))
-			}
+			s.CurrentVideoEncodedBitRate.Store(newVideoEncodedValue)
+			s.CurrentAudioEncodedBitRate.Store(newAudioEncodedValue)
+			s.CurrentOtherEncodedBitRate.Store(newOtherEncodedValue)
+
+			bytesVideoOutputRead := bytesVideoOutputReadNext - bytesVideoOutputReadPrev
+			bitRateVideoOutput := int(float64(bytesVideoOutputRead*8) / duration.Seconds())
+			bytesAudioOutputRead := bytesAudioOutputReadNext - bytesAudioOutputReadPrev
+			bitRateAudioOutput := int(float64(bytesAudioOutputRead*8) / duration.Seconds())
+			bytesOtherOutputRead := bytesOtherOutputReadNext - bytesOtherOutputReadPrev
+			bitRateOtherOutput := int(float64(bytesOtherOutputRead*8) / duration.Seconds())
+
+			oldVideoOutputValue := s.CurrentVideoOutputBitRate.Load()
+			newVideoOutputValue := updateWithInertialValue(oldVideoOutputValue, uint64(bitRateVideoOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldAudioOutputValue := s.CurrentAudioOutputBitRate.Load()
+			newAudioOutputValue := updateWithInertialValue(oldAudioOutputValue, uint64(bitRateAudioOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			oldOtherOutputValue := s.CurrentOtherOutputBitRate.Load()
+			newOtherOutputValue := updateWithInertialValue(oldOtherOutputValue, uint64(bitRateOtherOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			logger.Debugf(ctx, "output bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d as the new value",
+				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput,
+				humanize.SI(float64(bitRateVideoOutput), "bps"), humanize.SI(float64(bitRateAudioOutput), "bps"), humanize.SI(float64(bitRateOtherOutput), "bps"),
+				bytesVideoOutputReadNext, bytesVideoOutputReadPrev, duration,
+				bytesAudioOutputReadNext, bytesAudioOutputReadPrev, duration,
+				bytesOtherOutputReadNext, bytesOtherOutputReadPrev, duration,
+				newVideoOutputValue, newAudioOutputValue, newOtherOutputValue,
+			)
+			s.CurrentVideoOutputBitRate.Store(newVideoOutputValue)
+			s.CurrentAudioOutputBitRate.Store(newAudioOutputValue)
+			s.CurrentOtherOutputBitRate.Store(newOtherOutputValue)
+
+			// DONE
 
 			s.CurrentBitRateMeasurementsCount.Add(1)
 
-			bytesInputReadTotalPrev, bytesOutputReadTotalPrev = bytesInputReadTotalNext, bytesOutputReadTotalNext
+			bytesVideoInputReadPrev = bytesVideoInputReadNext
+			bytesVideoEncodedGenPrev = bytesVideoEncodedGenNext
+			bytesVideoOutputReadPrev = bytesVideoOutputReadNext
+			bytesAudioInputReadPrev = bytesAudioInputReadNext
+			bytesAudioEncodedGenPrev = bytesAudioEncodedGenNext
+			bytesAudioOutputReadPrev = bytesAudioOutputReadNext
+			bytesOtherInputReadPrev = bytesOtherInputReadNext
+			bytesOtherEncodedGenPrev = bytesOtherEncodedGenNext
+			bytesOtherOutputReadPrev = bytesOtherOutputReadNext
 			tsPrev = tsNext
 		}
 	}

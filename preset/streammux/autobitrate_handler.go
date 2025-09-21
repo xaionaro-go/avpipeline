@@ -147,7 +147,7 @@ type AutoBitRateHandler[C any] struct {
 	StreamMux                      *StreamMux[C]
 	closureSignaler                *closuresignaler.ClosureSignaler
 	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
-	lastBitRate                    uint64
+	lastVideoBitRate               uint64
 	lastTotalQueueSize             uint64
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
@@ -228,8 +228,8 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			if reqErr != nil {
 				previousQueueSize, _ := h.previousQueueSize.Load(proc)
 				if proc == activeOutputProc {
-					nodeTotalQueue = previousQueueSize + uint64(tsDiff.Seconds()*float64(h.lastBitRate)/8.0)
-					logger.Infof(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d (and now is: %d)", tsDiff, h.lastBitRate/8, nodeTotalQueue)
+					nodeTotalQueue = previousQueueSize + uint64(tsDiff.Seconds()*float64(h.lastVideoBitRate)/8.0)
+					logger.Infof(ctx, "timed out on getting queue size on the active output; assuming the queue increased by %v*%d (and now is: %d)", tsDiff, h.lastVideoBitRate/8, nodeTotalQueue)
 				} else {
 					logger.Infof(ctx, "timed out on getting queue size on a non-active output; assuming the queue size remained the same")
 					nodeTotalQueue = previousQueueSize
@@ -249,7 +249,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	wg.Wait()
 	logger.Tracef(ctx, "total queue size: %d", totalQueue.Load())
 	if !haveAnError.Load() {
-		h.lastBitRate = h.StreamMux.CurrentOutputBitRate.Load()
+		h.lastVideoBitRate = h.StreamMux.CurrentVideoOutputBitRate.Load()
 	}
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
@@ -261,7 +261,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	var curReqBitRate uint64
 	if codec.IsEncoderCopy(encoderV) {
 		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
-		curReqBitRate = h.StreamMux.CurrentInputBitRate.Load()
+		curReqBitRate = h.StreamMux.CurrentVideoInputBitRate.Load()
 	} else {
 		logger.Tracef(ctx, "getting current bitrate from the encoder")
 		q := encoderV.GetQuality(ctx)
@@ -277,14 +277,14 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	actualOutputBitrate := h.StreamMux.CurrentOutputBitRate.Load()
+	actualOutputBitrate := h.StreamMux.CurrentVideoOutputBitRate.Load()
 	totalQueueSizeDerivative := (float64(totalQueue.Load()) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
 	h.lastTotalQueueSize = totalQueue.Load()
 	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
 		CalculateBitRateRequest{
 			CurrentBitrateSetting: types.Ubps(curReqBitRate),
-			InputBitrate:          types.Ubps(h.StreamMux.CurrentInputBitRate.Load()),
+			InputBitrate:          types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load()),
 			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
 			QueueSize:             types.UB(totalQueue.Load()),
 			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
@@ -341,7 +341,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	return h.setOutput(
 		ctx,
 		nil,
-		uint64(float64(h.StreamMux.CurrentInputBitRate.Load())*0.9),
+		uint64(float64(h.StreamMux.CurrentVideoInputBitRate.Load())*0.9),
 		isCritical,
 	)
 }
@@ -379,7 +379,7 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		}
 	}
 
-	inputBitRate := h.StreamMux.CurrentInputBitRate.Load()
+	inputBitRate := h.StreamMux.CurrentVideoInputBitRate.Load()
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
 		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(inputBitRate))
 		if h.isBypassEnabled(ctx) {
