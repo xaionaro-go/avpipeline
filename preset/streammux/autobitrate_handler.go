@@ -71,7 +71,7 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 			},
 			{
 				Resolution:  codec.Resolution{Width: 320, Height: 180},
-				BitrateHigh: 500_000, BitrateLow: 50_000, // 500 Kbps .. 50 Kbps
+				BitrateHigh: 500_000, BitrateLow: 20_000, // 500 Kbps .. 20 Kbps
 			},
 		}
 	case astiav.CodecIDHevc:
@@ -115,12 +115,12 @@ func DefaultAutoBitrateConfig(
 		FPSReducer:             DefaultFPSReducerConfig(),
 		Calculator:             DefaultAutoBitrateCalculatorQueueSizeGapDecay(),
 		CheckInterval:          time.Second / 4,
-		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
-		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
+		MinBitRate:             resWorst.BitrateLow,     // limiting just to avoid nonsensical values that makes automation and calculations weird
+		MaxBitRate:             resBest.BitrateHigh * 2, // limiting since there is no need to consume more channel if we already provide enough bitrate
 
 		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
-		ResolutionSlowdownDurationUpgrade:   time.Minute,
-		ResolutionSlowdownDurationDowngrade: time.Second * 10,
+		ResolutionSlowdownDurationUpgrade:   time.Second * 2,
+		ResolutionSlowdownDurationDowngrade: time.Second,
 	}
 	return result
 }
@@ -419,6 +419,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	case uint64(req.BitRate) > maxVideoBitRate:
 		clampedVideoBitRate = maxVideoBitRate
 	}
+	logger.Debugf(ctx, "clamped bitrate: %d (min:%d, max:%d, input:%d)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
 
 	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(uint64(req.BitRate))
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)

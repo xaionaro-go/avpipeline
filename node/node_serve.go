@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -312,14 +313,23 @@ func pushToDestination[
 
 		pushChan := getPushChan(pushTo.Node.GetProcessor())
 		logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
-		if serveConfig.FrameDrop {
+		frameDrop := false
+		switch mediaType {
+		case astiav.MediaTypeAudio:
+			frameDrop = serveConfig.FrameDropAudio
+		case astiav.MediaTypeVideo:
+			frameDrop = serveConfig.FrameDropVideo
+		default:
+			frameDrop = serveConfig.FrameDropOther
+		}
+		if frameDrop {
 			select {
 			case <-ctx.Done():
 				return
 			case pushChan <- inputObj:
 				isPushed = true
 			default:
-				logger.Errorf(ctx, "unable to push to %s: the queue is full", pushTo.Node)
+				logger.Errorf(ctx, "unable to push %s to %s: the %T queue is full (size: %d)", mediaType, pushTo.Node, outputObj, cap(pushChan))
 				poolPutInput(inputObj)
 				return
 			}

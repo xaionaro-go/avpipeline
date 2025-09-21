@@ -218,7 +218,9 @@ func main() {
 		}()
 		avpipeline.Serve[node.Abstract](ctx, avpipeline.ServeConfig{
 			EachNode: node.ServeConfig{
-				FrameDrop: *frameDrop,
+				FrameDropVideo: *frameDrop,
+				FrameDropAudio: *frameDrop,
+				FrameDropOther: *frameDrop,
 			},
 		}, errCh, pipelineInputs...)
 	})

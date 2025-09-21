@@ -91,7 +91,9 @@ func newRoute[T any](
 		logger.Debugf(ctx, "started")
 		r.Node.Serve(ctx, node.ServeConfig{
 			// we don't want the whole pipeline to hang just because of one bad consumer:
-			FrameDrop: routeFrameDrop,
+			FrameDropVideo: routeFrameDrop,
+			FrameDropAudio: routeFrameDrop,
+			FrameDropOther: routeFrameDrop,
 		}, errCh)
 	})
 	return r

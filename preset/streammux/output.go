@@ -38,6 +38,7 @@ import (
 const (
 	outputReuseDecoderResources = false
 	outputDebug                 = true
+	enableFPSFractioner         = true
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -272,9 +273,11 @@ func newOutput[C any](
 		packetfiltercondition.Packet{Condition: packetcondition.And{
 			o.OutputThrottler,
 			packetcondition.Or{
-				packetcondition.Function(func(context.Context, packet.Input) bool {
+				packetcondition.Function(func(ctx context.Context, input packet.Input) bool {
 					return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes <= 0
 				}),
+				packetcondition.Not{packetcondition.MediaType(astiav.MediaTypeVideo)},
+				packetcondition.IsKeyFrame(true),
 				extrapacketcondition.PushQueueSize(
 					o.OutputNode,
 					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
@@ -323,6 +326,10 @@ func (o *Output) initFPSFractioner(ctx context.Context) {
 		i frame.Input,
 	) (_ret bool) {
 		if i.GetMediaType() != astiav.MediaTypeVideo {
+			return true
+		}
+
+		if !enableFPSFractioner {
 			return true
 		}
 

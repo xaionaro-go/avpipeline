@@ -112,6 +112,8 @@ message AutoBitrateCalculatorLogK {
 
 message AutoBitrateCalculatorQueueSizeGapDecay {
   uint64 queueOptimalMS = 1;
-  uint64 decayMS = 2;
-  MovingAverageConfig derivativeSmoothed = 3;
+  uint64 queueSizeMin = 2; // in bits
+  uint64 gapDecayMS = 3;
+  uint64 increaseInertiaMS = 4;
+  MovingAverageConfig derivativeSmoothed = 5;
 }

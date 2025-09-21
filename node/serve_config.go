@@ -1,5 +1,7 @@
 package node
 
 type ServeConfig struct {
-	FrameDrop bool
+	FrameDropAudio bool
+	FrameDropVideo bool
+	FrameDropOther bool
 }

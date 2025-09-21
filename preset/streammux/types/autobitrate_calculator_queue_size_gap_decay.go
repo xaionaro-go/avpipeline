@@ -12,18 +12,22 @@ import (
 // by forcing a bitrate to ensure a queue size derivative that decays to the
 // optimal queue size.
 type AutoBitrateCalculatorQueueSizeGapDecay struct {
-	QueueOptimal       time.Duration
-	Decay              time.Duration
-	DerivativeSmoothed MovingAverage[UBps]
+	QueueDurationOptimal time.Duration
+	QueueSizeMin         UB
+	GapDecay             time.Duration
+	IncreaseInertia      time.Duration
+	DerivativeSmoothed   MovingAverage[UBps]
 }
 
 var _ AutoBitRateCalculator = (*AutoBitrateCalculatorQueueSizeGapDecay)(nil)
 
 func DefaultAutoBitrateCalculatorQueueSizeGapDecay() *AutoBitrateCalculatorQueueSizeGapDecay {
 	return &AutoBitrateCalculatorQueueSizeGapDecay{
-		QueueOptimal:       time.Second,
-		Decay:              time.Second,
-		DerivativeSmoothed: indicator.NewMAMA[UBps](20, 0.3, 0.05),
+		QueueDurationOptimal: 3 * time.Second, // pings up to 3 seconds are quite normal
+		QueueSizeMin:         200_000,         // setting some minimum to avoid bottlenecking on ACK-latency instead of bandwidth
+		GapDecay:             time.Second,
+		IncreaseInertia:      3 * time.Second,
+		DerivativeSmoothed:   indicator.NewMAMA[UBps](20, 0.3, 0.05),
 	}
 }
 
@@ -38,15 +42,8 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 
 	queueDerivative := d.DerivativeSmoothed.Update(req.QueueSizeDerivative)
 	if !d.DerivativeSmoothed.Valid() {
-		logger.Tracef(ctx, "CalculateBitRate: not enough data for derivative smoothing")
+		logger.Debugf(ctx, "CalculateBitRate: not enough data for derivative smoothing")
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
-	}
-
-	if req.ActualOutputBitrate < req.CurrentBitrateSetting/2 {
-		logger.Tracef(ctx, "CalculateBitRate: actualOutputBitrate %s is less than half of currentBitrateSetting %s; we are so deep in a congestion that the numbers are already nonsensical for the calculations; so just setting a half of the actualOutputBitrate as the setting",
-			Ubps(req.ActualOutputBitrate), Ubps(req.CurrentBitrateSetting),
-		)
-		return BitRateChangeRequest{BitRate: req.ActualOutputBitrate / 2, IsCritical: true}
 	}
 
 	queueDuration := US(time.Duration(
@@ -55,15 +52,30 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 			float64(time.Second),
 	)) // s
 
-	gap := queueDuration - US(d.QueueOptimal)            // s
-	gapB := req.ActualOutputBitrate.Tob(gap).ToB()       // B
-	desiredDerivative := -gapB.ToBps(US(d.Decay))        // B/s
-	derivativeGap := desiredDerivative - queueDerivative // B/s
-	bitRateDiff := derivativeGap.Tobps()                 // b/s
-	newBitRate := max(Ubps(req.CurrentBitrateSetting)+bitRateDiff, 1)
+	queueDurationOptimal := max(
+		US(d.QueueDurationOptimal),
+		d.QueueSizeMin.Tob().ToS(req.ActualOutputBitrate),
+	) // s
 
-	logger.Tracef(ctx, "CalculateBitRate: queueDuration=%s, gap=%s, gapB=%s, queueDerivative=%s, desiredDerivative=%s, derivativeGap=%s, bitRateDiff=%s, newBitRate=%s, currentBitRateSetting=%s, actualOutputBitrate=%s",
-		queueDuration, gap, gapB, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate, Ubps(req.CurrentBitrateSetting), Ubps(req.ActualOutputBitrate),
+	gap := queueDuration - queueDurationOptimal                       // s
+	gapB := req.ActualOutputBitrate.Tob(gap).ToB()                    // B
+	desiredDerivative := -gapB.ToBps(US(d.GapDecay))                  // B/s
+	derivativeGap := desiredDerivative - queueDerivative              // B/s
+	bitRateDiff := derivativeGap.Tobps()                              // b/s
+	newBitRate := max(Ubps(req.CurrentBitrateSetting)+bitRateDiff, 1) // b/s
+
+	// slowdown the increase of bitrate to avoid oscillations
+	if bitRateDiff > 0 {
+		ratio := float64(newBitRate) / float64(max(req.CurrentBitrateSetting, 1))
+		fraction := req.Config.CheckInterval.Seconds() / d.IncreaseInertia.Seconds()
+		if ratio > 1+fraction {
+			logger.Tracef(ctx, "CalculateBitRate: increasing bitrate too fast: ratio=%s, fraction=%s", ratio, fraction)
+			newBitRate = Ubps(float64(req.CurrentBitrateSetting) * (1 + fraction))
+		}
+	}
+
+	logger.Debugf(ctx, "CalculateBitRate: queueSize=%s, queueDuration=%s, queueDurationOptimal=%s, gap=%s, gapB=%s, queueDerivative=%s, desiredDerivative=%s, derivativeGap=%s, bitRateDiff=%s, newBitRate=%s, currentBitRateSetting=%s, actualOutputBitrate=%s",
+		req.QueueSize, queueDuration, queueDurationOptimal, gap, gapB, queueDerivative, desiredDerivative, derivativeGap, bitRateDiff, newBitRate, Ubps(req.CurrentBitrateSetting), Ubps(req.ActualOutputBitrate),
 	)
 	return BitRateChangeRequest{
 		BitRate:    Ubps(newBitRate),

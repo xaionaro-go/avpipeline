@@ -111,7 +111,9 @@ func main() {
 		defer cancelFn()
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
 			EachNode: node.ServeConfig{
-				FrameDrop: *frameDrop,
+				FrameDropVideo: *frameDrop,
+				FrameDropAudio: *frameDrop,
+				FrameDropOther: *frameDrop,
 			},
 		}, errCh, inputNode)
 	})

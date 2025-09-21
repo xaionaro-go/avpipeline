@@ -134,7 +134,8 @@ func TestRecoderNoFailure(t *testing.T) {
 				defer cancelFn()
 				avpipeline.Serve(ctx, avpipeline.ServeConfig{
 					EachNode: node.ServeConfig{
-						FrameDrop: false,
+						FrameDropVideo: false,
+						FrameDropAudio: false,
 					},
 				}, errCh, inputNode)
 			})

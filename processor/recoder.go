@@ -10,7 +10,9 @@ import (
 var DefaultOptionsRecoder = func() []Option {
 	return []Option{
 		OptionQueueSizeInputPacket(600),
-		OptionQueueSizeOutputPacket(0),
+		OptionQueueSizeInputFrame(600),
+		OptionQueueSizeOutputPacket(10),
+		OptionQueueSizeOutputFrame(10),
 		OptionQueueSizeError(2),
 	}
 }
