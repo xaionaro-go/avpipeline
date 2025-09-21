@@ -371,6 +371,13 @@ func (r *Recoder[DF, EF]) Reset(
 	return errors.Join(errs...)
 }
 
+func (r *Recoder[DF, EF]) SetForceNextKeyFrame(
+	ctx context.Context,
+	v bool,
+) {
+	r.Encoder.SetForceNextKeyFrame(ctx, v)
+}
+
 func (r *Recoder[DF, EF]) IsDirty(
 	ctx context.Context,
 ) (_ret bool) {

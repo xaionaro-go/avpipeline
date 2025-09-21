@@ -67,7 +67,11 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 			},
 			{
 				Resolution:  codec.Resolution{Width: 640, Height: 360},
-				BitrateHigh: 1_500_000, BitrateLow: 50_000, // 1.5 Mbps .. 50 Kbps
+				BitrateHigh: 1_500_000, BitrateLow: 300_000, // 1.5 Mbps .. 300 Kbps
+			},
+			{
+				Resolution:  codec.Resolution{Width: 320, Height: 180},
+				BitrateHigh: 500_000, BitrateLow: 50_000, // 500 Kbps .. 50 Kbps
 			},
 		}
 	case astiav.CodecIDHevc:
@@ -114,7 +118,7 @@ func DefaultAutoBitrateConfig(
 		MinBitRate:             resWorst.BitrateLow / 10, // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2,  // limiting since there is no need to consume more channel if we already provide enough bitrate
 
-		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dumpen oscillations)
+		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
 		ResolutionSlowdownDurationUpgrade:   time.Minute,
 		ResolutionSlowdownDurationDowngrade: time.Second * 10,
 	}
@@ -302,7 +306,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	if err := h.trySetBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
+	if err := h.trySetVideoBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
 		return
 	}
@@ -346,15 +350,15 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	)
 }
 
-func (h *AutoBitRateHandler[C]) trySetBitrate(
+func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	ctx context.Context,
 	oldBitRate uint64,
 	req BitRateChangeRequest,
 	actualOutputBitrate uint64,
 ) (_err error) {
-	logger.Tracef(ctx, "setBitrate: %d->%s (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
+	logger.Tracef(ctx, "trySetVideoBitrate: %d->%s (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
 	defer func() {
-		logger.Tracef(ctx, "/setBitrate: %d->%s (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
+		logger.Tracef(ctx, "/trySetVideoBitrate: %d->%s (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
 	}()
 
 	now := time.Now()
@@ -379,17 +383,17 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		}
 	}
 
-	inputBitRate := h.StreamMux.CurrentVideoInputBitRate.Load()
+	videoInputBitRate := h.StreamMux.CurrentVideoInputBitRate.Load()
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
-		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(inputBitRate))
+		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate))
 		if h.isBypassEnabled(ctx) {
-			if uint64(req.BitRate) < inputBitRate {
+			if uint64(req.BitRate) < videoInputBitRate {
 				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
 			}
 		} else {
-			if float64(req.BitRate) > float64(inputBitRate)*1.2 {
+			if float64(req.BitRate) > float64(videoInputBitRate)*1.2 {
 				err := h.enableBypass(ctx, true, req.IsCritical)
 				if err != nil {
 					return fmt.Errorf("unable to enable bypass mode: %w", err)
@@ -403,23 +407,23 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		return nil
 	}
 
-	maxBitRate := h.MaxBitRate
-	if inputBitRate > h.MinBitRate*2 && float64(inputBitRate)*1.5 < float64(maxBitRate) {
-		maxBitRate = uint64(1.5 * float64(inputBitRate))
+	maxVideoBitRate := h.MaxBitRate
+	if videoInputBitRate > h.MinBitRate*2 && float64(videoInputBitRate)*1.5 < float64(maxVideoBitRate) {
+		maxVideoBitRate = uint64(1.5 * float64(videoInputBitRate))
 	}
 
-	clampedBitRate := uint64(req.BitRate)
+	clampedVideoBitRate := uint64(req.BitRate)
 	switch {
 	case uint64(req.BitRate) < h.MinBitRate:
-		clampedBitRate = h.MinBitRate
-	case uint64(req.BitRate) > maxBitRate:
-		clampedBitRate = maxBitRate
+		clampedVideoBitRate = h.MinBitRate
+	case uint64(req.BitRate) > maxVideoBitRate:
+		clampedVideoBitRate = maxVideoBitRate
 	}
 
-	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(clampedBitRate)
+	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(uint64(req.BitRate))
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
 
-	if err := h.changeResolutionIfNeeded(ctx, clampedBitRate, req.IsCritical); err != nil {
+	if err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
@@ -439,14 +443,14 @@ func (h *AutoBitRateHandler[C]) trySetBitrate(
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
 
-	if clampedBitRate == oldBitRate {
+	if clampedVideoBitRate == oldBitRate {
 		logger.Debugf(ctx, "bitrate remains unchanged after clamping: %d (resCfg: %#+v)", oldBitRate, resCfg)
 		return nil
 	}
 
-	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v); max:%d, min:%d, in:%d", oldBitRate, clampedBitRate, resCfg, maxBitRate, h.MinBitRate, inputBitRate)
-	if err := encoderV.SetQuality(ctx, quality.ConstantBitrate(clampedBitRate), nil); err != nil {
-		return fmt.Errorf("unable to set bitrate to %d: %w", clampedBitRate, err)
+	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v); max:%d, min:%d, in:%d", oldBitRate, clampedVideoBitRate, resCfg, maxVideoBitRate, h.MinBitRate, videoInputBitRate)
+	if err := encoderV.SetQuality(ctx, quality.ConstantBitrate(clampedVideoBitRate), nil); err != nil {
+		return fmt.Errorf("unable to set bitrate to %d: %w", clampedVideoBitRate, err)
 	}
 
 	return nil

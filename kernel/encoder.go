@@ -414,6 +414,18 @@ func (e *Encoder[EF]) SendInputPacket(
 	return nil
 }
 
+func (e *Encoder[EF]) SetForceNextKeyFrame(
+	ctx context.Context,
+	v bool,
+) {
+	logger.Debugf(ctx, "SetForceNextKeyFrame: %v", v)
+	e.Locker.Do(xsync.WithNoLogging(ctx, true), func() {
+		for _, encoder := range e.encoders {
+			encoder.Encoder.SetForceNextKeyFrame(ctx, v)
+		}
+	})
+}
+
 func (e *Encoder[EF]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,

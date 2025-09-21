@@ -13,6 +13,12 @@ type EncoderCopy struct{}
 
 var _ Encoder = EncoderCopy{}
 
+type ErrCopyEncoder struct{}
+
+func (ErrCopyEncoder) Error() string {
+	return "'copy' encoder"
+}
+
 func (EncoderCopy) String() string {
 	return "Encoder(copy)"
 }
@@ -50,11 +56,11 @@ func (EncoderCopy) TimeBase() astiav.Rational {
 }
 
 func (EncoderCopy) SendFrame(context.Context, *astiav.Frame) error {
-	return fmt.Errorf("'copy' needs to be processed manually")
+	return ErrCopyEncoder{}
 }
 
 func (EncoderCopy) ReceivePacket(context.Context, *astiav.Packet) error {
-	return fmt.Errorf("'copy' needs to be processed manually")
+	return ErrCopyEncoder{}
 }
 
 func (EncoderCopy) GetQuality(
@@ -64,14 +70,14 @@ func (EncoderCopy) GetQuality(
 }
 
 func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) error {
-	return fmt.Errorf("'copy' implies the quality cannot be manipulated")
+	return ErrCopyEncoder{}
 }
 
 func (EncoderCopy) GetResolution(ctx context.Context) *Resolution {
 	return nil
 }
 func (EncoderCopy) SetResolution(context.Context, Resolution, condition.Condition) error {
-	return fmt.Errorf("'copy' implies the resolution cannot be manipulated")
+	return ErrCopyEncoder{}
 }
 
 func (EncoderCopy) Reset(context.Context) error {
@@ -80,6 +86,10 @@ func (EncoderCopy) Reset(context.Context) error {
 
 func (EncoderCopy) GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat {
 	return nil
+}
+
+func (EncoderCopy) SetForceNextKeyFrame(ctx context.Context, v bool) error {
+	return ErrCopyEncoder{}
 }
 
 func (EncoderCopy) Flush(ctx context.Context, callback CallbackPacketReceiver) error {

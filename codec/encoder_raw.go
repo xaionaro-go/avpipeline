@@ -86,6 +86,10 @@ func (EncoderRaw) Drain(context.Context, CallbackPacketReceiver) error {
 	return nil
 }
 
+func (EncoderRaw) SetForceNextKeyFrame(ctx context.Context, v bool) error {
+	return nil
+}
+
 func (EncoderRaw) Flush(context.Context, CallbackPacketReceiver) error {
 	return nil
 }

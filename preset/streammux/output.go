@@ -317,6 +317,7 @@ func (o *Output) initFPSFractioner(ctx context.Context) {
 	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
 
 	var frameCount atomic.Uint32
+	lastSentFramePTS := astiav.NoPtsValue
 	o.RecoderNode.Processor.Kernel.Filter = framecondition.Function(func(
 		ctx context.Context,
 		i frame.Input,
@@ -335,13 +336,27 @@ func (o *Output) initFPSFractioner(ctx context.Context) {
 		if den == 0 {
 			return true
 		}
-		i.Frame.SetDuration(i.Frame.Duration() * int64(den) / int64(num))
 		frameID := frameCount.Add(1)
 		shouldPass := frameID%den < num
 		if outputDebug {
 			logger.Tracef(ctx, "shouldPass: %t: frameID=%d, num=%d, den=%d", shouldPass, frameID, num, den)
 		}
-		return shouldPass
+		if !shouldPass {
+			return
+		}
+		if lastSentFramePTS != astiav.NoPtsValue {
+			duration := i.Frame.Pts() - lastSentFramePTS
+			expectedDuration := float64(i.Frame.Duration()) * float64(den) / float64(num)
+			if duration > int64(expectedDuration)*2 {
+				duration = int64(expectedDuration)
+			}
+			i.Frame.SetDuration(duration)
+			if outputDebug {
+				logger.Tracef(ctx, "dur: %d", i.Frame.Duration())
+			}
+		}
+		lastSentFramePTS = i.Frame.Pts()
+		return true
 	})
 }
 

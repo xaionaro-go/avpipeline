@@ -414,26 +414,26 @@ func newCodec(
 					// to allow low bitrates:
 					h := codecParameters.Height()
 					switch {
-					case h <= 720:
-						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 38")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "38", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "40", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "42", 0)
-					case h <= 640:
-						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 48")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "48", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "50", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "52", 0)
-					case h <= 560:
-						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 60")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "60", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "62", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "64", 0)
 					case h <= 360:
 						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 80")
 						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "80", 0)
 						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "82", 0)
 						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "84", 0)
+					case h <= 560:
+						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 60")
+						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "60", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "62", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "64", 0)
+					case h <= 640:
+						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 48")
+						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "48", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "50", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "52", 0)
+					case h <= 720:
+						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 38")
+						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "38", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "40", 0)
+						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "42", 0)
 					}
 				}
 

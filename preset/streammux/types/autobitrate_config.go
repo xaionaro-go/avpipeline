@@ -161,21 +161,9 @@ func DefaultFPSReducerConfig() FPSReducerConfig {
 	return FPSReducerConfig{
 		{
 			BitrateMax:  500_000,
-			BitrateMin:  150_000,
+			BitrateMin:  0,
 			FractionNum: 1,
 			FractionDen: 2,
-		},
-		{
-			BitrateMax:  150_000,
-			BitrateMin:  50_000,
-			FractionNum: 1,
-			FractionDen: 4,
-		},
-		{
-			BitrateMax:  50_000,
-			BitrateMin:  10_000,
-			FractionNum: 1,
-			FractionDen: 10,
 		},
 	}
 }

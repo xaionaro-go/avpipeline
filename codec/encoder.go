@@ -39,6 +39,7 @@ type Encoder interface {
 	SetQuality(context.Context, Quality, condition.Condition) error
 	GetResolution(ctx context.Context) *Resolution
 	SetResolution(context.Context, Resolution, condition.Condition) error
+	SetForceNextKeyFrame(ctx context.Context, v bool) error
 	Flush(ctx context.Context, callback CallbackPacketReceiver) error
 	Drain(ctx context.Context, callback CallbackPacketReceiver) error
 	IsDirty() bool

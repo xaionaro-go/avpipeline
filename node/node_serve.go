@@ -27,6 +27,8 @@ import (
 const (
 	extraDebug           = true
 	extraDefensiveChecks = true
+
+	todoDeleteMeRefreshProcInfoInterval = time.Minute
 )
 
 func (n *NodeWithCustomData[C, T]) Serve(
@@ -87,7 +89,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	}()
 
 	procNodeEndCtx := ctx
-	t := time.NewTicker(100 * time.Millisecond)
+	t := time.NewTicker(todoDeleteMeRefreshProcInfoInterval)
 	defer t.Stop()
 	for {
 		logger.Tracef(ctx, "Serve[%s]: an iteration started", nodeKey)

@@ -289,6 +289,14 @@ func (e *EncoderFullLocked) SanityCheck(
 	return nil
 }
 
+func (e *EncoderFullLocked) SetForceNextKeyFrame(
+	ctx context.Context,
+	v bool,
+) error {
+	e.ForceNextKeyFrame = v
+	return nil
+}
+
 func (e *EncoderFullLocked) Flush(
 	ctx context.Context,
 	callback CallbackPacketReceiver,

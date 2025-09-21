@@ -35,8 +35,9 @@ import (
 )
 
 const (
-	switchTimeout = time.Hour
-	switchDebug   = false
+	switchTimeout     = time.Hour
+	switchDebug       = false
+	switchEnableFlush = false // TODO: enable this (currently it causes bugs with mediacodec)
 )
 
 type StreamMux[C any] struct {
@@ -169,13 +170,15 @@ func (s *StreamMux[C]) initSwitches(
 		}
 
 		observability.Go(ctx, func(ctx context.Context) {
-			{
+			if switchEnableFlush {
 				ctx, cancelFn := context.WithTimeout(ctx, switchTimeout)
 				defer cancelFn()
 				err := outputPrev.FlushAfterFilter(ctx)
 				if err != nil {
 					logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
 				}
+			} else {
+				outputPrev.RecoderNode.Processor.Kernel.SetForceNextKeyFrame(ctx, true)
 			}
 			logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
 			err := s.OutputSyncer.SetValue(ctx, to)
@@ -748,7 +751,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			newAudioEncodedValue := updateWithInertialValue(oldAudioEncodedValue, uint64(bitRateAudioEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
 			oldOtherEncodedValue := s.CurrentOtherEncodedBitRate.Load()
 			newOtherEncodedValue := updateWithInertialValue(oldOtherEncodedValue, uint64(bitRateOtherEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			logger.Debugf(ctx, "encoded bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d as the new value",
+			logger.Debugf(ctx, "encoded bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
 				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded,
 				humanize.SI(float64(bitRateVideoEncoded), "bps"), humanize.SI(float64(bitRateAudioEncoded), "bps"), humanize.SI(float64(bitRateOtherEncoded), "bps"),
 				bytesVideoEncodedGenNext, bytesVideoEncodedGenPrev, duration,
@@ -773,7 +776,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			newAudioOutputValue := updateWithInertialValue(oldAudioOutputValue, uint64(bitRateAudioOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
 			oldOtherOutputValue := s.CurrentOtherOutputBitRate.Load()
 			newOtherOutputValue := updateWithInertialValue(oldOtherOutputValue, uint64(bitRateOtherOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			logger.Debugf(ctx, "output bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d as the new value",
+			logger.Debugf(ctx, "output bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
 				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput,
 				humanize.SI(float64(bitRateVideoOutput), "bps"), humanize.SI(float64(bitRateAudioOutput), "bps"), humanize.SI(float64(bitRateOtherOutput), "bps"),
 				bytesVideoOutputReadNext, bytesVideoOutputReadPrev, duration,

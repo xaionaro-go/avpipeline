@@ -118,6 +118,18 @@ func (e *EncoderFull) SanityCheck(
 	})
 }
 
+func (e *EncoderFull) SetForceNextKeyFrame(
+	ctx context.Context,
+	v bool,
+) error {
+	return e.withLocked(ctx, func(
+		ctx context.Context,
+		e *EncoderFullLocked,
+	) error {
+		return e.SetForceNextKeyFrame(ctx, v)
+	})
+}
+
 func (e *EncoderFull) Flush(
 	ctx context.Context,
 	callback CallbackPacketReceiver,
