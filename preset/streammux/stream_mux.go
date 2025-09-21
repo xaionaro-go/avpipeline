@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -614,10 +613,10 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	}
 	videoCfg := cfg.Output.VideoTrackConfigs[0]
 
-	if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
+	/*if strings.HasSuffix(string(videoCfg.CodecName), "_mediacodec") && res.Height < 720 {
 		// TODO: this should not be here, it should be somewhere else.
 		return ErrNotImplemented{Err: fmt.Errorf("when scaling from 1080p to let's say 480p, we get a distorted image when using mediacodec, to be investigated; until then this is forbidden")}
-	}
+	}*/
 
 	if videoCfg.Resolution == res && videoCfg.CodecName == videoCodec && audioCfg.CodecName == audioCodec {
 		logger.Tracef(ctx, "the config is already set to %v '%s' '%s'", res, videoCodec, audioCodec)

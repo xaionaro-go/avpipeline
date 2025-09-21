@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +34,9 @@ const (
 	encoderDTSHigherPTSCorrect                 = false
 	encoderDebug                               = true
 	encoderExtraDefensive                      = true
+	encoderRescaleEnableCropping               = false
+	encoderRescaleSameResolution               = false
+	encoderRescaleEnableTightPacking           = false
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -694,8 +698,10 @@ func (e *streamEncoder) fitFrameForEncoding(
 			logger.Tracef(ctx, "input frame: %dx%d (%s); encoder resolution: %s", input.Frame.Width(), input.Frame.Height(), input.CodecParameters.CodecID(), res)
 		}
 		// TODO: also check if non-hardware-backed pixel formats do match
-		if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) {
-			return []*astiav.Frame{input.Frame}, nil
+		if !encoderRescaleSameResolution {
+			if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) {
+				return []*astiav.Frame{input.Frame}, nil
+			}
 		}
 		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat())
 		scaledFrame, err := e.getScaledFrame(ctx, input)
@@ -837,8 +843,88 @@ func (e *streamEncoder) getScaledFrame(
 		return nil, fmt.Errorf("unable to get a scaler: %w", err)
 	}
 
-	e.Scaler.ScaleFrame(ctx, input.Frame, e.ScaledFrame)
+	frameSrc := input.Frame
+	if frameSrc.HardwareFramesContext() != nil {
+		logger.Tracef(ctx, "transferring the frame data from hardware to software")
+		sw := frame.Pool.Get()
+		if err := frameSrc.TransferHardwareData(sw); err != nil {
+			frame.Pool.Put(sw)
+			return nil, fmt.Errorf("unable to transfer the frame data from hardware to software: %w", err)
+		}
+		frameSrc = sw
+	}
+
+	if encoderRescaleEnableCropping {
+		if frameSrc == input.Frame {
+			frameSrc = frame.CloneAsWritable(frameSrc)
+		}
+		err = frameSrc.ApplyCropping(0)
+		if err != nil {
+			return nil, fmt.Errorf("unable to apply cropping: %w", err)
+		}
+	}
+
+	if encoderRescaleEnableTightPacking {
+		if getDecoderer, ok := input.Source.(codec.GetDecoderer); ok {
+			decoder := getDecoderer.GetDecoder()
+			if strings.HasSuffix(decoder.Codec.Codec().Name(), "_mediacodec") {
+				frameSrc, err = tightPack(ctx, frameSrc)
+				if err != nil {
+					return nil, fmt.Errorf("unable to tight-pack the frame: %w", err)
+				}
+			}
+		}
+	}
+
+	err = e.Scaler.ScaleFrame(ctx, frameSrc, e.ScaledFrame)
+	if err != nil {
+		return nil, fmt.Errorf("unable to scale the frame: %w", err)
+	}
 	return e.ScaledFrame, nil
+}
+
+func tightPack(
+	ctx context.Context,
+	input *astiav.Frame,
+) (packed *astiav.Frame, _err error) {
+	logger.Tracef(ctx, "tightPack: %s", input.PixelFormat())
+	defer func() { logger.Tracef(ctx, "/tightPack: %s: %v", input.PixelFormat(), _err) }()
+	switch input.PixelFormat() {
+	case astiav.PixelFormatNv12:
+		return tightPackNV12(input)
+	default:
+		return nil, fmt.Errorf("tight packing is not implemented for pixel format %s", input.PixelFormat())
+	}
+}
+
+// tightPackNV12 copies only the visible WxH and discards any padded columns/rows.
+// align=1 => linesize(Y)=W, linesize(UV)=W for NV12.
+func tightPackNV12(src *astiav.Frame) (*astiav.Frame, error) {
+	srcSize, err := src.ImageBufferSize(1)
+	if err != nil {
+		return nil, fmt.Errorf("ImageBufferSize: %w", err)
+	}
+
+	tmp := make([]byte, srcSize)
+	if _, err := src.ImageCopyToBuffer(tmp, 1); err != nil {
+		return nil, fmt.Errorf("ImageCopyToBuffer: %w", err)
+	}
+
+	packed := frame.Pool.Get()
+	packed.MakeWritable()
+	packed.SetPixelFormat(src.PixelFormat())
+	packed.SetWidth(src.Width())
+	packed.SetHeight(src.Height())
+	packed.AllocBuffer(0)
+	if err := packed.Data().SetBytes(tmp, 1); err != nil {
+		return nil, fmt.Errorf("SetBytes: %w", err)
+	}
+
+	packed.SetPts(src.Pts())
+	packed.SetSampleAspectRatio(src.SampleAspectRatio())
+	packed.SetColorRange(src.ColorRange())
+	packed.SetColorSpace(src.ColorSpace())
+	return packed, nil
 }
 
 func (e *streamEncoder) prepareScaler(
@@ -846,6 +932,7 @@ func (e *streamEncoder) prepareScaler(
 	input frame.Input,
 ) (_err error) {
 	inputResolution := input.GetResolution()
+
 	outputResolution := e.Encoder.GetResolution(ctx)
 	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat())
 	defer func() {
@@ -875,6 +962,7 @@ func (e *streamEncoder) prepareScaler(
 		return fmt.Errorf("unable to allocate a buffer for the scaled frame: %w", err)
 	}
 
+	input.Frame.Linesize()
 	s, err := scaler.NewSoftware(
 		ctx,
 		inputResolution, input.Frame.PixelFormat(),

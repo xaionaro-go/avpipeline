@@ -84,8 +84,8 @@ github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOf
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825 h1:4f2P9/JASUXx2GWhQ6wyGlwOtr+nIfM6PUq9wTHqHmM=
 github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825/go.mod h1:IvRt8Hto32EGtBEf7A94HVxiYEt7hGXLWabjdnUYmAE=
-github.com/xaionaro-go/astiav v0.0.0-20250907230500-45a5f440e59d h1:yLU02A9JD5AWuCLxOuhTYcg3sjNIP7uP/PlbYQvse4k=
-github.com/xaionaro-go/astiav v0.0.0-20250907230500-45a5f440e59d/go.mod h1:txVrlvD3ErCtyacQ6WBMarn9+oD1V8vk33dWmVCGQhM=
+github.com/xaionaro-go/astiav v0.0.0-20250920230204-a742340d5485 h1:Zrt4veeIEljzMkuFMsODed19bld7IOZqG3A4gs4bFKE=
+github.com/xaionaro-go/astiav v0.0.0-20250920230204-a742340d5485/go.mod h1:txVrlvD3ErCtyacQ6WBMarn9+oD1V8vk33dWmVCGQhM=
 github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d h1:++uR850Cqo5qXGTfAq60p2sIfq7oSYK0x0KoKL8B9Ts=
 github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d/go.mod h1:kjLo1LasgdDJqbTGD5bbEM+D6RiZSbf5ZT8yiPFF1BA=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8 h1:FZn9+TN3uHhohfpanWkR9lFNHApizznZbML6XjvEgTU=

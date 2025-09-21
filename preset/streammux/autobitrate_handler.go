@@ -55,15 +55,19 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1920, Height: 1080},
-				BitrateHigh: 6_000_000, BitrateLow: 2_000_000, // 6 Mbps .. 2 Mbps
+				BitrateHigh: 6_000_000, BitrateLow: 3_000_000, // 6 Mbps .. 3 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1280, Height: 720},
+				BitrateHigh: 4_000_000, BitrateLow: 2_000_000, // 4 Mbps .. 2 Mbps
+			},
+			{
+				Resolution:  codec.Resolution{Width: 960, Height: 540},
 				BitrateHigh: 3_000_000, BitrateLow: 1_000_000, // 3 Mbps .. 1 Mbps
 			},
 			{
-				Resolution:  codec.Resolution{Width: 854, Height: 480},
-				BitrateHigh: 2_000_000, BitrateLow: 500_000, // 2 Mbps .. 500 Kbps
+				Resolution:  codec.Resolution{Width: 640, Height: 360},
+				BitrateHigh: 1_500_000, BitrateLow: 50_000, // 1.5 Mbps .. 50 Kbps
 			},
 		}
 	case astiav.CodecIDHevc:
