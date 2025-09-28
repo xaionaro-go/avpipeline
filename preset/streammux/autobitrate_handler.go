@@ -55,7 +55,7 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1920, Height: 1080},
-				BitrateHigh: 6_000_000, BitrateLow: 3_000_000, // 6 Mbps .. 3 Mbps
+				BitrateHigh: 8_000_000, BitrateLow: 3_000_000, // 6 Mbps .. 3 Mbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 1280, Height: 720},
@@ -327,8 +327,8 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	enable bool,
 	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "enableByPass: %v", enable)
-	defer func() { logger.Tracef(ctx, "/enableByPass: %v: %v", enable, _err) }()
+	logger.Debugf(ctx, "enableByPass: %v", enable)
+	defer func() { logger.Debugf(ctx, "/enableByPass: %v: %v", enable, _err) }()
 
 	if enable {
 		return h.setOutput(
@@ -507,6 +507,13 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 			return nil
 		}
 		newRes = *_newRes
+		if newRes.Resolution == *res {
+			// if already the highest resolution, then enable bypass:
+			err := h.enableBypass(ctx, true, isCritical)
+			if err != nil {
+				return fmt.Errorf("unable to enable bypass mode: %w", err)
+			}
+		}
 	default:
 		return nil
 	}
@@ -618,6 +625,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 			logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationDowngrade)
 			return nil
 		}
+		h.currentResolutionChangeRequest = nil
 	}
 
 	if outputKey.VideoCodec == codectypes.NameCopy {
@@ -629,6 +637,9 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	switch {
 	case err == nil:
 		logger.Infof(ctx, "changed resolution to %v (bitrate: %d)", outputKey.Resolution, bitrate)
+		return nil
+	case errors.As(err, &ErrAlreadySet{}):
+		logger.Debugf(ctx, "resolution is already set to %v: %v", outputKey.Resolution, err)
 		return nil
 	case errors.As(err, &ErrNotImplemented{}):
 		logger.Debugf(ctx, "resolution change is not implemented: %v", err)

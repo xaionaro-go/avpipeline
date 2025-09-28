@@ -28,8 +28,8 @@ func (c *MonotonicPTSConvertedType) Match(
 	val, ok := c.LoadOrStore(streamIdx, &xsync.WithMutex[time.Duration]{})
 	assert(ctx, val != nil, ok, streamIdx, ptsConverted)
 	return xsync.DoR1(ctx, val, func() bool {
-		if ptsConverted <= val.Value {
-			logger.Tracef(ctx, "MonotonicPTSConverted: dropping packet with PTS %v <= last PTS %v", ptsConverted, val.Value)
+		if ptsConverted < val.Value {
+			logger.Debugf(ctx, "MonotonicPTSConverted: dropping packet with PTS %v < last PTS %v", ptsConverted, val.Value)
 			return false
 		}
 		val.Value = ptsConverted

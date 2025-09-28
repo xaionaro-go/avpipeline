@@ -610,6 +610,12 @@ func (s *StreamMux[C]) setResolutionBitRateCodec(
 	})
 }
 
+type ErrAlreadySet struct{}
+
+func (e ErrAlreadySet) Error() string {
+	return "already set"
+}
+
 func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	ctx context.Context,
 	res codec.Resolution,
@@ -641,7 +647,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		} else {
 			videoCfg.AverageBitRate = bitrate
 			cfg.Output.VideoTrackConfigs[0] = videoCfg
-			return nil
+			return ErrAlreadySet{}
 		}
 	}
 
