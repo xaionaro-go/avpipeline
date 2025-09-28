@@ -125,6 +125,8 @@ func (opts InitOutputOptions) config() initOutputConfig {
 //	  v                              v
 //	OutputFixer                  OutputFixer
 //	  |                              |
+//	  v MonotonicPTS-· · · · · · · · v ·-MonotonicPTS
+//	  |                              |
 //	  v OutputSyncer-· · · · · · · · v ·-OutputSyncer
 //	  |                              |
 //	  v                              v
@@ -138,6 +140,7 @@ func newOutput[C any](
 	outputKey OutputKey,
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
+	monotonicPTS packetcondition.Condition,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	streamsIniter OutputStreamsIniter,
 	fpsFractionGetter FPSFractionGetter,
@@ -269,8 +272,12 @@ func newOutput[C any](
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
 		return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes
 	})
+	if monotonicPTS == nil {
+		monotonicPTS = packetcondition.Static(true)
+	}
 	o.OutputSyncer.AddPushPacketsTo(o.OutputNode,
 		packetfiltercondition.Packet{Condition: packetcondition.And{
+			monotonicPTS,
 			o.OutputThrottler,
 			packetcondition.Or{
 				packetcondition.Function(func(ctx context.Context, input packet.Input) bool {

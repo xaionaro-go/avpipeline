@@ -106,7 +106,11 @@ func New[C any, P processor.Abstract](
 	s.MapInputStreamIndicesNode = node.NewFromKernel(
 		ctx,
 		kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s)),
-		processor.DefaultOptionsRecoder()...,
+		processor.OptionQueueSizeInputPacket(6000),
+		processor.OptionQueueSizeInputFrame(6000),
+		processor.OptionQueueSizeOutputPacket(10),
+		processor.OptionQueueSizeOutputFrame(10),
+		processor.OptionQueueSizeError(2),
 	)
 	s.inputStreamMapIndicesAsPacketSource = asPacketSource(s.MapInputStreamIndicesNode.Processor)
 	s.MapOutputStreamIndices = kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerOutput(s))

@@ -67,7 +67,7 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 			},
 			{
 				Resolution:  codec.Resolution{Width: 640, Height: 360},
-				BitrateHigh: 1_500_000, BitrateLow: 300_000, // 1.5 Mbps .. 300 Kbps
+				BitrateHigh: 1_500_000, BitrateLow: 200_000, // 1.5 Mbps .. 200 Kbps
 			},
 			{
 				Resolution:  codec.Resolution{Width: 320, Height: 180},
@@ -119,8 +119,8 @@ func DefaultAutoBitrateConfig(
 		MaxBitRate:             resBest.BitrateHigh * 2, // limiting since there is no need to consume more channel if we already provide enough bitrate
 
 		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
-		ResolutionSlowdownDurationUpgrade:   time.Second * 2,
-		ResolutionSlowdownDurationDowngrade: time.Second,
+		ResolutionSlowdownDurationUpgrade:   time.Second * 5,
+		ResolutionSlowdownDurationDowngrade: time.Second * 2,
 	}
 	return result
 }

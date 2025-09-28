@@ -15,7 +15,8 @@ type AutoBitrateCalculatorQueueSizeGapDecay struct {
 	QueueDurationOptimal time.Duration
 	QueueSizeMin         UB
 	GapDecay             time.Duration
-	IncreaseInertia      time.Duration
+	InertiaIncrease      time.Duration
+	InertiaDecrease      time.Duration
 	DerivativeSmoothed   MovingAverage[UBps]
 }
 
@@ -25,8 +26,9 @@ func DefaultAutoBitrateCalculatorQueueSizeGapDecay() *AutoBitrateCalculatorQueue
 	return &AutoBitrateCalculatorQueueSizeGapDecay{
 		QueueDurationOptimal: 3 * time.Second, // pings up to 3 seconds are quite normal
 		QueueSizeMin:         200_000,         // setting some minimum to avoid bottlenecking on ACK-latency instead of bandwidth
-		GapDecay:             time.Second,
-		IncreaseInertia:      3 * time.Second,
+		GapDecay:             3 * time.Second,
+		InertiaIncrease:      10 * time.Second,
+		InertiaDecrease:      2 * time.Second,
 		DerivativeSmoothed:   indicator.NewMAMA[UBps](20, 0.3, 0.05),
 	}
 }
@@ -64,13 +66,24 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 	bitRateDiff := derivativeGap.Tobps()                              // b/s
 	newBitRate := max(Ubps(req.CurrentBitrateSetting)+bitRateDiff, 1) // b/s
 
+	if bitRateDiff == 0 {
+		return BitRateChangeRequest{BitRate: Ubps(newBitRate), IsCritical: false}
+	}
+
 	// slowdown the increase of bitrate to avoid oscillations
 	if bitRateDiff > 0 {
 		ratio := float64(newBitRate) / float64(max(req.CurrentBitrateSetting, 1))
-		fraction := req.Config.CheckInterval.Seconds() / d.IncreaseInertia.Seconds()
+		fraction := req.Config.CheckInterval.Seconds() / d.InertiaIncrease.Seconds()
 		if ratio > 1+fraction {
 			logger.Tracef(ctx, "CalculateBitRate: increasing bitrate too fast: ratio=%s, fraction=%s", ratio, fraction)
 			newBitRate = Ubps(float64(req.CurrentBitrateSetting) * (1 + fraction))
+		}
+	} else {
+		ratio := float64(max(req.CurrentBitrateSetting, 1)) / float64(newBitRate)
+		fraction := req.Config.CheckInterval.Seconds() / d.InertiaDecrease.Seconds()
+		if ratio > 1+fraction {
+			logger.Tracef(ctx, "CalculateBitRate: decreasing bitrate too fast: ratio=%s, fraction=%s", ratio, fraction)
+			newBitRate = Ubps(1 + float64(req.CurrentBitrateSetting)/(1+fraction))
 		}
 	}
 

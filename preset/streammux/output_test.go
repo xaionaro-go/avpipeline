@@ -42,6 +42,7 @@ func TestOutputNodes(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 

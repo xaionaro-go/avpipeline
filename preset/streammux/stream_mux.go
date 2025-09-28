@@ -25,6 +25,7 @@ import (
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
@@ -57,6 +58,7 @@ type StreamMux[C any] struct {
 	OutputFactory OutputFactory
 
 	// aux
+	MonotonicPTSCondition   packetcondition.Condition
 	InputNodeAsPacketSource packet.Source
 	AutoBitRateHandler      *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
@@ -112,10 +114,11 @@ func NewWithCustomData[C any](
 	outputFactory OutputFactory,
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
-		OutputSwitch:  barrierstategetter.NewSwitch(),
-		OutputSyncer:  barrierstategetter.NewSwitch(),
-		OutputFactory: outputFactory,
-		MuxMode:       muxMode,
+		OutputSwitch:          barrierstategetter.NewSwitch(),
+		OutputSyncer:          barrierstategetter.NewSwitch(),
+		OutputFactory:         outputFactory,
+		MuxMode:               muxMode,
+		MonotonicPTSCondition: packetcondition.MonotonicPTSConverted(),
 
 		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packet.Input]{},
 		startedCh:     ptr(make(chan struct{})),
@@ -288,6 +291,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 		s.OutputFactory, outputKey,
 		s.OutputSwitch.Output(int32(outputID)),
 		s.OutputSyncer.Output(int32(outputID)),
+		s.MonotonicPTSCondition,
 		newStreamIndexAssigner(s.MuxMode, outputID, s.InputNode.Processor.Kernel),
 		s,
 		s,
