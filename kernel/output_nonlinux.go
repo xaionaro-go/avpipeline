@@ -9,6 +9,6 @@ import (
 
 func (r *Output) unsafeGetTCPSocketQueue(
 	ctx context.Context,
-) *uint64 {
+) map[string]uint64 {
 	return nil
 }
