@@ -37,7 +37,7 @@ const (
 	outputWaitForStreams                = true
 	outputCopyStreamIndex               = false
 	outputUpdateStreams                 = false
-	outputSendPendingPackets            = false
+	outputSendPendingPackets            = true
 	skipTooHighTimestamps               = false
 	flvForbidStreamIndexAbove1          = true
 	outputMediaMTXHack                  = true
@@ -667,7 +667,6 @@ func (o *Output) send(
 	}
 	if o.Config.WaitForOutputStreams != nil && activeStreamCount < expectedStreamsCount {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
-
 		return nil
 	}
 	if outputWaitForKeyFrames && len(o.waitingKeyFrames) != 0 {
