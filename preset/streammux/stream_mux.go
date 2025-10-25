@@ -36,9 +36,9 @@ import (
 )
 
 const (
-	switchTimeout     = time.Hour
-	switchDebug       = false
-	switchEnableFlush = false // TODO: enable this (currently it causes bugs with mediacodec)
+	switchTimeout        = time.Hour
+	switchDebug          = false
+	switchEnableDraining = false // TODO: enable this (currently it causes bugs with mediacodec)
 )
 
 type StreamMux[C any] struct {
@@ -62,7 +62,7 @@ type StreamMux[C any] struct {
 	InputNodeAsPacketSource packet.Source
 	AutoBitRateHandler      *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
-	OutputIDBeforeBypass    int
+	OutputBeforeBypass      *Output
 
 	// measurements
 	CurrentVideoInputBitRate        atomic.Uint64
@@ -160,6 +160,7 @@ func (s *StreamMux[C]) initSwitches(
 			outputNext := xsync.DoR1(ctx, &s.OutputsLocker, func() *Output {
 				return s.Outputs[to]
 			})
+			outputNext.RecoderNode.Processor.Kernel.SetForceNextKeyFrame(ctx, true)
 			outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
 		})
 	}
@@ -172,26 +173,49 @@ func (s *StreamMux[C]) initSwitches(
 			outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is inactive"))
 		}
 
-		observability.Go(ctx, func(ctx context.Context) {
-			if switchEnableFlush {
+		s.OutputsLocker.Do(ctx, func() {
+			if switchEnableDraining {
 				ctx, cancelFn := context.WithTimeout(ctx, switchTimeout)
 				defer cancelFn()
-				err := outputPrev.FlushAfterFilter(ctx)
+				err := outputPrev.Close(ctx)
 				if err != nil {
-					logger.Errorf(ctx, "unable to flush the output %d: %v", from, err)
+					logger.Errorf(ctx, "unable to close the output %d: %v", from, err)
 				}
 			} else {
-				outputPrev.RecoderNode.Processor.Kernel.SetForceNextKeyFrame(ctx, true)
+				err := outputPrev.CloseNoDrain(ctx)
+				if err != nil {
+					logger.Errorf(ctx, "unable to close the output %d: %v", from, err)
+				}
 			}
 			logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
 			err := s.OutputSyncer.SetValue(ctx, to)
 			logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
+			err = s.removeOutputLocked(ctx, outputPrev.GetKey())
+			if err != nil {
+				logger.Errorf(ctx, "unable to remove the output %d: %v", from, err)
+			}
 		})
 	})
 	s.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
 
 	logger.Tracef(ctx, "o.OutputSwitch: %p", s.OutputSwitch)
 	logger.Tracef(ctx, "o.OutputSyncer: %p", s.OutputSyncer)
+}
+
+func (s *StreamMux[C]) removeOutputLocked(
+	ctx context.Context,
+	outputKey OutputKey,
+) (_err error) {
+	logger.Tracef(ctx, "removeOutputLocked(%v)", outputKey)
+	defer func() { logger.Tracef(ctx, "/removeOutputLocked(%v): %v", outputKey, _err) }()
+	output, ok := s.OutputsMap.LoadAndDelete(outputKey)
+	if !ok {
+		return fmt.Errorf("output %v not found in OutputsMap", outputKey)
+	}
+	s.Outputs[output.ID] = s.Outputs[len(s.Outputs)-1]
+	s.Outputs[output.ID].ID = output.ID
+	s.Outputs = s.Outputs[:len(s.Outputs)-1]
+	return nil
 }
 
 func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
@@ -203,11 +227,12 @@ func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 		errs = append(errs, fmt.Errorf("unable to close the input node: %w", err))
 	}
 	s.OutputsLocker.Do(ctx, func() {
-		for _, output := range s.Outputs {
+		s.OutputsMap.Range(func(key OutputKey, output *Output) bool {
 			if err := output.Close(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("unable to close the output chain %d: %w", output.ID, err))
 			}
-		}
+			return true
+		})
 	})
 	if s.AutoBitRateHandler != nil {
 		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
@@ -283,7 +308,7 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	cfg := InitOutputOptions(opts).config()
 	_ = cfg // currently unused
 
-	outputID := len(s.Outputs)
+	outputID := OutputID(len(s.Outputs))
 	output, err := newOutput(
 		ctx,
 		outputID,
@@ -336,7 +361,7 @@ func (s *StreamMux[C]) enableRecodingBypassLocked(
 	if err != nil {
 		return fmt.Errorf("unable to set the preferred output %d:%s: %w", output.ID, outputKey, err)
 	}
-	s.OutputIDBeforeBypass = output.ID
+	s.OutputBeforeBypass = output
 
 	return nil
 }

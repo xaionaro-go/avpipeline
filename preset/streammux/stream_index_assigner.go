@@ -12,13 +12,13 @@ import (
 
 type streamIndexAssigner struct {
 	MuxMode      types.MuxMode
-	OutputID     int
+	OutputID     OutputID
 	PacketSource packet.Source
 }
 
 func newStreamIndexAssigner(
 	muxMode types.MuxMode,
-	outputID int,
+	outputID OutputID,
 	packetSource packet.Source,
 ) *streamIndexAssigner {
 	return &streamIndexAssigner{
@@ -46,7 +46,7 @@ func (s *streamIndexAssigner) StreamIndexAssign(
 		if streamCount <= 0 {
 			return nil, fmt.Errorf("no streams in the output format context")
 		}
-		return []int{in.GetStreamIndex() + s.OutputID*streamCount}, nil
+		return []int{in.GetStreamIndex() + int(s.OutputID)*streamCount}, nil
 	default:
 		return nil, fmt.Errorf("unknown MuxMode: %s", s.MuxMode)
 	}

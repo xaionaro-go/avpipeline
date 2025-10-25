@@ -59,8 +59,10 @@ type OutputCustomData struct {
 	*Output
 }
 
+type OutputID int
+
 type Output struct {
-	ID                int
+	ID                OutputID
 	InputFilter       *NodeBarrier[OutputCustomData]
 	InputThrottler    *packetcondition.VideoAverageBitrateLower
 	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData]
@@ -131,7 +133,7 @@ func (opts InitOutputOptions) config() initOutputConfig {
 
 func newOutput[C any](
 	ctx context.Context,
-	outputID int,
+	outputID OutputID,
 	inputNode *NodeInput[C],
 	outputFactory OutputFactory,
 	outputKey OutputKey,
@@ -451,14 +453,24 @@ func (o *Output) initReuseDecoderResources(
 }
 
 func (o *Output) Close(ctx context.Context) (_err error) {
-	logger.Tracef(ctx, "Output.Close()")
-	defer func() { logger.Tracef(ctx, "/Output.Close(): %v", _err) }()
+	return o.close(ctx, true)
+}
+
+func (o *Output) CloseNoDrain(ctx context.Context) (_err error) {
+	return o.close(ctx, false)
+}
+
+func (o *Output) close(ctx context.Context, shouldDrain bool) (_err error) {
+	logger.Tracef(ctx, "Output.close(%v)", shouldDrain)
+	defer func() { logger.Tracef(ctx, "/Output.close(%v): %v", shouldDrain, _err) }()
 	var errs []error
 
 	o.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Static(false))
 	o.FirstNodeAfterFilter().SetInputFrameFilter(framefiltercondition.Static(false))
-	if err := o.FlushAfterFilter(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
+	if shouldDrain {
+		if err := o.DrainAfterFilter(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
+		}
 	}
 	if err := o.InputFilter.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close input filter for output %d: %w", o.ID, err))
@@ -496,6 +508,19 @@ func (o *Output) Flush(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Output[%d].Flush()", o.ID)
 	defer func() { logger.Tracef(ctx, "/Output[%d].Flush(): %v", o.ID, _err) }()
 	for _, n := range o.Nodes() {
+		logger.Tracef(ctx, "flushing %s:%p", n, n)
+		err := n.Flush(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to flush %s: %w", n, err)
+		}
+	}
+	return nil
+}
+
+func (o *Output) Drain(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Output[%d].Drain()", o.ID)
+	defer func() { logger.Tracef(ctx, "/Output[%d].Drain(): %v", o.ID, _err) }()
+	for _, n := range o.Nodes() {
 		logger.Tracef(ctx, "draining the inputs of %s:%p", n, n)
 		err := processor.DrainInput(ctx, n.GetProcessor())
 		if err != nil {
@@ -517,9 +542,9 @@ func (o *Output) Flush(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (o *Output) FlushAfterFilter(ctx context.Context) (_err error) {
-	logger.Tracef(ctx, "Output[%d].FlushAfterFilter()", o.ID)
-	defer func() { logger.Tracef(ctx, "/Output[%d].FlushAfterFilter(): %v", o.ID, _err) }()
+func (o *Output) DrainAfterFilter(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Output[%d].DrainAfterFilter()", o.ID)
+	defer func() { logger.Tracef(ctx, "/Output[%d].DrainAfterFilter(): %v", o.ID, _err) }()
 	for _, n := range o.NodesAfterFilter() {
 		logger.Tracef(ctx, "draining the inputs of %s:%p", n, n)
 		err := processor.DrainInput(ctx, n.GetProcessor())
