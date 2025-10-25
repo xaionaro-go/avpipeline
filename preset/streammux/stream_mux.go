@@ -42,9 +42,9 @@ const (
 )
 
 type StreamMux[C any] struct {
-	MuxMode        types.MuxMode
-	RecodingConfig types.RecoderConfig
-	Locker         xsync.Mutex
+	MuxMode            types.MuxMode
+	CurrentOutputProps types.OutputProps
+	Locker             xsync.Mutex
 
 	// switches:
 	OutputSwitch *barrierstategetter.Switch
@@ -90,7 +90,7 @@ type OutputFactory interface {
 	NewOutput(
 		ctx context.Context,
 		outputKey OutputKey,
-	) (node.Abstract, OutputConfig, error)
+	) (node.Abstract, types.OutputConfig, error)
 }
 
 func New(
@@ -353,34 +353,37 @@ func (s *StreamMux[C]) GetRecoderConfig(
 	if s == nil {
 		return types.RecoderConfig{}
 	}
-	return xsync.DoA1R1(ctx, &s.Locker, s.getRecoderConfigLocked, ctx)
+	outputConfig := xsync.DoA1R1(ctx, &s.Locker, s.getCurrentOutputPropsLocked, ctx)
+	return outputConfig.RecoderConfig
 }
 
-func (s *StreamMux[C]) getRecoderConfigLocked(
+func (s *StreamMux[C]) getCurrentOutputPropsLocked(
 	ctx context.Context,
-) (_ret types.RecoderConfig) {
-	assertNoError(json.Unmarshal(must(json.Marshal(s.RecodingConfig)), &_ret)) // deep copy of a poor man
+) (_ret types.OutputProps) {
+	assertNoError(json.Unmarshal(must(json.Marshal(s.CurrentOutputProps)), &_ret)) // deep copy of a poor man
 	return
 }
 
-func (s *StreamMux[C]) SetRecoderConfig(
+func (s *StreamMux[C]) SwitchToOutputByProps(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	props types.OutputProps,
 ) (_err error) {
-	logger.Tracef(ctx, "SetRecoderConfig(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
-	return xsync.DoA3R1(ctx, &s.Locker, s.setRecoderConfigLocked, ctx, cfg, true)
+	logger.Tracef(ctx, "SwitchToOutputByProps(ctx, %#+v)", props)
+	defer func() { logger.Tracef(ctx, "/SwitchToOutputByProps(ctx, %#+v): %v", props, _err) }()
+	return xsync.DoA3R1(ctx, &s.Locker, s.switchToOutputByProps, ctx, props, true)
 }
 
-func (s *StreamMux[C]) setRecoderConfigLocked(
+func (s *StreamMux[C]) switchToOutputByProps(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	props types.OutputProps,
 	persistent bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setRecoderConfigLocked: %#+v", cfg)
-	defer func() { logger.Tracef(ctx, "/setRecoderConfigLocked: %#+v: %v", cfg, _err) }()
+	logger.Tracef(ctx, "switchToOutputByProps: %#+v, %v, %v", props, persistent)
+	defer func() {
+		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v, %v: %v", props, persistent, _err)
+	}()
 
-	outputKey := OutputKeyFromRecoderConfig(ctx, &cfg)
+	outputKey := PartialOutputKeyFromRecoderConfig(ctx, &props.RecoderConfig)
 	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
 		return fmt.Errorf("output resolution is not set")
 	}
@@ -392,7 +395,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
-	err = output.reconfigureRecoder(ctx, cfg)
+	err = output.reconfigureRecoder(ctx, props.RecoderConfig)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
 	}
@@ -412,7 +415,7 @@ func (s *StreamMux[C]) setRecoderConfigLocked(
 	}
 
 	if persistent {
-		s.RecodingConfig = cfg
+		s.CurrentOutputProps = props
 	}
 	return nil
 }
@@ -597,16 +600,16 @@ func (e ErrNotImplemented) Error() string {
 func (s *StreamMux[C]) setResolutionBitRateCodec(
 	ctx context.Context,
 	res codec.Resolution,
-	bitrate uint64,
+	bitRate types.Ubps,
 	videoCodec codectypes.Name,
 	audioCodec codectypes.Name,
 ) (_err error) {
-	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, '%s', '%s'", res, bitrate, videoCodec, audioCodec)
+	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, '%s', '%s'", res, bitRate, videoCodec, audioCodec)
 	defer func() {
-		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, '%s', '%s': %v", res, bitrate, videoCodec, audioCodec, _err)
+		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, '%s', '%s': %v", res, bitRate, videoCodec, audioCodec, _err)
 	}()
 	return xsync.DoR1(ctx, &s.Locker, func() error {
-		return s.setResolutionBitRateCodecLocked(ctx, res, bitrate, videoCodec, audioCodec)
+		return s.setResolutionBitRateCodecLocked(ctx, res, bitRate, videoCodec, audioCodec)
 	})
 }
 
@@ -619,11 +622,11 @@ func (e ErrAlreadySet) Error() string {
 func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	ctx context.Context,
 	res codec.Resolution,
-	bitrate uint64,
+	bitRate types.Ubps,
 	videoCodec codectypes.Name,
 	audioCodec codectypes.Name,
 ) (_err error) {
-	cfg := s.getRecoderConfigLocked(ctx)
+	cfg := s.getCurrentOutputPropsLocked(ctx)
 	if len(cfg.Output.AudioTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.Output.AudioTrackConfigs))
 	}
@@ -645,7 +648,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoderV) {
 			logger.Errorf(ctx, "the video codec is set to '%s', but the encoder is %s", videoCodec, encoderV)
 		} else {
-			videoCfg.AverageBitRate = bitrate
+			videoCfg.AverageBitRate = uint64(bitRate)
 			cfg.Output.VideoTrackConfigs[0] = videoCfg
 			return ErrAlreadySet{}
 		}
@@ -655,11 +658,13 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	cfg.Output.AudioTrackConfigs[0] = audioCfg
 
 	videoCfg.Resolution = res
-	videoCfg.AverageBitRate = bitrate
+	videoCfg.AverageBitRate = uint64(bitRate)
 	videoCfg.CodecName = videoCodec
 	cfg.Output.VideoTrackConfigs[0] = videoCfg
 
-	return s.setRecoderConfigLocked(ctx, cfg, false)
+	return s.switchToOutputByProps(ctx, types.OutputProps{
+		RecoderConfig: cfg.RecoderConfig,
+	}, false)
 }
 
 func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {

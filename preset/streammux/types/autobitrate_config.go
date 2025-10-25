@@ -35,8 +35,8 @@ type AutoBitRateCalculator interface {
 
 type AutoBitRateResolutionAndBitRateConfig struct {
 	codectypes.Resolution
-	BitrateHigh uint64
-	BitrateLow  uint64
+	BitrateHigh Ubps
+	BitrateLow  Ubps
 }
 
 func (res AutoBitRateResolutionAndBitRateConfig) String() string {
@@ -57,7 +57,7 @@ func (r AutoBitRateResolutionAndBitRateConfigs) Find(
 }
 
 func (r AutoBitRateResolutionAndBitRateConfigs) BitRate(
-	bitrate uint64,
+	bitrate Ubps,
 ) AutoBitRateResolutionAndBitRateConfigs {
 	out := make(AutoBitRateResolutionAndBitRateConfigs, 0, len(r))
 	for i := range r {
@@ -140,8 +140,8 @@ type AutoBitRateConfig struct {
 	FPSReducer             FPSReducerConfig
 	CheckInterval          time.Duration
 	AutoByPass             bool
-	MaxBitRate             uint64
-	MinBitRate             uint64
+	MaxBitRate             Ubps
+	MinBitRate             Ubps
 
 	BitRateIncreaseSlowdown             time.Duration
 	ResolutionSlowdownDurationUpgrade   time.Duration
@@ -151,8 +151,8 @@ type AutoBitRateConfig struct {
 type FPSReducerConfig []FPSReductionRange
 
 type FPSReductionRange struct {
-	BitrateMin  uint64
-	BitrateMax  uint64
+	BitrateMin  Ubps
+	BitrateMax  Ubps
 	FractionNum uint32
 	FractionDen uint32
 }
@@ -168,7 +168,7 @@ func DefaultFPSReducerConfig() FPSReducerConfig {
 	}
 }
 
-func (r FPSReducerConfig) GetFraction(bitrate uint64) (num, den uint32) {
+func (r FPSReducerConfig) GetFraction(bitrate Ubps) (num, den uint32) {
 	for i := range r {
 		if r[i].BitrateMin <= bitrate && bitrate <= r[i].BitrateMax {
 			return r[i].FractionNum, r[i].FractionDen

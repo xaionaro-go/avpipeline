@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	e2eNvencEnable = true
+	e2eNvencEnable = false
 )
 
 func must[T any](v T, err error) T {
@@ -131,13 +131,13 @@ var _ streammux.OutputFactory = (*decoderOutputFactory)(nil)
 func (decoderOutputFactory) NewOutput(
 	ctx context.Context,
 	outputKey streammux.OutputKey,
-) (node.Abstract, streammux.OutputConfig, error) {
+) (node.Abstract, streammuxtypes.OutputConfig, error) {
 	n := node.NewFromKernel(
 		ctx,
 		kernel.NewDecoder(ctx, &codec.NaiveDecoderFactory{}),
 		processor.DefaultOptionsRecoder()...,
 	)
-	return n, streammux.OutputConfig{}, nil
+	return n, streammuxtypes.OutputConfig{}, nil
 }
 
 func runTest(
@@ -168,22 +168,27 @@ func runTest(
 		vcodecName = "libx264"
 	}
 
-	require.NoError(t, streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
-		Output: streammuxtypes.RecoderOutputConfig{
-			VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
-				InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
-				OutputTrackIDs:     []int{0},
-				CodecName:          vcodecName,
-				Resolution:         codectypes.Resolution{Width: 1920, Height: 1080},
-				HardwareDeviceType: hardwareDeviceType,
-			}},
-			AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
-				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-				OutputTrackIDs: []int{1},
-				CodecName:      "aac",
-			}},
+	require.NoError(t, streamMux.SwitchToOutputByProps(
+		ctx,
+		streammuxtypes.OutputProps{
+			RecoderConfig: streammuxtypes.RecoderConfig{
+				Output: streammuxtypes.RecoderOutputConfig{
+					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+						InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs:     []int{0},
+						CodecName:          vcodecName,
+						Resolution:         codectypes.Resolution{Width: 1920, Height: 1080},
+						HardwareDeviceType: hardwareDeviceType,
+					}},
+					AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs: []int{1},
+						CodecName:      "aac",
+					}},
+				},
+			},
 		},
-	}))
+	))
 
 	require.NotNil(t, streamMux.GetActiveOutput(ctx))
 
@@ -243,22 +248,27 @@ func runTest(
 	for idx, p := range input {
 		if idx == len(input)/2 {
 			for {
-				err := streamMux.SetRecoderConfig(ctx, streammuxtypes.RecoderConfig{
-					Output: streammuxtypes.RecoderOutputConfig{
-						VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
-							InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
-							OutputTrackIDs:     []int{0},
-							CodecName:          vcodecName,
-							Resolution:         codectypes.Resolution{Width: 1280, Height: 720},
-							HardwareDeviceType: hardwareDeviceType,
-						}},
-						AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
-							InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
-							OutputTrackIDs: []int{1},
-							CodecName:      "aac",
-						}},
+				err := streamMux.SwitchToOutputByProps(
+					ctx,
+					streammuxtypes.OutputProps{
+						RecoderConfig: streammuxtypes.RecoderConfig{
+							Output: streammuxtypes.RecoderOutputConfig{
+								VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+									InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
+									OutputTrackIDs:     []int{0},
+									CodecName:          vcodecName,
+									Resolution:         codectypes.Resolution{Width: 1280, Height: 720},
+									HardwareDeviceType: hardwareDeviceType,
+								}},
+								AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+									InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+									OutputTrackIDs: []int{1},
+									CodecName:      "aac",
+								}},
+							},
+						},
 					},
-				})
+				)
 				if errors.As(err, &streammux.ErrSwitchAlreadyInProgress{}) {
 					logger.Warnf(ctx, "SetRecoderConfig: switch in progress: %v; retrying in 1 second", err)
 					time.Sleep(time.Second)

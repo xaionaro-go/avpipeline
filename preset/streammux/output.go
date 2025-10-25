@@ -70,13 +70,10 @@ type Output struct {
 	OutputFixer       *autofix.AutoFixerWithCustomData[OutputCustomData]
 	OutputSyncer      *NodeBarrier[OutputCustomData]
 	OutputNode        node.Abstract
-	OutputNodeConfig  OutputConfig
+	OutputNodeConfig  types.OutputConfig
+	OutputNodeProps   types.OutputNodeProps
 	FPSFractionGetter FPSFractionGetter
 	InitOnce          sync.Once
-}
-
-type OutputConfig struct {
-	OutputThrottlerMaxQueueSizeBytes uint64
 }
 
 type initOutputConfig struct{}
@@ -545,7 +542,7 @@ func (o *Output) FlushAfterFilter(ctx context.Context) (_err error) {
 	return nil
 }
 
-func OutputKeyFromRecoderConfig(
+func PartialOutputKeyFromRecoderConfig(
 	ctx context.Context,
 	c *types.RecoderConfig,
 ) OutputKey {

@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/xaionaro-go/avpipeline/codec/types"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 )
 
 type dummyHandler struct {
@@ -20,11 +21,11 @@ type dummyOutputFactory struct{}
 func (dummyOutputFactory) NewOutput(
 	ctx context.Context,
 	outputKey OutputKey,
-) (node.Abstract, OutputConfig, error) {
+) (node.Abstract, types.OutputConfig, error) {
 	return node.NewFromKernel(
 		ctx,
 		boilerplate.NewKernelWithFormatContext(ctx, &dummyHandler{}),
-	), OutputConfig{}, nil
+	), types.OutputConfig{}, nil
 }
 
 func TestOutputNodes(t *testing.T) {
@@ -35,7 +36,7 @@ func TestOutputNodes(t *testing.T) {
 		newInputNode[struct{}](ctx, nil),
 		dummyOutputFactory{},
 		OutputKey{
-			Resolution: types.Resolution{Width: 1920, Height: 1080},
+			Resolution: codectypes.Resolution{Width: 1920, Height: 1080},
 		},
 		nil,
 		nil,

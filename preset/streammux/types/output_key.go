@@ -22,12 +22,30 @@ func (k OutputKey) Compare(b OutputKey) int {
 		if k.VideoCodec == codectypes.NameCopy {
 			return 1 // lossless is better even despite lower width/height
 		}
+		if b.VideoCodec == codectypes.NameCopy {
+			return -1
+		}
+		if k.VideoCodec > b.VideoCodec { // TODO: determine better codec by some other way?
+			return 1
+		}
 		return -1
 	}
 	resK := k.Resolution.Width * k.Resolution.Height
 	resB := b.Resolution.Width * b.Resolution.Height
 	if resK != resB {
 		if resK > resB {
+			return 1
+		}
+		return -1
+	}
+	if k.AudioCodec != b.AudioCodec {
+		if k.AudioCodec == codectypes.NameCopy {
+			return 1
+		}
+		if b.AudioCodec == codectypes.NameCopy {
+			return -1
+		}
+		if k.AudioCodec > b.AudioCodec { // TODO: determine better codec by some other way?
 			return 1
 		}
 		return -1
