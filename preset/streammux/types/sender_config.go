@@ -1,5 +1,5 @@
 package types
 
-type OutputConfig struct {
+type SenderConfig struct {
 	OutputThrottlerMaxQueueSizeBytes uint64
 }

@@ -199,14 +199,18 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			if o == nil {
 				continue
 			}
-			outputProc, ok := o.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
+			outputProc, ok := o.SendingNode.GetProcessor().(kernel.GetInternalQueueSizer)
 			if !ok {
-				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", o.OutputNode.GetProcessor())
+				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", o.SendingNode.GetProcessor())
 				continue
 			}
 			getQueueSizers = append(getQueueSizers, outputProc)
 		}
 	})
+	if activeOutput == nil {
+		logger.Warnf(ctx, "no active output; skipping bitrate check")
+		return
+	}
 
 	now := time.Now()
 	tsDiff := now.Sub(h.lastCheckTS)
@@ -214,7 +218,10 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	var haveAnError atomic.Bool
 	var totalQueue atomic.Uint64
-	activeOutputProc, _ := activeOutput.OutputNode.GetProcessor().(kernel.GetInternalQueueSizer)
+	assert(ctx, activeOutput.SendingNode != nil)
+	proc := activeOutput.SendingNode.GetProcessor()
+	assert(ctx, proc != nil)
+	activeOutputProc, _ := proc.(kernel.GetInternalQueueSizer)
 	var wg sync.WaitGroup
 	for _, proc := range getQueueSizers {
 		wg.Add(1)
@@ -299,10 +306,10 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %s (current: %d); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
+	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
 
 	if bitRateRequest.BitRate == curReqBitRate {
-		logger.Tracef(ctx, "bitrate remains unchanged: %d", curReqBitRate)
+		logger.Tracef(ctx, "bitrate remains unchanged: %v", curReqBitRate)
 		return
 	}
 
@@ -333,7 +340,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	if enable {
 		return h.setOutput(
 			ctx,
-			&OutputKey{
+			&SenderKey{
 				AudioCodec: codectypes.NameCopy,
 				VideoCodec: codectypes.NameCopy,
 			},
@@ -356,9 +363,9 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	req BitRateChangeRequest,
 	actualOutputBitrate types.Ubps,
 ) (_err error) {
-	logger.Tracef(ctx, "trySetVideoBitrate: %d->%s (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
+	logger.Tracef(ctx, "trySetVideoBitrate: %v->%v (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
 	defer func() {
-		logger.Tracef(ctx, "/trySetVideoBitrate: %d->%s (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
+		logger.Tracef(ctx, "/trySetVideoBitrate: %v->%v (isCritical:%t): %v", oldBitRate, req.BitRate, req.IsCritical, _err)
 	}()
 
 	now := time.Now()
@@ -374,11 +381,11 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		switch {
 		case req.BitRate > oldBitRate && !h.currentResolutionChangeRequest.IsUpgrade:
 			// we are increasing bitrate while a downgrade is in progress; cancel the downgrade
-			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate: %d > %d", uint64(req.BitRate), oldBitRate)
+			logger.Tracef(ctx, "cancelling the downgrade since we are increasing bitrate: %v > %v", req.BitRate, oldBitRate)
 			h.currentResolutionChangeRequest = nil
 		case req.BitRate < oldBitRate && h.currentResolutionChangeRequest.IsUpgrade:
 			// we are decreasing bitrate while an upgrade is in progress; cancel the upgrade
-			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate: %d < %d", uint64(req.BitRate), oldBitRate)
+			logger.Tracef(ctx, "cancelling the upgrade since we are decreasing bitrate: %v < %v", req.BitRate, oldBitRate)
 			h.currentResolutionChangeRequest = nil
 		}
 	}
@@ -445,11 +452,11 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 
 	if clampedVideoBitRate == oldBitRate {
-		logger.Debugf(ctx, "bitrate remains unchanged after clamping: %d (resCfg: %#+v)", oldBitRate, resCfg)
+		logger.Debugf(ctx, "bitrate remains unchanged after clamping: %v (resCfg: %#+v)", oldBitRate, resCfg)
 		return nil
 	}
 
-	logger.Infof(ctx, "changing bitrate from %d to %d (resCfg: %#+v); max:%d, min:%d, in:%d", oldBitRate, clampedVideoBitRate, resCfg, maxVideoBitRate, h.MinBitRate, videoInputBitRate)
+	logger.Infof(ctx, "changing bitrate from %v to %v (resCfg: %#+v); max:%v, min:%v, in:%v", oldBitRate, clampedVideoBitRate, resCfg, maxVideoBitRate, h.MinBitRate, videoInputBitRate)
 	if err := encoderV.SetQuality(ctx, quality.ConstantBitrate(clampedVideoBitRate), nil); err != nil {
 		return fmt.Errorf("unable to set bitrate to %v: %w", clampedVideoBitRate, err)
 	}
@@ -462,9 +469,9 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	bitrate types.Ubps,
 	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%d, isCritical=%t)", bitrate, isCritical)
+	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%v, isCritical=%t)", bitrate, isCritical)
 	defer func() {
-		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%d, isCritical=%t): %v", bitrate, isCritical, _err)
+		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%v, isCritical=%t): %v", bitrate, isCritical, _err)
 	}()
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
@@ -518,7 +525,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return nil
 	}
 
-	err := h.setOutput(ctx, &OutputKey{
+	err := h.setOutput(ctx, &SenderKey{
 		Resolution: newRes.Resolution,
 	}, bitrate, isCritical)
 	if err != nil {
@@ -529,13 +536,13 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 
 func (h *AutoBitRateHandler[C]) setOutput(
 	ctx context.Context,
-	outputKey *OutputKey,
+	outputKey *SenderKey,
 	bitrate types.Ubps,
 	isCritical bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %d (isCritical:%t)", outputKey, bitrate, isCritical)
+	logger.Tracef(ctx, "setOutput: %v, %v (isCritical:%t)", outputKey, bitrate, isCritical)
 	defer func() {
-		logger.Tracef(ctx, "/setOutput: %v, %d (isCritical:%t): %v", outputKey, bitrate, isCritical, _err)
+		logger.Tracef(ctx, "/setOutput: %v, %v (isCritical:%t): %v", outputKey, bitrate, isCritical, _err)
 	}()
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)

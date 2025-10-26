@@ -31,7 +31,8 @@ import (
 )
 
 const (
-	e2eNvencEnable = false
+	e2eNvencEnable       = true
+	e2eForceTestDraining = false
 )
 
 func must[T any](v T, err error) T {
@@ -46,7 +47,7 @@ func ptr[T any](v T) *T {
 }
 
 func TestE2E(t *testing.T) {
-	loggerLevel := logger.LevelWarning
+	loggerLevel := logger.LevelTrace
 	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
 	l := logrus.Default().WithLevel(loggerLevel)
 	ctx := logger.CtxWithLogger(context.Background(), l)
@@ -126,18 +127,18 @@ func readInputFromFile(ctx context.Context, t *testing.T, fileName string) ([]pa
 
 type decoderOutputFactory struct{}
 
-var _ streammux.OutputFactory = (*decoderOutputFactory)(nil)
+var _ streammux.SenderFactory = (*decoderOutputFactory)(nil)
 
-func (decoderOutputFactory) NewOutput(
+func (decoderOutputFactory) NewSender(
 	ctx context.Context,
-	outputKey streammux.OutputKey,
-) (node.Abstract, streammuxtypes.OutputConfig, error) {
+	outputKey streammux.SenderKey,
+) (node.Abstract, streammuxtypes.SenderConfig, error) {
 	n := node.NewFromKernel(
 		ctx,
 		kernel.NewDecoder(ctx, &codec.NaiveDecoderFactory{}),
 		processor.DefaultOptionsRecoder()...,
 	)
-	return n, streammuxtypes.OutputConfig{}, nil
+	return n, streammuxtypes.SenderConfig{}, nil
 }
 
 func runTest(
@@ -170,7 +171,7 @@ func runTest(
 
 	require.NoError(t, streamMux.SwitchToOutputByProps(
 		ctx,
-		streammuxtypes.OutputProps{
+		streammuxtypes.SenderProps{
 			RecoderConfig: streammuxtypes.RecoderConfig{
 				Output: streammuxtypes.RecoderOutputConfig{
 					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
@@ -214,7 +215,8 @@ func runTest(
 		streamMux.GetCountersPtr().Addressed.Packets.Increment(mediaType, pktSize)
 		select {
 		case <-ctx.Done():
-			require.NoError(t, ctx.Err())
+			streamMux.GetCountersPtr().Missed.Packets.Increment(mediaType, pktSize)
+			t.Fatalf("context is closed prematurely: %v", ctx.Err())
 		case inputCh <- p:
 			streamMux.GetCountersPtr().Received.Packets.Increment(mediaType, pktSize)
 		}
@@ -243,14 +245,16 @@ func runTest(
 		avpipeline.SetBlockInput(ctx, false, streamMux)
 	}
 
-	drain()
+	if streammux.EnableDraining || e2eForceTestDraining {
+		drain()
+	}
 
 	for idx, p := range input {
 		if idx == len(input)/2 {
 			for {
 				err := streamMux.SwitchToOutputByProps(
 					ctx,
-					streammuxtypes.OutputProps{
+					streammuxtypes.SenderProps{
 						RecoderConfig: streammuxtypes.RecoderConfig{
 							Output: streammuxtypes.RecoderOutputConfig{
 								VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
@@ -283,7 +287,8 @@ func runTest(
 		streamMux.GetCountersPtr().Addressed.Packets.Increment(mediaType, pktSize)
 		select {
 		case <-ctx.Done():
-			require.NoError(t, ctx.Err())
+			streamMux.GetCountersPtr().Missed.Packets.Increment(mediaType, pktSize)
+			t.Fatalf("context is closed prematurely: %v", ctx.Err())
 		case inputCh <- p:
 			streamMux.GetCountersPtr().Received.Packets.Increment(
 				globaltypes.MediaType(p.GetMediaType()),
@@ -292,5 +297,7 @@ func runTest(
 		}
 	}
 
-	drain()
+	if streammux.EnableDraining || e2eForceTestDraining {
+		drain()
+	}
 }

@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -47,6 +48,10 @@ func readerLoop(
 				countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, pkt, err)
 				if err != nil {
+					if eofErr(err) {
+						logger.Debugf(ctx, "ReaderLoop[%s](closing): EOF reached", kernel)
+						return
+					}
 					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send packet: %v", kernel, err)
 					return
 				}
@@ -65,6 +70,10 @@ func readerLoop(
 				countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, f, err)
 				if err != nil {
+					if eofErr(err) {
+						logger.Debugf(ctx, "ReaderLoop[%s](closing): EOF reached", kernel)
+						return
+					}
 					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send frame: %v", kernel, err)
 					return
 				}
@@ -125,4 +134,14 @@ func readerLoop(
 			}
 		}
 	}
+}
+
+func eofErr(err error) bool {
+	switch {
+	case errors.Is(err, io.EOF):
+		return true
+	case errors.Is(err, context.Canceled):
+		return true
+	}
+	return false
 }

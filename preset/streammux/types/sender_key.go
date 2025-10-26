@@ -7,17 +7,17 @@ import (
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
-type OutputKey struct {
+type SenderKey struct {
 	AudioCodec codectypes.Name
 	VideoCodec codectypes.Name
 	Resolution codectypes.Resolution
 }
 
-func (k OutputKey) String() string {
+func (k SenderKey) String() string {
 	return fmt.Sprintf("%s/%dx%d;%s", k.VideoCodec, k.Resolution.Width, k.Resolution.Height, k.AudioCodec)
 }
 
-func (k OutputKey) Compare(b OutputKey) int {
+func (k SenderKey) Compare(b SenderKey) int {
 	if k.VideoCodec != b.VideoCodec {
 		if k.VideoCodec == codectypes.NameCopy {
 			return 1 // lossless is better even despite lower width/height
@@ -53,7 +53,7 @@ func (k OutputKey) Compare(b OutputKey) int {
 	return 0
 }
 
-type OutputKeys []OutputKey
+type OutputKeys []SenderKey
 
 func (s OutputKeys) Sort() {
 	sort.Sort(s)

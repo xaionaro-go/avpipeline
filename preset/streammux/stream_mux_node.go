@@ -39,7 +39,7 @@ func (s *StreamMux[C]) Serve(
 	observability.Go(ctx, func(ctx context.Context) {
 		s.inputBitRateMeasurerLoop(ctx)
 	})
-	rawErrCh := make(chan node.Error, 1)
+	rawErrCh := make(chan node.Error, 100)
 	defer close(rawErrCh)
 	observability.Go(ctx, func(ctx context.Context) {
 		for {
@@ -54,11 +54,11 @@ func (s *StreamMux[C]) Serve(
 				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData]); ok {
 					output := customDataer.GetCustomData().Output
 					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
-					assert(ctx, s.OutputSwitch != nil)
-					if int32(output.ID) != s.OutputSwitch.CurrentValue.Load() {
+					assert(ctx, s.VideoOutputSwitch != nil)
+					if int32(output.ID) != s.VideoOutputSwitch.CurrentValue.Load() {
 						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
 						s.OutputsMap.Delete(output.GetKey())
-						output.Close(ctx)
+						output.CloseNoDrain(ctx)
 						continue
 					}
 				}
@@ -156,7 +156,7 @@ func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 		s.InputNode,
 	}
 	s.Locker.Do(ctx, func() {
-		s.OutputsMap.Range(func(_ OutputKey, output *Output) bool {
+		s.OutputsMap.Range(func(_ SenderKey, output *Output) bool {
 			nodes = append(nodes, output.Nodes()...)
 			return true
 		})

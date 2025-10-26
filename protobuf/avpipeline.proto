@@ -18,7 +18,8 @@ message NodeCounters {
     NodeCountersSection processed = 2;
     NodeCountersSection missed = 3;
     NodeCountersSection generated = 4;
-    NodeCountersSection sent = 5;
+    NodeCountersSection omitted = 5;
+    NodeCountersSection sent = 6;
 }
 
 message NodeCountersSection {

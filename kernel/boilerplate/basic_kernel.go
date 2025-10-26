@@ -7,9 +7,10 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	"github.com/xaionaro-go/avpipeline/kernel/types"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -47,7 +48,7 @@ type Base[H CustomHandler] struct {
 	OutputStreams map[int]*astiav.Stream
 }
 
-var _ types.Abstract = (*Base[CustomHandler])(nil)
+var _ kerneltypes.Abstract = (*Base[CustomHandler])(nil)
 
 func NewBasicKernel[H CustomHandler](
 	ctx context.Context,
@@ -74,7 +75,7 @@ func (k *Base[H]) SendInputPacket(
 	logger.Tracef(ctx, "SendInputPacket()")
 	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
 
-	if sender, ok := any(k.Handler).(types.SendInputPacketer); ok {
+	if sender, ok := any(k.Handler).(kerneltypes.SendInputPacketer); ok {
 		return sender.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
 	}
 
@@ -112,7 +113,7 @@ func (k *Base[H]) SendInputFrame(
 	logger.Tracef(ctx, "SendInputFrame()")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame(): %v", _err) }()
 
-	if sender, ok := any(k.Handler).(types.SendInputFramer); ok {
+	if sender, ok := any(k.Handler).(kerneltypes.SendInputFramer); ok {
 		return sender.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 	}
 
@@ -155,6 +156,9 @@ func prepareError(ctx context.Context, err error, action string) error {
 }
 
 func (k *Base[H]) String() string {
+	if k == nil {
+		return "<BasicKernel:nil>"
+	}
 	return k.Handler.String()
 }
 
@@ -162,6 +166,9 @@ func (k *Base[H]) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Close()")
 	defer func() { logger.Tracef(ctx, "/Close(): %v", _err) }()
 	k.ClosureSignaler.Close(ctx)
+	if close, ok := any(k.Handler).(types.Closer); ok {
+		return close.Close(ctx)
+	}
 	return nil
 }
 
@@ -177,7 +184,7 @@ func (k *Base[H]) Generate(
 	logger.Tracef(ctx, "Generate()")
 	defer func() { logger.Tracef(ctx, "/Generate(): %v", _err) }()
 
-	if sender, ok := any(k.Handler).(types.Generator); ok {
+	if sender, ok := any(k.Handler).(kerneltypes.Generator); ok {
 		return sender.Generate(ctx, outputPacketsCh, outputFramesCh)
 	}
 

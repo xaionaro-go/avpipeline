@@ -1,6 +1,7 @@
 package router
 
 type nodeKernelConfig struct {
+	ShouldFixPTS bool
 }
 
 type NodeKernelOption interface {
@@ -19,4 +20,10 @@ func (opts NodeKernelOptions) config() nodeKernelConfig {
 	cfg := nodeKernelConfig{}
 	opts.apply(&cfg)
 	return cfg
+}
+
+type NodeKernelOptionShouldFixPTS bool
+
+func (o NodeKernelOptionShouldFixPTS) apply(cfg *nodeKernelConfig) {
+	cfg.ShouldFixPTS = bool(o)
 }

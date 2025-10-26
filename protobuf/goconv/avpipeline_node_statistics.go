@@ -19,6 +19,7 @@ func NodeCountersToGRPC(
 		Processed: CountersSectionToGRPC(&pc.Processed),
 		Missed:    CountersSectionToGRPC(&nc.Missed),
 		Generated: CountersSectionToGRPC(&pc.Generated),
+		Omitted:   CountersSectionToGRPC(&pc.Omitted),
 		Sent:      CountersSectionToGRPC(&nc.Sent),
 	}
 }

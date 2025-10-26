@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"sync/atomic"
 )
 
@@ -34,6 +35,7 @@ type Statistics struct {
 	Received  StatisticsSection
 	Processed StatisticsSection
 	Generated StatisticsSection
+	Omitted   StatisticsSection
 	Sent      StatisticsSection
 }
 
@@ -174,6 +176,19 @@ const (
 	CountersSubSectionIDFrames
 	EndOfCountersSubSectionID
 )
+
+func (id CountersSubSectionID) String() string {
+	switch id {
+	case UndefinedSubSectionID:
+		return "undefined"
+	case CountersSubSectionIDPackets:
+		return "packets"
+	case CountersSubSectionIDFrames:
+		return "frames"
+	default:
+		return fmt.Sprintf("unknown_%d", int(id))
+	}
+}
 
 func (s *CountersSection) Increment(
 	subSection CountersSubSectionID,
