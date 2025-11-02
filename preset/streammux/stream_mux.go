@@ -1005,3 +1005,30 @@ func (s *StreamMux[C]) initOutputStreamsLocked(
 	}
 	return nil
 }
+
+func (s *StreamMux[C]) GetBitRates(
+	ctx context.Context,
+) (_ret *types.BitRates, _err error) {
+	logger.Tracef(ctx, "GetBitRates")
+	defer func() { logger.Tracef(ctx, "/GetBitRates: %v, %v", _ret, _err) }()
+
+	result := &types.BitRates{
+		Input: types.BitRateInfo{
+			Video: types.Ubps(s.CurrentVideoInputBitRate.Load()),
+			Audio: types.Ubps(s.CurrentAudioInputBitRate.Load()),
+			Other: types.Ubps(s.CurrentOtherInputBitRate.Load()),
+		},
+		Encoded: types.BitRateInfo{
+			Video: types.Ubps(s.CurrentVideoEncodedBitRate.Load()),
+			Audio: types.Ubps(s.CurrentAudioEncodedBitRate.Load()),
+			Other: types.Ubps(s.CurrentOtherEncodedBitRate.Load()),
+		},
+		Output: types.BitRateInfo{
+			Video: types.Ubps(s.CurrentVideoOutputBitRate.Load()),
+			Audio: types.Ubps(s.CurrentAudioOutputBitRate.Load()),
+			Other: types.Ubps(s.CurrentOtherOutputBitRate.Load()),
+		},
+	}
+
+	return result, nil
+}

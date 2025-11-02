@@ -249,9 +249,9 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	}
 	codecID := params.CodecID()
 	pixFmt := params.PixelFormat()
-	logger.Debugf(ctx, "initEncoderAndOutputFor(%d): %s, %v/%s", streamIndex, codecID, res, pixFmt)
+	logger.Debugf(ctx, "initEncoderAndOutputFor(%d): %s, %v/%s, %T", streamIndex, codecID, res, pixFmt, frameSource)
 	defer func() {
-		logger.Debugf(ctx, "/initEncoderAndOutputFor(%d): %s, %v/%s: %v", streamIndex, codecID, res, pixFmt, _err)
+		logger.Debugf(ctx, "/initEncoderAndOutputFor(%d): %s, %v/%s, %T: %v", streamIndex, codecID, res, pixFmt, frameSource, _err)
 	}()
 	if _, ok := e.encoders[streamIndex]; ok {
 		logger.Errorf(ctx, "stream #%d already exists, not initializing", streamIndex)
@@ -295,8 +295,10 @@ func (e *Encoder[EF]) initEncoderFor(
 	timeBase astiav.Rational,
 	frameSource frame.Source,
 ) (_err error) {
-	logger.Debugf(ctx, "initEncoderFor(ctx, stream[%d])", streamIndex)
-	defer func() { logger.Debugf(ctx, "/initEncoderFor(ctx, stream[%d]): %v", streamIndex, _err) }()
+	logger.Debugf(ctx, "initEncoderFor(ctx, %d, params, %v, %T)", streamIndex, timeBase, frameSource)
+	defer func() {
+		logger.Debugf(ctx, "/initEncoderFor(ctx, %d, params, %v, %T): %v", streamIndex, timeBase, frameSource, _err)
+	}()
 
 	if timeBase.Num() == 0 {
 		return fmt.Errorf("TimeBase must be set")

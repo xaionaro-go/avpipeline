@@ -111,5 +111,6 @@ func (e *EncoderFullLocked) setQualityCodecReinit(
 	e.Quality = q
 	logger.Infof(ctx, "SetQuality (generic): %T(%v)", q, q)
 	e.InitParams.CodecParameters.SetBitRate(0) // TODO: explain why it's needed
+	logger.Debugf(ctx, "reinitializing encoder to apply new quality %T(%v)", q, q)
 	return e.reinitEncoder(ctx)
 }

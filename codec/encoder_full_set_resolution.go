@@ -76,5 +76,6 @@ func (e *EncoderFullLocked) setResolutionGeneric(
 			e.InitParams.Options.Set("s", fmt.Sprintf("%dx%d", oldRes.Width, oldRes.Height), 0)
 		}
 	}()
+	logger.Debugf(ctx, "reinitializing encoder to apply new resolution %v", res)
 	return e.reinitEncoder(ctx)
 }
