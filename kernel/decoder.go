@@ -25,7 +25,8 @@ const (
 )
 
 const (
-	decoderDebug = true
+	decoderDebug       = true
+	enableAntiStucking = false
 )
 
 // TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
@@ -68,6 +69,8 @@ type Decoder[DF codec.DecoderFactory] struct {
 
 	FormatContext *astiav.FormatContext
 	IsDirtyCache  atomic.Bool
+
+	SentPacketsWithoutDecodingFrames uint64
 }
 
 var _ Abstract = (*Decoder[codec.DecoderFactory])(nil)
@@ -181,6 +184,11 @@ func (d *Decoder[DF]) SendInputPacket(
 		ctx context.Context,
 		decoder *codec.DecoderLocked,
 	) (_err error) {
+		if decoder.Codec == nil {
+			logger.Errorf(ctx, "the decoder is closed; dropping the packet")
+			return nil
+		}
+
 		if _, ok := d.StreamInfo.Load(streamIndex); !ok {
 			streamInfo := &frame.StreamInfo{
 				Source:           d.asSource(streamDecoder),
@@ -210,10 +218,19 @@ func (d *Decoder[DF]) SendInputPacket(
 			}*/
 			return fmt.Errorf("unable to decode the packet: %w", err)
 		}
+		d.SentPacketsWithoutDecodingFrames++
 
 		err = d.drain(ctx, outputFramesCh, decoder.Drain, packetInfo)
 		if err != nil {
 			return fmt.Errorf("unable to drain the decoder: %w", err)
+		}
+
+		if enableAntiStucking {
+			if d.SentPacketsWithoutDecodingFrames > 30 {
+				logger.Errorf(ctx, "decoder seems to be stuck, resetting it")
+				d.SentPacketsWithoutDecodingFrames = 0
+				decoder.Reset(ctx)
+			}
 		}
 
 		return nil
@@ -233,10 +250,12 @@ func (d *Decoder[DF]) drain(
 		decoder *codec.DecoderLocked,
 		caps astiav.CodecCapabilities,
 		f *astiav.Frame,
-	) error {
+	) (_err error) {
 		ctx = belt.WithField(ctx, "decoder", decoder)
 		opaque := f.Opaque()
 		logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame (opaque len: %d)", len(opaque))
+
+		d.SentPacketsWithoutDecodingFrames = 0
 
 		f.SetPictureType(astiav.PictureTypeNone)
 
@@ -364,25 +383,58 @@ func (d *Decoder[DF]) NotifyAboutPacketSource(
 	return errors.Join(errs...)
 }
 
-func (d *Decoder[DF]) Reset(
+func (d *Decoder[DF]) ResetSoft(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "Reset")
-	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
-	return xsync.DoA1R1(ctx, &d.Locker, d.reset, ctx)
+	logger.Debugf(ctx, "ResetSoft")
+	defer func() { logger.Debugf(ctx, "/ResetSoft: %v", _err) }()
+	return xsync.DoA1R1(ctx, &d.Locker, d.resetSoft, ctx)
 }
 
-func (d *Decoder[DF]) reset(
+func (d *Decoder[DF]) resetSoft(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "reset")
-	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+	logger.Tracef(ctx, "resetSoft")
+	defer func() { logger.Tracef(ctx, "/resetSoft: %v", _err) }()
 
 	var errs []error
 	for streamIndex, decoder := range d.Decoders {
 		if err := decoder.Reset(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to reset the decoder for stream #%d: %w", streamIndex, err))
 		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (d *Decoder[DF]) ResetHard(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "ResetHard")
+	defer func() { logger.Debugf(ctx, "/ResetHard: %v", _err) }()
+	return xsync.DoA1R1(ctx, &d.Locker, d.resetHard, ctx)
+}
+
+func (d *Decoder[DF]) resetHard(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "resetHard")
+	defer func() { logger.Tracef(ctx, "/resetHard: %v", _err) }()
+
+	var errs []error
+	for streamIndex, decoder := range d.Decoders {
+		decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) (_err error) {
+			if err := decoder.Close(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("unable to close the decoder for stream #%d: %w", streamIndex, err))
+			}
+			delete(d.Decoders, streamIndex)
+			delete(d.OutputCodecParameters, streamIndex)
+			return nil
+		})
+	}
+
+	if err := d.DecoderFactory.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to hard reset the decoder factory: %w", err))
 	}
 
 	return errors.Join(errs...)

@@ -75,6 +75,7 @@ type Output struct {
 	SendingNodeProps  types.SenderNodeProps
 	FPSFractionGetter FPSFractionGetter
 	InitOnce          sync.Once
+	IsClosedValue     bool
 }
 
 type initOutputConfig struct{}
@@ -460,6 +461,8 @@ func (o *Output) CloseNoDrain(ctx context.Context) (_err error) {
 func (o *Output) close(ctx context.Context, shouldDrain bool) (_err error) {
 	logger.Tracef(ctx, "Output.close(%v)", shouldDrain)
 	defer func() { logger.Tracef(ctx, "/Output.close(%v): %v", shouldDrain, _err) }()
+	o.IsClosedValue = true
+
 	var errs []error
 
 	o.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Static(false))
@@ -566,8 +569,20 @@ func (o *Output) DrainAfterFilter(ctx context.Context) (_err error) {
 
 func (o *Output) Deinit(
 	ctx context.Context,
-) error {
-	return o.SendingNode.Processor.Kernel.Handler.Deinit(ctx)
+) (_err error) {
+	logger.Tracef(ctx, "Output[%d].Deinit()", o.ID)
+	defer func() { logger.Tracef(ctx, "/Output[%d].Deinit(): %v", o.ID, _err) }()
+	var errs []error
+
+	if err := o.RecoderNode.Processor.Kernel.ResetHard(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset recoder node for output %d: %w", o.ID, err))
+	}
+
+	if err := o.SendingNode.Processor.Kernel.Handler.Deinit(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to deinit recoder node for output %d: %w", o.ID, err))
+	}
+
+	return errors.Join(errs...)
 }
 
 func PartialOutputKeyFromRecoderConfig(
@@ -810,4 +825,8 @@ func (o *Output) Nodes() []node.Abstract {
 
 func (o *Output) NodesAfterFilter() []node.Abstract {
 	return o.Nodes()[1:]
+}
+
+func (o *Output) IsClosed() bool {
+	return o.IsClosedValue
 }

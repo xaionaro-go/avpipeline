@@ -355,17 +355,33 @@ func (r *Recoder[DF, EF]) NotifyAboutPacketSource(
 	return errors.Join(errs...)
 }
 
-func (r *Recoder[DF, EF]) Reset(
+func (r *Recoder[DF, EF]) ResetSoft(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "Reset")
-	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	logger.Debugf(ctx, "ResetSoft")
+	defer func() { logger.Debugf(ctx, "/ResetSoft: %v", _err) }()
 
 	var errs []error
-	if err := r.Encoder.Reset(ctx); err != nil {
+	if err := r.Encoder.ResetSoft(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
 	}
-	if err := r.Decoder.Reset(ctx); err != nil {
+	if err := r.Decoder.ResetSoft(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Recoder[DF, EF]) ResetHard(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "ResetHard")
+	defer func() { logger.Debugf(ctx, "/ResetHard: %v", _err) }()
+
+	var errs []error
+	if err := r.Encoder.ResetHard(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+	}
+	if err := r.Decoder.ResetHard(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
 	}
 	return errors.Join(errs...)

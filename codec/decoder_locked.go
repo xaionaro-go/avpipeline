@@ -22,7 +22,8 @@ type CallbackFrameReceiver func(
 
 type DecoderLocked struct {
 	*Codec
-	IsDirtyValue atomic.Bool
+	receivedKeyFrame bool
+	IsDirtyValue     atomic.Bool
 }
 
 type DecoderInput struct {
@@ -46,6 +47,13 @@ func (d *DecoderLocked) SendPacket(
 	ctx context.Context,
 	p *astiav.Packet,
 ) error {
+	if !d.receivedKeyFrame {
+		if !p.Flags().Has(astiav.PacketFlagKey) {
+			logger.Warnf(ctx, "%s: dropping non-keyframe packet before the first keyframe", d)
+			return nil
+		}
+		d.receivedKeyFrame = true
+	}
 	d.IsDirtyValue.Store(true)
 	return d.codecContext.SendPacket(p)
 }
@@ -192,4 +200,11 @@ func (d *DecoderLocked) Drain(
 
 func (d *DecoderLocked) ToCodecParameters(cp *astiav.CodecParameters) error {
 	return d.Codec.toCodecParametersLocked(cp)
+}
+
+func (c *DecoderLocked) Reset(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	c.receivedKeyFrame = false
+	return c.Codec.reset(ctx)
 }

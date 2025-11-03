@@ -160,40 +160,46 @@ func (s *StreamMux[C]) initSwitches(
 	if switchDebug {
 		s.VideoOutputSwitch.SetOnBeforeSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 			logger.Debugf(ctx, "s.OutputSwitch.SetOnBeforeSwitch: %d -> %d", from, to)
-			outputNext := xsync.DoR1(ctx, &s.OutputsLocker, func() *Output {
-				return s.Outputs[to]
-			})
-			outputNext.RecoderNode.Processor.Kernel.SetForceNextKeyFrame(ctx, true)
-			outputNext.FirstNodeAfterFilter().SetInputPacketFilter(nil)
 		})
 	}
 	s.VideoOutputSwitch.SetOnAfterSwitch(func(ctx context.Context, in packetorframe.InputUnion, from, to int32) {
 		logger.Debugf(ctx, "s.OutputSwitch.SetOnAfterSwitch: %d -> %d", from, to)
-		outputPrev := xsync.DoR1(ctx, &s.OutputsLocker, func() *Output {
-			return s.Outputs[from]
-		})
-		if switchDebug {
-			outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is inactive"))
-		}
 
-		s.OutputsLocker.Do(ctx, func() {
-			observability.Go(ctx, func(ctx context.Context) {
-				if EnableDraining {
-					ctx, cancelFn := context.WithTimeout(ctx, switchTimeout)
-					defer cancelFn()
-					err := outputPrev.Drain(ctx)
-					if err != nil {
-						logger.Errorf(ctx, "unable to close the output %d: %v", from, err)
-					}
-				}
-				err := outputPrev.Deinit(ctx)
+		logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
+		err := s.VideoOutputSyncer.SetValue(ctx, to)
+		logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
+
+		s.OutputsLocker.ManualLock(ctx)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer s.OutputsLocker.ManualUnlock(ctx)
+			outputPrev := s.Outputs[from]
+
+			if err := node.RemovePushPacketsTo(ctx, s.Input(), outputPrev.Input()); err != nil {
+				logger.Errorf(ctx, "unable to remove push packets to the output %d: %v", from, err)
+			}
+
+			if EnableDraining {
+				ctx, cancelFn := context.WithTimeout(ctx, switchTimeout)
+				defer cancelFn()
+				err := outputPrev.Drain(ctx)
 				if err != nil {
 					logger.Errorf(ctx, "unable to close the output %d: %v", from, err)
 				}
+			}
+
+			err := outputPrev.CloseNoDrain(ctx)
+			if err != nil {
+				logger.Errorf(ctx, "unable to close the output %d: %v", from, err)
+			}
+
+			outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("somehow received a packet, while the output is closed"))
+
+			observability.Go(ctx, func(ctx context.Context) {
+				_, err := s.GetOrInitOutput(ctx, outputPrev.GetKey())
+				if err != nil {
+					logger.Errorf(ctx, "unable to re-initialize the output %d:%s: %v", outputPrev.ID, outputPrev.GetKey(), err)
+				}
 			})
-			logger.Debugf(ctx, "s.OutputSyncFilter.SetValue(ctx, %d): from %d", to, from)
-			err := s.VideoOutputSyncer.SetValue(ctx, to)
-			logger.Debugf(ctx, "/s.OutputSyncFilter.SetValue(ctx, %d): from %d: %v", to, from, err)
 		})
 	})
 	s.VideoOutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
@@ -260,8 +266,8 @@ func (s *StreamMux[C]) setPreferredOutput(
 	ctx context.Context,
 	outputKey SenderKey,
 ) (_err error) {
-	logger.Tracef(ctx, "setPreferredOutput(ctx, %s)", outputKey)
-	defer func() { logger.Tracef(ctx, "/setPreferredOutput(ctx, %s): %v", outputKey, _err) }()
+	logger.Debugf(ctx, "setPreferredOutput(ctx, %s)", outputKey)
+	defer func() { logger.Debugf(ctx, "/setPreferredOutput(ctx, %s): %v", outputKey, _err) }()
 
 	output, _ := s.OutputsMap.Load(outputKey)
 
@@ -295,15 +301,20 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	outputKey types.SenderKey,
 	opts []InitOutputOption,
 ) (_ret *Output, _err error) {
-	logger.Tracef(ctx, "getOrInitOutputLocked: %#+v, %#+v", outputKey, opts)
-	defer func() { logger.Tracef(ctx, "/getOrInitOutputLocked: %#+v, %#+v: %v, %v", outputKey, opts, _ret, _err) }()
+	logger.Debugf(ctx, "getOrInitOutputLocked: %#+v, %#+v", outputKey, opts)
+	defer func() { logger.Debugf(ctx, "/getOrInitOutputLocked: %#+v, %#+v: %v, %v", outputKey, opts, _ret, _err) }()
 
 	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
 		return nil, fmt.Errorf("output resolution is not set")
 	}
 
+	outputID := OutputID(len(s.Outputs))
+
 	if output, ok := s.OutputsMap.Load(outputKey); ok {
-		return output, nil
+		if !output.IsClosed() {
+			return output, nil
+		}
+		outputID = output.ID
 	}
 
 	switch s.MuxMode {
@@ -322,7 +333,6 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	cfg := InitOutputOptions(opts).config()
 	_ = cfg // currently unused
 
-	outputID := OutputID(len(s.Outputs))
 	output, err := newOutput(
 		ctx,
 		outputID,
@@ -338,8 +348,15 @@ func (s *StreamMux[C]) getOrInitOutputLocked(
 	if err != nil {
 		return nil, fmt.Errorf("unable to create an output: %w", err)
 	}
-	s.Outputs = append(s.Outputs, output)
 	s.OutputsMap.Store(outputKey, output)
+	switch {
+	case int(outputID) < len(s.Outputs):
+		s.Outputs[outputID] = output
+	case int(outputID) == len(s.Outputs):
+		s.Outputs = append(s.Outputs, output)
+	default:
+		return nil, fmt.Errorf("internal error: outputID %d is greater than len(s.Outputs) %d", outputID, len(s.Outputs))
+	}
 	s.Input().AddPushPacketsTo(output.Input())
 	err = avpipeline.NotifyAboutPacketSources(ctx, s.InputNodeAsPacketSource, output.Input())
 	if err != nil {

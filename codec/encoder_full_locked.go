@@ -435,3 +435,7 @@ func (e *EncoderFullLocked) checkCallCount(ctx context.Context) context.CancelFu
 		e.CallCount.Add(-1)
 	}
 }
+
+func (e *EncoderFullLocked) Codec() *astiav.Codec {
+	return e.codec
+}

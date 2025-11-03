@@ -572,6 +572,10 @@ func (e *Encoder[EF]) SendInputFrame(
 		TimeBase:    input.GetTimeBase(),
 	}
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+		if encoder.Codec() == nil {
+			logger.Errorf(ctx, "the encoder is closed; dropping the frame")
+			return nil
+		}
 		for _, fittedFrame := range fittedFrames {
 			if encoderDebug {
 				logger.Tracef(ctx, "fitted frame: dur:%d, dts:%d, pts:%d", fittedFrame.Duration(), fittedFrame.PktDts(), input.Frame.Pts())
@@ -1084,25 +1088,58 @@ func (e *Encoder[EF]) NotifyAboutPacketSource(
 	return errors.Join(errs...)
 }
 
-func (e *Encoder[EF]) Reset(
+func (e *Encoder[EF]) ResetSoft(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "Reset")
-	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
-	return xsync.DoA1R1(ctx, &e.Locker, e.reset, ctx)
+	logger.Debugf(ctx, "ResetSoft")
+	defer func() { logger.Debugf(ctx, "/ResetSoft: %v", _err) }()
+	return xsync.DoA1R1(ctx, &e.Locker, e.resetSoft, ctx)
 }
 
-func (e *Encoder[EF]) reset(
+func (e *Encoder[EF]) resetSoft(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "reset")
-	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
+	logger.Tracef(ctx, "resetSoft")
+	defer func() { logger.Tracef(ctx, "/resetSoft: %v", _err) }()
 
 	var errs []error
 	for streamIndex, encoder := range e.encoders {
 		if err := encoder.Flush(ctx, nil); err != nil {
 			errs = append(errs, fmt.Errorf("unable to reset the encoder for stream #%d: %w", streamIndex, err))
 		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (e *Encoder[EF]) ResetHard(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "ResetHard")
+	defer func() { logger.Debugf(ctx, "/ResetHard: %v", _err) }()
+	return xsync.DoA1R1(ctx, &e.Locker, e.resetHard, ctx)
+}
+
+func (e *Encoder[EF]) resetHard(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "resetHard")
+	defer func() { logger.Tracef(ctx, "/resetHard: %v", _err) }()
+
+	var errs []error
+	for streamIndex, encoder := range e.encoders {
+		encoder.Encoder.LockDo(ctx, func(ctx context.Context, _ codec.Encoder) error {
+			if err := encoder.Close(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("unable to close the encoder for stream #%d: %w", streamIndex, err))
+			}
+			delete(e.encoders, streamIndex)
+			delete(e.outputStreams, streamIndex)
+			return nil
+		})
+	}
+
+	if err := e.EncoderFactory.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder factory: %w", err))
 	}
 
 	return errors.Join(errs...)

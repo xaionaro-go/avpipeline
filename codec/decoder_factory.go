@@ -2,6 +2,7 @@ package codec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/asticode/go-astiav"
@@ -13,6 +14,8 @@ type DecoderFactory interface {
 	fmt.Stringer
 
 	NewDecoder(ctx context.Context, stream *astiav.Stream) (*Decoder, error)
+
+	Reset(ctx context.Context) error
 }
 
 type NaiveDecoderFactory struct {
@@ -114,6 +117,19 @@ func (f *NaiveDecoderFactory) newDecoder(
 		ctx,
 		decInput,
 	)
+}
+
+func (f *NaiveDecoderFactory) Reset(ctx context.Context) error {
+	return xsync.DoA1R1(ctx, &f.Locker, f.reset, ctx)
+}
+
+func (f *NaiveDecoderFactory) reset(
+	ctx context.Context,
+) error {
+	var errs []error
+	f.AudioDecoders = nil
+	f.VideoDecoders = nil
+	return errors.Join(errs...)
 }
 
 func (f *NaiveDecoderFactory) String() string {

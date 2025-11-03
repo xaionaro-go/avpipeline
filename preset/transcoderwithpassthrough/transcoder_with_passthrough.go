@@ -372,7 +372,7 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 
 	if switchState == 0 { // was in the recoding state
 		// to avoid the recoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.
-		if err := s.Recoder.Reset(ctx); err != nil {
+		if err := s.Recoder.ResetSoft(ctx); err != nil {
 			logger.Errorf(ctx, "unable to reset the recoder: %v", err)
 		}
 	}

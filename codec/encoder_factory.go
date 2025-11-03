@@ -19,6 +19,7 @@ type EncoderFactory interface {
 		timeBase astiav.Rational,
 		opts ...EncoderFactoryOption,
 	) (Encoder, error)
+	Reset(ctx context.Context) error
 }
 
 type ResourcesGetter = resourcegetter.ResourcesGetter
@@ -155,6 +156,21 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 		}
 	}
 	return NewEncoder(ctx, *encParams, opts...)
+}
+
+func (f *NaiveEncoderFactory) Reset(
+	ctx context.Context,
+) error {
+	return xsync.DoA1R1(ctx, &f.Locker, f.reset, ctx)
+}
+
+func (f *NaiveEncoderFactory) reset(
+	ctx context.Context,
+) error {
+	var errs []error
+	f.VideoEncoders = nil
+	f.AudioEncoders = nil
+	return errors.Join(errs...)
 }
 
 func (f *NaiveEncoderFactory) amendVideoCodecParams(

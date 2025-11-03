@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -72,6 +73,12 @@ func (d *Decoder) SetLowLatency(
 	v bool,
 ) (_err error) {
 	return xsync.DoA2R1(xsync.WithNoLogging(ctx, true), &d.locker, d.locked().SetLowLatency, ctx, v)
+}
+
+func (d *Decoder) Reset(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "Reset")
+	defer func() { logger.Debugf(ctx, "/Reset: %v", _err) }()
+	return xsync.DoA1R1(ctx, &d.locker, d.locked().Reset, ctx)
 }
 
 func (d *Decoder) Flush(

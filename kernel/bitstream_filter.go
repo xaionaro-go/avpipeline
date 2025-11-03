@@ -25,6 +25,8 @@ type BitstreamFilter struct {
 	xsync.Mutex
 	GetChainParamser bitstreamfilter.GetChainParamser
 	FilterChains     map[int][]*InternalBitstreamFilterInstance
+
+	SentPacketsWithoutOutput uint64
 }
 
 var _ Abstract = (*BitstreamFilter)(nil)
@@ -111,6 +113,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 	pkts := []*astiav.Packet{packet.CloneAsReferenced(input.Packet)}
 	for _, filter := range filterChain {
 		for _, pkt := range pkts {
+			bsf.SentPacketsWithoutOutput++
 			logger.Tracef(ctx, "sending a packet to %s", filter.Name())
 			err = filter.SendPacket(pkt)
 			packet.Pool.Put(pkt)
@@ -143,8 +146,16 @@ func (bsf *BitstreamFilter) sendInputPacket(
 				return fmt.Errorf("unable receive the packet from the filter: %w", err)
 			}
 
+			bsf.SentPacketsWithoutOutput = 0
 			logger.Tracef(ctx, "received a packet from %s", filter.Name())
 			pkts = append(pkts, pkt)
+		}
+
+		if enableAntiStucking {
+			if bsf.SentPacketsWithoutOutput > 30 {
+				logger.Errorf(ctx, "bitstream filter %s seems stuck (did not produce any output packets for %d input packets); resetting the filter chain", filter.Name(), bsf.SentPacketsWithoutOutput)
+				bsf.FilterChains[input.StreamIndex()] = nil
+			}
 		}
 	}
 

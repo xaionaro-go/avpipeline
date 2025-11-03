@@ -21,6 +21,7 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// TODO: delete me: this was unnecessary, just send directly to the Output instead
 type SenderHandler[C any] struct {
 	SenderFactory SenderFactory
 	SenderKey     types.SenderKey
@@ -112,13 +113,12 @@ func (h *SenderHandler[C]) sendInputPacketLocked(
 	logger.Tracef(ctx, "SendInputPacket: %s", input.Source)
 	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
 
-	for {
-		if h.Sender == nil {
-			if err := h.initSenderLocked(ctx); err != nil {
-				return fmt.Errorf("unable to init sending backend: %w", err)
-			}
-		}
+	if h.Sender == nil {
+		logger.Warnf(ctx, "backend is not connected; skipping the packet")
+		return nil
+	}
 
+	for {
 		proc := h.Sender.GetProcessor()
 		select {
 		case <-ctx.Done():
