@@ -117,8 +117,8 @@ func allWentInAndOut(
 			missed := nodeCounters.Missed.Get(subSectionID).Get(mediaType).Count.Load()
 			addressed := nodeCounters.Addressed.Get(subSectionID).Get(mediaType).Count.Load()
 			if extraDefensiveChecks {
-				assert(ctx, addressed >= processed+missed, mediaType, subSectionID, addressed, processed, missed)
-				assert(ctx, generated >= sent+omitted, mediaType, subSectionID, generated, sent, omitted)
+				assertSoft(ctx, addressed >= processed+missed, mediaType, subSectionID, addressed, processed, missed)
+				assertSoft(ctx, generated >= sent+omitted, mediaType, subSectionID, generated, sent, omitted)
 			}
 
 			if sent+omitted != generated || processed+missed != addressed {

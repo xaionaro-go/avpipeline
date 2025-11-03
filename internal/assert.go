@@ -23,3 +23,20 @@ func Assert(
 
 	logger.Panic(ctx, "assertion failed:\nExtra args:", extraArgs, "\n", string(debug.Stack()))
 }
+
+func AssertSoft(
+	ctx context.Context,
+	mustBeTrue bool,
+	extraArgs ...any,
+) {
+	if mustBeTrue {
+		return
+	}
+
+	if len(extraArgs) == 0 {
+		logger.Warnf(ctx, "soft assertion failed:\n%s", debug.Stack())
+		return
+	}
+
+	logger.Warn(ctx, "soft assertion failed:\nExtra args:", extraArgs, "\n", string(debug.Stack()))
+}

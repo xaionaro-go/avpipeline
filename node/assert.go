@@ -13,3 +13,11 @@ func assert(
 ) {
 	internal.Assert(ctx, mustBeTrue, extraArgs...)
 }
+
+func assertSoft(
+	ctx context.Context,
+	mustBeTrue bool,
+	extraArgs ...any,
+) {
+	internal.AssertSoft(ctx, mustBeTrue, extraArgs...)
+}
