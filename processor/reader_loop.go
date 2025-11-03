@@ -75,7 +75,7 @@ func readerLoop(
 	}()
 
 	defer func() {
-		logger.Debugf(ctx, "ReaderLoop[%s]: closing/flushing (%v)", _err)
+		logger.Debugf(ctx, "ReaderLoop[%s]: closing/flushing (%v)", kernel, _err)
 	}()
 
 	ch := kernel.CloseChan()

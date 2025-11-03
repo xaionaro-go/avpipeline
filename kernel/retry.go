@@ -296,6 +296,7 @@ func (r *Retry[T]) GetInternalQueueSize(
 		return nil
 	})
 	if kernel == nil {
+		logger.Debugf(ctx, "GetInternalQueueSize: kernel is not set")
 		return nil
 	}
 	return any(*kernel).(GetInternalQueueSizer).GetInternalQueueSize(ctx)
