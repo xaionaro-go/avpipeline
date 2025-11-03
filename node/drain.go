@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/go-ng/xatomic"
@@ -110,25 +111,25 @@ func allWentInAndOut(
 			// the reverse order here is important, it guarantees we cannot falsely claim
 			// something is drained due to a race condition:
 			sent := nodeCounters.Sent.Get(subSectionID).Get(mediaType).Count.Load()
+			omitted := procCounters.Omitted.Get(subSectionID).Get(mediaType).Count.Load()
 			generated := procCounters.Generated.Get(subSectionID).Get(mediaType).Count.Load()
 			processed := procCounters.Processed.Get(subSectionID).Get(mediaType).Count.Load()
 			missed := nodeCounters.Missed.Get(subSectionID).Get(mediaType).Count.Load()
 			addressed := nodeCounters.Addressed.Get(subSectionID).Get(mediaType).Count.Load()
 			if extraDefensiveChecks {
-				assert(ctx, addressed >= processed+missed, addressed, processed)
-				assert(ctx, generated >= sent, generated, sent)
+				assert(ctx, addressed >= processed+missed, mediaType, subSectionID, addressed, processed, missed)
+				assert(ctx, generated >= sent+omitted, mediaType, subSectionID, generated, sent, omitted)
 			}
 
-			if sent != generated || processed+missed != addressed {
+			if sent+omitted != generated || processed+missed != addressed {
 				logger.Tracef(
 					ctx,
-					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; generated=%#+v; processed=%#+v; missed=%#+v; addressed=%#+v",
+					"allWentInAndOut: subSectionID=%d mediaType=%s: sent=%#+v; omitted=%#+v; generated=%#+v; processed=%#+v; missed=%#+v; addressed=%#+v",
 					subSectionID, mediaType,
-					sent, generated, processed, missed, addressed,
+					sent, omitted, generated, processed, missed, addressed,
 				)
 				return false
 			}
-
 		}
 	}
 
@@ -194,7 +195,10 @@ func WaitForDrain(
 	}
 }
 
-func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) error {
+func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Flush: %v:%p: %s", n, n, debug.Stack())
+	defer func() { logger.Tracef(ctx, "/Flush: %v:%p: %v", n, n, _err) }()
+
 	flusher, ok := any(n.Processor).(processor.Flusher)
 	if !ok {
 		return nil

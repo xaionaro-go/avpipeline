@@ -11,17 +11,20 @@ type CountersSectionID int
 const (
 	CountersSectionIDProcessed CountersSectionID = iota
 	CountersSectionIDGenerated
+	CountersSectionIDOmitted
 )
 
 type Counters struct {
 	Processed globaltypes.CountersSection
 	Generated globaltypes.CountersSection
+	Omitted   globaltypes.CountersSection
 }
 
 func NewCounters() *Counters {
 	return &Counters{
 		Processed: globaltypes.NewCountersSection(),
 		Generated: globaltypes.NewCountersSection(),
+		Omitted:   globaltypes.NewCountersSection(),
 	}
 }
 
@@ -37,6 +40,8 @@ func (c *Counters) Increment(
 		return c.Processed.Increment(subsection, mediaType, msgSize)
 	case CountersSectionIDGenerated:
 		return c.Generated.Increment(subsection, mediaType, msgSize)
+	case CountersSectionIDOmitted:
+		return c.Omitted.Increment(subsection, mediaType, msgSize)
 	default:
 		return nil
 	}

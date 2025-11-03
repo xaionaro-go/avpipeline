@@ -16,16 +16,20 @@ type dummyHandler struct {
 	boilerplate.CustomHandler
 }
 
+func (dummyHandler) String() string {
+	return "dummyHandler"
+}
+
 type dummyOutputFactory struct{}
 
-func (dummyOutputFactory) NewOutput(
+func (dummyOutputFactory) NewSender(
 	ctx context.Context,
-	outputKey OutputKey,
-) (node.Abstract, types.OutputConfig, error) {
+	outputKey SenderKey,
+) (node.Abstract, types.SenderConfig, error) {
 	return node.NewFromKernel(
 		ctx,
 		boilerplate.NewKernelWithFormatContext(ctx, &dummyHandler{}),
-	), types.OutputConfig{}, nil
+	), types.SenderConfig{}, nil
 }
 
 func TestOutputNodes(t *testing.T) {
@@ -35,7 +39,7 @@ func TestOutputNodes(t *testing.T) {
 		1,
 		newInputNode[struct{}](ctx, nil),
 		dummyOutputFactory{},
-		OutputKey{
+		SenderKey{
 			Resolution: codectypes.Resolution{Width: 1920, Height: 1080},
 		},
 		nil,

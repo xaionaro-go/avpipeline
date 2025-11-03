@@ -17,10 +17,14 @@ func (Passthrough) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	outputPacketsCh <- packet.BuildOutput(
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case outputPacketsCh <- packet.BuildOutput(
 		packet.CloneAsReferenced(input.Packet),
 		input.StreamInfo,
-	)
+	):
+	}
 	return nil
 }
 
@@ -30,10 +34,14 @@ func (Passthrough) SendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	outputFramesCh <- frame.BuildOutput(
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case outputFramesCh <- frame.BuildOutput(
 		frame.CloneAsReferenced(input.Frame),
 		input.StreamInfo,
-	)
+	):
+	}
 	return nil
 }
 

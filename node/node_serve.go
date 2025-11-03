@@ -196,10 +196,11 @@ func pushFurther[
 	defer func() {
 		nodeCountsItem := stats.Sent.Increment(countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 		if extraDebug {
-			procCountsItem := n.Processor.CountersPtr().Generated.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType))
+			procCounts := n.Processor.CountersPtr()
 			sentCount := nodeCountsItem.Count.Load()
-			generatedCount := procCountsItem.Count.Load()
-			if sentCount > generatedCount {
+			generatedCount := procCounts.Generated.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType)).Count.Load()
+			omittedCount := procCounts.Omitted.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType)).Count.Load()
+			if sentCount > generatedCount+omittedCount {
 				panic(fmt.Sprintf("sent more objects than generated, this is a bug: %d > %d (a possible issue: are you pushing data directly to processor's output chan? you should not; you should count the objects first)", sentCount, generatedCount))
 			}
 		}

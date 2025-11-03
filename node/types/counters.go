@@ -31,6 +31,7 @@ func ToStatistics(nc *Counters, pc *processortypes.Counters) globaltypes.Statist
 		Missed:    nc.Missed.ToStats(),
 		Processed: pc.Processed.ToStats(),
 		Generated: pc.Generated.ToStats(),
+		Omitted:   pc.Omitted.ToStats(),
 		Sent:      nc.Sent.ToStats(),
 	}
 }

@@ -25,6 +25,7 @@ type SourceInfo struct {
 type NodeKernel struct {
 	*closuresignaler.ClosureSignaler
 	Locker         xsync.Mutex
+	Config         nodeKernelConfig
 	PreviousSource map[int]packet.Source // map[streamID]Source
 	SourceInfo     map[packet.Source]*SourceInfo
 	FormatContext  *astiav.FormatContext
@@ -40,9 +41,9 @@ func NewNodeKernel(
 ) (_ *NodeKernel, _err error) {
 	logger.Tracef(ctx, "NewNodeKernel")
 	defer func() { logger.Tracef(ctx, "/NewNodeKernel: %v", _err) }()
-	_ = NodeKernelOptions(opts).config() // not used, yet
 	k := &NodeKernel{
 		ClosureSignaler: closuresignaler.New(),
+		Config:          NodeKernelOptions(opts).config(),
 		PreviousSource:  map[int]packet.Source{},
 		SourceInfo:      map[packet.Source]*SourceInfo{},
 		FormatContext:   astiav.AllocFormatContext(),
@@ -77,6 +78,10 @@ func (k *NodeKernel) sendInputPacket(
 		k.PreviousSource[input.StreamIndex()] = input.Source
 	}
 	if err := k.makeTimeMoveOnlyForward(ctx, &input, input.Source, isNewSource); err != nil {
+		if errors.Is(err, errSkip{}) {
+			logger.Tracef(ctx, "skipping packet for stream %v due to errSkip", input.Stream)
+			return nil
+		}
 		return fmt.Errorf("unable to handle corrections for stream %v: %w", input.Stream, err)
 	}
 
@@ -112,6 +117,10 @@ func (k *NodeKernel) sendInputFrame(
 	defer func() { logger.Tracef(ctx, "/NodeKernel.sendInputFrame(): %v", _err) }()
 
 	if err := k.makeTimeMoveOnlyForward(ctx, &input, nil, input.GetDTS() == 0); err != nil {
+		if errors.Is(err, errSkip{}) {
+			logger.Tracef(ctx, "skipping frame due to errSkip")
+			return nil
+		}
 		return fmt.Errorf("unable to handle corrections for stream %d: %w", input.GetStreamIndex(), err)
 	}
 
@@ -125,6 +134,12 @@ func (k *NodeKernel) sendInputFrame(
 		return ctx.Err()
 	}
 	return nil
+}
+
+type errSkip struct{}
+
+func (errSkip) Error() string {
+	return "skip"
 }
 
 func (k *NodeKernel) makeTimeMoveOnlyForward(
@@ -150,7 +165,8 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	}
 
 	if input.GetDTS() > input.GetPTS() {
-		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for source %v", input.GetDTS(), input.GetPTS(), packetSource)
+		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d) for source %v; fixing...", input.GetDTS(), input.GetPTS(), packetSource)
+		input.SetDTS(input.GetPTS())
 	}
 
 	sourceInfo := k.SourceInfo[packetSource]
@@ -187,6 +203,10 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	if newTimeShift < sourceInfo.TimeShift {
 		logger.Tracef(ctx, "New time shift %v is less than the previous one %v, keeping the previous one", newTimeShift, sourceInfo.TimeShift)
 		return nil
+	}
+	if !k.Config.ShouldFixPTS {
+		logger.Errorf(ctx, "PTS fixing is disabled, not applying the new time shift (%v)", newTimeShift)
+		return errSkip{}
 	}
 	logger.Tracef(ctx, "Setting PTS to %d (offset %d) from %d for source %v", newPTS, ptsOffset, input.GetPTS(), packetSource)
 	sourceInfo.TimeShift = newTimeShift

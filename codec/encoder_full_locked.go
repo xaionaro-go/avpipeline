@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -179,12 +180,17 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 		return
 	}
 
-	logger.Debugf(ctx, "setting FPS to %v (codec: '%s')", fps, e.codec.Name())
-	e.InitParams.CodecParameters.SetFrameRate(fps)
+	logger.Debugf(ctx, "setting FPS to %v->%v (codec: '%s')", oldFPS, fps, e.codec.Name())
 	switch {
 	case strings.HasSuffix(e.codec.Name(), "_nvenc"):
+		fpsChangeFactor := math.Abs((fps.Float64() - oldFPS.Float64()) / math.Max(fps.Float64(), oldFPS.Float64()))
+		if fpsChangeFactor < 0.2 {
+			logger.Debugf(ctx, "the framerate change is negligible (%v -> %v: %f), not reinitializing the encoder", oldFPS, fps, fpsChangeFactor)
+			return
+		}
 		// NVENC seems to ignore codec context framerate
 		// so we just need to reinit the encoder
+		logger.Warnf(ctx, "reinitializing encoder to apply new framerate %v", fps)
 		err := e.reinitEncoder(ctx)
 		if err != nil {
 			logger.Errorf(ctx, "unable to reinit the encoder after framerate (%v -> %v) change: %v", oldFPS, fps, err)
@@ -192,6 +198,7 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 	default:
 		e.codecContext.SetFramerate(fps)
 	}
+	e.InitParams.CodecParameters.SetFrameRate(fps)
 }
 
 func (e *EncoderFullLocked) ReceivePacket(

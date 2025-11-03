@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"slices"
 
@@ -29,6 +30,7 @@ type Route[T any] struct {
 	CustomData         T
 	OnPublisherAdded   FuncPublisherEvent[T]
 	OnPublisherRemoved FuncPublisherEvent[T]
+	ShouldFixPTS       atomic.Bool
 
 	// not supported, yet (TODO: fix)
 	OnConsumerAdded   func(context.Context, *Route[T], Consumer[T])

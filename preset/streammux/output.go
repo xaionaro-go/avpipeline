@@ -44,7 +44,7 @@ const (
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
 type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
 type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
-type OutputKey = types.OutputKey
+type SenderKey = types.SenderKey
 type OutputKeys = types.OutputKeys
 
 type FPSFractionGetter interface {
@@ -52,7 +52,7 @@ type FPSFractionGetter interface {
 }
 
 type OutputStreamsIniter interface {
-	InitOutputStreams(ctx context.Context, receiver node.Abstract, outputKey OutputKey) error
+	InitOutputStreams(ctx context.Context, receiver node.Abstract, outputKey SenderKey) error
 }
 
 type OutputCustomData struct {
@@ -67,13 +67,12 @@ type Output struct {
 	InputThrottler    *packetcondition.VideoAverageBitrateLower
 	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData]
 	RecoderNode       *NodeRecoder[OutputCustomData]
-	OutputThrottler   *packetcondition.VideoAverageBitrateLower
+	SendingThrottler  *packetcondition.VideoAverageBitrateLower
 	MapIndices        *NodeMapStreamIndexes[OutputCustomData]
-	OutputFixer       *autofix.AutoFixerWithCustomData[OutputCustomData]
-	OutputSyncer      *NodeBarrier[OutputCustomData]
-	OutputNode        node.Abstract
-	OutputNodeConfig  types.OutputConfig
-	OutputNodeProps   types.OutputNodeProps
+	SendingFixer      *autofix.AutoFixerWithCustomData[OutputCustomData]
+	SendingSyncer     *NodeBarrier[OutputCustomData]
+	SendingNode       *NodeSender[OutputCustomData]
+	SendingNodeProps  types.SenderNodeProps
 	FPSFractionGetter FPSFractionGetter
 	InitOnce          sync.Once
 }
@@ -135,8 +134,8 @@ func newOutput[C any](
 	ctx context.Context,
 	outputID OutputID,
 	inputNode *NodeInput[C],
-	outputFactory OutputFactory,
-	outputKey OutputKey,
+	outputFactory SenderFactory,
+	outputKey SenderKey,
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
 	monotonicPTS packetcondition.Condition,
@@ -162,12 +161,10 @@ func newOutput[C any](
 
 	// construct nodes
 
-	outputNode, outputConfig, err := outputFactory.NewOutput(ctx, outputKey)
+	senderNode := newSenderNode[OutputCustomData](ctx, outputFactory, outputKey)
+	err := senderNode.Processor.Kernel.Handler.Init(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create an output node: %w", err)
-	}
-	if outputNode == nil {
-		return nil, fmt.Errorf("output node is nil")
+		return nil, fmt.Errorf("unable to connect sending node: %w", err)
 	}
 
 	recoderKernel, err := kernel.NewRecoder(
@@ -184,9 +181,9 @@ func newOutput[C any](
 		return nil, fmt.Errorf("failed to create recoder kernel: %w", err)
 	}
 
-	packetSinker, ok := outputNode.GetProcessor().(processor.GetPacketSinker)
+	packetSinker, ok := senderNode.GetProcessor().(processor.GetPacketSinker)
 	if !ok {
-		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", outputNode)
+		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", senderNode)
 	}
 
 	o := &Output{
@@ -207,28 +204,28 @@ func newOutput[C any](
 			recoderKernel,
 			processor.DefaultOptionsRecoder()...,
 		),
-		OutputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		MapIndices:      node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
-		OutputFixer: autofix.NewWithCustomData[OutputCustomData](
+		SendingThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
+		SendingFixer: autofix.NewWithCustomData[OutputCustomData](
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
 			OutputCustomData{},
 		),
-		OutputSyncer: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
+		SendingSyncer: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
 			outputSyncer,
 		)),
-		OutputNode:        outputNode,
-		OutputNodeConfig:  outputConfig,
+		SendingNode:       senderNode,
 		FPSFractionGetter: fpsFractionGetter,
 	}
 	o.InputFilter.CustomData = OutputCustomData{Output: o}
 	o.InputFixer.SetCustomData(OutputCustomData{Output: o})
 	o.RecoderNode.CustomData = OutputCustomData{Output: o}
 	o.MapIndices.CustomData = OutputCustomData{Output: o}
-	o.OutputFixer.SetCustomData(OutputCustomData{Output: o})
-	o.OutputSyncer.CustomData = OutputCustomData{Output: o}
+	o.SendingFixer.SetCustomData(OutputCustomData{Output: o})
+	o.SendingSyncer.CustomData = OutputCustomData{Output: o}
+	o.SendingNode.CustomData = OutputCustomData{Output: o}
 
 	if outputReuseDecoderResources {
 		o.initReuseDecoderResources(ctx)
@@ -238,9 +235,9 @@ func newOutput[C any](
 	// wiring
 
 	var inputFixer, outputFixer node.Abstract
-	inputFixer, outputFixer = o.InputFixer, o.OutputFixer
+	inputFixer, outputFixer = o.InputFixer, o.SendingFixer
 	if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
-		inputFixer, outputFixer = o.RecoderNode, o.OutputSyncer
+		inputFixer, outputFixer = o.RecoderNode, o.SendingSyncer
 	}
 
 	o.InputFilter.AddPushPacketsTo(
@@ -267,25 +264,25 @@ func newOutput[C any](
 		o.MapIndices,
 	)
 	o.MapIndices.AddPushPacketsTo(outputFixer)
-	o.OutputFixer.AddPushPacketsTo(o.OutputSyncer)
+	o.SendingFixer.AddPushPacketsTo(o.SendingSyncer)
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
-		return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes
+		return o.SendingNode.Processor.Kernel.Handler.SenderConfig.OutputThrottlerMaxQueueSizeBytes
 	})
 	if monotonicPTS == nil {
 		monotonicPTS = packetcondition.Static(true)
 	}
-	o.OutputSyncer.AddPushPacketsTo(o.OutputNode,
+	o.SendingSyncer.AddPushPacketsTo(o.SendingNode,
 		packetfiltercondition.Packet{Condition: packetcondition.And{
 			monotonicPTS,
-			o.OutputThrottler,
+			o.SendingThrottler,
 			packetcondition.Or{
 				packetcondition.Function(func(ctx context.Context, input packet.Input) bool {
-					return o.OutputNodeConfig.OutputThrottlerMaxQueueSizeBytes <= 0
+					return o.SendingNode.Processor.Kernel.Handler.SenderConfig.OutputThrottlerMaxQueueSizeBytes <= 0
 				}),
 				packetcondition.Not{packetcondition.MediaType(astiav.MediaTypeVideo)},
 				packetcondition.IsKeyFrame(true),
 				extrapacketcondition.PushQueueSize(
-					o.OutputNode,
+					o.SendingNode,
 					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
 				),
 			},
@@ -295,7 +292,7 @@ func newOutput[C any](
 	// logging
 
 	logger.Tracef(ctx, "o.InputFilter.Processor.Kernel.Handler.Condition: %p", o.InputFilter.Processor.Kernel.Handler.Condition)
-	logger.Tracef(ctx, "o.OutputSyncer.Processor.Kernel.Handler.Condition: %p", o.OutputSyncer.Processor.Kernel.Handler.Condition)
+	logger.Tracef(ctx, "o.OutputSyncer.Processor.Kernel.Handler.Condition: %p", o.SendingSyncer.Processor.Kernel.Handler.Condition)
 
 	return o, nil
 }
@@ -484,13 +481,13 @@ func (o *Output) close(ctx context.Context, shouldDrain bool) (_err error) {
 	if err := o.MapIndices.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close map indices for output %d: %w", o.ID, err))
 	}
-	if err := o.OutputFixer.Close(ctx); err != nil {
+	if err := o.SendingFixer.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output fixer for output %d: %w", o.ID, err))
 	}
-	if err := o.OutputSyncer.GetProcessor().Close(ctx); err != nil {
+	if err := o.SendingSyncer.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output sync filter for output %d: %w", o.ID, err))
 	}
-	if err := o.OutputNode.GetProcessor().Close(ctx); err != nil {
+	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output node for output %d: %w", o.ID, err))
 	}
 	return errors.Join(errs...)
@@ -501,7 +498,7 @@ func (o *Output) Input() node.Abstract {
 }
 
 func (o *Output) Output() node.Abstract {
-	return o.OutputNode
+	return o.SendingNode
 }
 
 func (o *Output) Flush(ctx context.Context) (_err error) {
@@ -567,12 +564,18 @@ func (o *Output) DrainAfterFilter(ctx context.Context) (_err error) {
 	return nil
 }
 
+func (o *Output) Deinit(
+	ctx context.Context,
+) error {
+	return o.SendingNode.Processor.Kernel.Handler.Deinit(ctx)
+}
+
 func PartialOutputKeyFromRecoderConfig(
 	ctx context.Context,
 	c *types.RecoderConfig,
-) OutputKey {
+) SenderKey {
 	if c == nil {
-		return OutputKey{}
+		return SenderKey{}
 	}
 
 	var audioCodec codec.Name
@@ -585,7 +588,7 @@ func PartialOutputKeyFromRecoderConfig(
 		videoCodec = codec.Name(c.Output.VideoTrackConfigs[0].CodecName).Canonicalize(ctx, true)
 		resolution = c.Output.VideoTrackConfigs[0].Resolution
 	}
-	return OutputKey{
+	return SenderKey{
 		AudioCodec: codectypes.Name(audioCodec),
 		VideoCodec: codectypes.Name(videoCodec),
 		Resolution: resolution,
@@ -769,14 +772,19 @@ func (o *Output) reconfigureEncoder(
 	return nil
 }
 
-func (o *Output) GetKey() OutputKey {
+func canonicalizeCodecName(ctx context.Context, name codec.Name) codectypes.Name {
+	return codectypes.Name(name.Canonicalize(ctx, true))
+}
+
+func (o *Output) GetKey() SenderKey {
 	var res codec.Resolution
 	if o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
 		res = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 	}
-	return OutputKey{
-		AudioCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
-		VideoCodec: codectypes.Name(o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
+	ctx := context.Background()
+	return SenderKey{
+		AudioCodec: canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
+		VideoCodec: canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
 		Resolution: res,
 	}
 }
@@ -793,9 +801,9 @@ func (o *Output) Nodes() []node.Abstract {
 	result = append(result,
 		o.RecoderNode,
 		o.MapIndices,
-		o.OutputFixer,
-		o.OutputSyncer,
-		o.OutputNode,
+		o.SendingFixer,
+		o.SendingSyncer,
+		o.SendingNode,
 	)
 	return result
 }

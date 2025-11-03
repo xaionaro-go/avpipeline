@@ -285,7 +285,10 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsDrained(ctx context.Context) boo
 	return (fwd.AutoFixer == nil || fwd.AutoFixer.IsDrained(ctx)) && fwd.Output.IsDrained(ctx)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) Flush(ctx context.Context) error {
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) Flush(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Flush: %v:%p", fwd, fwd)
+	defer func() { logger.Tracef(ctx, "/Flush: %v:%p: %v", fwd, fwd, _err) }()
+
 	if fwd.AutoFixer != nil {
 		err := fwd.AutoFixer.Flush(ctx)
 		if err != nil {

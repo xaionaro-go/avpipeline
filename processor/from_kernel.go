@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/asticode/go-astikit"
@@ -15,6 +17,7 @@ import (
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xsync"
 )
 
 type FromKernel[T kernel.Abstract] struct {
@@ -83,8 +86,12 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	ctx, cancelFn := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 
+	var debugM xsync.Map[string, struct{}]
+
+	debugM.Store("preOutputPacketsCh", struct{}{})
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
+		defer debugM.Delete("preOutputPacketsCh")
 		defer wg.Done()
 		defer close(p.OutputPacketCh)
 		for {
@@ -98,13 +105,20 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 				mediaType := outputPacket.GetMediaType()
 				objSize := uint64(outputPacket.GetSize())
 				p.CountersStorage.Generated.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
-				p.OutputPacketCh <- outputPacket
+				select {
+				case <-ctx.Done():
+					p.CountersStorage.Omitted.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+					return
+				case p.OutputPacketCh <- outputPacket:
+				}
 			}
 		}
 	})
 
+	debugM.Store("preOutputFramesCh", struct{}{})
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
+		defer debugM.Delete("preOutputFramesCh")
 		defer wg.Done()
 		defer close(p.OutputFrameCh)
 		for {
@@ -118,14 +132,21 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 				mediaType := outputFrame.GetMediaType()
 				objSize := uint64(outputFrame.GetSize())
 				p.CountersStorage.Generated.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
-				p.OutputFrameCh <- outputFrame
+				select {
+				case <-ctx.Done():
+					p.CountersStorage.Omitted.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
+					return
+				case p.OutputFrameCh <- outputFrame:
+				}
 			}
 		}
 	})
 
+	debugM.Store("readerLoop", struct{}{})
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer observability.Go(ctx, func(ctx context.Context) {
+			defer debugM.Delete("readerLoop")
 			defer wg.Done()
 			logger.Tracef(ctx, "finalize[%s]", p)
 			err := p.finalize(ctx)
@@ -165,12 +186,20 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 			errCh <- err
 		}
 	})
+
 	var once sync.Once
 	p.addToCloser(func() {
 		once.Do(func() {
 			logger.Tracef(ctx, "close[%s]", p)
 			defer logger.Tracef(ctx, "/close[%s]", p)
 			cancelFn()
+			runtime.Gosched()
+			var leftovers []string
+			debugM.Range(func(key string, value struct{}) bool {
+				leftovers = append(leftovers, key)
+				return true
+			})
+			logger.Tracef(ctx, "wait[%s] for %s", p, strings.Join(leftovers, ", "))
 			wg.Wait()
 		})
 	})
@@ -263,6 +292,7 @@ func (p *FromKernel[T]) GetInternalQueueSize(
 ) map[string]uint64 {
 	queuer, ok := any(p.Kernel).(GetInternalQueueSizer)
 	if !ok {
+		logger.Debugf(ctx, "GetInternalQueueSize: kernel %T does not implement GetInternalQueueSizer", p.Kernel)
 		return nil
 	}
 	return queuer.GetInternalQueueSize(ctx)
