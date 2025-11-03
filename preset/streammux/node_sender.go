@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/kernel"
 	kernelboilerplate "github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -54,6 +55,8 @@ type KernelSender[C any] struct {
 	*kernelboilerplate.BaseWithFormatContext[*SenderHandler[C]]
 }
 
+var _ kernel.GetInternalQueueSizer = (*KernelSender[any])(nil)
+
 func newKernelSender[C any](
 	ctx context.Context,
 	f SenderFactory,
@@ -72,11 +75,15 @@ func (k *KernelSender[C]) GetInternalQueueSize(
 ) (_ret map[string]uint64) {
 	k.Handler.SenderLocker.Do(ctx, func() {
 		if k.Handler.Sender == nil {
+			_ret = map[string]uint64{}
 			return
 		}
-		if qSizer, ok := k.Handler.Sender.(kerneltypes.GetInternalQueueSizer); ok {
-			_ret = qSizer.GetInternalQueueSize(ctx)
+		qSizer, ok := k.Handler.Sender.GetProcessor().(kerneltypes.GetInternalQueueSizer)
+		if !ok {
+			logger.Debugf(ctx, "GetInternalQueueSize: sender backend %T does not implement GetInternalQueueSizer", k.Handler.Sender)
+			return
 		}
+		_ret = qSizer.GetInternalQueueSize(ctx)
 	})
 	return
 }

@@ -227,12 +227,13 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			nodeReqCtx, cancelFn := context.WithTimeout(ctx, max(h.AutoBitRateConfig.CheckInterval/4-50*time.Millisecond, 50*time.Millisecond))
+			queueCheckTimeout := max(h.AutoBitRateConfig.CheckInterval/4-50*time.Millisecond, 50*time.Millisecond)
+			nodeReqCtx, cancelFn := context.WithTimeout(ctx, queueCheckTimeout)
 			defer cancelFn()
 			queueSize := proc.GetInternalQueueSize(nodeReqCtx)
 			reqErr := nodeReqCtx.Err()
 			if queueSize == nil && reqErr == nil {
-				logger.Warnf(ctx, "unable to get queue size")
+				logger.Warnf(ctx, "unable to get queue size of %T:%s", proc, proc)
 				return
 			}
 			var nodeTotalQueue uint64
@@ -426,7 +427,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	case req.BitRate > maxVideoBitRate:
 		clampedVideoBitRate = maxVideoBitRate
 	}
-	logger.Debugf(ctx, "clamped bitrate: %d (min:%d, max:%d, input:%d)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
+	logger.Debugf(ctx, "clamped bitrate: %v (min:%v, max:%v, input:%v)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
 
 	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(req.BitRate)
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)

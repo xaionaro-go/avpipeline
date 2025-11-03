@@ -292,6 +292,7 @@ func (p *FromKernel[T]) GetInternalQueueSize(
 ) map[string]uint64 {
 	queuer, ok := any(p.Kernel).(GetInternalQueueSizer)
 	if !ok {
+		logger.Debugf(ctx, "GetInternalQueueSize: kernel %T does not implement GetInternalQueueSizer", p.Kernel)
 		return nil
 	}
 	return queuer.GetInternalQueueSize(ctx)
