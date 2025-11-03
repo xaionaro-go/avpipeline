@@ -165,7 +165,8 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	}
 
 	if input.GetDTS() > input.GetPTS() {
-		return fmt.Errorf("DTS (%d) is greater than PTS (%d) for source %v", input.GetDTS(), input.GetPTS(), packetSource)
+		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d) for source %v; fixing...", input.GetDTS(), input.GetPTS(), packetSource)
+		input.SetDTS(input.GetPTS())
 	}
 
 	sourceInfo := k.SourceInfo[packetSource]

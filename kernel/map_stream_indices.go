@@ -169,7 +169,10 @@ func (m *MapStreamIndices) newOutputStream(
 	codecParams *astiav.CodecParameters,
 	timeBase astiav.Rational,
 ) (*astiav.Stream, error) {
+	assert(ctx, codecParams != nil, "codecParams is nil")
+	assert(ctx, m.formatContext != nil, "formatContext is nil")
 	outputStream := m.formatContext.NewStream(nil)
+	assert(ctx, outputStream != nil, "unable to create a new output stream")
 	codecParams.Copy(outputStream.CodecParameters())
 	outputStream.SetTimeBase(timeBase)
 	outputStream.SetIndex(outputStreamIndex)
