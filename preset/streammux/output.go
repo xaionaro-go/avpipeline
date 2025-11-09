@@ -71,7 +71,7 @@ type Output struct {
 	MapIndices        *NodeMapStreamIndexes[OutputCustomData]
 	SendingFixer      *autofix.AutoFixerWithCustomData[OutputCustomData]
 	SendingSyncer     *NodeBarrier[OutputCustomData]
-	SendingNode       *NodeSender[OutputCustomData]
+	SendingNode       SendingNode
 	SendingNodeProps  types.SenderNodeProps
 	FPSFractionGetter FPSFractionGetter
 	InitOnce          sync.Once
@@ -116,20 +116,20 @@ func (opts InitOutputOptions) config() initOutputConfig {
 //	  v                              v
 //	dyn(RecoderNode)             dyn(RecoderNode)
 //	  |                              |
-//	  v OutputThrottler              v OutputThrottler
+//	  v SendingThrottler             v SendingThrottler
 //	  |                              |
 //	  v                              v
-//	OutputMapIndices             OutputMapIndices
+//	MapIndices                    MapIndices
 //	  |                              |
 //	  v                              v
-//	OutputFixer                  OutputFixer
+//	SendingFixer                  SendingFixer
 //	  |                              |
 //	  v MonotonicPTS-· · · · · · · · v ·-MonotonicPTS
 //	  |                              |
-//	  v OutputSyncer-· · · · · · · · v ·-OutputSyncer
+//	  v SendingSyncer- · · · · · · · v ·-SendingSyncer
 //	  |                              |
 //	  v                              v
-//	OutputNode                   OutputNode
+//	SendingNode                   SendingNode
 
 func newOutput[C any](
 	ctx context.Context,
@@ -162,8 +162,7 @@ func newOutput[C any](
 
 	// construct nodes
 
-	senderNode := newSenderNode[OutputCustomData](ctx, outputFactory, outputKey)
-	err := senderNode.Processor.Kernel.Handler.Init(ctx)
+	senderNode, sendingCfg, err := outputFactory.NewSender(ctx, outputKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to connect sending node: %w", err)
 	}
@@ -220,13 +219,14 @@ func newOutput[C any](
 		SendingNode:       senderNode,
 		FPSFractionGetter: fpsFractionGetter,
 	}
-	o.InputFilter.CustomData = OutputCustomData{Output: o}
-	o.InputFixer.SetCustomData(OutputCustomData{Output: o})
-	o.RecoderNode.CustomData = OutputCustomData{Output: o}
-	o.MapIndices.CustomData = OutputCustomData{Output: o}
-	o.SendingFixer.SetCustomData(OutputCustomData{Output: o})
-	o.SendingSyncer.CustomData = OutputCustomData{Output: o}
-	o.SendingNode.CustomData = OutputCustomData{Output: o}
+	customData := OutputCustomData{Output: o}
+	o.InputFilter.CustomData = customData
+	o.InputFixer.SetCustomData(customData)
+	o.RecoderNode.CustomData = customData
+	o.MapIndices.CustomData = customData
+	o.SendingFixer.SetCustomData(customData)
+	o.SendingSyncer.CustomData = customData
+	o.SendingNode.SetCustomData(customData)
 
 	if outputReuseDecoderResources {
 		o.initReuseDecoderResources(ctx)
@@ -267,7 +267,7 @@ func newOutput[C any](
 	o.MapIndices.AddPushPacketsTo(outputFixer)
 	o.SendingFixer.AddPushPacketsTo(o.SendingSyncer)
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
-		return o.SendingNode.Processor.Kernel.Handler.SenderConfig.OutputThrottlerMaxQueueSizeBytes
+		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
 	if monotonicPTS == nil {
 		monotonicPTS = packetcondition.Static(true)
@@ -278,7 +278,7 @@ func newOutput[C any](
 			o.SendingThrottler,
 			packetcondition.Or{
 				packetcondition.Function(func(ctx context.Context, input packet.Input) bool {
-					return o.SendingNode.Processor.Kernel.Handler.SenderConfig.OutputThrottlerMaxQueueSizeBytes <= 0
+					return sendingCfg.OutputThrottlerMaxQueueSizeBytes <= 0
 				}),
 				packetcondition.Not{packetcondition.MediaType(astiav.MediaTypeVideo)},
 				packetcondition.IsKeyFrame(true),
@@ -578,7 +578,7 @@ func (o *Output) Deinit(
 		errs = append(errs, fmt.Errorf("unable to reset recoder node for output %d: %w", o.ID, err))
 	}
 
-	if err := o.SendingNode.Processor.Kernel.Handler.Deinit(ctx); err != nil {
+	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to deinit recoder node for output %d: %w", o.ID, err))
 	}
 

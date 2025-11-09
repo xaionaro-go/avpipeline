@@ -89,11 +89,17 @@ type StreamMux[C any] struct {
 	lastKeyFrames map[int]*ringbuffer.RingBuffer[packet.Input]
 }
 
+type SendingNode interface {
+	node.Abstract
+	SetCustomData(v OutputCustomData)
+	GetCustomData() OutputCustomData
+}
+
 type SenderFactory interface {
 	NewSender(
 		ctx context.Context,
 		senderKey SenderKey,
-	) (node.Abstract, types.SenderConfig, error)
+	) (SendingNode, types.SenderConfig, error)
 }
 
 func New(
@@ -204,8 +210,8 @@ func (s *StreamMux[C]) initSwitches(
 	})
 	s.VideoOutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
 
-	logger.Tracef(ctx, "o.OutputSwitch: %p", s.VideoOutputSwitch)
-	logger.Tracef(ctx, "o.OutputSyncer: %p", s.VideoOutputSyncer)
+	logger.Tracef(ctx, "o.VideoOutputSwitch: %p", s.VideoOutputSwitch)
+	logger.Tracef(ctx, "o.VideoOutputSyncer: %p", s.VideoOutputSyncer)
 }
 
 func (s *StreamMux[C]) removeOutputByIDLocked(

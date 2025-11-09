@@ -195,17 +195,19 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
 		activeOutput = h.StreamMux.waitForActiveOutputLocked(ctx)
-		for _, o := range h.StreamMux.Outputs {
+		h.StreamMux.OutputsMap.Range(func(_ SenderKey, o *Output) bool {
 			if o == nil {
-				continue
+				return true
 			}
-			outputProc, ok := o.SendingNode.GetProcessor().(kernel.GetInternalQueueSizer)
+			outputProc := o.SendingNode.GetProcessor()
+			getQueueSizer, ok := outputProc.(kernel.GetInternalQueueSizer)
 			if !ok {
-				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", o.SendingNode.GetProcessor())
-				continue
+				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", outputProc)
+				return true
 			}
-			getQueueSizers = append(getQueueSizers, outputProc)
-		}
+			getQueueSizers = append(getQueueSizers, getQueueSizer)
+			return true
+		})
 	})
 	if activeOutput == nil {
 		logger.Warnf(ctx, "no active output; skipping bitrate check")

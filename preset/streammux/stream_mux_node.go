@@ -2,7 +2,9 @@ package streammux
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
@@ -56,11 +58,23 @@ func (s *StreamMux[C]) Serve(
 					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
 					assert(ctx, s.VideoOutputSwitch != nil)
 					if int32(output.ID) != s.VideoOutputSwitch.CurrentValue.Load() {
-						logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
-						s.OutputsMap.Delete(output.GetKey())
+						switch {
+						case errors.Is(nodeErr.Err, io.EOF):
+							logger.Debugf(ctx, "node <%T> received EOF, closing it", nodeErr.Node)
+						case errors.Is(nodeErr.Err, context.Canceled):
+							logger.Debugf(ctx, "node <%T> was canceled, closing it", nodeErr.Node)
+						default:
+							logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
+						}
+						if s.OutputsMap.CompareAndDelete(output.GetKey(), output) {
+							logger.Debugf(ctx, "output %d removed from OutputsMap", output.ID)
+						}
 						output.CloseNoDrain(ctx)
 						continue
 					}
+					logger.Errorf(ctx, "error from the active output %d: %v", output.ID, nodeErr.Err)
+				} else {
+					logger.Errorf(ctx, "node %T:%s does not implement GetCustomDataer[OutputCustomData]; do not know how to handle error %v", nodeErr.Node, nodeErr.Node, nodeErr.Err)
 				}
 				select {
 				case errCh <- nodeErr:

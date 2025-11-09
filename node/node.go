@@ -225,6 +225,10 @@ func (n *NodeWithCustomData[C, T]) GetCustomData() C {
 	return n.CustomData
 }
 
+func (n *NodeWithCustomData[C, T]) SetCustomData(v C) {
+	n.CustomData = v
+}
+
 func (n *NodeWithCustomData[C, T]) IsServing() bool {
 	if n == nil {
 		return false

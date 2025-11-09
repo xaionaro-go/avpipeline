@@ -132,8 +132,8 @@ var _ streammux.SenderFactory = (*decoderOutputFactory)(nil)
 func (decoderOutputFactory) NewSender(
 	ctx context.Context,
 	outputKey streammux.SenderKey,
-) (node.Abstract, streammuxtypes.SenderConfig, error) {
-	n := node.NewFromKernel(
+) (streammux.SendingNode, streammuxtypes.SenderConfig, error) {
+	n := node.NewWithCustomDataFromKernel[streammux.OutputCustomData](
 		ctx,
 		kernel.NewDecoder(ctx, &codec.NaiveDecoderFactory{}),
 		processor.DefaultOptionsRecoder()...,

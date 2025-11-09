@@ -25,8 +25,8 @@ type dummyOutputFactory struct{}
 func (dummyOutputFactory) NewSender(
 	ctx context.Context,
 	outputKey SenderKey,
-) (node.Abstract, types.SenderConfig, error) {
-	return node.NewFromKernel(
+) (SendingNode, types.SenderConfig, error) {
+	return node.NewWithCustomDataFromKernel[OutputCustomData](
 		ctx,
 		boilerplate.NewKernelWithFormatContext(ctx, &dummyHandler{}),
 	), types.SenderConfig{}, nil

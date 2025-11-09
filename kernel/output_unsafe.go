@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
@@ -37,6 +38,11 @@ var _ GetInternalQueueSizer = (*Output)(nil)
 func (r *Output) GetInternalQueueSize(
 	ctx context.Context,
 ) map[string]uint64 {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Debugf(ctx, "panic recovered in %s in GetInternalQueueSize: %v\n%s", r, rec, debug.Stack())
+		}
+	}()
 	return xsync.DoA1R1(ctx, &r.formatContextLocker, r.unsafeGetInternalQueueSize, ctx)
 }
 
