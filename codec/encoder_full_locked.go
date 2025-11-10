@@ -181,6 +181,7 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 	}
 
 	logger.Debugf(ctx, "setting FPS to %v->%v (codec: '%s')", oldFPS, fps, e.codec.Name())
+	e.InitParams.CodecParameters.SetFrameRate(fps)
 	switch {
 	case strings.HasSuffix(e.codec.Name(), "_nvenc"):
 		fpsChangeFactor := math.Abs((fps.Float64() - oldFPS.Float64()) / math.Max(fps.Float64(), oldFPS.Float64()))
@@ -198,7 +199,6 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 	default:
 		e.codecContext.SetFramerate(fps)
 	}
-	e.InitParams.CodecParameters.SetFrameRate(fps)
 }
 
 func (e *EncoderFullLocked) ReceivePacket(
