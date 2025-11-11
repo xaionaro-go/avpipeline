@@ -338,9 +338,6 @@ func (o *Output) doOpen(
 		}
 		logger.Debugf(ctx, "set the send buffer size to %d", cfg.SendBufferSize)
 	}
-	if err := o.UnsafeSetLinger(ctx, 1, 0); err != nil {
-		logger.Errorf(ctx, "unable to set linger on the output socket: %v", err)
-	}
 
 	return nil
 }

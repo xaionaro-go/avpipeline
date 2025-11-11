@@ -335,10 +335,13 @@ func (h *AutoBitRateHandler[C]) isBypassEnabled(
 func (h *AutoBitRateHandler[C]) enableBypass(
 	ctx context.Context,
 	enable bool,
-	isCritical bool,
+	force bool,
+	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Debugf(ctx, "enableByPass: %v", enable)
-	defer func() { logger.Debugf(ctx, "/enableByPass: %v: %v", enable, _err) }()
+	logger.Debugf(ctx, "enableByPass: %v, %t, %t", enable, force, allowTrafficLoss)
+	defer func() {
+		logger.Debugf(ctx, "/enableByPass: %v, %t, %t: %v", enable, force, allowTrafficLoss, _err)
+	}()
 
 	if enable {
 		return h.setOutput(
@@ -348,7 +351,8 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 				VideoCodec: codectypes.NameCopy,
 			},
 			0,
-			isCritical,
+			force,
+			allowTrafficLoss,
 		)
 	}
 
@@ -356,7 +360,8 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 		ctx,
 		nil,
 		types.Ubps(float64(h.StreamMux.CurrentVideoInputBitRate.Load())*0.9),
-		isCritical,
+		force,
+		allowTrafficLoss,
 	)
 }
 
@@ -398,13 +403,13 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate))
 		if h.isBypassEnabled(ctx) {
 			if req.BitRate < videoInputBitRate {
-				if err := h.enableBypass(ctx, false, req.IsCritical); err != nil {
+				if err := h.enableBypass(ctx, false, req.IsCritical, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
 				}
 			}
 		} else {
 			if float64(req.BitRate) > float64(videoInputBitRate)*1.2 {
-				err := h.enableBypass(ctx, true, req.IsCritical)
+				err := h.enableBypass(ctx, true, req.IsCritical, false)
 				if err != nil {
 					return fmt.Errorf("unable to enable bypass mode: %w", err)
 				}
@@ -434,7 +439,12 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(req.BitRate)
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
 
-	if err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical); err != nil {
+	allowTrafficLoss := false
+	if req.BitRate < oldBitRate && req.IsCritical {
+		allowTrafficLoss = true
+	}
+
+	if err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical, allowTrafficLoss); err != nil {
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
 
@@ -470,11 +480,12 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	ctx context.Context,
 	bitrate types.Ubps,
-	isCritical bool,
+	force bool,
+	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%v, isCritical=%t)", bitrate, isCritical)
+	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t)", bitrate, force)
 	defer func() {
-		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%v, isCritical=%t): %v", bitrate, isCritical, _err)
+		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t): %v", bitrate, force, allowTrafficLoss, _err)
 	}()
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
@@ -519,7 +530,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		newRes = *_newRes
 		if newRes.Resolution == *res {
 			// if already the highest resolution, then enable bypass:
-			err := h.enableBypass(ctx, true, isCritical)
+			err := h.enableBypass(ctx, true, force, allowTrafficLoss)
 			if err != nil {
 				return fmt.Errorf("unable to enable bypass mode: %w", err)
 			}
@@ -530,7 +541,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 
 	err := h.setOutput(ctx, &SenderKey{
 		Resolution: newRes.Resolution,
-	}, bitrate, isCritical)
+	}, bitrate, force, allowTrafficLoss)
 	if err != nil {
 		return fmt.Errorf("unable to set new resolution %v: %w", newRes.Resolution, err)
 	}
@@ -541,11 +552,12 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	ctx context.Context,
 	outputKey *SenderKey,
 	bitrate types.Ubps,
-	isCritical bool,
+	force bool,
+	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %v (isCritical:%t)", outputKey, bitrate, isCritical)
+	logger.Tracef(ctx, "setOutput: %v, %v (force:%t, allowTrafficLoss:%t)", outputKey, bitrate, force, allowTrafficLoss)
 	defer func() {
-		logger.Tracef(ctx, "/setOutput: %v, %v (isCritical:%t): %v", outputKey, bitrate, isCritical, _err)
+		logger.Tracef(ctx, "/setOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", outputKey, bitrate, force, allowTrafficLoss, _err)
 	}()
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)
@@ -609,8 +621,8 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		return fmt.Errorf("unable to compare output keys: %v and %v", outputKey, outputCur.GetKey())
 	}
 
-	if isCritical {
-		logger.Debugf(ctx, "critical resolution change request: cancelling any previous resolution change request")
+	if force {
+		logger.Debugf(ctx, "force-resolution-change request: cancelling any previous resolution change requests")
 		h.currentResolutionChangeRequest = nil
 	} else {
 		now := time.Now()
@@ -643,6 +655,16 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		return h.StreamMux.EnableRecodingBypass(ctx)
 	}
 
+	if allowTrafficLoss {
+		err := sendingNodeSetDropOnClose(ctx, outputCur.SendingNode, true)
+		switch {
+		case err == nil:
+		case errors.As(err, &ErrNoSetDropOnClose{}):
+			logger.Debugf(ctx, "current output's sending node %T does not implement SetDropOnCloser; cannot allow traffic loss during resolution change", outputCur.SendingNode)
+		default:
+			logger.Errorf(ctx, "unable to set drop-on-close on the current output sending node: %v", err)
+		}
+	}
 	err := h.StreamMux.setResolutionBitRateCodec(
 		ctx,
 		outputKey.Resolution,

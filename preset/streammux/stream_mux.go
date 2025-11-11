@@ -89,19 +89,6 @@ type StreamMux[C any] struct {
 	lastKeyFrames map[int]*ringbuffer.RingBuffer[packet.Input]
 }
 
-type SendingNode interface {
-	node.Abstract
-	SetCustomData(v OutputCustomData)
-	GetCustomData() OutputCustomData
-}
-
-type SenderFactory interface {
-	NewSender(
-		ctx context.Context,
-		senderKey SenderKey,
-	) (SendingNode, types.SenderConfig, error)
-}
-
 func New(
 	ctx context.Context,
 	muxMode types.MuxMode,
