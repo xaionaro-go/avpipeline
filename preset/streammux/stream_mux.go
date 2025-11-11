@@ -134,9 +134,8 @@ func NewWithCustomData[C any](
 	}
 	s.InputNode = newInputNode[C](ctx, s)
 	s.InputNodeAsPacketSource = s.InputNode.Processor.GetPacketSource()
-	s.CurrentVideoInputBitRate.Store(math.MaxUint64)
-	s.CurrentAudioInputBitRate.Store(math.MaxUint64)
-	s.CurrentOtherInputBitRate.Store(math.MaxUint64)
+	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
+	s.CurrentOtherInputBitRate.Store(0)
 	s.initSwitches(ctx)
 
 	if autoBitRate != nil {
@@ -150,6 +149,10 @@ func NewWithCustomData[C any](
 			err := h.ServeContext(ctx)
 			logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
 		})
+		bestCfg := autoBitRate.ResolutionsAndBitRates.Best()
+		s.CurrentVideoInputBitRate.Store(uint64(bestCfg.BitrateHigh))
+	} else {
+		s.CurrentVideoInputBitRate.Store(math.MaxUint64)
 	}
 
 	return s, nil

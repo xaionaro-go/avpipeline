@@ -651,7 +651,7 @@ func (h *AutoBitRateHandler[C]) setOutput(
 	)
 	switch {
 	case err == nil:
-		logger.Infof(ctx, "changed resolution to %v (bitrate: %d)", outputKey.Resolution, bitrate)
+		logger.Infof(ctx, "changed resolution to %v (bitrate: %s)", outputKey.Resolution, bitrate)
 		return nil
 	case errors.As(err, &ErrAlreadySet{}):
 		logger.Debugf(ctx, "resolution is already set to %v: %v", outputKey.Resolution, err)

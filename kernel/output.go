@@ -40,7 +40,6 @@ const (
 	outputSendPendingPackets            = true
 	skipTooHighTimestamps               = false
 	flvForbidStreamIndexAbove1          = true
-	outputMediaMTXHack                  = true
 	outputAcceptOnlyKeyFramesUntilStart = true
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
@@ -49,7 +48,8 @@ const (
 )
 
 type OutputConfigWaitForOutputStreams struct {
-	MinStreams uint
+	MinStreams       uint
+	VideoBeforeAudio bool // this is a hack required to make MediaMTX see video tracks
 }
 
 type OutputConfig struct {
@@ -336,6 +336,10 @@ func (o *Output) doOpen(
 		if err := o.UnsafeSetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
 			return fmt.Errorf("unable to set the send buffer size to %d: %w", cfg.SendBufferSize, err)
 		}
+		logger.Debugf(ctx, "set the send buffer size to %d", cfg.SendBufferSize)
+	}
+	if err := o.UnsafeSetLinger(ctx, 1, 0); err != nil {
+		logger.Errorf(ctx, "unable to set linger on the output socket: %v", err)
 	}
 
 	return nil
@@ -632,14 +636,6 @@ func (o *Output) send(
 		return o.FormatContext.NbStreams()
 	})
 
-	if outputMediaMTXHack {
-		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
-		// does not see the video track:
-		if mediaType != astiav.MediaTypeVideo {
-			logger.Tracef(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
-			return nil
-		}
-	}
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
 	logger.Debugf(ctx, "isKeyFrame:%t", keyFrame)
 	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
@@ -648,6 +644,15 @@ func (o *Output) send(
 			return nil
 		}
 	}
+	if o.Config.WaitForOutputStreams.VideoBeforeAudio {
+		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
+		// does not see the video track:
+		if mediaType != astiav.MediaTypeVideo {
+			logger.Tracef(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
+			return nil
+		}
+	}
+
 	streamIndex := pkt.StreamIndex()
 	_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
 	if waitingKeyFrame {

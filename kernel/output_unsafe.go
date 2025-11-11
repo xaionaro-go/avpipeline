@@ -32,6 +32,27 @@ func (o *Output) UnsafeSetSendBufferSize(
 	return nil
 }
 
+func (o *Output) UnsafeSetLinger(
+	ctx context.Context,
+	onOff int32,
+	linger int32,
+) (_err error) {
+	logger.Debugf(ctx, "UnsafeSetLinger(ctx, %d, %d)", onOff, linger)
+	defer func() { logger.Debugf(ctx, "/UnsafeSetLinger(ctx, %d, %d): %v", onOff, linger, _err) }()
+
+	fd, err := o.UnsafeGetFileDescriptor(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get file descriptor: %w", err)
+	}
+
+	err = sockSetLinger(fd, onOff, linger)
+	if err != nil {
+		return fmt.Errorf("unable to set the linger of file descriptor %d to %d/%d: %w", fd, onOff, linger, err)
+	}
+
+	return nil
+}
+
 var _ GetInternalQueueSizer = (*Output)(nil)
 
 // Warning! The implementation intrudes into private structures, which is unsafe.
