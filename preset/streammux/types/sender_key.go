@@ -14,7 +14,11 @@ type SenderKey struct {
 }
 
 func (k SenderKey) String() string {
-	return fmt.Sprintf("%s/%dx%d;%s", k.VideoCodec, k.Resolution.Width, k.Resolution.Height, k.AudioCodec)
+	return fmt.Sprintf(
+		"%s/%dx%d | %s",
+		k.VideoCodec, k.Resolution.Width, k.Resolution.Height,
+		k.AudioCodec,
+	)
 }
 
 func (k SenderKey) Compare(b SenderKey) int {
@@ -53,20 +57,20 @@ func (k SenderKey) Compare(b SenderKey) int {
 	return 0
 }
 
-type OutputKeys []SenderKey
+type SenderKeys []SenderKey
 
-func (s OutputKeys) Sort() {
+func (s SenderKeys) Sort() {
 	sort.Sort(s)
 }
 
-func (s OutputKeys) Len() int {
+func (s SenderKeys) Len() int {
 	return len(s)
 }
 
-func (s OutputKeys) Less(i, j int) bool {
+func (s SenderKeys) Less(i, j int) bool {
 	return s[i].Compare(s[j]) < 0
 }
 
-func (s OutputKeys) Swap(i, j int) {
+func (s SenderKeys) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }

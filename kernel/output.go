@@ -641,7 +641,7 @@ func (o *Output) send(
 			return nil
 		}
 	}
-	if o.Config.WaitForOutputStreams.VideoBeforeAudio {
+	if o.Config.WaitForOutputStreams.VideoBeforeAudio || true {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
@@ -830,9 +830,10 @@ func (o *Output) doWritePacket(
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
 	})
 	if err != nil {
+		isKey := pkt.Flags().Has(astiav.PacketFlagKey)
 		err = fmt.Errorf(
-			"unable to write the packet with pos:%v (pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d: %w",
-			pos, pts, dts, dur, outputStream.LastDTS,
+			"unable to write the packet with pos:%v (is_key:%v, pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d: %w",
+			pos, isKey, pts, dts, dur, outputStream.LastDTS,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
 			pkt.Flags(),

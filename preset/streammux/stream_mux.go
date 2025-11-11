@@ -895,7 +895,7 @@ func (s *StreamMux[C]) GetBestNotBypassOutput(
 func (s *StreamMux[C]) getBestNotBypassOutputLocked(
 	ctx context.Context,
 ) (_ret *Output) {
-	var outputKeys OutputKeys
+	var outputKeys SenderKeys
 	s.OutputsMap.Range(func(outputKey SenderKey, _ *Output) bool {
 		outputKeys = append(outputKeys, outputKey)
 		return true
@@ -973,7 +973,7 @@ func (s *StreamMux[C]) onInputPacket(
 	return nil
 }
 
-func (s *StreamMux[C]) InitOutputStreams(
+func (s *StreamMux[C]) InitOutputVideoStreams(
 	ctx context.Context,
 	receiver node.Abstract,
 	outputKey SenderKey,

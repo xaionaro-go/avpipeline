@@ -45,21 +45,25 @@ type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kern
 type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
 type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 type SenderKey = types.SenderKey
-type OutputKeys = types.OutputKeys
+type SenderKeys = types.SenderKeys
+
+type OutputID int
+
+type OutputCustomData struct {
+	*Output
+}
 
 type FPSFractionGetter interface {
 	GetFPSFraction(ctx context.Context) (num, den uint32)
 }
 
 type OutputStreamsIniter interface {
-	InitOutputStreams(ctx context.Context, receiver node.Abstract, outputKey SenderKey) error
+	InitOutputVideoStreams(
+		ctx context.Context,
+		receiver node.Abstract,
+		senderKey SenderKey,
+	) error
 }
-
-type OutputCustomData struct {
-	*Output
-}
-
-type OutputID int
 
 type Output struct {
 	ID                OutputID
@@ -135,8 +139,8 @@ func newOutput[C any](
 	ctx context.Context,
 	outputID OutputID,
 	inputNode *NodeInput[C],
-	outputFactory SenderFactory,
-	outputKey SenderKey,
+	senderFactory SenderFactory,
+	senderKey SenderKey,
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
 	monotonicPTS packetcondition.Condition,
@@ -147,8 +151,8 @@ func newOutput[C any](
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
 	ctx, cancelFn := context.WithCancel(ctx)
-	logger.Debugf(ctx, "newOutput: %#+v", outputKey)
-	defer func() { logger.Debugf(ctx, "/newOutput: %#+v %v", outputKey, _err) }()
+	logger.Debugf(ctx, "newOutput: %#+v", senderKey)
+	defer func() { logger.Debugf(ctx, "/newOutput: %#+v %v", senderKey, _err) }()
 
 	defer func() {
 		if _err != nil {
@@ -156,13 +160,13 @@ func newOutput[C any](
 		}
 	}()
 
-	if outputKey.Resolution == (codec.Resolution{}) && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+	if senderKey.Resolution == (codec.Resolution{}) && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
 		return nil, fmt.Errorf("output resolution is not set")
 	}
 
 	// construct nodes
 
-	senderNode, sendingCfg, err := outputFactory.NewSender(ctx, outputKey)
+	senderNode, sendingCfg, err := senderFactory.NewSender(ctx, senderKey)
 	if err != nil {
 		return nil, fmt.Errorf("unable to connect sending node: %w", err)
 	}
@@ -171,9 +175,9 @@ func newOutput[C any](
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, nil),
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
-			VideoCodec:      codec.Name(outputKey.VideoCodec),
-			AudioCodec:      codec.Name(outputKey.AudioCodec),
-			VideoResolution: &outputKey.Resolution,
+			VideoCodec:      codec.Name(senderKey.VideoCodec),
+			AudioCodec:      codec.Name(senderKey.AudioCodec),
+			VideoResolution: &senderKey.Resolution,
 		}),
 		nil,
 	)
@@ -237,7 +241,7 @@ func newOutput[C any](
 
 	var inputFixer, outputFixer node.Abstract
 	inputFixer, outputFixer = o.InputFixer, o.SendingFixer
-	if outputKey.VideoCodec == codectypes.Name(codec.NameCopy) {
+	if senderKey.VideoCodec == codectypes.Name(codec.NameCopy) {
 		inputFixer, outputFixer = o.RecoderNode, o.SendingSyncer
 	}
 
@@ -252,7 +256,7 @@ func newOutput[C any](
 				return true
 			}
 			o.InitOnce.Do(func() {
-				err := streamsIniter.InitOutputStreams(ctx, inputFixer, outputKey)
+				err := streamsIniter.InitOutputVideoStreams(ctx, inputFixer, senderKey)
 				if err != nil {
 					logger.Errorf(ctx, "unable to init output streams: %v", err)
 				}
