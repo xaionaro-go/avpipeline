@@ -9,9 +9,6 @@ type Resolution struct {
 	Height uint32 `yaml:"height"`
 }
 
-func (r *Resolution) String() string {
-	if r == nil {
-		return "<nil>"
-	}
+func (r Resolution) String() string {
 	return fmt.Sprintf("%dx%d", r.Width, r.Height)
 }

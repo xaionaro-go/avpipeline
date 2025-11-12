@@ -176,6 +176,16 @@ func (s *StreamMux[C]) ForEachInput(
 func (s *StreamMux[C]) initSwitches(
 	ctx context.Context,
 ) error {
+	switch s.MuxMode {
+	case types.MuxModeDifferentOutputsSameTracksSplitAV:
+		// we don't consume directly from s.InputAll in this mode
+		if err := s.InputAll.OutputSwitch.SetValue(ctx, -1); err != nil {
+			return fmt.Errorf("unable to initialize switch for catch-all input: %w", err)
+		}
+		if err := s.InputAll.OutputSyncer.SetValue(ctx, -1); err != nil {
+			return fmt.Errorf("unable to initialize switch for catch-all input: %w", err)
+		}
+	}
 	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 		inputType := input.GetType()
 		if inputType.IncludesMediaType(astiav.MediaTypeVideo) {
@@ -338,8 +348,8 @@ func (s *StreamMux[C]) setPreferredOutputs(
 	ctx context.Context,
 	senderKey SenderKey,
 ) (_err error) {
-	logger.Debugf(ctx, "setPreferredOutput(ctx, %s)", senderKey)
-	defer func() { logger.Debugf(ctx, "/setPreferredOutput(ctx, %s): %v", senderKey, _err) }()
+	logger.Debugf(ctx, "setPreferredOutputs(ctx, %s)", senderKey)
+	defer func() { logger.Debugf(ctx, "/setPreferredOutputs(ctx, %s): %v", senderKey, _err) }()
 
 	switch s.MuxMode {
 	case types.MuxModeDifferentOutputsSameTracks:
@@ -351,31 +361,38 @@ func (s *StreamMux[C]) setPreferredOutputs(
 	case types.MuxModeDifferentOutputsSameTracksSplitAV:
 		var alreadyPreferredErr0, alreadyPreferredErr1 ErrOutputAlreadyPreferred
 		alreadyPreferredCount := 0
-		senderKeyVideo := SenderKey{
-			VideoCodec:      senderKey.VideoCodec,
-			VideoResolution: senderKey.VideoResolution,
+		outputsToChange := 0
+		if senderKey.VideoCodec != "" {
+			outputsToChange++
+			senderKeyVideo := SenderKey{
+				VideoCodec:      senderKey.VideoCodec,
+				VideoResolution: senderKey.VideoResolution,
+			}
+			err := s.setPreferredOutputForInput(ctx, s.getVideoInput(), senderKeyVideo)
+			switch {
+			case err == nil:
+			case errors.As(err, &alreadyPreferredErr0):
+				alreadyPreferredCount++
+			default:
+				return fmt.Errorf("unable to set preferred output for video input with key %s: %w", senderKeyVideo, err)
+			}
 		}
-		err := s.setPreferredOutputForInput(ctx, s.getVideoInput(), senderKeyVideo)
-		switch {
-		case err == nil:
-		case errors.As(err, &alreadyPreferredErr0):
-			alreadyPreferredCount++
-		default:
-			return fmt.Errorf("unable to set preferred output for video input with key %s: %w", senderKeyVideo, err)
+		if senderKey.AudioCodec != "" {
+			outputsToChange++
+			senderKeyAudio := SenderKey{
+				AudioCodec:      senderKey.AudioCodec,
+				AudioSampleRate: senderKey.AudioSampleRate,
+			}
+			err := s.setPreferredOutputForInput(ctx, s.getAudioInput(), senderKeyAudio)
+			switch {
+			case err == nil:
+			case errors.Is(err, &alreadyPreferredErr1):
+				alreadyPreferredCount++
+			default:
+				return fmt.Errorf("unable to set preferred output for audio input with key %v: %w", senderKeyAudio, err)
+			}
 		}
-		senderKeyAudio := SenderKey{
-			AudioCodec:      senderKey.AudioCodec,
-			AudioSampleRate: senderKey.AudioSampleRate,
-		}
-		err = s.setPreferredOutputForInput(ctx, s.getAudioInput(), senderKeyAudio)
-		switch {
-		case err == nil:
-		case errors.Is(err, &alreadyPreferredErr1):
-			alreadyPreferredCount++
-		default:
-			return fmt.Errorf("unable to set preferred output for audio input with key %w: %w", senderKeyAudio, err)
-		}
-		if alreadyPreferredCount >= 2 {
+		if alreadyPreferredCount >= outputsToChange {
 			return ErrOutputsAlreadyPreferred{
 				OutputIDs: []OutputID{alreadyPreferredErr0.OutputID, alreadyPreferredErr1.OutputID},
 			}
@@ -533,23 +550,45 @@ func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
 
 	prevVideoOutput := s.GetActiveVideoOutput(ctx)
 
-	senderKey := SenderKey{
-		AudioCodec: codectypes.Name(codec.NameCopy),
-		VideoCodec: codectypes.Name(codec.NameCopy),
+	var senderKey SenderKey
+	var recoderCfg types.RecoderConfig
+	switch s.MuxMode {
+	case types.MuxModeDifferentOutputsSameTracks:
+		senderKey = SenderKey{
+			AudioCodec: codectypes.Name(codec.NameCopy),
+			VideoCodec: codectypes.Name(codec.NameCopy),
+		}
+		recoderCfg = types.RecoderConfig{
+			Output: types.RecoderOutputConfig{
+				VideoTrackConfigs: []types.OutputVideoTrackConfig{{
+					CodecName: codectypes.Name(codec.NameCopy),
+				}},
+				AudioTrackConfigs: []types.OutputAudioTrackConfig{{
+					CodecName: codectypes.Name(codec.NameCopy),
+				}},
+			},
+		}
+	case types.MuxModeDifferentOutputsSameTracksSplitAV:
+		senderKey = SenderKey{
+			VideoCodec: codectypes.Name(codec.NameCopy),
+		}
+		recoderCfg = types.RecoderConfig{
+			Output: types.RecoderOutputConfig{
+				VideoTrackConfigs: []types.OutputVideoTrackConfig{{
+					CodecName: codectypes.Name(codec.NameCopy),
+				}},
+			},
+		}
+	default:
+		return fmt.Errorf("unable to enable video recoding bypass in mux mode %s", s.MuxMode)
 	}
 
-	s.createAndConfigureOutputs(ctx, senderKey, types.RecoderConfig{
-		Output: types.RecoderOutputConfig{
-			VideoTrackConfigs: []types.OutputVideoTrackConfig{{
-				CodecName: codectypes.Name(codec.NameCopy),
-			}},
-			AudioTrackConfigs: []types.OutputAudioTrackConfig{{
-				CodecName: codectypes.Name(codec.NameCopy),
-			}},
-		},
-	})
+	err := s.createAndConfigureOutputs(ctx, senderKey, recoderCfg)
+	if err != nil {
+		return fmt.Errorf("unable to initialize and prepare outputs for bypass key %s: %w", senderKey, err)
+	}
 
-	err := s.setPreferredOutputs(ctx, senderKey)
+	err = s.setPreferredOutputs(ctx, senderKey)
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrOutputAlreadyPreferred{}):
@@ -559,8 +598,8 @@ func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
 	default:
 		return fmt.Errorf("unable to set the preferred outputs %d:%s: %w", prevVideoOutput.ID, senderKey, err)
 	}
-	s.VideoOutputBeforeBypass = prevVideoOutput
 
+	s.VideoOutputBeforeBypass = prevVideoOutput
 	return nil
 }
 
@@ -903,9 +942,9 @@ func (s *StreamMux[C]) setResolutionBitRateCodec(
 	videoCodec codectypes.Name,
 	audioCodec codectypes.Name,
 ) (_err error) {
-	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %d, '%s', '%s'", res, bitRate, videoCodec, audioCodec)
+	logger.Tracef(ctx, "setResolutionBitRateCodec: %v, %v, '%s', '%s'", res, bitRate, videoCodec, audioCodec)
 	defer func() {
-		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %d, '%s', '%s': %v", res, bitRate, videoCodec, audioCodec, _err)
+		logger.Tracef(ctx, "/setResolutionBitRateCodec: %v, %v, '%s', '%s': %v", res, bitRate, videoCodec, audioCodec, _err)
 	}()
 	return xsync.DoR1(ctx, &s.Locker, func() error {
 		return s.setResolutionBitRateCodecLocked(ctx, res, bitRate, videoCodec, audioCodec)
@@ -961,9 +1000,14 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	videoCfg.CodecName = videoCodec
 	cfg.Output.VideoTrackConfigs[0] = videoCfg
 
-	return s.switchToOutputByProps(ctx, types.SenderProps{
+	err := s.switchToOutputByProps(ctx, types.SenderProps{
 		RecoderConfig: cfg.RecoderConfig,
 	}, false)
+	if err != nil {
+		return fmt.Errorf("unable to switch to the new output props: %w", err)
+	}
+
+	return nil
 }
 
 func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {

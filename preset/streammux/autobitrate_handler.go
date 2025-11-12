@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
@@ -347,7 +348,6 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 		return h.setVideoOutput(
 			ctx,
 			&SenderKey{
-				AudioCodec: codectypes.NameCopy,
 				VideoCodec: codectypes.NameCopy,
 			},
 			0,
@@ -400,8 +400,9 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 
 	videoInputBitRate := types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
-		logger.Tracef(ctx, "AutoByPass is enabled: %v %v %v", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate))
-		if h.isBypassEnabled(ctx) {
+		byPassEnabled := h.isBypassEnabled(ctx)
+		logger.Tracef(ctx, "AutoByPass is enabled: oldBitRate:%v reqBitRate:%v inputBitRate:%v; byPass:%t", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate), byPassEnabled)
+		if byPassEnabled {
 			if req.BitRate < videoInputBitRate {
 				if err := h.enableBypass(ctx, false, req.IsCritical, req.IsCritical); err != nil {
 					return fmt.Errorf("unable to disable bypass mode: %w", err)
@@ -555,21 +556,20 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	force bool,
 	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %v (force:%t, allowTrafficLoss:%t)", videoOutputKey, bitrate, force, allowTrafficLoss)
+	logger.Tracef(ctx, "setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t)", videoOutputKey, bitrate, force, allowTrafficLoss)
 	defer func() {
-		logger.Tracef(ctx, "/setOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
+		logger.Tracef(ctx, "/setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
 	}()
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)
-	if encA == nil {
-		return fmt.Errorf("unable to get audio encoder")
+	var curACodecName codec.Name
+	var curASampleRate audio.SampleRate
+	if encA != nil {
+		curACodecName = codec.Name(encA.Codec().Name())
+		curASampleRate = audio.SampleRate(encA.CodecContext().SampleRate())
 	}
-	if encV == nil {
-		return fmt.Errorf("unable to get video encoder")
-	}
-	curACodecName := codec.Name(encA.Codec().Name())
-	var curVCodecName codec.Name
 	var curRes codec.Resolution
+	var curVCodecName codec.Name
 	if codec.IsEncoderCopy(encV) {
 		curVCodecName = codec.NameCopy
 	} else {
@@ -578,7 +578,9 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 			Width:  uint32(encVCtx.Width()),
 			Height: uint32(encVCtx.Height()),
 		}
-		curVCodecName = codec.Name(encV.Codec().Name())
+		if encV != nil {
+			curVCodecName = codec.Name(encV.Codec().Name())
+		}
 	}
 	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)
 
@@ -588,14 +590,21 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		origConfig := h.StreamMux.GetRecoderConfig(ctx)
 		logger.Tracef(ctx, "original recoder config: %+v", origConfig)
 		if len(origConfig.Output.VideoTrackConfigs) > 0 {
-			videoOutputKey.VideoCodec = codectypes.Name(origConfig.Output.VideoTrackConfigs[0].CodecName)
+			videoCfg := origConfig.Output.VideoTrackConfigs[0]
+			videoOutputKey.VideoCodec = codectypes.Name(videoCfg.CodecName)
+			videoOutputKey.VideoResolution = videoCfg.Resolution
 		}
 		if len(origConfig.Output.AudioTrackConfigs) > 0 {
-			videoOutputKey.AudioCodec = codectypes.Name(origConfig.Output.AudioTrackConfigs[0].CodecName)
+			audioCfg := origConfig.Output.AudioTrackConfigs[0]
+			videoOutputKey.AudioCodec = codectypes.Name(audioCfg.CodecName)
+			videoOutputKey.AudioSampleRate = audioCfg.SampleRate
 		}
 	} else {
 		if videoOutputKey.AudioCodec == "" {
 			videoOutputKey.AudioCodec = codectypes.Name(curACodecName)
+		}
+		if videoOutputKey.AudioSampleRate == 0 {
+			videoOutputKey.AudioSampleRate = curASampleRate
 		}
 		if videoOutputKey.VideoCodec == "" {
 			videoOutputKey.VideoCodec = codectypes.Name(curVCodecName)
@@ -648,6 +657,7 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		}
 		h.currentResolutionChangeRequest = nil
 	}
+	logger.Debugf(ctx, "proceeding with resolution change to %v", videoOutputKey.VideoResolution)
 
 	if videoOutputKey.VideoCodec == codectypes.NameCopy {
 		logger.Infof(ctx, "switching to bypass mode")

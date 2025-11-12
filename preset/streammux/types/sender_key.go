@@ -16,11 +16,28 @@ type SenderKey struct {
 }
 
 func (k SenderKey) String() string {
-	return fmt.Sprintf(
-		"%s/%dx%d | %s",
-		k.VideoCodec, k.VideoResolution.Width, k.VideoResolution.Height,
-		k.AudioCodec,
-	)
+	noAudio := k.AudioCodec == "" && k.AudioSampleRate == 0
+	noVideo := k.VideoCodec == "" && k.VideoResolution == (codectypes.Resolution{})
+	switch {
+	case noAudio && noVideo:
+		return "<empty>"
+	case noAudio:
+		return fmt.Sprintf(
+			"v:%s/%dx%d",
+			k.VideoCodec, k.VideoResolution.Width, k.VideoResolution.Height,
+		)
+	case noVideo:
+		return fmt.Sprintf(
+			"a:%s@%dHz",
+			k.AudioCodec, k.AudioSampleRate,
+		)
+	default:
+		return fmt.Sprintf(
+			"v:%s/%dx%d&a:%s@%dHz",
+			k.VideoCodec, k.VideoResolution.Width, k.VideoResolution.Height,
+			k.AudioCodec, k.AudioSampleRate,
+		)
+	}
 }
 
 func (k SenderKey) Compare(b SenderKey) int {

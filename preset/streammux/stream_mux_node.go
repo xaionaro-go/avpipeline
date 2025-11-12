@@ -58,7 +58,7 @@ func (s *StreamMux[C]) Serve(
 					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
 					err := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 						if int32(output.ID) == input.OutputSwitch.CurrentValue.Load() {
-							logger.Errorf(ctx, "error from the active output %d: %v", output.ID, nodeErr.Err)
+							logger.Errorf(ctx, "error from the active output %d (%s) of input %s, node %T:%s: %v", output.ID, output.GetKey(), input.GetType(), nodeErr.Node, nodeErr.Node, nodeErr.Err)
 							return nodeErr.Err
 						}
 						switch {
@@ -72,7 +72,9 @@ func (s *StreamMux[C]) Serve(
 						if s.OutputsMap.CompareAndDelete(output.GetKey(), output) {
 							logger.Debugf(ctx, "output %d removed from OutputsMap", output.ID)
 						}
-						output.CloseNoDrain(ctx)
+						if err := output.CloseNoDrain(ctx); err != nil {
+							logger.Debugf(ctx, "unable to close output %d: %v", output.ID, err)
+						}
 						return nil
 					})
 					if err == nil {

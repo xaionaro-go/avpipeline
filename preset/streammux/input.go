@@ -108,7 +108,10 @@ func (h *InputHandler[C]) VisitInputPacket(
 	}
 	switch h.Type {
 	case InputTypeAll:
-		return h.StreamMux.onInputPacket(ctx, input)
+		err := h.StreamMux.onInputPacket(ctx, input)
+		if err != nil {
+			return fmt.Errorf("unable to process input packet in StreamMux: %w", err)
+		}
 	}
 	return nil
 }
