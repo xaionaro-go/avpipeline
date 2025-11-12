@@ -13,6 +13,7 @@ const (
 	MuxModeSameOutputSameTracks
 	MuxModeSameOutputDifferentTracks
 	MuxModeDifferentOutputsSameTracks
+	MuxModeDifferentOutputsSameTracksSplitAV
 	EndOfPassthroughMode
 )
 
@@ -28,6 +29,8 @@ func (m MuxMode) String() string {
 		return "same_output_different_tracks"
 	case MuxModeDifferentOutputsSameTracks:
 		return "different_outputs_same_tracks"
+	case MuxModeDifferentOutputsSameTracksSplitAV:
+		return "different_outputs_same_tracks_split_av"
 	default:
 		return fmt.Sprintf("<unknown_mode_%d>", int(m))
 	}

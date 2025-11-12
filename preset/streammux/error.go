@@ -5,10 +5,32 @@ import (
 )
 
 type ErrSwitchAlreadyInProgress struct {
-	OutputIDCurrent int32
-	OutputIDNext    int32
+	OutputIDCurrent OutputID
+	OutputIDNext    OutputID
 }
 
 func (e ErrSwitchAlreadyInProgress) Error() string {
 	return fmt.Sprintf("switch already in progress: %d -> %d", e.OutputIDCurrent, e.OutputIDNext)
+}
+
+type ErrOutputAlreadyPreferred struct {
+	OutputID OutputID
+}
+
+func (e ErrOutputAlreadyPreferred) Error() string {
+	return fmt.Sprintf("outputs %v is already preferred", e.OutputID)
+}
+
+type ErrOutputsAlreadyPreferred struct {
+	OutputIDs []OutputID
+}
+
+func (e ErrOutputsAlreadyPreferred) Error() string {
+	return fmt.Sprintf("outputs %v is already preferred", e.OutputIDs)
+}
+
+type ErrStop struct{}
+
+func (e ErrStop) Error() string {
+	return "stopped"
 }

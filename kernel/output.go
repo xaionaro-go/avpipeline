@@ -49,6 +49,8 @@ const (
 
 type OutputConfigWaitForOutputStreams struct {
 	MinStreams       uint
+	MinStreamsVideo  uint
+	MinStreamsAudio  uint
 	VideoBeforeAudio bool // this is a hack required to make MediaMTX see video tracks
 }
 
@@ -143,9 +145,9 @@ func NewOutputFromURL(
 	streamKey secret.String,
 	cfg OutputConfig,
 ) (_ret *Output, _err error) {
-	logger.Debugf(ctx, "NewOutputFromURL(ctx, '%s', streamKey, %#+v)", urlString, cfg)
+	logger.Debugf(ctx, "NewOutputFromURL(ctx, '%s', streamKey, %s)", urlString, spew.Sdump(cfg))
 	defer func() {
-		logger.Debugf(ctx, "/NewOutputFromURL(ctx, '%s', streamKey, %#+v): %p %v", urlString, cfg, _ret, _err)
+		logger.Debugf(ctx, "/NewOutputFromURL(ctx, '%s', streamKey, %s): %p %v", urlString, spew.Sdump(cfg), _ret, _err)
 	}()
 	if urlString == "" {
 		return nil, fmt.Errorf("the provided URL is empty")
@@ -167,9 +169,6 @@ func NewOutputFromURL(
 
 	if cfg.WaitForOutputStreams == nil {
 		cfg.WaitForOutputStreams = &OutputConfigWaitForOutputStreams{}
-		if outputWaitForStreams {
-			cfg.WaitForOutputStreams.MinStreams = 2
-		}
 	}
 
 	o := &Output{
@@ -619,18 +618,32 @@ func (o *Output) send(
 
 	mediaType := inputStream.CodecParameters().MediaType()
 
-	var expectedStreamsCount int
+	var expectedStreamsCount uint
+	var expectedStreamsVideoCount uint
+	var expectedStreamsAudioCount uint
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		expectedStreamsCount = fmtCtx.NbStreams()
+		fmtStreams := fmtCtx.NbStreams()
+		if fmtStreams < 0 {
+			logger.Errorf(ctx, "invalid number of streams in the source format context: %d", fmtStreams)
+			return
+		}
+		expectedStreamsCount = uint(fmtStreams)
 	})
 	if o.Config.WaitForOutputStreams != nil {
-		if expectedStreamsCount < int(o.Config.WaitForOutputStreams.MinStreams) {
-			expectedStreamsCount = int(o.Config.WaitForOutputStreams.MinStreams)
+		if expectedStreamsCount < o.Config.WaitForOutputStreams.MinStreams {
+			expectedStreamsCount = o.Config.WaitForOutputStreams.MinStreams
 		}
+		expectedStreamsVideoCount = o.Config.WaitForOutputStreams.MinStreamsVideo
+		expectedStreamsAudioCount = o.Config.WaitForOutputStreams.MinStreamsAudio
 	}
 
-	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() int {
-		return o.FormatContext.NbStreams()
+	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() uint {
+		outputStreams := o.FormatContext.NbStreams()
+		if outputStreams < 0 {
+			logger.Errorf(ctx, "invalid number of streams in the output format context: %d", outputStreams)
+			return math.MaxUint
+		}
+		return uint(outputStreams)
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
@@ -641,7 +654,7 @@ func (o *Output) send(
 			return nil
 		}
 	}
-	if o.Config.WaitForOutputStreams.VideoBeforeAudio || true {
+	if o.Config.WaitForOutputStreams.VideoBeforeAudio {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
@@ -667,18 +680,44 @@ func (o *Output) send(
 			o.pendingPackets = o.pendingPackets[1:]
 		}
 	}
-	if o.Config.WaitForOutputStreams != nil && activeStreamCount < expectedStreamsCount {
-		logger.Tracef(ctx, "not starting sending the packets, yet: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
-		return nil
+	var activeVideoStreamCount uint
+	var activeAudioStreamCount uint
+	for _, stream := range o.OutputStreams {
+		switch stream.CodecParameters().MediaType() {
+		case astiav.MediaTypeVideo:
+			activeVideoStreamCount++
+		case astiav.MediaTypeAudio:
+			activeAudioStreamCount++
+		}
+	}
+	if o.Config.WaitForOutputStreams != nil {
+		if activeStreamCount < expectedStreamsCount {
+			logger.Tracef(ctx, "not starting sending the packets, yet: total streams: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
+			return nil
+		}
+		if activeVideoStreamCount < expectedStreamsVideoCount {
+			logger.Tracef(ctx, "not starting sending the packets, yet: video streams: %d < %d; %s", activeVideoStreamCount, expectedStreamsVideoCount, mediaType)
+			return nil
+		}
+		if activeAudioStreamCount < expectedStreamsAudioCount {
+			logger.Tracef(ctx, "not starting sending the packets, yet: audio streams: %d < %d; %s", activeAudioStreamCount, expectedStreamsAudioCount, mediaType)
+			return nil
+		}
 	}
 	if outputWaitForKeyFrames && len(o.waitingKeyFrames) != 0 {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), mediaType)
-
 		return nil
 	}
 	o.started = true
 
-	logger.Debugf(ctx, "writing the header; streams: %d/%d; len(waitingKeyFrames): %d", activeStreamCount, expectedStreamsCount, len(o.waitingKeyFrames))
+	logger.Debugf(
+		ctx,
+		"writing the header; streams: *:%d/%d, a:%d/%d, v:%d/%d; len(waitingKeyFrames): %d",
+		activeStreamCount, expectedStreamsCount,
+		activeAudioStreamCount, expectedStreamsAudioCount,
+		activeVideoStreamCount, expectedStreamsVideoCount,
+		len(o.waitingKeyFrames),
+	)
 	var err error
 	if outputWriteHeaders {
 		o.formatContextLocker.Do(ctx, func() {

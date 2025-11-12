@@ -33,7 +33,10 @@ func (s *streamIndexAssigner) StreamIndexAssign(
 	in packetorframe.InputUnion,
 ) ([]int, error) {
 	switch s.MuxMode {
-	case types.MuxModeForbid, types.MuxModeSameOutputSameTracks, types.MuxModeDifferentOutputsSameTracks:
+	case types.MuxModeForbid,
+		types.MuxModeSameOutputSameTracks,
+		types.MuxModeDifferentOutputsSameTracks,
+		types.MuxModeDifferentOutputsSameTracksSplitAV:
 		return []int{in.GetStreamIndex()}, nil
 	case types.MuxModeSameOutputDifferentTracks:
 		if s.OutputID == 0 {

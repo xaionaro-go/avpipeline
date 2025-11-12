@@ -24,8 +24,8 @@ func (s *StreamMux[C]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
-	logger.Tracef(ctx, "StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
-	defer logger.Tracef(ctx, "/StreamMux.Serve(ctx, %s, %p)", cfg, errCh)
+	logger.Tracef(ctx, "StreamMux.Serve(ctx, %#+v, %p)", cfg, errCh)
+	defer logger.Tracef(ctx, "/StreamMux.Serve(ctx, %#+v, %p)", cfg, errCh)
 	s.waitGroup.Add(1)
 	defer s.waitGroup.Done()
 	startCh := *xatomic.LoadPointer(&s.startedCh)
@@ -53,11 +53,14 @@ func (s *StreamMux[C]) Serve(
 					return
 				}
 				logger.Tracef(ctx, "got error from rawErrCh: %v", nodeErr)
-				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData]); ok {
+				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData[C]]); ok {
 					output := customDataer.GetCustomData().Output
 					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
-					assert(ctx, s.VideoOutputSwitch != nil)
-					if int32(output.ID) != s.VideoOutputSwitch.CurrentValue.Load() {
+					err := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+						if int32(output.ID) == input.OutputSwitch.CurrentValue.Load() {
+							logger.Errorf(ctx, "error from the active output %d: %v", output.ID, nodeErr.Err)
+							return nodeErr.Err
+						}
 						switch {
 						case errors.Is(nodeErr.Err, io.EOF):
 							logger.Debugf(ctx, "node <%T> received EOF, closing it", nodeErr.Node)
@@ -70,9 +73,12 @@ func (s *StreamMux[C]) Serve(
 							logger.Debugf(ctx, "output %d removed from OutputsMap", output.ID)
 						}
 						output.CloseNoDrain(ctx)
+						return nil
+					})
+					if err == nil {
+						// the error was handled
 						continue
 					}
-					logger.Errorf(ctx, "error from the active output %d: %v", output.ID, nodeErr.Err)
 				} else {
 					logger.Errorf(ctx, "node %T:%s does not implement GetCustomDataer[OutputCustomData]; do not know how to handle error %v", nodeErr.Node, nodeErr.Node, nodeErr.Err)
 				}
@@ -87,7 +93,7 @@ func (s *StreamMux[C]) Serve(
 	avpipeline.Serve(ctx, avpipeline.ServeConfig{
 		EachNode:             cfg,
 		AutoServeNewBranches: true,
-	}, rawErrCh, s.InputNode)
+	}, rawErrCh, s.InputAll.Node)
 }
 
 func (s *StreamMux[C]) String() string {
@@ -95,7 +101,7 @@ func (s *StreamMux[C]) String() string {
 }
 
 func (s *StreamMux[C]) IsServing() bool {
-	return s.InputNode.IsServing()
+	return s.InputAll.Node.IsServing()
 }
 
 func (n *StreamMux[C]) OriginalNodeAbstract() node.Abstract {
@@ -107,7 +113,7 @@ func (n *StreamMux[C]) OriginalNodeAbstract() node.Abstract {
 }
 
 func (n *StreamMux[C]) OriginalNode() *NodeInput[C] {
-	return n.InputNode
+	return n.InputAll.Node
 }
 
 func (s *StreamMux[C]) GetPushPacketsTos() node.PushPacketsTos {
@@ -145,7 +151,7 @@ func (s *StreamMux[C]) GetProcessor() processor.Abstract {
 }
 
 func (s *StreamMux[C]) GetChangeChanIsServing() <-chan struct{} {
-	return s.InputNode.GetChangeChanIsServing()
+	return s.InputAll.Node.GetChangeChanIsServing()
 }
 
 func (s *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
@@ -167,10 +173,10 @@ func (s *StreamMux[C]) IsDrained(ctx context.Context) bool {
 
 func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 	nodes := []node.Abstract{
-		s.InputNode,
+		s.InputAll.Node,
 	}
 	s.Locker.Do(ctx, func() {
-		s.OutputsMap.Range(func(_ SenderKey, output *Output) bool {
+		s.OutputsMap.Range(func(_ SenderKey, output *Output[C]) bool {
 			nodes = append(nodes, output.Nodes()...)
 			return true
 		})
@@ -179,7 +185,7 @@ func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
 }
 
 func (s *StreamMux[C]) GetCountersPtr() *nodetypes.Counters {
-	inputStats := s.InputNode.GetCountersPtr()
+	inputStats := s.InputAll.Node.GetCountersPtr()
 
 	return &nodetypes.Counters{
 		Addressed: inputStats.Addressed,

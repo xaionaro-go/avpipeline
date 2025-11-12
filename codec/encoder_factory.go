@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/xsync"
@@ -43,6 +44,7 @@ type NaiveEncoderFactoryParams struct {
 	VideoQuality          Quality
 	VideoResolution       *Resolution
 	VideoAverageFrameRate astiav.Rational
+	AudioSampleRate       audio.SampleRate
 }
 
 func DefaultNaiveEncoderFactoryParams() *NaiveEncoderFactoryParams {

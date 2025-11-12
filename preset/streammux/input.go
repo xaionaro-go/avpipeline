@@ -2,37 +2,102 @@ package streammux
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/asticode/go-astiav"
+	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	kernelboilerplate "github.com/xaionaro-go/avpipeline/kernel/boilerplate"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
+type InputType int
+
+const (
+	UndefinedInputType = InputType(iota)
+	InputTypeAll
+	InputTypeAudioOnly
+	InputTypeVideoOnly
+	EndOfInputType
+)
+
+func (t InputType) String() string {
+	switch t {
+	case UndefinedInputType:
+		return "undefined"
+	case InputTypeAll:
+		return "all"
+	case InputTypeAudioOnly:
+		return "audio-only"
+	case InputTypeVideoOnly:
+		return "video-only"
+	default:
+		return fmt.Sprintf("<unknown_%d>", int(t))
+	}
+}
+
+func (t InputType) IncludesMediaType(mediaType astiav.MediaType) bool {
+	switch t {
+	case InputTypeAll:
+		return true
+	case InputTypeAudioOnly:
+		return mediaType == astiav.MediaTypeAudio
+	case InputTypeVideoOnly:
+		return mediaType == astiav.MediaTypeVideo
+	default:
+		return false
+	}
+}
+
+type Input[C any] struct {
+	Node                  *NodeInput[C]
+	MonotonicPTSCondition packetcondition.Condition
+	OutputSwitch          *barrierstategetter.Switch
+	OutputSyncer          *barrierstategetter.Switch
+}
+
+func newInput[C any](
+	ctx context.Context,
+	s *StreamMux[C],
+	inputType InputType,
+) *Input[C] {
+	h := &InputHandler[C]{
+		StreamMux: s,
+		Type:      inputType,
+	}
+	k := kernelboilerplate.NewKernelWithFormatContext(ctx, h)
+	h.Kernel = k
+	return &Input[C]{
+		Node:                  node.NewWithCustomDataFromKernel[C](ctx, k),
+		MonotonicPTSCondition: packetcondition.MonotonicPTSConverted(),
+		OutputSwitch:          barrierstategetter.NewSwitch(),
+		OutputSyncer:          barrierstategetter.NewSwitch(),
+	}
+}
+
+func (i *Input[C]) GetType() InputType {
+	return i.Node.Processor.Kernel.Handler.Type
+}
+
 type InputHandler[C any] struct {
 	StreamMux *StreamMux[C]
+	Type      InputType
+	Kernel    *kernelboilerplate.BaseWithFormatContext[*InputHandler[C]]
 }
 
 var _ kernelboilerplate.CustomHandlerWithContextFormat = (*InputHandler[any])(nil)
+var _ kernelboilerplate.StreamFilterer = (*InputHandler[any])(nil)
 
 func (h *InputHandler[C]) String() string {
-	return "StreamMuxInput"
+	return fmt.Sprintf("StreamMux:Input:%s", h.Type)
 }
 
 type NodeInput[C any] = node.NodeWithCustomData[
 	C, *processor.FromKernel[*kernelboilerplate.BaseWithFormatContext[*InputHandler[C]]],
 ]
-
-func newInputNode[C any](
-	ctx context.Context,
-	s *StreamMux[C],
-) *NodeInput[C] {
-	return node.NewWithCustomDataFromKernel[C](ctx,
-		kernelboilerplate.NewKernelWithFormatContext(ctx, &InputHandler[C]{
-			StreamMux: s,
-		}),
-	)
-}
 
 func (h *InputHandler[C]) VisitInputPacket(
 	ctx context.Context,
@@ -41,5 +106,25 @@ func (h *InputHandler[C]) VisitInputPacket(
 	if h.StreamMux == nil {
 		return nil
 	}
-	return h.StreamMux.onInputPacket(ctx, input)
+	switch h.Type {
+	case InputTypeAll:
+		return h.StreamMux.onInputPacket(ctx, input)
+	}
+	return nil
+}
+
+func (h *InputHandler[C]) StreamFilter(
+	ctx context.Context,
+	inputStream *astiav.Stream,
+) (_err error) {
+	mediaType := inputStream.CodecParameters().MediaType()
+	logger.Debugf(ctx, "StreamMux:Input:%s:StreamFilter: %d %s", h.Type, inputStream.Index(), mediaType)
+	defer func() {
+		logger.Debugf(ctx, "/StreamMux:Input:%s:StreamFilter: %d %s: %v", h.Type, inputStream.Index(), mediaType, _err)
+	}()
+
+	if !h.Type.IncludesMediaType(mediaType) {
+		return kernelboilerplate.ErrSkip{}
+	}
+	return nil
 }

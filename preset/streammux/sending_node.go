@@ -7,21 +7,21 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 )
 
-type SendingNode interface {
+type SendingNode[C any] interface {
 	node.Abstract
-	SetCustomData(v OutputCustomData)
-	GetCustomData() OutputCustomData
+	SetCustomData(v OutputCustomData[C])
+	GetCustomData() OutputCustomData[C]
 }
 
 type SetDropOnCloser interface {
 	SetDropOnClose(ctx context.Context, v bool) error
 }
 
-type SenderFactory interface {
+type SenderFactory[C any] interface {
 	NewSender(
 		ctx context.Context,
 		senderKey SenderKey,
-	) (SendingNode, types.SenderConfig, error)
+	) (SendingNode[C], types.SenderConfig, error)
 }
 
 type ErrNoSetDropOnClose struct{}
@@ -30,9 +30,9 @@ func (e ErrNoSetDropOnClose) Error() string {
 	return "sending node does not implement SetDropOnCloser"
 }
 
-func sendingNodeSetDropOnClose(
+func sendingNodeSetDropOnClose[C any](
 	ctx context.Context,
-	sendingNode SendingNode,
+	sendingNode SendingNode[C],
 	v bool,
 ) error {
 	s, ok := sendingNode.(SetDropOnCloser)

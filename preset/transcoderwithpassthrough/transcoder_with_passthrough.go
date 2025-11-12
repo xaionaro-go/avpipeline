@@ -10,6 +10,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -26,7 +27,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
-	avptypes "github.com/xaionaro-go/avpipeline/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/observability"
@@ -230,8 +230,8 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
-				HardwareDeviceType: avptypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: avptypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
+				HardwareDeviceType: globaltypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName: globaltypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
 				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
 					err := d.SetLowLatency(ctx, true)
 					if err != nil {
@@ -244,13 +244,14 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 			&codec.NaiveEncoderFactoryParams{
 				VideoCodec:            codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName),
 				AudioCodec:            codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName),
-				HardwareDeviceType:    avptypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName:    avptypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
+				HardwareDeviceType:    globaltypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
+				HardwareDeviceName:    globaltypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
 				VideoOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.VideoTrackConfigs[0].CustomOptions)),
 				AudioOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.AudioTrackConfigs[0].CustomOptions)),
 				VideoQuality:          videoQuality,
 				VideoResolution:       videoResolution,
 				VideoAverageFrameRate: astiav.NewRational(int(cfg.Output.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),
+				AudioSampleRate:       audio.SampleRate(cfg.Output.AudioTrackConfigs[0].SampleRate),
 			},
 		),
 		nil,

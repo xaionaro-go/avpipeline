@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
 	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
@@ -49,8 +50,8 @@ type SenderKeys = types.SenderKeys
 
 type OutputID int
 
-type OutputCustomData struct {
-	*Output
+type OutputCustomData[C any] struct {
+	*Output[C]
 }
 
 type FPSFractionGetter interface {
@@ -65,17 +66,18 @@ type OutputStreamsIniter interface {
 	) error
 }
 
-type Output struct {
+type Output[C any] struct {
 	ID                OutputID
-	InputFilter       *NodeBarrier[OutputCustomData]
+	InputFrom         *NodeInput[C]
+	InputFilter       *NodeBarrier[OutputCustomData[C]]
 	InputThrottler    *packetcondition.VideoAverageBitrateLower
-	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData]
-	RecoderNode       *NodeRecoder[OutputCustomData]
+	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
+	RecoderNode       *NodeRecoder[OutputCustomData[C]]
 	SendingThrottler  *packetcondition.VideoAverageBitrateLower
-	MapIndices        *NodeMapStreamIndexes[OutputCustomData]
-	SendingFixer      *autofix.AutoFixerWithCustomData[OutputCustomData]
-	SendingSyncer     *NodeBarrier[OutputCustomData]
-	SendingNode       SendingNode
+	MapIndices        *NodeMapStreamIndexes[OutputCustomData[C]]
+	SendingFixer      *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
+	SendingSyncer     *NodeBarrier[OutputCustomData[C]]
+	SendingNode       SendingNode[C]
 	SendingNodeProps  types.SenderNodeProps
 	FPSFractionGetter FPSFractionGetter
 	InitOnce          sync.Once
@@ -139,7 +141,7 @@ func newOutput[C any](
 	ctx context.Context,
 	outputID OutputID,
 	inputNode *NodeInput[C],
-	senderFactory SenderFactory,
+	senderFactory SenderFactory[C],
 	senderKey SenderKey,
 	outputSwitch barrierstategetter.StateGetter,
 	outputSyncer barrierstategetter.StateGetter,
@@ -147,12 +149,18 @@ func newOutput[C any](
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	streamsIniter OutputStreamsIniter,
 	fpsFractionGetter FPSFractionGetter,
-) (_ret *Output, _err error) {
+) (_ret *Output[C], _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
 	ctx, cancelFn := context.WithCancel(ctx)
 	logger.Debugf(ctx, "newOutput: %#+v", senderKey)
-	defer func() { logger.Debugf(ctx, "/newOutput: %#+v %v", senderKey, _err) }()
+	defer func() {
+		if _ret != nil {
+			logger.Debugf(ctx, "/newOutput: %#+v: OutputID:%v", senderKey, _ret.ID)
+			return
+		}
+		logger.Debugf(ctx, "/newOutput: %#+v: err:%v", senderKey, _err)
+	}()
 
 	defer func() {
 		if _err != nil {
@@ -160,8 +168,11 @@ func newOutput[C any](
 		}
 	}()
 
-	if senderKey.Resolution == (codec.Resolution{}) && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
-		return nil, fmt.Errorf("output resolution is not set")
+	if senderKey.VideoResolution == (codec.Resolution{}) && senderKey.VideoCodec != "" && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+		return nil, fmt.Errorf("output resolution is not set (codec: %s)", senderKey.VideoCodec)
+	}
+	if senderKey.AudioSampleRate == 0 && senderKey.AudioCodec != "" && senderKey.AudioCodec != codectypes.Name(codec.NameCopy) {
+		return nil, fmt.Errorf("output audio sample rate is not set (codec: %s)", senderKey.AudioCodec)
 	}
 
 	// construct nodes
@@ -177,7 +188,8 @@ func newOutput[C any](
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
 			VideoCodec:      codec.Name(senderKey.VideoCodec),
 			AudioCodec:      codec.Name(senderKey.AudioCodec),
-			VideoResolution: &senderKey.Resolution,
+			VideoResolution: &senderKey.VideoResolution,
+			AudioSampleRate: audio.SampleRate(senderKey.AudioSampleRate),
 		}),
 		nil,
 	)
@@ -190,40 +202,41 @@ func newOutput[C any](
 		return nil, fmt.Errorf("output node %T does not implement GetPacketSinker", senderNode)
 	}
 
-	o := &Output{
-		ID: outputID,
-		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
+	o := &Output[C]{
+		ID:        outputID,
+		InputFrom: inputNode,
+		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),
 			outputSwitch,
 		)),
 		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		InputFixer: autofix.NewWithCustomData[OutputCustomData](
+		InputFixer: autofix.NewWithCustomData[OutputCustomData[C]](
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
-			inputNode.Processor.GetPacketSource(),
+			inputNode.Processor.Kernel,
 			recoderKernel.Decoder,
-			OutputCustomData{},
+			OutputCustomData[C]{},
 		),
-		RecoderNode: node.NewWithCustomDataFromKernel[OutputCustomData](
+		RecoderNode: node.NewWithCustomDataFromKernel[OutputCustomData[C]](
 			ctx,
 			recoderKernel,
 			processor.DefaultOptionsRecoder()...,
 		),
 		SendingThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
-		SendingFixer: autofix.NewWithCustomData[OutputCustomData](
+		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
+		SendingFixer: autofix.NewWithCustomData[OutputCustomData[C]](
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
-			OutputCustomData{},
+			OutputCustomData[C]{},
 		),
-		SendingSyncer: node.NewWithCustomDataFromKernel[OutputCustomData](ctx, kernel.NewBarrier(
+		SendingSyncer: node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
 			outputSyncer,
 		)),
 		SendingNode:       senderNode,
 		FPSFractionGetter: fpsFractionGetter,
 	}
-	customData := OutputCustomData{Output: o}
+	customData := OutputCustomData[C]{Output: o}
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.RecoderNode.CustomData = customData
@@ -309,21 +322,21 @@ func logIfError(ctx context.Context, err error) {
 	logger.Errorf(ctx, "got an error: %v", err)
 }
 
-func (o *Output) String() string {
+func (o *Output[C]) String() string {
 	if o == nil {
 		return "streammux.Output(nil)"
 	}
 	return fmt.Sprintf("StreamMux.Outputs[%d]", o.ID)
 }
 
-func (o *Output) FirstNodeAfterFilter() node.Abstract {
+func (o *Output[C]) FirstNodeAfterFilter() node.Abstract {
 	if o.InputFixer != nil {
 		return o.InputFixer
 	}
 	return o.RecoderNode
 }
 
-func (o *Output) initFPSFractioner(ctx context.Context) {
+func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 	logger.Tracef(ctx, "initFPSFractioner()")
 	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
 
@@ -375,7 +388,7 @@ func (o *Output) initFPSFractioner(ctx context.Context) {
 	})
 }
 
-func (o *Output) initReuseDecoderResources(
+func (o *Output[C]) initReuseDecoderResources(
 	ctx context.Context,
 ) {
 	logger.Tracef(ctx, "initReuseDecoderResources()")
@@ -454,15 +467,15 @@ func (o *Output) initReuseDecoderResources(
 	)
 }
 
-func (o *Output) Close(ctx context.Context) (_err error) {
+func (o *Output[C]) Close(ctx context.Context) (_err error) {
 	return o.close(ctx, true)
 }
 
-func (o *Output) CloseNoDrain(ctx context.Context) (_err error) {
+func (o *Output[C]) CloseNoDrain(ctx context.Context) (_err error) {
 	return o.close(ctx, false)
 }
 
-func (o *Output) close(ctx context.Context, shouldDrain bool) (_err error) {
+func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 	logger.Tracef(ctx, "Output.close(%v)", shouldDrain)
 	defer func() { logger.Tracef(ctx, "/Output.close(%v): %v", shouldDrain, _err) }()
 	o.IsClosedValue = true
@@ -500,15 +513,15 @@ func (o *Output) close(ctx context.Context, shouldDrain bool) (_err error) {
 	return errors.Join(errs...)
 }
 
-func (o *Output) Input() node.Abstract {
+func (o *Output[C]) Input() node.Abstract {
 	return o.InputFilter
 }
 
-func (o *Output) Output() node.Abstract {
+func (o *Output[C]) Output() node.Abstract {
 	return o.SendingNode
 }
 
-func (o *Output) Flush(ctx context.Context) (_err error) {
+func (o *Output[C]) Flush(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Output[%d].Flush()", o.ID)
 	defer func() { logger.Tracef(ctx, "/Output[%d].Flush(): %v", o.ID, _err) }()
 	for _, n := range o.Nodes() {
@@ -521,7 +534,7 @@ func (o *Output) Flush(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (o *Output) Drain(ctx context.Context) (_err error) {
+func (o *Output[C]) Drain(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Output[%d].Drain()", o.ID)
 	defer func() { logger.Tracef(ctx, "/Output[%d].Drain(): %v", o.ID, _err) }()
 	for _, n := range o.Nodes() {
@@ -546,7 +559,7 @@ func (o *Output) Drain(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (o *Output) DrainAfterFilter(ctx context.Context) (_err error) {
+func (o *Output[C]) DrainAfterFilter(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Output[%d].DrainAfterFilter()", o.ID)
 	defer func() { logger.Tracef(ctx, "/Output[%d].DrainAfterFilter(): %v", o.ID, _err) }()
 	for _, n := range o.NodesAfterFilter() {
@@ -571,7 +584,7 @@ func (o *Output) DrainAfterFilter(ctx context.Context) (_err error) {
 	return nil
 }
 
-func (o *Output) Deinit(
+func (o *Output[C]) Deinit(
 	ctx context.Context,
 ) (_err error) {
 	logger.Tracef(ctx, "Output[%d].Deinit()", o.ID)
@@ -589,7 +602,7 @@ func (o *Output) Deinit(
 	return errors.Join(errs...)
 }
 
-func PartialOutputKeyFromRecoderConfig(
+func PartialSenderKeyFromRecoderConfig(
 	ctx context.Context,
 	c *types.RecoderConfig,
 ) SenderKey {
@@ -598,8 +611,10 @@ func PartialOutputKeyFromRecoderConfig(
 	}
 
 	var audioCodec codec.Name
+	var audioSampleRate audio.SampleRate
 	if len(c.Output.AudioTrackConfigs) > 0 {
 		audioCodec = codec.Name(c.Output.AudioTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+		audioSampleRate = c.Output.AudioTrackConfigs[0].SampleRate
 	}
 	var videoCodec codec.Name
 	var resolution codec.Resolution
@@ -608,13 +623,14 @@ func PartialOutputKeyFromRecoderConfig(
 		resolution = c.Output.VideoTrackConfigs[0].Resolution
 	}
 	return SenderKey{
-		AudioCodec: codectypes.Name(audioCodec),
-		VideoCodec: codectypes.Name(videoCodec),
-		Resolution: resolution,
+		AudioCodec:      codectypes.Name(audioCodec),
+		AudioSampleRate: audioSampleRate,
+		VideoCodec:      codectypes.Name(videoCodec),
+		VideoResolution: resolution,
 	}
 }
 
-func (o *Output) reconfigureRecoder(
+func (o *Output[C]) reconfigureRecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -630,7 +646,7 @@ func (o *Output) reconfigureRecoder(
 	return nil
 }
 
-func (o *Output) reconfigureDecoder(
+func (o *Output[C]) reconfigureDecoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -677,7 +693,7 @@ func (o *Output) reconfigureDecoder(
 	return nil
 }
 
-func (o *Output) reconfigureEncoder(
+func (o *Output[C]) reconfigureEncoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
 ) (_err error) {
@@ -721,6 +737,7 @@ func (o *Output) reconfigureEncoder(
 			fps := globaltypes.RationalFromApproxFloat64(videoCfg.AverageFrameRate)
 			encoderFactory.VideoAverageFrameRate = astiav.NewRational(fps.Num, fps.Den)
 			encoderFactory.VideoAverageFrameRate.SetDen(1000)
+			encoderFactory.AudioSampleRate = audioCfg.SampleRate
 			return nil
 		}
 
@@ -737,6 +754,10 @@ func (o *Output) reconfigureEncoder(
 
 		if videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
 			return fmt.Errorf("unable to change the hardware device name on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceName, encoderFactory.HardwareDeviceName)
+		}
+
+		if audioCfg.SampleRate != encoderFactory.AudioSampleRate {
+			return fmt.Errorf("unable to change the audio sample rate on the fly, yet: '%d' != '%d'", audioCfg.SampleRate, encoderFactory.AudioSampleRate)
 		}
 
 		{
@@ -795,20 +816,21 @@ func canonicalizeCodecName(ctx context.Context, name codec.Name) codectypes.Name
 	return codectypes.Name(name.Canonicalize(ctx, true))
 }
 
-func (o *Output) GetKey() SenderKey {
-	var res codec.Resolution
+func (o *Output[C]) GetKey() SenderKey {
+	var videoResolution codec.Resolution
 	if o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
-		res = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+		videoResolution = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 	}
 	ctx := context.Background()
 	return SenderKey{
-		AudioCodec: canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
-		VideoCodec: canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
-		Resolution: res,
+		AudioCodec:      canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
+		AudioSampleRate: o.RecoderNode.Processor.Kernel.EncoderFactory.AudioSampleRate,
+		VideoCodec:      canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
+		VideoResolution: videoResolution,
 	}
 }
 
-func (o *Output) Nodes() []node.Abstract {
+func (o *Output[C]) Nodes() []node.Abstract {
 	// the order must be the same as the packets/frames flow,
 	// otherwise flushing/draining will deadlock
 	result := []node.Abstract{
@@ -827,10 +849,21 @@ func (o *Output) Nodes() []node.Abstract {
 	return result
 }
 
-func (o *Output) NodesAfterFilter() []node.Abstract {
+func (o *Output[C]) NodesAfterFilter() []node.Abstract {
 	return o.Nodes()[1:]
 }
 
-func (o *Output) IsClosed() bool {
+func (o *Output[C]) IsClosed() bool {
 	return o.IsClosedValue
+}
+
+func (o *Output[C]) SetForceNextFrameKey(
+	ctx context.Context,
+	forceNextFrameKey bool,
+) (_err error) {
+	logger.Tracef(ctx, "Output[%d].SetForceNextFrameKey(%v)", o.ID, forceNextFrameKey)
+	defer func() { logger.Tracef(ctx, "/Output[%d].SetForceNextFrameKey(%v): %v", o.ID, forceNextFrameKey, _err) }()
+
+	// not implemented, yet
+	return nil
 }

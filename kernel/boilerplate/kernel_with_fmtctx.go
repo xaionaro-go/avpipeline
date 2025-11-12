@@ -75,6 +75,10 @@ func (k *BaseWithFormatContext[H]) WithInputFormatContext(
 	})
 }
 
+type StreamFilterer interface {
+	StreamFilter(ctx context.Context, inputStream *astiav.Stream) error
+}
+
 func (k *BaseWithFormatContext[H]) NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
@@ -91,6 +95,18 @@ func (k *BaseWithFormatContext[H]) NotifyAboutPacketSource(
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		k.Locker.Do(ctx, func() {
 			for _, inputStream := range fmtCtx.Streams() {
+				if handler, ok := any(k.Handler).(StreamFilterer); ok {
+					err := handler.StreamFilter(ctx, inputStream)
+					switch {
+					case errors.Is(err, ErrSkip{}):
+						logger.Debugf(ctx, "skipping stream #%d from source %T as per ErrSkip", inputStream.Index(), source)
+						continue
+					case err != nil:
+						errs = append(errs, fmt.Errorf("unable to filter stream #%d from source %T: %w", inputStream.Index(), source, err))
+						continue
+					}
+				}
+
 				outputStream, err := k.getOutputStreamForPacketByIndex(
 					ctx,
 					inputStream.Index(),

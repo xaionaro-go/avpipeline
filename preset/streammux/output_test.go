@@ -25,8 +25,8 @@ type dummyOutputFactory struct{}
 func (dummyOutputFactory) NewSender(
 	ctx context.Context,
 	outputKey SenderKey,
-) (SendingNode, types.SenderConfig, error) {
-	return node.NewWithCustomDataFromKernel[OutputCustomData](
+) (SendingNode[struct{}], types.SenderConfig, error) {
+	return node.NewWithCustomDataFromKernel[OutputCustomData[struct{}]](
 		ctx,
 		boilerplate.NewKernelWithFormatContext(ctx, &dummyHandler{}),
 	), types.SenderConfig{}, nil
@@ -34,13 +34,14 @@ func (dummyOutputFactory) NewSender(
 
 func TestOutputNodes(t *testing.T) {
 	ctx := context.Background()
+	input := newInput[struct{}](ctx, nil, InputTypeAll)
 	output, err := newOutput[struct{}](
 		ctx,
 		1,
-		newInputNode[struct{}](ctx, nil),
+		input.Node,
 		dummyOutputFactory{},
 		SenderKey{
-			Resolution: codectypes.Resolution{Width: 1920, Height: 1080},
+			VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 		},
 		nil,
 		nil,

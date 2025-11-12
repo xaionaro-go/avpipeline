@@ -14,6 +14,7 @@ require (
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
+	github.com/xaionaro-go/audio v0.0.0-20250426140416-6a9b3f1c8737
 	github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20250505013920-61d894a3b7e9
@@ -39,6 +40,10 @@ require (
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
+	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect

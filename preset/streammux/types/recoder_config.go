@@ -3,6 +3,7 @@ package types
 import (
 	"time"
 
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
@@ -20,12 +21,13 @@ type InputVideoTrackConfig struct {
 }
 
 type OutputAudioTrackConfig struct {
-	InputTrackIDs   []int           `yaml:"input_track_ids"`
-	OutputTrackIDs  []int           `yaml:"output_track_ids"`
-	CodecName       codectypes.Name `yaml:"codec_name"`
-	AveragingPeriod time.Duration   `yaml:"averaging_period"`
-	AverageBitRate  uint64          `yaml:"average_bit_rate"`
-	CustomOptions   DictionaryItems `yaml:"custom_options"`
+	InputTrackIDs   []int            `yaml:"input_track_ids"`
+	OutputTrackIDs  []int            `yaml:"output_track_ids"`
+	CodecName       codectypes.Name  `yaml:"codec_name"`
+	AveragingPeriod time.Duration    `yaml:"averaging_period"`
+	AverageBitRate  uint64           `yaml:"average_bit_rate"`
+	CustomOptions   DictionaryItems  `yaml:"custom_options"`
+	SampleRate      audio.SampleRate `yaml:"sample_rate"`
 }
 
 // TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)

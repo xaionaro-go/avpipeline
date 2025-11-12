@@ -22,7 +22,7 @@ import (
 )
 
 type AutoBitRateCalculator = types.AutoBitRateCalculator
-type AutoBitRateConfig = types.AutoBitRateConfig
+type AutoBitRateConfig = types.AutoBitRateVideoConfig
 type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
 type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
 type BitRateChangeRequest = types.BitRateChangeRequest
@@ -191,11 +191,11 @@ func (h *AutoBitRateHandler[C]) ServeContext(
 func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
-	var activeOutput *Output
+	var activeVideoOutput *Output[C]
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	h.StreamMux.Locker.Do(ctx, func() {
-		activeOutput = h.StreamMux.waitForActiveOutputLocked(ctx)
-		h.StreamMux.OutputsMap.Range(func(_ SenderKey, o *Output) bool {
+		activeVideoOutput = h.StreamMux.waitForActiveVideoOutputLocked(ctx)
+		h.StreamMux.OutputsMap.Range(func(_ SenderKey, o *Output[C]) bool {
 			if o == nil {
 				return true
 			}
@@ -209,7 +209,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			return true
 		})
 	})
-	if activeOutput == nil {
+	if activeVideoOutput == nil {
 		logger.Warnf(ctx, "no active output; skipping bitrate check")
 		return
 	}
@@ -220,8 +220,8 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	var haveAnError atomic.Bool
 	var totalQueue atomic.Uint64
-	assert(ctx, activeOutput.SendingNode != nil)
-	proc := activeOutput.SendingNode.GetProcessor()
+	assert(ctx, activeVideoOutput.SendingNode != nil)
+	proc := activeVideoOutput.SendingNode.GetProcessor()
 	assert(ctx, proc != nil)
 	activeOutputProc, _ := proc.(kernel.GetInternalQueueSizer)
 	var wg sync.WaitGroup
@@ -344,7 +344,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	}()
 
 	if enable {
-		return h.setOutput(
+		return h.setVideoOutput(
 			ctx,
 			&SenderKey{
 				AudioCodec: codectypes.NameCopy,
@@ -356,7 +356,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 		)
 	}
 
-	return h.setOutput(
+	return h.setVideoOutput(
 		ctx,
 		nil,
 		types.Ubps(float64(h.StreamMux.CurrentVideoInputBitRate.Load())*0.9),
@@ -539,8 +539,8 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return nil
 	}
 
-	err := h.setOutput(ctx, &SenderKey{
-		Resolution: newRes.Resolution,
+	err := h.setVideoOutput(ctx, &SenderKey{
+		VideoResolution: newRes.Resolution,
 	}, bitrate, force, allowTrafficLoss)
 	if err != nil {
 		return fmt.Errorf("unable to set new resolution %v: %w", newRes.Resolution, err)
@@ -548,77 +548,76 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	return nil
 }
 
-func (h *AutoBitRateHandler[C]) setOutput(
+func (h *AutoBitRateHandler[C]) setVideoOutput(
 	ctx context.Context,
-	outputKey *SenderKey,
+	videoOutputKey *SenderKey,
 	bitrate types.Ubps,
 	force bool,
 	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setOutput: %v, %v (force:%t, allowTrafficLoss:%t)", outputKey, bitrate, force, allowTrafficLoss)
+	logger.Tracef(ctx, "setOutput: %v, %v (force:%t, allowTrafficLoss:%t)", videoOutputKey, bitrate, force, allowTrafficLoss)
 	defer func() {
-		logger.Tracef(ctx, "/setOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", outputKey, bitrate, force, allowTrafficLoss, _err)
+		logger.Tracef(ctx, "/setOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
 	}()
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)
-	if encV == nil {
-		return fmt.Errorf("unable to get video encoder")
-	}
 	if encA == nil {
 		return fmt.Errorf("unable to get audio encoder")
 	}
-	var curACodecName, curVCodecName codec.Name
+	if encV == nil {
+		return fmt.Errorf("unable to get video encoder")
+	}
+	curACodecName := codec.Name(encA.Codec().Name())
+	var curVCodecName codec.Name
 	var curRes codec.Resolution
 	if codec.IsEncoderCopy(encV) {
-		curACodecName = codec.NameCopy
 		curVCodecName = codec.NameCopy
 	} else {
-		encCtx := encV.CodecContext()
+		encVCtx := encV.CodecContext()
 		curRes = codec.Resolution{
-			Width:  uint32(encCtx.Width()),
-			Height: uint32(encCtx.Height()),
+			Width:  uint32(encVCtx.Width()),
+			Height: uint32(encVCtx.Height()),
 		}
 		curVCodecName = codec.Name(encV.Codec().Name())
-		curACodecName = codec.Name(encA.Codec().Name())
 	}
 	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)
 
-	if outputKey == nil {
-		outputKey = ptr(h.StreamMux.GetBestNotBypassOutput(ctx).GetKey())
-		logger.Tracef(ctx, "using best not-bypass output key: %v", outputKey)
+	if videoOutputKey == nil {
+		videoOutputKey = ptr(h.StreamMux.GetBestNotBypassOutput(ctx).GetKey())
+		logger.Tracef(ctx, "using best not-bypass output key: %v", videoOutputKey)
 		origConfig := h.StreamMux.GetRecoderConfig(ctx)
 		logger.Tracef(ctx, "original recoder config: %+v", origConfig)
 		if len(origConfig.Output.VideoTrackConfigs) > 0 {
-			outputKey.VideoCodec = codectypes.Name(origConfig.Output.VideoTrackConfigs[0].CodecName)
+			videoOutputKey.VideoCodec = codectypes.Name(origConfig.Output.VideoTrackConfigs[0].CodecName)
 		}
 		if len(origConfig.Output.AudioTrackConfigs) > 0 {
-			outputKey.AudioCodec = codectypes.Name(origConfig.Output.AudioTrackConfigs[0].CodecName)
+			videoOutputKey.AudioCodec = codectypes.Name(origConfig.Output.AudioTrackConfigs[0].CodecName)
 		}
 	} else {
-		if outputKey.AudioCodec == "" {
-			outputKey.AudioCodec = codectypes.Name(curACodecName)
+		if videoOutputKey.AudioCodec == "" {
+			videoOutputKey.AudioCodec = codectypes.Name(curACodecName)
 		}
-		if outputKey.VideoCodec == "" {
-			outputKey.VideoCodec = codectypes.Name(curVCodecName)
+		if videoOutputKey.VideoCodec == "" {
+			videoOutputKey.VideoCodec = codectypes.Name(curVCodecName)
 		}
-		if outputKey.Resolution == (codec.Resolution{}) {
-			outputKey.Resolution = curRes
+		if videoOutputKey.VideoResolution == (codec.Resolution{}) {
+			videoOutputKey.VideoResolution = curRes
 		}
 	}
-	logger.Tracef(ctx, "target output key: %v", outputKey)
+	logger.Tracef(ctx, "target output key: %v", videoOutputKey)
 
-	outputCur := h.StreamMux.GetActiveOutput(ctx)
+	videoOutputCur := h.StreamMux.GetActiveVideoOutput(ctx)
 
 	isUpgrade := false
-	switch outputKey.Compare(outputCur.GetKey()) {
+	switch videoOutputKey.Compare(videoOutputCur.GetKey()) {
 	case 0:
-		return fmt.Errorf("output is already set to %v", outputKey)
+		return fmt.Errorf("output is already set to %v", videoOutputKey)
 	case 1:
 		isUpgrade = true
 	case -1:
 		isUpgrade = false
 	default:
-		return fmt.Errorf("unable to compare output keys: %v and %v", outputKey, outputCur.GetKey())
+		return fmt.Errorf("unable to compare output keys: %v and %v", videoOutputKey, videoOutputCur.GetKey())
 	}
 
 	if force {
@@ -650,38 +649,42 @@ func (h *AutoBitRateHandler[C]) setOutput(
 		h.currentResolutionChangeRequest = nil
 	}
 
-	if outputKey.VideoCodec == codectypes.NameCopy {
+	if videoOutputKey.VideoCodec == codectypes.NameCopy {
 		logger.Infof(ctx, "switching to bypass mode")
-		return h.StreamMux.EnableRecodingBypass(ctx)
+		err := h.StreamMux.EnableVideoRecodingBypass(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to enable video recoding bypass: %w", err)
+		}
+		return nil
 	}
 
 	if allowTrafficLoss {
-		err := sendingNodeSetDropOnClose(ctx, outputCur.SendingNode, true)
+		err := sendingNodeSetDropOnClose(ctx, videoOutputCur.SendingNode, true)
 		switch {
 		case err == nil:
 		case errors.As(err, &ErrNoSetDropOnClose{}):
-			logger.Debugf(ctx, "current output's sending node %T does not implement SetDropOnCloser; cannot allow traffic loss during resolution change", outputCur.SendingNode)
+			logger.Debugf(ctx, "current output's sending node %T does not implement SetDropOnCloser; cannot allow traffic loss during resolution change", videoOutputCur.SendingNode)
 		default:
 			logger.Errorf(ctx, "unable to set drop-on-close on the current output sending node: %v", err)
 		}
 	}
 	err := h.StreamMux.setResolutionBitRateCodec(
 		ctx,
-		outputKey.Resolution,
+		videoOutputKey.VideoResolution,
 		bitrate,
-		outputKey.VideoCodec, outputKey.AudioCodec,
+		videoOutputKey.VideoCodec, videoOutputKey.AudioCodec,
 	)
 	switch {
 	case err == nil:
-		logger.Infof(ctx, "changed resolution to %v (bitrate: %s)", outputKey.Resolution, bitrate)
+		logger.Infof(ctx, "changed resolution to %v (bitrate: %s)", videoOutputKey.VideoResolution, bitrate)
 		return nil
 	case errors.As(err, &ErrAlreadySet{}):
-		logger.Debugf(ctx, "resolution is already set to %v: %v", outputKey.Resolution, err)
+		logger.Debugf(ctx, "resolution is already set to %v: %v", videoOutputKey.VideoResolution, err)
 		return nil
 	case errors.As(err, &ErrNotImplemented{}):
 		logger.Debugf(ctx, "resolution change is not implemented: %v", err)
 		return nil
 	default:
-		return fmt.Errorf("unable to set resolution to %v: %w", outputKey.Resolution, err)
+		return fmt.Errorf("unable to set resolution to %v: %w", videoOutputKey.VideoResolution, err)
 	}
 }

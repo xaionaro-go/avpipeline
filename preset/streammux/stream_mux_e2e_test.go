@@ -125,15 +125,15 @@ func readInputFromFile(ctx context.Context, t *testing.T, fileName string) ([]pa
 	}
 }
 
-type decoderOutputFactory struct{}
+type decoderOutputFactory[C any] struct{}
 
-var _ streammux.SenderFactory = (*decoderOutputFactory)(nil)
+var _ streammux.SenderFactory[any] = (*decoderOutputFactory[any])(nil)
 
-func (decoderOutputFactory) NewSender(
+func (decoderOutputFactory[C]) NewSender(
 	ctx context.Context,
 	outputKey streammux.SenderKey,
-) (streammux.SendingNode, streammuxtypes.SenderConfig, error) {
-	n := node.NewWithCustomDataFromKernel[streammux.OutputCustomData](
+) (streammux.SendingNode[C], streammuxtypes.SenderConfig, error) {
+	n := node.NewWithCustomDataFromKernel[streammux.OutputCustomData[C]](
 		ctx,
 		kernel.NewDecoder(ctx, &codec.NaiveDecoderFactory{}),
 		processor.DefaultOptionsRecoder()...,
@@ -151,7 +151,7 @@ func runTest(
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 
-	outputFactory := decoderOutputFactory{}
+	outputFactory := decoderOutputFactory[struct{}]{}
 
 	streamMux := must(streammux.New(
 		ctx,
@@ -191,7 +191,7 @@ func runTest(
 		},
 	))
 
-	require.NotNil(t, streamMux.GetActiveOutput(ctx))
+	require.NotNil(t, streamMux.GetActiveVideoOutput(ctx))
 
 	errCh := make(chan node.Error, 100)
 	observability.Go(ctx, func(ctx context.Context) {

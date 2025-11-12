@@ -4,19 +4,21 @@ import (
 	"fmt"
 	"sort"
 
+	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 )
 
 type SenderKey struct {
-	AudioCodec codectypes.Name
-	VideoCodec codectypes.Name
-	Resolution codectypes.Resolution
+	AudioCodec      codectypes.Name
+	AudioSampleRate audio.SampleRate
+	VideoCodec      codectypes.Name
+	VideoResolution codectypes.Resolution
 }
 
 func (k SenderKey) String() string {
 	return fmt.Sprintf(
 		"%s/%dx%d | %s",
-		k.VideoCodec, k.Resolution.Width, k.Resolution.Height,
+		k.VideoCodec, k.VideoResolution.Width, k.VideoResolution.Height,
 		k.AudioCodec,
 	)
 }
@@ -34,8 +36,8 @@ func (k SenderKey) Compare(b SenderKey) int {
 		}
 		return -1
 	}
-	resK := k.Resolution.Width * k.Resolution.Height
-	resB := b.Resolution.Width * b.Resolution.Height
+	resK := k.VideoResolution.Width * k.VideoResolution.Height
+	resB := b.VideoResolution.Width * b.VideoResolution.Height
 	if resK != resB {
 		if resK > resB {
 			return 1
