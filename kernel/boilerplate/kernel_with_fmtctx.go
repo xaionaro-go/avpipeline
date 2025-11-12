@@ -7,9 +7,11 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/xsync"
 )
 
 type CustomHandlerWithContextFormat interface {
@@ -174,4 +176,36 @@ func (k *BaseWithFormatContext[H]) newOutputStream(
 		spew.Sdump(outputStream.CodecParameters()),
 	)
 	return outputStream, nil
+}
+
+func (k *BaseWithFormatContext[H]) SendInputPacket(
+	ctx context.Context,
+	input packet.Input,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
+) (_err error) {
+	logger.Tracef(ctx, "SendInputPacket()")
+	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
+
+	outputStream, err := xsync.DoR2(ctx, &k.Locker, func() (*astiav.Stream, error) {
+		return k.getOutputStreamForPacketByIndex(
+			ctx,
+			input.Stream.Index(),
+			input.Stream.CodecParameters(),
+			input.Stream.TimeBase(),
+		)
+	})
+	if err != nil {
+		return fmt.Errorf("unable to get output stream for input packet: %w", err)
+	}
+	assert(ctx, outputStream != nil, "output stream must be initialized")
+
+	input.Source = k
+	input.Stream = outputStream
+	return k.Base.SendInputPacket(
+		ctx,
+		input,
+		outputPacketsCh,
+		outputFramesCh,
+	)
 }

@@ -153,7 +153,7 @@ func (s *Switch) setNextValueNow(
 ) (_err error) {
 	s.CommitMutex.Do(ctx, func() {
 		old := s.NextValue.Swap(int32(idx))
-		logger.Debugf(ctx, "setting the next value: %d -> %d", old, idx)
+		logger.Debugf(ctx, "setting the next value: %d -> %d (cur: %d)", old, idx, s.CurrentValue.Load())
 		if old == idx {
 			return
 		}

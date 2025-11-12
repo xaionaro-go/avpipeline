@@ -17,6 +17,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -852,12 +853,18 @@ func (o *Output) doWritePacket(
 
 	var dataLen int
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
+		resolution := codectypes.Resolution{
+			Width:  uint32(outputStream.CodecParameters().Width()),
+			Height: uint32(outputStream.CodecParameters().Height()),
+		}
+		sampleRate := outputStream.CodecParameters().SampleRate()
+		channels := outputStream.CodecParameters().ChannelLayout().Channels()
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d",
+			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (res: %s, sample_rate: %v, channels: %v, time_base: %v) with flags 0x%016X and data length %d",
 			pkt.Pos(), pkt.Pts(), avconv.Duration(pkt.Pts(), outputStream.TimeBase()), pkt.Dts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
-			pkt.StreamIndex(), outputStream.CodecParameters().SampleRate(), outputStream.TimeBase(),
+			pkt.StreamIndex(), resolution, sampleRate, channels, outputStream.TimeBase(),
 			pkt.Flags(),
 			len(pkt.Data()),
 		)

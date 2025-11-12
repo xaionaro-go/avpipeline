@@ -18,7 +18,7 @@ type ErrOutputAlreadyPreferred struct {
 }
 
 func (e ErrOutputAlreadyPreferred) Error() string {
-	return fmt.Sprintf("outputs %v is already preferred", e.OutputID)
+	return fmt.Sprintf("output %v is already preferred", e.OutputID)
 }
 
 type ErrOutputsAlreadyPreferred struct {

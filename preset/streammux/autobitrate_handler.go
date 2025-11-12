@@ -194,8 +194,8 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 ) {
 	var activeVideoOutput *Output[C]
 	var getQueueSizers []kernel.GetInternalQueueSizer
-	h.StreamMux.Locker.Do(ctx, func() {
-		activeVideoOutput = h.StreamMux.waitForActiveVideoOutputLocked(ctx)
+	err := h.StreamMux.withActiveVideoOutput(ctx, func(output *Output[C]) error {
+		activeVideoOutput = output
 		h.StreamMux.OutputsMap.Range(func(_ SenderKey, o *Output[C]) bool {
 			if o == nil {
 				return true
@@ -209,7 +209,12 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			getQueueSizers = append(getQueueSizers, getQueueSizer)
 			return true
 		})
+		return nil
 	})
+	if err != nil {
+		logger.Errorf(ctx, "unable to get active video output: %v", err)
+		return
+	}
 	if activeVideoOutput == nil {
 		logger.Warnf(ctx, "no active output; skipping bitrate check")
 		return
@@ -573,13 +578,15 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	if codec.IsEncoderCopy(encV) {
 		curVCodecName = codec.NameCopy
 	} else {
-		encVCtx := encV.CodecContext()
-		curRes = codec.Resolution{
-			Width:  uint32(encVCtx.Width()),
-			Height: uint32(encVCtx.Height()),
-		}
 		if encV != nil {
-			curVCodecName = codec.Name(encV.Codec().Name())
+			encVCtx := encV.CodecContext()
+			curRes = codec.Resolution{
+				Width:  uint32(encVCtx.Width()),
+				Height: uint32(encVCtx.Height()),
+			}
+			if encV != nil {
+				curVCodecName = codec.Name(encV.Codec().Name())
+			}
 		}
 	}
 	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)

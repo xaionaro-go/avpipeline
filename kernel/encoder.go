@@ -591,12 +591,32 @@ func (e *Encoder[EF]) SendInputFrame(
 			}
 
 			fittedFrame.SetOpaque(frameInfo.Bytes())
-			err := encoder.SendFrame(ctx, fittedFrame)
-			if err != nil {
-				return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
+			for {
+				err := encoder.SendFrame(ctx, fittedFrame)
+				switch {
+				case err == nil:
+				case errors.Is(err, astiav.ErrEagain):
+					logger.Debugf(ctx, "encoder.SendFrame(): EAGAIN; draining and retrying")
+					err = e.drain(
+						ctx,
+						outputPacketsCh,
+						encoder.Drain,
+						outputStream,
+						frameInfo,
+					)
+					if err != nil {
+						return fmt.Errorf("unable to drain: %w", err)
+					}
+					continue
+				default:
+					return fmt.Errorf("unable to send a %s frame to the encoder: %w", outputMediaType, err)
+				}
+				break
 			}
 		}
 
+		// TODO: research: what's better: send all inputs and then read all outputs, or read after each send?
+		// For now we do the batching approach.
 		err = e.drain(
 			ctx,
 			outputPacketsCh,

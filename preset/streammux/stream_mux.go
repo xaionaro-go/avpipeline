@@ -54,7 +54,7 @@ type StreamMux[C any] struct {
 	InputVideoOnly *Input[C]
 
 	// outputs:
-	Outputs       []*Output[C]
+	Outputs       xsync.Map[OutputID, *Output[C]]
 	OutputsMap    xsync.Map[SenderKey, *Output[C]]
 	OutputsLocker xsync.Mutex
 	SenderFactory SenderFactory[C]
@@ -84,6 +84,7 @@ type StreamMux[C any] struct {
 	startedCh     *chan struct{}
 	waitGroup     sync.WaitGroup
 	lastKeyFrames map[int]*ringbuffer.RingBuffer[packet.Input]
+	nextOutputID  atomic.Uint32
 }
 
 func New(
@@ -138,7 +139,7 @@ func NewWithCustomData[C any](
 			logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
 		})
 		bestCfg := autoBitRate.ResolutionsAndBitRates.Best()
-		s.CurrentVideoInputBitRate.Store(uint64(bestCfg.BitrateHigh))
+		s.CurrentVideoInputBitRate.Store(uint64(bestCfg.BitrateHigh)) // some reasonable high end guess
 	} else {
 		s.CurrentVideoInputBitRate.Store(math.MaxUint64)
 	}
@@ -176,18 +177,16 @@ func (s *StreamMux[C]) ForEachInput(
 func (s *StreamMux[C]) initSwitches(
 	ctx context.Context,
 ) error {
-	switch s.MuxMode {
-	case types.MuxModeDifferentOutputsSameTracksSplitAV:
-		// we don't consume directly from s.InputAll in this mode
-		if err := s.InputAll.OutputSwitch.SetValue(ctx, -1); err != nil {
-			return fmt.Errorf("unable to initialize switch for catch-all input: %w", err)
-		}
-		if err := s.InputAll.OutputSyncer.SetValue(ctx, -1); err != nil {
-			return fmt.Errorf("unable to initialize switch for catch-all input: %w", err)
-		}
-	}
 	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 		inputType := input.GetType()
+
+		if err := input.OutputSwitch.SetValue(ctx, -1); err != nil {
+			return fmt.Errorf("unable to reset the switch value for %s input: %w", inputType, err)
+		}
+		if err := input.OutputSyncer.SetValue(ctx, -1); err != nil {
+			return fmt.Errorf("unable to reset the syncer value for %s input: %w", inputType, err)
+		}
+
 		if inputType.IncludesMediaType(astiav.MediaTypeVideo) {
 			input.OutputSwitch.SetKeepUnless(packetorframecondition.And{
 				packetorframecondition.MediaType(astiav.MediaTypeVideo),
@@ -220,13 +219,26 @@ func (s *StreamMux[C]) initSwitches(
 			logger.Debugf(ctx, "/Syncer[%s].SetValue(ctx, %d): from %d: %v", inputType, to, from, err)
 
 			s.OutputsLocker.ManualLock(ctx)
-			outputNext := s.Outputs[to]
+			outputNext, _ := s.Outputs.Load(OutputID(to))
+			if outputNext == nil {
+				logger.Errorf(ctx, "Switch[%s]: next output %d not found", inputType, to)
+				s.OutputsLocker.ManualUnlock(ctx)
+				input.OutputSyncer.SetValue(ctx, from)
+				return
+			}
 			if err := outputNext.SetForceNextFrameKey(ctx, true); err != nil {
 				logger.Errorf(ctx, "Switch[%s]: unable to set force key frame on the output %d: %v", inputType, to, err)
 			}
 			observability.Go(ctx, func(ctx context.Context) {
 				defer s.OutputsLocker.ManualUnlock(ctx)
-				outputPrev := s.Outputs[from]
+				if from == -1 {
+					return
+				}
+				outputPrev, _ := s.Outputs.Load(OutputID(from))
+				if outputPrev == nil {
+					logger.Errorf(ctx, "Switch[%s]: previous output %d not found", inputType, from)
+					return
+				}
 
 				if err := node.RemovePushPacketsTo(ctx, outputPrev.InputFrom, outputPrev.Input()); err != nil {
 					logger.Errorf(ctx, "Switch[%s]: unable to remove push packets to the output %d: %v", inputType, from, err)
@@ -272,7 +284,7 @@ func (s *StreamMux[C]) removeOutputByIDLocked(
 ) (_err error) {
 	logger.Tracef(ctx, "removeOutputByIDLocked(%v)", outputID)
 	defer func() { logger.Tracef(ctx, "/removeOutputByIDLocked(%v): %v", outputID, _err) }()
-	output := s.Outputs[outputID]
+	output, _ := s.Outputs.Load(OutputID(outputID))
 	return s.removeOutputLocked(ctx, output.GetKey())
 }
 
@@ -288,9 +300,8 @@ func (s *StreamMux[C]) removeOutputLocked(
 	if !ok {
 		return fmt.Errorf("output %v not found in OutputsMap", outputKey)
 	}
-	s.Outputs[output.ID] = s.Outputs[len(s.Outputs)-1]
-	s.Outputs[output.ID].ID = output.ID
-	s.Outputs = s.Outputs[:len(s.Outputs)-1]
+	cmp, ok := s.Outputs.LoadAndDelete(OutputID(output.ID))
+	assert(ctx, ok && cmp == output, "Outputs and OutputsMap are out of sync")
 	return nil
 }
 
@@ -386,7 +397,7 @@ func (s *StreamMux[C]) setPreferredOutputs(
 			err := s.setPreferredOutputForInput(ctx, s.getAudioInput(), senderKeyAudio)
 			switch {
 			case err == nil:
-			case errors.Is(err, &alreadyPreferredErr1):
+			case errors.As(err, &alreadyPreferredErr1):
 				alreadyPreferredCount++
 			default:
 				return fmt.Errorf("unable to set preferred output for audio input with key %v: %w", senderKeyAudio, err)
@@ -439,62 +450,80 @@ func (s *StreamMux[C]) GetOrCreateOutput(
 	ctx context.Context,
 	outputKey types.SenderKey,
 	opts ...InitOutputOption,
-) (output *Output[C], _err error) {
+) (output *Output[C], _isNew bool, _err error) {
 	logger.Tracef(ctx, "GetOrCreateOutput(%#+v)", outputKey)
 	defer func() { logger.Tracef(ctx, "/GetOrCreateOutput(%#+v): %v", outputKey, _err) }()
-	return xsync.DoA3R2(ctx, &s.OutputsLocker, s.getOrCreateOutputLocked, ctx, outputKey, opts)
+	return xsync.DoR3(ctx, &s.OutputsLocker, func() (*Output[C], bool, error) {
+		return s.getOrCreateOutputLocked(ctx, outputKey, opts)
+	})
+}
+
+func (s *StreamMux[C]) countOutputs() int {
+	count := 0
+	s.Outputs.Range(func(_ OutputID, output *Output[C]) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 func (s *StreamMux[C]) getOrCreateOutputLocked(
 	ctx context.Context,
 	outputKey types.SenderKey,
 	opts []InitOutputOption,
-) (_ret *Output[C], _err error) {
+) (_ret *Output[C], _isNew bool, _err error) {
 	logger.Debugf(ctx, "getOrCreateOutputLocked: %#+v, %#+v", outputKey, opts)
 	defer func() {
 		logger.Debugf(ctx, "/getOrCreateOutputLocked: %#+v, %#+v: %v, %v", outputKey, opts, _ret, _err)
 	}()
 
 	if outputKey.VideoResolution == (codec.Resolution{}) && outputKey.VideoCodec != "" && outputKey.VideoCodec != codectypes.Name(codec.NameCopy) {
-		return nil, fmt.Errorf("output resolution is not set (codec: %s)", outputKey.VideoCodec)
+		return nil, false, fmt.Errorf("output resolution is not set (codec: %s)", outputKey.VideoCodec)
 	}
 	if outputKey.AudioSampleRate == 0 && outputKey.AudioCodec != "" && outputKey.AudioCodec != codectypes.Name(codec.NameCopy) {
-		return nil, fmt.Errorf("output audio sample rate is not set (codec: %s)", outputKey.AudioCodec)
+		return nil, false, fmt.Errorf("output audio sample rate is not set (codec: %s)", outputKey.AudioCodec)
 	}
 
-	outputID := OutputID(len(s.Outputs))
+	outputID := OutputID(s.nextOutputID.Add(1))
 
-	if output, ok := s.OutputsMap.Load(outputKey); ok {
-		if !output.IsClosed() {
-			return output, nil
-		}
-		outputID = output.ID
+	if output, ok := s.OutputsMap.Load(outputKey); ok && !output.IsClosed() {
+		return output, false, nil
 	}
 
 	var input *Input[C]
 	switch s.MuxMode {
 	case types.UndefinedMuxMode:
-		return nil, fmt.Errorf("mux mode is not defined")
+		return nil, false, fmt.Errorf("mux mode is not defined")
 	case types.MuxModeForbid:
-		if len(s.Outputs) > 0 {
-			return nil, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, len(s.Outputs))
+		if c := s.countOutputs(); c > 0 {
+			return nil, false, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, c)
 		}
 	case types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
-		if len(s.Outputs) > 0 {
-			return s.Outputs[0], nil
+		count := 0
+		var output *Output[C]
+		s.Outputs.Range(func(_ OutputID, _output *Output[C]) bool {
+			count++
+			output = _output
+			return true
+		})
+		if count > 1 {
+			return nil, false, fmt.Errorf("mux mode %s allows only one output, but already have %d outputs", s.MuxMode, count)
+		}
+		if count == 1 {
+			return output, false, nil
 		}
 	case types.MuxModeDifferentOutputsSameTracks:
 		input = &s.InputAll
 	case types.MuxModeDifferentOutputsSameTracksSplitAV:
 		switch {
 		case outputKey.AudioCodec != "" && outputKey.VideoCodec != "":
-			return nil, fmt.Errorf("in mux mode '%s', you can get video xor audio output, not both (acodec:%s, vcodec:%s)", s.MuxMode, outputKey.AudioCodec, outputKey.VideoCodec)
+			return nil, false, fmt.Errorf("in mux mode '%s', you can get video xor audio output, not both (acodec:%s, vcodec:%s)", s.MuxMode, outputKey.AudioCodec, outputKey.VideoCodec)
 		case outputKey.AudioCodec != "":
 			input = s.InputAudioOnly
 		case outputKey.VideoCodec != "":
 			input = s.InputVideoOnly
 		default:
-			return nil, fmt.Errorf("in mux mode '%s', you must specify either audio or video codec in output key", s.MuxMode)
+			return nil, false, fmt.Errorf("in mux mode '%s', you must specify either audio or video codec in output key", s.MuxMode)
 		}
 	}
 
@@ -514,24 +543,14 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		s,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create an output: %w", err)
+		return nil, true, fmt.Errorf("unable to create an output: %w", err)
 	}
+	s.Outputs.Store(outputID, output)
 	s.OutputsMap.Store(outputKey, output)
-	switch {
-	case int(outputID) < len(s.Outputs):
-		s.Outputs[outputID] = output
-	case int(outputID) == len(s.Outputs):
-		s.Outputs = append(s.Outputs, output)
-	default:
-		return nil, fmt.Errorf("internal error: outputID %d is greater than len(s.Outputs) %d", outputID, len(s.Outputs))
-	}
+
 	input.Node.AddPushPacketsTo(output.Input())
-	err = avpipeline.NotifyAboutPacketSources(ctx, input.Node.Processor.Kernel, output.Input())
-	if err != nil {
-		logger.Errorf(ctx, "received an error while notifying about packet sources (%s -> %s): %v", input.Node.Processor.Kernel, output.Input(), err)
-	}
 	logger.Debugf(ctx, "initialized new output %d:%s", output.ID, outputKey)
-	return output, nil
+	return output, true, nil
 }
 
 func (s *StreamMux[C]) EnableVideoRecodingBypass(
@@ -591,9 +610,9 @@ func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
 	err = s.setPreferredOutputs(ctx, senderKey)
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrOutputAlreadyPreferred{}):
+	case errors.As(err, &ErrOutputAlreadyPreferred{}):
 		return nil
-	case errors.Is(err, ErrOutputsAlreadyPreferred{}):
+	case errors.As(err, &ErrOutputsAlreadyPreferred{}):
 		return nil
 	default:
 		return fmt.Errorf("unable to set the preferred outputs %d:%s: %w", prevVideoOutput.ID, senderKey, err)
@@ -654,9 +673,9 @@ func (s *StreamMux[C]) switchToOutputByProps(
 	err = s.setPreferredOutputs(ctx, senderKey)
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrOutputAlreadyPreferred{}):
+	case errors.As(err, &ErrOutputAlreadyPreferred{}):
 		return nil
-	case errors.Is(err, ErrOutputsAlreadyPreferred{}):
+	case errors.As(err, &ErrOutputsAlreadyPreferred{}):
 		return nil
 	default:
 		return fmt.Errorf("unable to set the preferred outputs %s: %w", senderKey, err)
@@ -677,10 +696,10 @@ func (s *StreamMux[C]) getInputsForSenderKey(
 	ctx context.Context,
 	senderKey SenderKey,
 ) (_ret []inputAndKey[C], _err error) {
-	if senderKey.VideoResolution == (codec.Resolution{}) && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
+	if senderKey.VideoResolution == (codec.Resolution{}) && senderKey.VideoCodec != "" && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
 		return nil, fmt.Errorf("output resolution is not set (codec: %s)", senderKey.VideoCodec)
 	}
-	if senderKey.AudioSampleRate == 0 && senderKey.AudioCodec != codectypes.Name(codec.NameCopy) {
+	if senderKey.AudioSampleRate == 0 && senderKey.AudioCodec != "" && senderKey.AudioCodec != codectypes.Name(codec.NameCopy) {
 		return nil, fmt.Errorf("output audio sample rate is not set (codec: %s)", senderKey.AudioCodec)
 	}
 
@@ -735,12 +754,12 @@ func (s *StreamMux[C]) createAndConfigureOutputs(
 		input := ik.Input
 		outputKey := ik.Key
 
-		output, err := s.getOrCreateOutputLocked(ctx, outputKey, nil)
+		output, isNew, err := s.getOrCreateOutputLocked(ctx, outputKey, nil)
 		if err != nil {
 			return fmt.Errorf("unable to get-or-create the output %s: %w", outputKey, err)
 		}
 
-		logger.Debugf(ctx, "reconfiguring the output %d:%s", output.ID, outputKey)
+		logger.Debugf(ctx, "reconfiguring the output %d:%s (isNew: %v)", output.ID, outputKey, isNew)
 		err = output.reconfigureRecoder(ctx, recoderConfig)
 		if err != nil {
 			return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
@@ -893,18 +912,28 @@ func (s *StreamMux[C]) WaitForActiveVideoOutput(
 	}
 }
 
-func (s *StreamMux[C]) waitForActiveVideoOutputLocked(
+func (s *StreamMux[C]) withActiveVideoOutput(
 	ctx context.Context,
-) *Output[C] {
+	callback func(output *Output[C]) error,
+) error {
 	t := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			output := s.getActiveVideoOutputLocked(ctx)
-			if output != nil {
-				return output
+			var err error
+			var done bool
+			s.Locker.Do(ctx, func() {
+				output := s.getActiveVideoOutputLocked(ctx)
+				if output == nil {
+					return
+				}
+				err = callback(output)
+				done = true
+			})
+			if done {
+				return err
 			}
 		}
 	}
@@ -921,10 +950,8 @@ func (s *StreamMux[C]) getActiveVideoOutputLocked(
 ) *Output[C] {
 	outputID := s.getVideoInput().OutputSwitch.CurrentValue.Load()
 	logger.Tracef(ctx, "getActiveOutputLocked: outputID=%d", outputID)
-	if int(outputID) < 0 || int(outputID) >= len(s.Outputs) {
-		return nil
-	}
-	return s.Outputs[outputID]
+	output, _ := s.Outputs.Load(OutputID(outputID))
+	return output
 }
 
 type ErrNotImplemented struct {
@@ -1096,19 +1123,33 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			s.CurrentAudioInputBitRate.Store(newAudioInputValue)
 			s.CurrentOtherInputBitRate.Store(newOtherInputValue)
 
-			bytesVideoEncodedGen := bytesVideoEncodedGenNext - bytesVideoEncodedGenPrev
-			bytesAudioEncodedGen := bytesAudioEncodedGenNext - bytesAudioEncodedGenPrev
-			bytesOtherEncodedGen := bytesOtherEncodedGenNext - bytesOtherEncodedGenPrev
-			bitRateVideoEncoded := int(float64(bytesVideoEncodedGen*8) / duration.Seconds())
-			bitRateAudioEncoded := int(float64(bytesAudioEncodedGen*8) / duration.Seconds())
-			bitRateOtherEncoded := int(float64(bytesOtherEncodedGen*8) / duration.Seconds())
+			var (
+				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded    int
+				newVideoEncodedValue, newAudioEncodedValue, newOtherEncodedValue uint64
+			)
 
-			oldVideoEncodedValue := s.CurrentVideoEncodedBitRate.Load()
-			newVideoEncodedValue := updateWithInertialValue(oldVideoEncodedValue, uint64(bitRateVideoEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldAudioEncodedValue := s.CurrentAudioEncodedBitRate.Load()
-			newAudioEncodedValue := updateWithInertialValue(oldAudioEncodedValue, uint64(bitRateAudioEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldOtherEncodedValue := s.CurrentOtherEncodedBitRate.Load()
-			newOtherEncodedValue := updateWithInertialValue(oldOtherEncodedValue, uint64(bitRateOtherEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			bytesVideoEncodedGen := int64(bytesVideoEncodedGenNext) - int64(bytesVideoEncodedGenPrev)
+			if bytesVideoEncodedGen >= 0 {
+				bitRateVideoEncoded = int(float64(bytesVideoEncodedGen*8) / duration.Seconds())
+				oldVideoEncodedValue := s.CurrentVideoEncodedBitRate.Load()
+				newVideoEncodedValue = updateWithInertialValue(oldVideoEncodedValue, uint64(bitRateVideoEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentVideoEncodedBitRate.Store(newVideoEncodedValue)
+			}
+			bytesAudioEncodedGen := int64(bytesAudioEncodedGenNext) - int64(bytesAudioEncodedGenPrev)
+			if bytesAudioEncodedGen >= 0 {
+				bitRateAudioEncoded = int(float64(bytesAudioEncodedGen*8) / duration.Seconds())
+				oldAudioEncodedValue := s.CurrentAudioEncodedBitRate.Load()
+				newAudioEncodedValue = updateWithInertialValue(oldAudioEncodedValue, uint64(bitRateAudioEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentAudioEncodedBitRate.Store(newAudioEncodedValue)
+			}
+			bytesOtherEncodedGen := int64(bytesOtherEncodedGenNext) - int64(bytesOtherEncodedGenPrev)
+			if bytesOtherEncodedGen >= 0 {
+				bitRateOtherEncoded = int(float64(bytesOtherEncodedGen*8) / duration.Seconds())
+				oldOtherEncodedValue := s.CurrentOtherEncodedBitRate.Load()
+				newOtherEncodedValue = updateWithInertialValue(oldOtherEncodedValue, uint64(bitRateOtherEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentOtherEncodedBitRate.Store(newOtherEncodedValue)
+			}
+
 			logger.Debugf(ctx, "encoded bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
 				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded,
 				humanize.SI(float64(bitRateVideoEncoded), "bps"), humanize.SI(float64(bitRateAudioEncoded), "bps"), humanize.SI(float64(bitRateOtherEncoded), "bps"),
@@ -1117,23 +1158,32 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 				bytesOtherEncodedGenNext, bytesOtherEncodedGenPrev, duration,
 				newVideoEncodedValue, newAudioEncodedValue, newOtherEncodedValue,
 			)
-			s.CurrentVideoEncodedBitRate.Store(newVideoEncodedValue)
-			s.CurrentAudioEncodedBitRate.Store(newAudioEncodedValue)
-			s.CurrentOtherEncodedBitRate.Store(newOtherEncodedValue)
 
-			bytesVideoOutputRead := bytesVideoOutputReadNext - bytesVideoOutputReadPrev
-			bitRateVideoOutput := int(float64(bytesVideoOutputRead*8) / duration.Seconds())
-			bytesAudioOutputRead := bytesAudioOutputReadNext - bytesAudioOutputReadPrev
-			bitRateAudioOutput := int(float64(bytesAudioOutputRead*8) / duration.Seconds())
-			bytesOtherOutputRead := bytesOtherOutputReadNext - bytesOtherOutputReadPrev
-			bitRateOtherOutput := int(float64(bytesOtherOutputRead*8) / duration.Seconds())
-
-			oldVideoOutputValue := s.CurrentVideoOutputBitRate.Load()
-			newVideoOutputValue := updateWithInertialValue(oldVideoOutputValue, uint64(bitRateVideoOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldAudioOutputValue := s.CurrentAudioOutputBitRate.Load()
-			newAudioOutputValue := updateWithInertialValue(oldAudioOutputValue, uint64(bitRateAudioOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldOtherOutputValue := s.CurrentOtherOutputBitRate.Load()
-			newOtherOutputValue := updateWithInertialValue(oldOtherOutputValue, uint64(bitRateOtherOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+			var (
+				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput    int
+				newVideoOutputValue, newAudioOutputValue, newOtherOutputValue uint64
+			)
+			bytesVideoOutputRead := int64(bytesVideoOutputReadNext) - int64(bytesVideoOutputReadPrev)
+			if bytesVideoOutputRead >= 0 {
+				bitRateVideoOutput = int(float64(bytesVideoOutputRead*8) / duration.Seconds())
+				oldVideoOutputValue := s.CurrentVideoOutputBitRate.Load()
+				newVideoOutputValue = updateWithInertialValue(oldVideoOutputValue, uint64(bitRateVideoOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentVideoOutputBitRate.Store(newVideoOutputValue)
+			}
+			bytesAudioOutputRead := int64(bytesAudioOutputReadNext) - int64(bytesAudioOutputReadPrev)
+			if bytesAudioOutputRead >= 0 {
+				bitRateAudioOutput = int(float64(bytesAudioOutputRead*8) / duration.Seconds())
+				oldAudioOutputValue := s.CurrentAudioOutputBitRate.Load()
+				newAudioOutputValue = updateWithInertialValue(oldAudioOutputValue, uint64(bitRateAudioOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentAudioOutputBitRate.Store(newAudioOutputValue)
+			}
+			bytesOtherOutputRead := int64(bytesOtherOutputReadNext) - int64(bytesOtherOutputReadPrev)
+			if bytesOtherOutputRead >= 0 {
+				bitRateOtherOutput = int(float64(bytesOtherOutputRead*8) / duration.Seconds())
+				oldOtherOutputValue := s.CurrentOtherOutputBitRate.Load()
+				newOtherOutputValue = updateWithInertialValue(oldOtherOutputValue, uint64(bitRateOtherOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				s.CurrentOtherOutputBitRate.Store(newOtherOutputValue)
+			}
 			logger.Debugf(ctx, "output bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
 				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput,
 				humanize.SI(float64(bitRateVideoOutput), "bps"), humanize.SI(float64(bitRateAudioOutput), "bps"), humanize.SI(float64(bitRateOtherOutput), "bps"),
@@ -1142,9 +1192,6 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 				bytesOtherOutputReadNext, bytesOtherOutputReadPrev, duration,
 				newVideoOutputValue, newAudioOutputValue, newOtherOutputValue,
 			)
-			s.CurrentVideoOutputBitRate.Store(newVideoOutputValue)
-			s.CurrentAudioOutputBitRate.Store(newAudioOutputValue)
-			s.CurrentOtherOutputBitRate.Store(newOtherOutputValue)
 
 			// DONE
 
@@ -1269,20 +1316,20 @@ func (s *StreamMux[C]) InitOutputVideoStreams(
 	outputKey SenderKey,
 ) (_err error) {
 	isBypass := outputKey.VideoCodec == codectypes.Name(codec.NameCopy)
-	logger.Debugf(ctx, "InitOutputStreams: isBypass:%v", isBypass)
-	defer func() { logger.Debugf(ctx, "/InitOutputStreams: isBypass:%v: %v", isBypass, _err) }()
+	logger.Debugf(ctx, "InitOutputVideoStreams: isBypass:%v", isBypass)
+	defer func() { logger.Debugf(ctx, "/InitOutputVideoStreams: isBypass:%v: %v", isBypass, _err) }()
 	if !isBypass {
 		return nil
 	}
-	return xsync.DoA2R1(ctx, &s.Locker, s.initOutputStreamsLocked, ctx, receiver)
+	return xsync.DoA2R1(ctx, &s.Locker, s.initOutputVideoStreamsLocked, ctx, receiver)
 }
 
-func (s *StreamMux[C]) initOutputStreamsLocked(
+func (s *StreamMux[C]) initOutputVideoStreamsLocked(
 	ctx context.Context,
 	receiver node.Abstract,
 ) (_err error) {
-	logger.Tracef(ctx, "initOutputStreamsLocked")
-	defer func() { logger.Tracef(ctx, "/initOutputStreamsLocked: %v", _err) }()
+	logger.Tracef(ctx, "initOutputVideoStreamsLocked")
+	defer func() { logger.Tracef(ctx, "/initOutputVideoStreamsLocked: %v", _err) }()
 	counters := receiver.GetCountersPtr()
 	inputCh := receiver.GetProcessor().InputPacketChan()
 	var streamIndices []int

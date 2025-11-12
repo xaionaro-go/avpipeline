@@ -104,8 +104,9 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	outputPacketCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "sendInputPacket (started: %v)", r.started)
-	defer func() { logger.Tracef(ctx, "/sendInputPacket: %v (started: %v)", _err, r.started) }()
+	mediaType := input.GetMediaType()
+	logger.Tracef(ctx, "sendInputPacket %s (started: %v)", mediaType, r.started)
+	defer func() { logger.Tracef(ctx, "/sendInputPacket: %v: %v (started: %v)", mediaType, _err, r.started) }()
 
 	if r.IsClosed() {
 		return io.ErrClosedPipe
@@ -172,7 +173,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	close(resultFramesCh)
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
-	logger.Tracef(ctx, "input streams count: %d, active streams count: %d", inputStreamsCount, r.activeStreamsCount)
+	logger.Tracef(ctx, "input streams count: %d (source: %s), active streams count: %d", inputStreamsCount, input.Source, r.activeStreamsCount)
 	if int(r.activeStreamsCount) < inputStreamsCount {
 		return err
 	}

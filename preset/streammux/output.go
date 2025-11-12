@@ -240,6 +240,7 @@ func newOutput[C any](
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.RecoderNode.CustomData = customData
+	o.RecoderNode.SetInputPacketFilter(packetfiltercondition.Panic("the recoder is not configured, yet!"))
 	o.MapIndices.CustomData = customData
 	o.SendingFixer.SetCustomData(customData)
 	o.SendingSyncer.CustomData = customData
@@ -643,6 +644,8 @@ func (o *Output[C]) reconfigureRecoder(
 	if err := o.reconfigureEncoder(ctx, cfg); err != nil {
 		return fmt.Errorf("unable to reconfigure the encoder: %w", err)
 	}
+
+	o.RecoderNode.SetInputPacketFilter(nil)
 	return nil
 }
 
@@ -699,15 +702,22 @@ func (o *Output[C]) reconfigureEncoder(
 ) (_err error) {
 	logger.Tracef(ctx, "reconfigureEncoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureEncoder: %#+v: %v", cfg, _err) }()
-	if len(cfg.Output.VideoTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
-	}
-	videoCfg := cfg.Output.VideoTrackConfigs[0]
 
-	if len(cfg.Output.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
+	var videoCfg types.OutputVideoTrackConfig
+	if len(cfg.Output.VideoTrackConfigs) > 1 {
+		return fmt.Errorf("currently we support only one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	audioCfg := cfg.Output.AudioTrackConfigs[0]
+	if len(cfg.Output.VideoTrackConfigs) > 0 {
+		videoCfg = cfg.Output.VideoTrackConfigs[0]
+	}
+
+	var audioCfg types.OutputAudioTrackConfig
+	if len(cfg.Output.AudioTrackConfigs) > 1 {
+		return fmt.Errorf("currently we support only one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
+	}
+	if len(cfg.Output.AudioTrackConfigs) > 0 {
+		audioCfg = cfg.Output.AudioTrackConfigs[0]
+	}
 
 	encoderFactory := o.RecoderNode.Processor.Kernel.EncoderFactory
 
