@@ -115,6 +115,9 @@ type Output struct {
 
 	LatestSentDTS time.Duration
 
+	PreallocatedAudioStreams []*OutputStream
+	PreallocatedVideoStreams []*OutputStream
+
 	started          bool
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
@@ -311,6 +314,18 @@ func (o *Output) doOpen(
 		}
 	}()
 
+	switch url.Scheme {
+	case "rtmp", "rtmps":
+		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsVideo); i++ {
+			outputStream := &OutputStream{
+				Stream:  o.FormatContext.NewStream(nil),
+				LastDTS: math.MinInt64,
+			}
+			o.PreallocatedVideoStreams = append(o.PreallocatedVideoStreams, outputStream)
+			o.waitingKeyFrames[outputStream.Index()] = struct{}{}
+		}
+	}
+
 	formatName := o.FormatContext.OutputFormat().Name()
 	logger.Debugf(ctx, "output format name: '%s'", formatName)
 
@@ -449,9 +464,26 @@ func (o *Output) initOutputStreamFor(
 	logger.Tracef(ctx, "initOutputStreamFor(ctx, stream[%d])", inputStream.Index())
 	defer func() { logger.Tracef(ctx, "/initOutputStreamFor(ctx, stream[%d]) %v", inputStream.Index(), _err) }()
 
-	outputStream := &OutputStream{
-		Stream:  o.FormatContext.NewStream(nil),
-		LastDTS: math.MinInt64,
+	var outputStream *OutputStream
+	switch inputStream.CodecParameters().MediaType() {
+	case astiav.MediaTypeVideo:
+		if len(o.PreallocatedVideoStreams) > 0 {
+			outputStream = o.PreallocatedVideoStreams[0]
+			o.PreallocatedVideoStreams = o.PreallocatedVideoStreams[1:]
+			logger.Debugf(ctx, "reusing preallocated video output stream for input stream #%d", inputStream.Index())
+		}
+	case astiav.MediaTypeAudio:
+		if len(o.PreallocatedAudioStreams) > 0 {
+			outputStream = o.PreallocatedAudioStreams[0]
+			o.PreallocatedAudioStreams = o.PreallocatedAudioStreams[1:]
+			logger.Debugf(ctx, "reusing preallocated audio output stream for input stream #%d", inputStream.Index())
+		}
+	}
+	if outputStream == nil {
+		outputStream = &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
 	}
 
 	if err := o.configureOutputStream(ctx, outputStream, inputSource, inputStream); err != nil {
@@ -639,12 +671,7 @@ func (o *Output) send(
 	}
 
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() uint {
-		outputStreams := o.FormatContext.NbStreams()
-		if outputStreams < 0 {
-			logger.Errorf(ctx, "invalid number of streams in the output format context: %d", outputStreams)
-			return math.MaxUint
-		}
-		return uint(outputStreams)
+		return uint(len(o.OutputStreams))
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
@@ -655,11 +682,11 @@ func (o *Output) send(
 			return nil
 		}
 	}
-	if o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsCount > 1 {
+	if o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsVideoCount > 0 {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
-			logger.Tracef(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
+			logger.Debugf(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
 			return nil
 		}
 	}
