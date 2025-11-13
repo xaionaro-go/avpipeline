@@ -655,7 +655,7 @@ func (o *Output) send(
 			return nil
 		}
 	}
-	if o.Config.WaitForOutputStreams.VideoBeforeAudio {
+	if o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsCount > 1 {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
