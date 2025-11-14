@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt/tool/logger"
@@ -197,6 +198,7 @@ func (m *Monitor) observePacket(
 		sourceKernelID = streamInfo.Source.(globaltypes.GetObjectIDer).GetObjectID()
 	}
 	event := &avpipelinegrpc.MonitorEvent{
+		TimestampNs:      uint64(time.Now().UnixNano()),
 		SourceKernelId:   uint64(sourceKernelID),
 		Stream:           goconv.StreamFromGo(streamInfo.Stream).Protobuf(),
 		Packet:           goconv.PacketFromGo(pkt, m.IncludePacketPayload).Protobuf(),
@@ -236,6 +238,7 @@ func (m *Monitor) observeFrame(
 		sourceKernelID = streamInfo.Source.(globaltypes.GetObjectIDer).GetObjectID()
 	}
 	event := &avpipelinegrpc.MonitorEvent{
+		TimestampNs:    uint64(time.Now().UnixNano()),
 		SourceKernelId: uint64(sourceKernelID),
 		Stream: &libav_proto.Stream{
 			Index:           int32(streamInfo.StreamIndex),

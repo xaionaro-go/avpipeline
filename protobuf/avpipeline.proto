@@ -135,9 +135,10 @@ message MonitorRequest {
 }
 
 message MonitorEvent {
-  uint64 source_kernel_id = 1;
-  libav.Stream stream = 2;
-  optional libav.Packet packet = 3;
-  repeated libav.Frame frames = 4;
-  bytes pipeline_side_data = 5;
+  uint64 timestamp_ns = 1;
+  uint64 source_kernel_id = 2;
+  libav.Stream stream = 3;
+  optional libav.Packet packet = 4;
+  repeated libav.Frame frames = 5;
+  bytes pipeline_side_data = 6;
 }
