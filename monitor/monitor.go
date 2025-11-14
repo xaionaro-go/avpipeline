@@ -87,12 +87,12 @@ func (m *Monitor) inject(
 		m.Object.AddPushFramesTo(ctx, m.Node)
 		return nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_KERNEL_OUTPUT_SEND:
-		s, ok := m.Object.(kernel.OutputMonitorer)
-		if !ok {
-			return fmt.Errorf("node %v does not support setting output monitor", m.Object.GetObjectID())
+		k, err := getOutputMonitorer(ctx, m.Object)
+		if err != nil {
+			return fmt.Errorf("node %v does not support output monitor: %w", m.Object.GetObjectID(), err)
 		}
-		assert(ctx, s.GetOutputMonitor(ctx) != nil, "output monitor is already set for node %v", m.Object.GetObjectID())
-		s.SetOutputMonitor(ctx, m.asOutputMonitor())
+		assert(ctx, k.GetOutputMonitor(ctx) == nil, "output monitor is already set for node %v: %#+v", m.Object.GetObjectID(), k.GetOutputMonitor(ctx))
+		k.SetOutputMonitor(ctx, m.asOutputMonitor())
 		return nil
 	default:
 		return fmt.Errorf("unsupported monitor event type: %s", m.Type)
@@ -104,8 +104,8 @@ func (m *Monitor) uninject(
 ) error {
 	switch m.Type {
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_RECEIVE:
-		assert(ctx, m.Object.GetInputPacketFilter() != nil, "input packet filter is already unset for node %v", m.Object.GetObjectID())
-		assert(ctx, m.Object.GetInputFrameFilter() != nil, "input frame filter is already unset for node %v", m.Object.GetObjectID())
+		assert(ctx, m.Object.GetInputPacketFilter() != nil, "input packet filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputPacketFilter())
+		assert(ctx, m.Object.GetInputFrameFilter() != nil, "input frame filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputFrameFilter())
 		m.Object.SetInputPacketFilter(nil)
 		m.Object.SetInputFrameFilter(nil)
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_SEND:
@@ -115,17 +115,39 @@ func (m *Monitor) uninject(
 		assert(ctx, m.Object.RemovePushFramesTo(ctx, n) == nil, "push frames to monitor is already unset for node %v", m.Object.GetObjectID())
 		m.Node = nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_KERNEL_OUTPUT_SEND:
-		s, ok := m.Object.(kernel.OutputMonitorer)
-		if !ok {
-			return fmt.Errorf("node %v does not support setting output monitor", m.Object.GetObjectID())
+		k, err := getOutputMonitorer(ctx, m.Object)
+		if err != nil {
+			return fmt.Errorf("node %v does not support output monitor: %w", m.Object.GetObjectID(), err)
 		}
-		assert(ctx, s.GetOutputMonitor(ctx) == nil, "output monitor is already unset for node %v", m.Object.GetObjectID())
-		s.SetOutputMonitor(ctx, nil)
+		assert(ctx, k.GetOutputMonitor(ctx) != nil, "output monitor is already unset for node %v", m.Object.GetObjectID())
+		k.SetOutputMonitor(ctx, nil)
 		return nil
 	default:
 		return fmt.Errorf("unsupported monitor event type: %s", m.Type)
 	}
 	return nil
+}
+
+func getOutputMonitorer(
+	ctx context.Context,
+	n node.Abstract,
+) (kernel.OutputMonitorer, error) {
+	m, ok := n.(kernel.OutputMonitorer)
+	if ok {
+		return m, nil
+	}
+
+	proc, ok := n.GetProcessor().(kernel.GetKerneler)
+	if !ok {
+		return nil, fmt.Errorf("node %v does not support getting kernel", n.GetObjectID())
+	}
+
+	m, ok = proc.GetKernel().(kernel.OutputMonitorer)
+	if !ok {
+		return nil, fmt.Errorf("node %v does not support setting output monitor", n.GetObjectID())
+	}
+
+	return m, nil
 }
 
 func (m *Monitor) ObserveInputPacket(
