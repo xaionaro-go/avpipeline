@@ -4,7 +4,7 @@ option go_package = "github.com/xaionaro-go/avpipeline/protobuf/avpipeline;avpip
 import "libav.proto";
 
 message Node {
-    string id = 1;
+    uint64 id = 1;
     string type = 2;
     string description = 3;
     bool isServing = 4;

@@ -17,7 +17,7 @@ func NodeToGRPC(
 		return nil
 	}
 	result := &avpipelinegrpc.Node{
-		Id:          fmt.Sprintf("%p", n),
+		Id:          uint64(n.GetObjectID()),
 		Type:        fmt.Sprintf("%T", n),
 		Description: fmt.Sprintf("%s", n),
 		IsServing:   n.IsServing(),
