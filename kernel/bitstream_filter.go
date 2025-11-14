@@ -11,6 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -182,6 +183,10 @@ func (bsf *BitstreamFilter) SendInputFrame(
 	chan<- frame.Output,
 ) error {
 	return fmt.Errorf("BitstreamFilter could be used only for Packet-s, but not for Frame-s")
+}
+
+func (bsf *BitstreamFilter) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(bsf)
 }
 
 func (bsf *BitstreamFilter) String() string {

@@ -13,6 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -175,6 +176,10 @@ func (s *Sequence[T]) sendInput(
 	}
 
 	return nil
+}
+
+func (s *Sequence[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(s)
 }
 
 func (s *Sequence[T]) String() string {

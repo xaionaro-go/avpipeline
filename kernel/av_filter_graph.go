@@ -9,6 +9,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type AVFilterGraph[T avfilter.Kernel] struct {
@@ -70,6 +71,10 @@ func NewAVFilterGraph[T avfilter.Kernel](
 
 	f.Filters = filters
 	return f, nil
+}
+
+func (f *AVFilterGraph[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(f)
 }
 
 func (f *AVFilterGraph[T]) SendInputPacket(

@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -206,6 +207,10 @@ func (r *Retry[T]) SendInputFrame(
 		}()
 		return k.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 	})
+}
+
+func (r *Retry[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(r)
 }
 
 func (r *Retry[T]) String() string {

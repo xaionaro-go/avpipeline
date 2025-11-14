@@ -13,6 +13,7 @@ import (
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -40,6 +41,10 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 			a.MapStreamIndicesNode.Serve(ctx, cfg, errCh)
 		})
 	}
+}
+
+func (a *AutoFixerWithCustomData[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(a)
 }
 
 func (a *AutoFixerWithCustomData[T]) String() string {
@@ -74,28 +79,74 @@ func (a *AutoFixerWithCustomData[T]) DotBlockContentStringWriteTo(
 	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.GetProcessor(), a.Output().GetProcessor())
 }
 
-func (a *AutoFixerWithCustomData[T]) GetPushPacketsTos() node.PushPacketsTos {
-	return a.Output().GetPushPacketsTos()
+func (a *AutoFixerWithCustomData[T]) GetPushPacketsTos(
+	ctx context.Context,
+) node.PushPacketsTos {
+	return a.Output().GetPushPacketsTos(ctx)
 }
 
-func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetfiltercondition.Condition) {
-	a.Output().AddPushPacketsTo(dst, conds...)
+func (a *AutoFixerWithCustomData[T]) WithPushPacketsTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushPacketsTos),
+) {
+	a.Output().WithPushPacketsTos(ctx, callback)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetPushPacketsTos(pushTos node.PushPacketsTos) {
-	a.Output().SetPushPacketsTos(pushTos)
+func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...packetfiltercondition.Condition,
+) {
+	a.Output().AddPushPacketsTo(ctx, dst, conds...)
 }
 
-func (a *AutoFixerWithCustomData[T]) GetPushFramesTos() node.PushFramesTos {
-	return a.Output().GetPushFramesTos()
+func (a *AutoFixerWithCustomData[T]) SetPushPacketsTos(
+	ctx context.Context,
+	pushTos node.PushPacketsTos,
+) {
+	a.Output().SetPushPacketsTos(ctx, pushTos)
 }
 
-func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(dst node.Abstract, conds ...framefiltercondition.Condition) {
-	a.Output().AddPushFramesTo(dst, conds...)
+func (a *AutoFixerWithCustomData[T]) RemovePushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return a.Output().RemovePushPacketsTo(ctx, dst)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetPushFramesTos(pushTos node.PushFramesTos) {
-	a.Output().SetPushFramesTos(pushTos)
+func (a *AutoFixerWithCustomData[T]) GetPushFramesTos(
+	ctx context.Context,
+) node.PushFramesTos {
+	return a.Output().GetPushFramesTos(ctx)
+}
+
+func (a *AutoFixerWithCustomData[T]) WithPushFramesTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushFramesTos),
+) {
+	a.Output().WithPushFramesTos(ctx, callback)
+}
+
+func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...framefiltercondition.Condition,
+) {
+	a.Output().AddPushFramesTo(ctx, dst, conds...)
+}
+
+func (a *AutoFixerWithCustomData[T]) SetPushFramesTos(
+	ctx context.Context,
+	pushTos node.PushFramesTos,
+) {
+	a.Output().SetPushFramesTos(ctx, pushTos)
+}
+
+func (a *AutoFixerWithCustomData[T]) RemovePushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return a.Output().RemovePushFramesTo(ctx, dst)
 }
 
 func (a *AutoFixerWithCustomData[T]) IsServing() bool {

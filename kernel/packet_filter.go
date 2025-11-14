@@ -9,6 +9,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type PacketFilter struct {
@@ -60,6 +61,10 @@ func (f *PacketFilter) SendInputFrame(
 		input.StreamInfo,
 	)
 	return nil
+}
+
+func (f *PacketFilter) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(f)
 }
 
 func (f *PacketFilter) String() string {

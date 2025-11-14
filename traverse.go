@@ -47,7 +47,7 @@ func traverse[T node.Abstract](
 		}
 		alreadyVisited[n] = struct{}{}
 
-		nextNodes, err := nextLayer(n)
+		nextNodes, err := nextLayer(ctx, n)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("unable to get the next layer: %w", err))
 		}

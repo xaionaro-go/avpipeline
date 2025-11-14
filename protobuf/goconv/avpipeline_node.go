@@ -1,6 +1,7 @@
 package goconv
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline"
@@ -8,7 +9,10 @@ import (
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 )
 
-func NodeToGRPC(n node.Abstract) *avpipelinegrpc.Node {
+func NodeToGRPC(
+	ctx context.Context,
+	n node.Abstract,
+) *avpipelinegrpc.Node {
 	if n == nil {
 		return nil
 	}
@@ -30,12 +34,12 @@ func NodeToGRPC(n node.Abstract) *avpipelinegrpc.Node {
 		n = origer.OriginalNodeAbstract()
 	}
 
-	nextLayer, err := avpipeline.NextLayer(currentLayer...)
+	nextLayer, err := avpipeline.NextLayer(ctx, currentLayer...)
 	if err != nil {
 		panic(err)
 	}
 	for _, nextNode := range nextLayer {
-		result.ConsumingNodes = append(result.ConsumingNodes, NodeToGRPC(nextNode))
+		result.ConsumingNodes = append(result.ConsumingNodes, NodeToGRPC(ctx, nextNode))
 	}
 
 	return result

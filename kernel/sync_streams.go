@@ -13,6 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/sort"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
@@ -280,6 +281,10 @@ func (s *SyncStreams) Close(ctx context.Context) error {
 		s.ClosureSignaler.Close(ctx)
 		return nil
 	})
+}
+
+func (s *SyncStreams) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(s)
 }
 
 func (s *SyncStreams) String() string {

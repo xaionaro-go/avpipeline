@@ -11,6 +11,7 @@ import (
 	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type NoServe[T node.Abstract] struct {
@@ -26,6 +27,10 @@ func (n *NoServe[T]) Serve(
 	errCh chan<- node.Error,
 ) {
 	logger.Debugf(ctx, "NoServe")
+}
+
+func (n *NoServe[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(n)
 }
 
 func (n *NoServe[T]) OriginalNodeAbstract() node.Abstract {
@@ -53,28 +58,74 @@ func (n *NoServe[T]) String() string {
 	return fmt.Sprintf("NoServe(%s)", stringer)
 }
 
-func (n *NoServe[T]) GetPushPacketsTos() node.PushPacketsTos {
-	return nil
+func (n *NoServe[T]) GetPushPacketsTos(
+	ctx context.Context,
+) node.PushPacketsTos {
+	return n.Node.GetPushPacketsTos(ctx)
 }
 
-func (n *NoServe[T]) AddPushPacketsTo(dst node.Abstract, conds ...packetcondition.Condition) {
-	n.Node.AddPushPacketsTo(dst, conds...)
+func (n *NoServe[T]) WithPushPacketsTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushPacketsTos),
+) {
+	n.Node.WithPushPacketsTos(ctx, callback)
 }
 
-func (n *NoServe[T]) SetPushPacketsTos(pushTos node.PushPacketsTos) {
-	n.Node.SetPushPacketsTos(pushTos)
+func (n *NoServe[T]) AddPushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...packetcondition.Condition,
+) {
+	n.Node.AddPushPacketsTo(ctx, dst, conds...)
 }
 
-func (n *NoServe[T]) GetPushFramesTos() node.PushFramesTos {
-	return nil
+func (n *NoServe[T]) SetPushPacketsTos(
+	ctx context.Context,
+	pushTos node.PushPacketsTos,
+) {
+	n.Node.SetPushPacketsTos(ctx, pushTos)
 }
 
-func (n *NoServe[T]) AddPushFramesTo(dst node.Abstract, conds ...framecondition.Condition) {
-	n.Node.AddPushFramesTo(dst, conds...)
+func (n *NoServe[T]) RemovePushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return n.Node.RemovePushPacketsTo(ctx, dst)
 }
 
-func (n *NoServe[T]) SetPushFramesTos(pushTos node.PushFramesTos) {
-	n.Node.SetPushFramesTos(pushTos)
+func (n *NoServe[T]) GetPushFramesTos(
+	ctx context.Context,
+) node.PushFramesTos {
+	return n.Node.GetPushFramesTos(ctx)
+}
+
+func (n *NoServe[T]) WithPushFramesTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushFramesTos),
+) {
+	n.Node.WithPushFramesTos(ctx, callback)
+}
+
+func (n *NoServe[T]) AddPushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...framecondition.Condition,
+) {
+	n.Node.AddPushFramesTo(ctx, dst, conds...)
+}
+
+func (n *NoServe[T]) SetPushFramesTos(
+	ctx context.Context,
+	pushTos node.PushFramesTos,
+) {
+	n.Node.SetPushFramesTos(ctx, pushTos)
+}
+
+func (n *NoServe[T]) RemovePushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return n.Node.RemovePushFramesTo(ctx, dst)
 }
 
 func (n *NoServe[T]) IsServing() bool {

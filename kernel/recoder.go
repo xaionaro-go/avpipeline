@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -322,6 +323,10 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 		return nil
 	}
 	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
+}
+
+func (r *Recoder[DF, EF]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(r)
 }
 
 func (r *Recoder[DF, EF]) String() string {

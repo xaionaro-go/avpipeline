@@ -5,6 +5,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type Dummy struct {
@@ -64,6 +65,10 @@ func (d *Dummy) SendInputFrame(
 		return nil
 	}
 	return d.SendInputFrameFn(ctx, input, outputPacketsCh, outputFramesCh)
+}
+
+func (d *Dummy) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(d)
 }
 
 func (d *Dummy) String() string {

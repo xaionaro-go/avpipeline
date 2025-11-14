@@ -12,6 +12,7 @@ import (
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -36,6 +37,10 @@ func (a *ScreenCapturer[C]) Serve(
 		defer wg.Done()
 		a.DecoderNode.Serve(ctx, cfg, errCh)
 	})
+}
+
+func (a *ScreenCapturer[C]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(a)
 }
 
 func (a *ScreenCapturer[C]) String() string {
@@ -70,28 +75,74 @@ func (a *ScreenCapturer[C]) DotBlockContentStringWriteTo(
 	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.Input().GetProcessor(), a.Output().GetProcessor())
 }
 
-func (a *ScreenCapturer[C]) GetPushPacketsTos() node.PushPacketsTos {
-	return a.Output().GetPushPacketsTos()
+func (a *ScreenCapturer[C]) GetPushPacketsTos(
+	ctx context.Context,
+) node.PushPacketsTos {
+	return a.Output().GetPushPacketsTos(ctx)
 }
 
-func (a *ScreenCapturer[C]) AddPushPacketsTo(dst node.Abstract, conds ...packetfiltercondition.Condition) {
-	a.Output().AddPushPacketsTo(dst, conds...)
+func (a *ScreenCapturer[C]) WithPushPacketsTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushPacketsTos),
+) {
+	a.Output().WithPushPacketsTos(ctx, callback)
 }
 
-func (a *ScreenCapturer[C]) SetPushPacketsTos(pushTos node.PushPacketsTos) {
-	a.Output().SetPushPacketsTos(pushTos)
+func (a *ScreenCapturer[C]) AddPushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...packetfiltercondition.Condition,
+) {
+	a.Output().AddPushPacketsTo(ctx, dst, conds...)
 }
 
-func (a *ScreenCapturer[C]) GetPushFramesTos() node.PushFramesTos {
-	return a.Output().GetPushFramesTos()
+func (a *ScreenCapturer[C]) SetPushPacketsTos(
+	ctx context.Context,
+	pushTos node.PushPacketsTos,
+) {
+	a.Output().SetPushPacketsTos(ctx, pushTos)
 }
 
-func (a *ScreenCapturer[C]) AddPushFramesTo(dst node.Abstract, conds ...framefiltercondition.Condition) {
-	a.Output().AddPushFramesTo(dst, conds...)
+func (a *ScreenCapturer[C]) RemovePushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return a.Output().RemovePushPacketsTo(ctx, dst)
 }
 
-func (a *ScreenCapturer[C]) SetPushFramesTos(pushTos node.PushFramesTos) {
-	a.Output().SetPushFramesTos(pushTos)
+func (a *ScreenCapturer[C]) GetPushFramesTos(
+	ctx context.Context,
+) node.PushFramesTos {
+	return a.Output().GetPushFramesTos(ctx)
+}
+
+func (a *ScreenCapturer[C]) WithPushFramesTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushFramesTos),
+) {
+	a.Output().WithPushFramesTos(ctx, callback)
+}
+
+func (a *ScreenCapturer[C]) AddPushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+	conds ...framefiltercondition.Condition,
+) {
+	a.Output().AddPushFramesTo(ctx, dst, conds...)
+}
+
+func (a *ScreenCapturer[C]) SetPushFramesTos(
+	ctx context.Context,
+	pushTos node.PushFramesTos,
+) {
+	a.Output().SetPushFramesTos(ctx, pushTos)
+}
+
+func (a *ScreenCapturer[C]) RemovePushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return a.Output().RemovePushFramesTo(ctx, dst)
 }
 
 func (a *ScreenCapturer[C]) IsServing() bool {

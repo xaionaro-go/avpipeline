@@ -5,6 +5,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type Passthrough struct{}
@@ -43,6 +44,10 @@ func (Passthrough) SendInputFrame(
 	):
 	}
 	return nil
+}
+
+func (p *Passthrough) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(p)
 }
 
 func (Passthrough) String() string {

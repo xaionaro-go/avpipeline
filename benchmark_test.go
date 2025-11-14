@@ -91,19 +91,19 @@ ok  	github.com/xaionaro-go/avpipeline	20.299s
 */
 
 func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
-	first := node.NewFromKernel(ctx, kernel.Passthrough{})
+	first := node.NewFromKernel(ctx, &kernel.Passthrough{})
 
 	ctx, cancelFn := context.WithCancel(ctx)
 
 	n := first
 	errCh := make(chan node.Error, 10000)
 	for range connsCount - 1 {
-		next := node.NewFromKernel(ctx, kernel.Passthrough{})
-		n.AddPushPacketsTo(next)
+		next := node.NewFromKernel(ctx, &kernel.Passthrough{})
+		n.AddPushPacketsTo(ctx, next)
 		n = next
 	}
 	recvNode := newReceiverNode(ctx, b.N)
-	n.AddPushPacketsTo(recvNode)
+	n.AddPushPacketsTo(ctx, recvNode)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()

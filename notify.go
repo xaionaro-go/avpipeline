@@ -43,7 +43,7 @@ func NotifyAboutPacketSources[T node.Abstract](
 	}
 
 	dstAlreadyProcessed := map[node.Abstract]struct{}{}
-	for _, pushTo := range n.GetPushPacketsTos() {
+	for _, pushTo := range n.GetPushPacketsTos(ctx) {
 		if _, ok := dstAlreadyProcessed[pushTo.Node]; ok {
 			continue
 		}
@@ -52,7 +52,7 @@ func NotifyAboutPacketSources[T node.Abstract](
 			return fmt.Errorf("got error from %s: %w", pushTo.Node, err)
 		}
 	}
-	for _, pushTo := range n.GetPushFramesTos() {
+	for _, pushTo := range n.GetPushFramesTos(ctx) {
 		if _, ok := dstAlreadyProcessed[pushTo.Node]; ok {
 			continue
 		}

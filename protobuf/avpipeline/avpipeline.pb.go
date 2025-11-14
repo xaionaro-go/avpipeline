@@ -22,6 +22,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type MonitorEventType int32
+
+const (
+	MonitorEventType_UNDEFINED_EVENT_TYPE          MonitorEventType = 0
+	MonitorEventType_EVENT_TYPE_RECEIVE            MonitorEventType = 1
+	MonitorEventType_EVENT_TYPE_SEND               MonitorEventType = 2
+	MonitorEventType_EVENT_TYPE_KERNEL_OUTPUT_SEND MonitorEventType = 128
+)
+
+// Enum value maps for MonitorEventType.
+var (
+	MonitorEventType_name = map[int32]string{
+		0:   "UNDEFINED_EVENT_TYPE",
+		1:   "EVENT_TYPE_RECEIVE",
+		2:   "EVENT_TYPE_SEND",
+		128: "EVENT_TYPE_KERNEL_OUTPUT_SEND",
+	}
+	MonitorEventType_value = map[string]int32{
+		"UNDEFINED_EVENT_TYPE":          0,
+		"EVENT_TYPE_RECEIVE":            1,
+		"EVENT_TYPE_SEND":               2,
+		"EVENT_TYPE_KERNEL_OUTPUT_SEND": 128,
+	}
+)
+
+func (x MonitorEventType) Enum() *MonitorEventType {
+	p := new(MonitorEventType)
+	*p = x
+	return p
+}
+
+func (x MonitorEventType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MonitorEventType) Descriptor() protoreflect.EnumDescriptor {
+	return file_avpipeline_proto_enumTypes[0].Descriptor()
+}
+
+func (MonitorEventType) Type() protoreflect.EnumType {
+	return &file_avpipeline_proto_enumTypes[0]
+}
+
+func (x MonitorEventType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MonitorEventType.Descriptor instead.
+func (MonitorEventType) EnumDescriptor() ([]byte, []int) {
+	return file_avpipeline_proto_rawDescGZIP(), []int{0}
+}
+
 type Node struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Id                  string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1066,6 +1118,158 @@ func (x *AutoBitrateCalculatorQueueSizeGapDecay) GetDerivativeSmoothed() *Moving
 	return nil
 }
 
+type MonitorRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	NodeId               uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	EventType            MonitorEventType       `protobuf:"varint,2,opt,name=event_type,json=eventType,proto3,enum=avpipeline.MonitorEventType" json:"event_type,omitempty"`
+	IncludePacketPayload bool                   `protobuf:"varint,3,opt,name=include_packet_payload,json=includePacketPayload,proto3" json:"include_packet_payload,omitempty"`
+	IncludeFramePayload  bool                   `protobuf:"varint,4,opt,name=include_frame_payload,json=includeFramePayload,proto3" json:"include_frame_payload,omitempty"`
+	DoDecode             bool                   `protobuf:"varint,5,opt,name=do_decode,json=doDecode,proto3" json:"do_decode,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *MonitorRequest) Reset() {
+	*x = MonitorRequest{}
+	mi := &file_avpipeline_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MonitorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MonitorRequest) ProtoMessage() {}
+
+func (x *MonitorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_avpipeline_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MonitorRequest.ProtoReflect.Descriptor instead.
+func (*MonitorRequest) Descriptor() ([]byte, []int) {
+	return file_avpipeline_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *MonitorRequest) GetNodeId() uint64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *MonitorRequest) GetEventType() MonitorEventType {
+	if x != nil {
+		return x.EventType
+	}
+	return MonitorEventType_UNDEFINED_EVENT_TYPE
+}
+
+func (x *MonitorRequest) GetIncludePacketPayload() bool {
+	if x != nil {
+		return x.IncludePacketPayload
+	}
+	return false
+}
+
+func (x *MonitorRequest) GetIncludeFramePayload() bool {
+	if x != nil {
+		return x.IncludeFramePayload
+	}
+	return false
+}
+
+func (x *MonitorRequest) GetDoDecode() bool {
+	if x != nil {
+		return x.DoDecode
+	}
+	return false
+}
+
+type MonitorEvent struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	SourceKernelId   uint64                 `protobuf:"varint,1,opt,name=source_kernel_id,json=sourceKernelId,proto3" json:"source_kernel_id,omitempty"`
+	Stream           *libav.Stream          `protobuf:"bytes,2,opt,name=stream,proto3" json:"stream,omitempty"`
+	Packet           *libav.Packet          `protobuf:"bytes,3,opt,name=packet,proto3,oneof" json:"packet,omitempty"`
+	Frames           []*libav.Frame         `protobuf:"bytes,4,rep,name=frames,proto3" json:"frames,omitempty"`
+	PipelineSideData []byte                 `protobuf:"bytes,5,opt,name=pipeline_side_data,json=pipelineSideData,proto3" json:"pipeline_side_data,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *MonitorEvent) Reset() {
+	*x = MonitorEvent{}
+	mi := &file_avpipeline_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MonitorEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MonitorEvent) ProtoMessage() {}
+
+func (x *MonitorEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_avpipeline_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MonitorEvent.ProtoReflect.Descriptor instead.
+func (*MonitorEvent) Descriptor() ([]byte, []int) {
+	return file_avpipeline_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MonitorEvent) GetSourceKernelId() uint64 {
+	if x != nil {
+		return x.SourceKernelId
+	}
+	return 0
+}
+
+func (x *MonitorEvent) GetStream() *libav.Stream {
+	if x != nil {
+		return x.Stream
+	}
+	return nil
+}
+
+func (x *MonitorEvent) GetPacket() *libav.Packet {
+	if x != nil {
+		return x.Packet
+	}
+	return nil
+}
+
+func (x *MonitorEvent) GetFrames() []*libav.Frame {
+	if x != nil {
+		return x.Frames
+	}
+	return nil
+}
+
+func (x *MonitorEvent) GetPipelineSideData() []byte {
+	if x != nil {
+		return x.PipelineSideData
+	}
+	return nil
+}
+
 var File_avpipeline_proto protoreflect.FileDescriptor
 
 var file_avpipeline_proto_rawDesc = string([]byte{
@@ -1268,11 +1472,49 @@ var file_avpipeline_proto_rawDesc = string([]byte{
 	0x1f, 0x2e, 0x61, 0x76, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x2e, 0x4d, 0x6f, 0x76,
 	0x69, 0x6e, 0x67, 0x41, 0x76, 0x65, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67,
 	0x52, 0x12, 0x64, 0x65, 0x72, 0x69, 0x76, 0x61, 0x74, 0x69, 0x76, 0x65, 0x53, 0x6d, 0x6f, 0x6f,
-	0x74, 0x68, 0x65, 0x64, 0x42, 0x42, 0x5a, 0x40, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63,
-	0x6f, 0x6d, 0x2f, 0x78, 0x61, 0x69, 0x6f, 0x6e, 0x61, 0x72, 0x6f, 0x2d, 0x67, 0x6f, 0x2f, 0x61,
-	0x76, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62,
-	0x75, 0x66, 0x2f, 0x61, 0x76, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x3b, 0x61, 0x76,
-	0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x74, 0x68, 0x65, 0x64, 0x22, 0xed, 0x01, 0x0a, 0x0e, 0x4d, 0x6f, 0x6e, 0x69, 0x74, 0x6f, 0x72,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x17, 0x0a, 0x07, 0x6e, 0x6f, 0x64, 0x65, 0x5f,
+	0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x06, 0x6e, 0x6f, 0x64, 0x65, 0x49, 0x64,
+	0x12, 0x3b, 0x0a, 0x0a, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x0e, 0x32, 0x1c, 0x2e, 0x61, 0x76, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e,
+	0x65, 0x2e, 0x4d, 0x6f, 0x6e, 0x69, 0x74, 0x6f, 0x72, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x54, 0x79,
+	0x70, 0x65, 0x52, 0x09, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x34, 0x0a,
+	0x16, 0x69, 0x6e, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x5f, 0x70, 0x61, 0x63, 0x6b, 0x65, 0x74, 0x5f,
+	0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x14, 0x69,
+	0x6e, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x50, 0x61, 0x63, 0x6b, 0x65, 0x74, 0x50, 0x61, 0x79, 0x6c,
+	0x6f, 0x61, 0x64, 0x12, 0x32, 0x0a, 0x15, 0x69, 0x6e, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x5f, 0x66,
+	0x72, 0x61, 0x6d, 0x65, 0x5f, 0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64, 0x18, 0x04, 0x20, 0x01,
+	0x28, 0x08, 0x52, 0x13, 0x69, 0x6e, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x46, 0x72, 0x61, 0x6d, 0x65,
+	0x50, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64, 0x12, 0x1b, 0x0a, 0x09, 0x64, 0x6f, 0x5f, 0x64, 0x65,
+	0x63, 0x6f, 0x64, 0x65, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x08, 0x64, 0x6f, 0x44, 0x65,
+	0x63, 0x6f, 0x64, 0x65, 0x22, 0xea, 0x01, 0x0a, 0x0c, 0x4d, 0x6f, 0x6e, 0x69, 0x74, 0x6f, 0x72,
+	0x45, 0x76, 0x65, 0x6e, 0x74, 0x12, 0x28, 0x0a, 0x10, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f,
+	0x6b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52,
+	0x0e, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x4b, 0x65, 0x72, 0x6e, 0x65, 0x6c, 0x49, 0x64, 0x12,
+	0x25, 0x0a, 0x06, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x0d, 0x2e, 0x6c, 0x69, 0x62, 0x61, 0x76, 0x2e, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x52, 0x06,
+	0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x12, 0x2a, 0x0a, 0x06, 0x70, 0x61, 0x63, 0x6b, 0x65, 0x74,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x0d, 0x2e, 0x6c, 0x69, 0x62, 0x61, 0x76, 0x2e, 0x50,
+	0x61, 0x63, 0x6b, 0x65, 0x74, 0x48, 0x00, 0x52, 0x06, 0x70, 0x61, 0x63, 0x6b, 0x65, 0x74, 0x88,
+	0x01, 0x01, 0x12, 0x24, 0x0a, 0x06, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x73, 0x18, 0x04, 0x20, 0x03,
+	0x28, 0x0b, 0x32, 0x0c, 0x2e, 0x6c, 0x69, 0x62, 0x61, 0x76, 0x2e, 0x46, 0x72, 0x61, 0x6d, 0x65,
+	0x52, 0x06, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x73, 0x12, 0x2c, 0x0a, 0x12, 0x70, 0x69, 0x70, 0x65,
+	0x6c, 0x69, 0x6e, 0x65, 0x5f, 0x73, 0x69, 0x64, 0x65, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x18, 0x05,
+	0x20, 0x01, 0x28, 0x0c, 0x52, 0x10, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x53, 0x69,
+	0x64, 0x65, 0x44, 0x61, 0x74, 0x61, 0x42, 0x09, 0x0a, 0x07, 0x5f, 0x70, 0x61, 0x63, 0x6b, 0x65,
+	0x74, 0x2a, 0x7d, 0x0a, 0x10, 0x4d, 0x6f, 0x6e, 0x69, 0x74, 0x6f, 0x72, 0x45, 0x76, 0x65, 0x6e,
+	0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x18, 0x0a, 0x14, 0x55, 0x4e, 0x44, 0x45, 0x46, 0x49, 0x4e,
+	0x45, 0x44, 0x5f, 0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45, 0x10, 0x00, 0x12,
+	0x16, 0x0a, 0x12, 0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x52, 0x45,
+	0x43, 0x45, 0x49, 0x56, 0x45, 0x10, 0x01, 0x12, 0x13, 0x0a, 0x0f, 0x45, 0x56, 0x45, 0x4e, 0x54,
+	0x5f, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x53, 0x45, 0x4e, 0x44, 0x10, 0x02, 0x12, 0x22, 0x0a, 0x1d,
+	0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x4b, 0x45, 0x52, 0x4e, 0x45,
+	0x4c, 0x5f, 0x4f, 0x55, 0x54, 0x50, 0x55, 0x54, 0x5f, 0x53, 0x45, 0x4e, 0x44, 0x10, 0x80, 0x01,
+	0x42, 0x42, 0x5a, 0x40, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x78,
+	0x61, 0x69, 0x6f, 0x6e, 0x61, 0x72, 0x6f, 0x2d, 0x67, 0x6f, 0x2f, 0x61, 0x76, 0x70, 0x69, 0x70,
+	0x65, 0x6c, 0x69, 0x6e, 0x65, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x61,
+	0x76, 0x70, 0x69, 0x70, 0x65, 0x6c, 0x69, 0x6e, 0x65, 0x3b, 0x61, 0x76, 0x70, 0x69, 0x70, 0x65,
+	0x6c, 0x69, 0x6e, 0x65, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 })
 
 var (
@@ -1287,57 +1529,67 @@ func file_avpipeline_proto_rawDescGZIP() []byte {
 	return file_avpipeline_proto_rawDescData
 }
 
-var file_avpipeline_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_avpipeline_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_avpipeline_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_avpipeline_proto_goTypes = []any{
-	(*Node)(nil),                                   // 0: avpipeline.Node
-	(*NodeCounters)(nil),                           // 1: avpipeline.NodeCounters
-	(*NodeCountersSection)(nil),                    // 2: avpipeline.NodeCountersSection
-	(*NodeCountersSubSection)(nil),                 // 3: avpipeline.NodeCountersSubSection
-	(*NodeCountersItem)(nil),                       // 4: avpipeline.NodeCountersItem
-	(*Object)(nil),                                 // 5: avpipeline.Object
-	(*Frame)(nil),                                  // 6: avpipeline.Frame
-	(*AutoBitrateCalculator)(nil),                  // 7: avpipeline.AutoBitrateCalculator
-	(*AutoBitRateCalculatorThresholds)(nil),        // 8: avpipeline.AutoBitRateCalculatorThresholds
-	(*MovingAverageConfigMAMA)(nil),                // 9: avpipeline.MovingAverageConfigMAMA
-	(*MovingAverageConfigOther)(nil),               // 10: avpipeline.MovingAverageConfigOther
-	(*MovingAverageConfig)(nil),                    // 11: avpipeline.MovingAverageConfig
-	(*AutoBitrateCalculatorLogK)(nil),              // 12: avpipeline.AutoBitrateCalculatorLogK
-	(*AutoBitrateCalculatorQueueSizeGapDecay)(nil), // 13: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay
-	(*libav.Frame)(nil),                            // 14: libav.Frame
-	(*libav.CodecContext)(nil),                     // 15: libav.CodecContext
-	(*libav.Rational)(nil),                         // 16: libav.Rational
+	(MonitorEventType)(0),                          // 0: avpipeline.MonitorEventType
+	(*Node)(nil),                                   // 1: avpipeline.Node
+	(*NodeCounters)(nil),                           // 2: avpipeline.NodeCounters
+	(*NodeCountersSection)(nil),                    // 3: avpipeline.NodeCountersSection
+	(*NodeCountersSubSection)(nil),                 // 4: avpipeline.NodeCountersSubSection
+	(*NodeCountersItem)(nil),                       // 5: avpipeline.NodeCountersItem
+	(*Object)(nil),                                 // 6: avpipeline.Object
+	(*Frame)(nil),                                  // 7: avpipeline.Frame
+	(*AutoBitrateCalculator)(nil),                  // 8: avpipeline.AutoBitrateCalculator
+	(*AutoBitRateCalculatorThresholds)(nil),        // 9: avpipeline.AutoBitRateCalculatorThresholds
+	(*MovingAverageConfigMAMA)(nil),                // 10: avpipeline.MovingAverageConfigMAMA
+	(*MovingAverageConfigOther)(nil),               // 11: avpipeline.MovingAverageConfigOther
+	(*MovingAverageConfig)(nil),                    // 12: avpipeline.MovingAverageConfig
+	(*AutoBitrateCalculatorLogK)(nil),              // 13: avpipeline.AutoBitrateCalculatorLogK
+	(*AutoBitrateCalculatorQueueSizeGapDecay)(nil), // 14: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay
+	(*MonitorRequest)(nil),                         // 15: avpipeline.MonitorRequest
+	(*MonitorEvent)(nil),                           // 16: avpipeline.MonitorEvent
+	(*libav.Frame)(nil),                            // 17: libav.Frame
+	(*libav.CodecContext)(nil),                     // 18: libav.CodecContext
+	(*libav.Rational)(nil),                         // 19: libav.Rational
+	(*libav.Stream)(nil),                           // 20: libav.Stream
+	(*libav.Packet)(nil),                           // 21: libav.Packet
 }
 var file_avpipeline_proto_depIdxs = []int32{
-	1,  // 0: avpipeline.Node.counters:type_name -> avpipeline.NodeCounters
-	0,  // 1: avpipeline.Node.TODO_publishingNodes:type_name -> avpipeline.Node
-	0,  // 2: avpipeline.Node.consumingNodes:type_name -> avpipeline.Node
-	2,  // 3: avpipeline.NodeCounters.received:type_name -> avpipeline.NodeCountersSection
-	2,  // 4: avpipeline.NodeCounters.processed:type_name -> avpipeline.NodeCountersSection
-	2,  // 5: avpipeline.NodeCounters.missed:type_name -> avpipeline.NodeCountersSection
-	2,  // 6: avpipeline.NodeCounters.generated:type_name -> avpipeline.NodeCountersSection
-	2,  // 7: avpipeline.NodeCounters.omitted:type_name -> avpipeline.NodeCountersSection
-	2,  // 8: avpipeline.NodeCounters.sent:type_name -> avpipeline.NodeCountersSection
-	3,  // 9: avpipeline.NodeCountersSection.packets:type_name -> avpipeline.NodeCountersSubSection
-	3,  // 10: avpipeline.NodeCountersSection.frames:type_name -> avpipeline.NodeCountersSubSection
-	4,  // 11: avpipeline.NodeCountersSubSection.unknown:type_name -> avpipeline.NodeCountersItem
-	4,  // 12: avpipeline.NodeCountersSubSection.other:type_name -> avpipeline.NodeCountersItem
-	4,  // 13: avpipeline.NodeCountersSubSection.video:type_name -> avpipeline.NodeCountersItem
-	4,  // 14: avpipeline.NodeCountersSubSection.audio:type_name -> avpipeline.NodeCountersItem
-	14, // 15: avpipeline.Frame.frame:type_name -> libav.Frame
-	15, // 16: avpipeline.Frame.codecContext:type_name -> libav.CodecContext
-	16, // 17: avpipeline.Frame.timeBase:type_name -> libav.Rational
-	8,  // 18: avpipeline.AutoBitrateCalculator.thresholds:type_name -> avpipeline.AutoBitRateCalculatorThresholds
-	12, // 19: avpipeline.AutoBitrateCalculator.logK:type_name -> avpipeline.AutoBitrateCalculatorLogK
-	13, // 20: avpipeline.AutoBitrateCalculator.queueSizeGapDecay:type_name -> avpipeline.AutoBitrateCalculatorQueueSizeGapDecay
-	9,  // 21: avpipeline.MovingAverageConfig.mama:type_name -> avpipeline.MovingAverageConfigMAMA
-	10, // 22: avpipeline.MovingAverageConfig.other:type_name -> avpipeline.MovingAverageConfigOther
-	11, // 23: avpipeline.AutoBitrateCalculatorLogK.movingAverage:type_name -> avpipeline.MovingAverageConfig
-	11, // 24: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay.derivativeSmoothed:type_name -> avpipeline.MovingAverageConfig
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	2,  // 0: avpipeline.Node.counters:type_name -> avpipeline.NodeCounters
+	1,  // 1: avpipeline.Node.TODO_publishingNodes:type_name -> avpipeline.Node
+	1,  // 2: avpipeline.Node.consumingNodes:type_name -> avpipeline.Node
+	3,  // 3: avpipeline.NodeCounters.received:type_name -> avpipeline.NodeCountersSection
+	3,  // 4: avpipeline.NodeCounters.processed:type_name -> avpipeline.NodeCountersSection
+	3,  // 5: avpipeline.NodeCounters.missed:type_name -> avpipeline.NodeCountersSection
+	3,  // 6: avpipeline.NodeCounters.generated:type_name -> avpipeline.NodeCountersSection
+	3,  // 7: avpipeline.NodeCounters.omitted:type_name -> avpipeline.NodeCountersSection
+	3,  // 8: avpipeline.NodeCounters.sent:type_name -> avpipeline.NodeCountersSection
+	4,  // 9: avpipeline.NodeCountersSection.packets:type_name -> avpipeline.NodeCountersSubSection
+	4,  // 10: avpipeline.NodeCountersSection.frames:type_name -> avpipeline.NodeCountersSubSection
+	5,  // 11: avpipeline.NodeCountersSubSection.unknown:type_name -> avpipeline.NodeCountersItem
+	5,  // 12: avpipeline.NodeCountersSubSection.other:type_name -> avpipeline.NodeCountersItem
+	5,  // 13: avpipeline.NodeCountersSubSection.video:type_name -> avpipeline.NodeCountersItem
+	5,  // 14: avpipeline.NodeCountersSubSection.audio:type_name -> avpipeline.NodeCountersItem
+	17, // 15: avpipeline.Frame.frame:type_name -> libav.Frame
+	18, // 16: avpipeline.Frame.codecContext:type_name -> libav.CodecContext
+	19, // 17: avpipeline.Frame.timeBase:type_name -> libav.Rational
+	9,  // 18: avpipeline.AutoBitrateCalculator.thresholds:type_name -> avpipeline.AutoBitRateCalculatorThresholds
+	13, // 19: avpipeline.AutoBitrateCalculator.logK:type_name -> avpipeline.AutoBitrateCalculatorLogK
+	14, // 20: avpipeline.AutoBitrateCalculator.queueSizeGapDecay:type_name -> avpipeline.AutoBitrateCalculatorQueueSizeGapDecay
+	10, // 21: avpipeline.MovingAverageConfig.mama:type_name -> avpipeline.MovingAverageConfigMAMA
+	11, // 22: avpipeline.MovingAverageConfig.other:type_name -> avpipeline.MovingAverageConfigOther
+	12, // 23: avpipeline.AutoBitrateCalculatorLogK.movingAverage:type_name -> avpipeline.MovingAverageConfig
+	12, // 24: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay.derivativeSmoothed:type_name -> avpipeline.MovingAverageConfig
+	0,  // 25: avpipeline.MonitorRequest.event_type:type_name -> avpipeline.MonitorEventType
+	20, // 26: avpipeline.MonitorEvent.stream:type_name -> libav.Stream
+	21, // 27: avpipeline.MonitorEvent.packet:type_name -> libav.Packet
+	17, // 28: avpipeline.MonitorEvent.frames:type_name -> libav.Frame
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_avpipeline_proto_init() }
@@ -1355,18 +1607,20 @@ func file_avpipeline_proto_init() {
 		(*MovingAverageConfig_Mama)(nil),
 		(*MovingAverageConfig_Other)(nil),
 	}
+	file_avpipeline_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_avpipeline_proto_rawDesc), len(file_avpipeline_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   14,
+			NumEnums:      1,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_avpipeline_proto_goTypes,
 		DependencyIndexes: file_avpipeline_proto_depIdxs,
+		EnumInfos:         file_avpipeline_proto_enumTypes,
 		MessageInfos:      file_avpipeline_proto_msgTypes,
 	}.Build()
 	File_avpipeline_proto = out.File

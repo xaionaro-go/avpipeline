@@ -15,6 +15,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
+	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -24,7 +25,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/stream"
-	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
@@ -52,11 +53,11 @@ type OutputConfigWaitForOutputStreams struct {
 	MinStreams       uint
 	MinStreamsVideo  uint
 	MinStreamsAudio  uint
-	VideoBeforeAudio bool // this is a hack required to make MediaMTX see video tracks
+	VideoBeforeAudio *bool
 }
 
 type OutputConfig struct {
-	CustomOptions  types.DictionaryItems
+	CustomOptions  globaltypes.DictionaryItems
 	AsyncOpen      bool
 	OnOpened       func(context.Context, *Output) error
 	SendBufferSize uint
@@ -64,6 +65,14 @@ type OutputConfig struct {
 	WaitForOutputStreams *OutputConfigWaitForOutputStreams
 
 	ErrorOnNSequentialInvalidDTS uint
+}
+
+type OutputPacketMonitor interface {
+	ObserveOutputPacket(
+		ctx context.Context,
+		stream *astiav.Stream,
+		output *astiav.Packet,
+	)
 }
 
 type OutputStream struct {
@@ -104,6 +113,7 @@ type Output struct {
 	Config        OutputConfig
 
 	SequentialInvalidPacketsCount uint
+	OutputMonitor                 xatomic.Value[OutputPacketMonitor]
 
 	ioContext *astiav.IOContext
 	proxy     *proxy.TCPProxy
@@ -234,35 +244,39 @@ func NewOutputFromURL(
 		}
 	}
 
-	func() {
-		switch url.Scheme {
-		case "rtmp", "rtmps":
-			if o.Dictionary == nil {
-				o.Dictionary = astiav.NewDictionary()
-				setFinalizerFree(ctx, o.Dictionary)
-			}
-
-			for _, opt := range cfg.CustomOptions {
-				if opt.Key == "rtmp_app" {
-					continue // is already set, nothing is required from us here
-				}
-			}
-
-			if outputSetRTMPAppName {
-				logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
-				o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
-			}
-			o.Dictionary.Set("rtmp_live", "live", 0)
-			o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
-		case "rtsp", "srt":
-			if o.Dictionary == nil {
-				o.Dictionary = astiav.NewDictionary()
-				setFinalizerFree(ctx, o.Dictionary)
-			}
-
-			o.Dictionary.Set("live", "1", 0)
+	switch url.Scheme {
+	case "rtmp", "rtmps":
+		if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
+			cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(true)
 		}
-	}()
+		if o.Dictionary == nil {
+			o.Dictionary = astiav.NewDictionary()
+			setFinalizerFree(ctx, o.Dictionary)
+		}
+
+		for _, opt := range cfg.CustomOptions {
+			if opt.Key == "rtmp_app" {
+				continue // is already set, nothing is required from us here
+			}
+		}
+
+		if outputSetRTMPAppName {
+			logger.Debugf(ctx, "set 'rtmp_app':'%s'", rtmpAppName)
+			o.Dictionary.Set("rtmp_app", rtmpAppName, 0)
+		}
+		o.Dictionary.Set("rtmp_live", "live", 0)
+		o.Dictionary.Set("flvflags", "+no_sequence_end+no_metadata+no_duration_filesize", 0)
+	case "rtsp", "srt":
+		if o.Dictionary == nil {
+			o.Dictionary = astiav.NewDictionary()
+			setFinalizerFree(ctx, o.Dictionary)
+		}
+
+		o.Dictionary.Set("live", "1", 0)
+	}
+	if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
+		cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(false)
+	}
 
 	logger.Debugf(ctx, "isAsync: %t", cfg.AsyncOpen)
 	if cfg.AsyncOpen {
@@ -634,6 +648,10 @@ func (o *Output) SendInputFrame(
 	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
 }
 
+func (o *Output) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(o)
+}
+
 func (o *Output) String() string {
 	return fmt.Sprintf("Output(%s)", o.URL)
 }
@@ -682,7 +700,7 @@ func (o *Output) send(
 			return nil
 		}
 	}
-	if o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsVideoCount > 0 {
+	if *o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsVideoCount > 0 {
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
@@ -791,6 +809,29 @@ func (o *Output) GetLatestSentDTS(
 	})
 }
 
+type OutputMonitorer interface {
+	SetOutputMonitor(
+		ctx context.Context,
+		monitor OutputPacketMonitor,
+	)
+	GetOutputMonitor(
+		ctx context.Context,
+	) OutputPacketMonitor
+}
+
+func (o *Output) SetOutputMonitor(
+	ctx context.Context,
+	monitor OutputPacketMonitor,
+) {
+	o.OutputMonitor.Store(monitor)
+}
+
+func (o *Output) GetOutputMonitor(
+	ctx context.Context,
+) OutputPacketMonitor {
+	return o.OutputMonitor.Load()
+}
+
 func (o *Output) doWritePacket(
 	ctx context.Context,
 	pkt *astiav.Packet,
@@ -895,6 +936,10 @@ func (o *Output) doWritePacket(
 			pkt.Flags(),
 			len(pkt.Data()),
 		)
+	}
+
+	if outputMonitor := o.OutputMonitor.Load(); outputMonitor != nil {
+		outputMonitor.ObserveOutputPacket(ctx, outputStream.Stream, pkt)
 	}
 
 	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()

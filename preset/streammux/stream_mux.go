@@ -118,8 +118,8 @@ func NewWithCustomData[C any](
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
 		s.InputAudioOnly = newInput[C](ctx, s, InputTypeAudioOnly)
 		s.InputVideoOnly = newInput[C](ctx, s, InputTypeVideoOnly)
-		s.InputAll.Node.AddPushPacketsTo(s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
-		s.InputAll.Node.AddPushPacketsTo(s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
+		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
+		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
 	}
 	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
 	s.CurrentOtherInputBitRate.Store(0)
@@ -240,7 +240,7 @@ func (s *StreamMux[C]) initSwitches(
 					return
 				}
 
-				if err := node.RemovePushPacketsTo(ctx, outputPrev.InputFrom, outputPrev.Input()); err != nil {
+				if err := outputPrev.InputFrom.RemovePushPacketsTo(ctx, outputPrev.Input()); err != nil {
 					logger.Errorf(ctx, "Switch[%s]: unable to remove push packets to the output %d: %v", inputType, from, err)
 				}
 
@@ -548,7 +548,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	s.Outputs.Store(outputID, output)
 	s.OutputsMap.Store(outputKey, output)
 
-	input.Node.AddPushPacketsTo(output.Input())
+	input.Node.AddPushPacketsTo(ctx, output.Input())
 	logger.Debugf(ctx, "initialized new output %d:%s", output.ID, outputKey)
 	return output, true, nil
 }

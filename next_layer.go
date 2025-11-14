@@ -1,6 +1,7 @@
 package avpipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,8 +11,11 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-func NextLayer[T node.Abstract](nodes ...T) ([]node.Abstract, error) {
-	preResult, err := nextLayer(nodes...)
+func NextLayer[T node.Abstract](
+	ctx context.Context,
+	nodes ...T,
+) ([]node.Abstract, error) {
+	preResult, err := nextLayer(ctx, nodes...)
 
 	var result []node.Abstract
 	isSet := map[node.Abstract]struct{}{}
@@ -32,12 +36,15 @@ type nodeAbstractWithItemType struct {
 	ItemType reflect.Type
 }
 
-func nextLayer[T node.Abstract](nodes ...T) ([]nodeAbstractWithItemType, error) {
+func nextLayer[T node.Abstract](
+	ctx context.Context,
+	nodes ...T,
+) ([]nodeAbstractWithItemType, error) {
 	isSet := map[nodeAbstractWithItemType]struct{}{}
 	var nextNodes []nodeAbstractWithItemType
 	var errs []error
 	for _, n := range nodes {
-		for _, pushTo := range n.GetPushPacketsTos() {
+		for _, pushTo := range n.GetPushPacketsTos(ctx) {
 			r := nodeAbstractWithItemType{
 				Node:     pushTo.Node,
 				ItemType: reflect.TypeOf((*packet.Input)(nil)),
@@ -52,7 +59,7 @@ func nextLayer[T node.Abstract](nodes ...T) ([]nodeAbstractWithItemType, error) 
 			}
 			nextNodes = append(nextNodes, r)
 		}
-		for _, pushTo := range n.GetPushFramesTos() {
+		for _, pushTo := range n.GetPushFramesTos(ctx) {
 			r := nodeAbstractWithItemType{
 				Node:     pushTo.Node,
 				ItemType: reflect.TypeOf((*frame.Input)(nil)),

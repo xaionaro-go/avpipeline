@@ -88,7 +88,7 @@ func (h *AutoHeaders) sendInputPacketLocked(
 		return fmt.Errorf("unable to detect appropriate fixer kernel: %w", err)
 	}
 	if newKernel == nil {
-		newKernel = kernel.Passthrough{} // no fixing is needed
+		newKernel = &kernel.Passthrough{} // no fixing is needed
 	}
 
 	// so that we detect the new kernel only once and after that use it directly:

@@ -2,13 +2,13 @@ syntax = "proto3";
 package libav;
 option go_package = "github.com/xaionaro-go/avpipeline/protobuf/libav;libav";
 
-message SideDataElement {
+message PacketSideDataElement {
   uint32 type = 1;
   bytes data = 2;
 }
 
-message SideData {
-  repeated SideDataElement elements = 1;
+message PacketSideData {
+  repeated PacketSideDataElement elements = 1;
 }
 
 message Rational {
@@ -22,7 +22,7 @@ message Packet {
   bytes data = 3;
   int32 streamIndex = 4;
   uint32 flags = 5;
-  SideData sideData = 6;
+  PacketSideData sideData = 6;
   int64 duration = 7;
   int64 pos = 8;
   Rational timeBase = 9;
@@ -39,7 +39,7 @@ message CodecParameters {
   uint32 codecID = 2;
   uint32 codecTag = 3;
   bytes extraData = 4;
-  SideData codedSideData = 5;
+  PacketSideData codedSideData = 5;
   int32 format = 6;
   int64 bitRate = 7;
   int32 bitsPerCodecSample = 8;
@@ -87,16 +87,24 @@ message Stream {
   Dictionary Metadata = 10;
   Rational avgFrameRate = 11;
   Packet AttachedPic = 12;
-  SideData SideData = 13;
+  PacketSideData SideData = 13;
   int32 eventFlags = 14;
   Rational rFrameRate = 15;
   int32 ptsWrapBits = 16;
 }
 
+message FrameSideData {
+  uint32 type = 1;
+  bytes data = 2;
+  uint64 size = 3;
+  Dictionary metadata = 4;
+  bytes buf = 5;
+}
+
 message Frame {
-  repeated bytes data = 1;
-  repeated int32 linesize = 2;
-  repeated bytes extendedData = 3;
+  bytes data = 1;
+  repeated uint32 linesize = 2;
+  bytes extendedData = 3;
   int32 width = 4;
   int32 height = 5;
   int32 nbSamples = 6;
@@ -113,7 +121,7 @@ message Frame {
   int32 topFieldFirst = 17;
   int32 paletteHasChanged = 18;
   int32 sampleRate = 19;
-  SideData sideData = 20;
+  FrameSideData sideData = 20;
   int32 flags = 21;
   uint32 colorRange = 22;
   uint32 colorTRC = 23;
@@ -337,7 +345,7 @@ typedef struct AVCodecInternal {
  } AVCodecInternal;
 */ 
 
-message f {
+message FormatContext {
 	repeated Stream streams = 7;
 }
 

@@ -524,9 +524,10 @@ func newCodec(
 		c.codecContext.SetMaxBFrames(int(bFrames))
 		c.codecContext.SetGopSize(int(gopSize))
 		c.codecContext.SetSampleAspectRatio(codecParameters.SampleAspectRatio())
-		logger.Tracef(ctx,
-			"pixel_format: %s; frame_rate: %s; device_type: %s; hw_pixel_format: %s",
+		logger.Debugf(ctx,
+			"pixel_format: %s; frame_rate: %s; gop_size: %d; device_type: %s; hw_pixel_format: %s",
 			c.codecContext.PixelFormat(), c.codecContext.Framerate(),
+			gopSize,
 			hardwareDeviceType, c.hardwarePixelFormat,
 		)
 	case astiav.MediaTypeAudio:

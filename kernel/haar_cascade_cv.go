@@ -14,6 +14,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"gocv.io/x/gocv"
 )
 
@@ -81,6 +82,10 @@ func (c *HaarCascade) SendInputFrame(
 	case outputFramesCh <- outputFrame:
 	}
 	return fmt.Errorf("not implemented, yet")
+}
+
+func (c *HaarCascade) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(c)
 }
 
 func (c *HaarCascade) String() string {

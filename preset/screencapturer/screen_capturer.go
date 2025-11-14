@@ -62,7 +62,7 @@ func NewWithCustomData[C any](
 	decoderKernel := kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx, nil))
 	decoderNode := node.NewWithCustomDataFromKernel[C](ctx, decoderKernel)
 
-	inputNode.AddPushPacketsTo(decoderNode)
+	inputNode.AddPushPacketsTo(ctx, decoderNode)
 
 	return &ScreenCapturer[C]{
 		InputNode:   inputNode,

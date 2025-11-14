@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -336,7 +337,7 @@ func (m *MapStreamIndices) sendInputFrame(
 			ctx,
 			outputStreamIndex,
 			input.CodecParameters,
-			input.TimeBase,
+			input.StreamInfo.TimeBase,
 		)
 		if err != nil {
 			return fmt.Errorf("unable to get an output stream: %w", err)
@@ -349,7 +350,7 @@ func (m *MapStreamIndices) sendInputFrame(
 				input.CodecParameters,
 				outputStream.Index(),
 				len(m.outputStreams),
-				input.TimeBase,
+				input.StreamInfo.TimeBase,
 				input.StreamInfo.Duration,
 				input.PipelineSideData,
 			),
@@ -363,6 +364,10 @@ func (m *MapStreamIndices) sendInputFrame(
 
 	}
 	return ctx.Err()
+}
+
+func (m *MapStreamIndices) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(m)
 }
 
 func (m *MapStreamIndices) String() string {

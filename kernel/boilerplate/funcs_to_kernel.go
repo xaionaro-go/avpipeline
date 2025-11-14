@@ -7,6 +7,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type FuncsToKernel struct {
@@ -86,6 +87,10 @@ func (f *FuncsToKernel) SendInputFrame(
 		return nil
 	}
 	return f.SendInputFrameFunc(ctx, input, outputPacketsCh, outputFramesCh)
+}
+
+func (f *FuncsToKernel) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(f)
 }
 
 func (f *FuncsToKernel) String() string {

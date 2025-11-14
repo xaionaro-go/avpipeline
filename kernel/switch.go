@@ -15,6 +15,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -97,6 +98,10 @@ func (sw *Switch[T]) SetKernelIndex(
 
 func (sw *Switch[T]) GetKernel(ctx context.Context) Abstract {
 	return sw.Kernels[sw.GetKernelIndex(ctx)]
+}
+
+func (sw *Switch[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(sw)
 }
 
 func (sw *Switch[T]) String() string {

@@ -75,9 +75,9 @@ func serve[T node.Abstract](
 			childrenCtx, childrenCancelFn := context.WithCancel(childrenCtx)
 
 			pushPacketsChangeChan := n.GetChangeChanPushPacketsTo()
-			currentPushPacketsTos := n.GetPushPacketsTos()
+			currentPushPacketsTos := n.GetPushPacketsTos(ctx)
 			pushFramesChangeChan := n.GetChangeChanPushFramesTo()
-			currentPushFramesTos := n.GetPushFramesTos()
+			currentPushFramesTos := n.GetPushFramesTos(ctx)
 
 			nodesWG.Add(1)
 			observability.Go(ctx, func(ctx context.Context) {
@@ -89,7 +89,7 @@ func serve[T node.Abstract](
 						return
 					case <-pushPacketsChangeChan:
 						pushPacketsChangeChan = n.GetChangeChanPushPacketsTo()
-						newPushPacketsTos := n.GetPushPacketsTos()
+						newPushPacketsTos := n.GetPushPacketsTos(ctx)
 						newNodes := newPushPacketsTos.Nodes().Without(currentPushPacketsTos.Nodes())
 						logger.Tracef(ctx, "Serve[%s]: push packets change; new nodes count: %d", nodeKey, len(newNodes))
 						for _, newNode := range newNodes {
@@ -98,7 +98,7 @@ func serve[T node.Abstract](
 						currentPushPacketsTos = newPushPacketsTos
 					case <-pushFramesChangeChan:
 						pushFramesChangeChan = n.GetChangeChanPushFramesTo()
-						newPushFramesTos := n.GetPushFramesTos()
+						newPushFramesTos := n.GetPushFramesTos(ctx)
 						newNodes := newPushFramesTos.Nodes().Without(currentPushFramesTos.Nodes())
 						logger.Tracef(ctx, "Serve[%s]: push frames change; new nodes count: %d", nodeKey, len(newNodes))
 						for _, newNode := range newNodes {

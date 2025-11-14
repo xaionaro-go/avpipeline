@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -33,25 +34,29 @@ func origNode(n Abstract) Abstract {
 }
 
 func (s Nodes[T]) StringRecursive() string {
+	ctx := context.Background()
 	var results []string
 	for _, n := range s {
 		isSet := map[Abstract]struct{}{}
 		var pushToStrs []string
-		for _, pushTo := range origNode(n).GetPushPacketsTos() {
-			if _, ok := isSet[pushTo.Node]; ok {
-				continue
+		origNode(n).WithPushPacketsTos(ctx, func(ctx context.Context, pushTos *PushPacketsTos) {
+			for _, pushTo := range *pushTos {
+				if _, ok := isSet[pushTo.Node]; ok {
+					continue
+				}
+				isSet[pushTo.Node] = struct{}{}
+				pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 			}
-			isSet[pushTo.Node] = struct{}{}
-			pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
-		}
-		for _, pushTo := range origNode(n).GetPushFramesTos() {
-			if _, ok := isSet[pushTo.Node]; ok {
-				continue
+		})
+		origNode(n).WithPushFramesTos(ctx, func(ctx context.Context, pushTos *PushFramesTos) {
+			for _, pushTo := range *pushTos {
+				if _, ok := isSet[pushTo.Node]; ok {
+					continue
+				}
+				isSet[pushTo.Node] = struct{}{}
+				pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
 			}
-			isSet[pushTo.Node] = struct{}{}
-			pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
-		}
-
+		})
 		switch len(pushToStrs) {
 		case 0:
 			results = append(results, n.GetProcessor().String())

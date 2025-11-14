@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -105,6 +106,10 @@ func (d *Decoder[DF]) close(ctx context.Context) (_err error) {
 		delete(d.Decoders, key)
 	}
 	return nil
+}
+
+func (d *Decoder[DF]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(d)
 }
 
 func (d *Decoder[DF]) String() string {

@@ -118,3 +118,26 @@ message AutoBitrateCalculatorQueueSizeGapDecay {
   uint64 increaseInertiaMS = 4;
   MovingAverageConfig derivativeSmoothed = 5;
 }
+
+enum MonitorEventType {
+  UNDEFINED_EVENT_TYPE = 0;
+  EVENT_TYPE_RECEIVE = 1;
+  EVENT_TYPE_SEND = 2;
+  EVENT_TYPE_KERNEL_OUTPUT_SEND = 128;
+}
+
+message MonitorRequest {
+  uint64 node_id = 1;
+  MonitorEventType event_type = 2;
+  bool include_packet_payload = 3;
+  bool include_frame_payload = 4;
+  bool do_decode = 5;
+}
+
+message MonitorEvent {
+  uint64 source_kernel_id = 1;
+  libav.Stream stream = 2;
+  optional libav.Packet packet = 3;
+  repeated libav.Frame frames = 4;
+  bytes pipeline_side_data = 5;
+}

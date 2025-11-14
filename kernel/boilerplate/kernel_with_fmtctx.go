@@ -11,6 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -41,6 +42,10 @@ func NewKernelWithFormatContext[H CustomHandlerWithContextFormat](
 	}
 	setFinalizerFree(ctx, k.FormatContext)
 	return k
+}
+
+func (k *BaseWithFormatContext[H]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(k)
 }
 
 func (k *BaseWithFormatContext[H]) WithOutputFormatContext(

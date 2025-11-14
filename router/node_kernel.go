@@ -15,6 +15,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -214,6 +215,10 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	input.SetPTS(newPTS)
 	input.SetDTS(input.GetDTS() + ptsOffset)
 	return nil
+}
+
+func (k *NodeKernel) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(k)
 }
 
 func (k *NodeKernel) String() string {

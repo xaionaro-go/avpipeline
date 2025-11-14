@@ -18,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
@@ -382,6 +383,10 @@ func (i *Input) SendInputFrame(
 	outputFramesCh chan<- frame.Output,
 ) error {
 	return fmt.Errorf("cannot send frames to an Input")
+}
+
+func (i *Input) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(i)
 }
 
 func (i *Input) String() string {

@@ -138,8 +138,8 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 	}
 
 	fwd.ChainInput = &nodewrapper.NoServe[*chainInputNode]{Node: fwd.Chain.Input()}
-	fwd.Input.AddPushPacketsTo(fwd.ChainInput)
-	fwd.Input.AddPushFramesTo(fwd.ChainInput)
+	fwd.Input.AddPushPacketsTo(ctx, fwd.ChainInput)
+	fwd.Input.AddPushFramesTo(ctx, fwd.ChainInput)
 
 	observability.Go(ctx, func(ctx context.Context) {
 		logger.Debugf(ctx, "waiter")
@@ -203,8 +203,8 @@ func (fwd *StreamForwarderRecoding[CS, PS]) stop(
 		Name string
 		Err  error
 	}{
-		{Name: "packet", Err: node.RemovePushPacketsTo(ctx, fwd.Input, fwd.ChainInput)},
-		{Name: "frame", Err: node.RemovePushFramesTo(ctx, fwd.Input, fwd.ChainInput)},
+		{Name: "packet", Err: fwd.Input.RemovePushPacketsTo(ctx, fwd.ChainInput)},
+		{Name: "frame", Err: fwd.Input.RemovePushFramesTo(ctx, fwd.ChainInput)},
 	} {
 		if c.Err != nil {
 			if fwd.Input == nil {

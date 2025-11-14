@@ -49,7 +49,7 @@ func (f *Commons) GetMediaType() astiav.MediaType {
 }
 
 func (f *Commons) GetTimeBase() astiav.Rational {
-	return f.TimeBase
+	return f.StreamInfo.TimeBase
 }
 
 func (f *Commons) GetSize() int {
@@ -61,16 +61,16 @@ func (f *Commons) GetStreamIndex() int {
 }
 
 func (f *Commons) GetDurationAsDuration() time.Duration {
-	return avconv.Duration(f.StreamInfo.Duration, f.TimeBase)
+	return avconv.Duration(f.StreamInfo.Duration, f.StreamInfo.TimeBase)
 }
 
 func (f *Commons) GetDTSAsDuration() time.Duration {
-	return avconv.Duration(f.PktDts(), f.TimeBase)
+	return avconv.Duration(f.PktDts(), f.StreamInfo.TimeBase)
 
 }
 
 func (f *Commons) SetTimeBase(v astiav.Rational) {
-	f.TimeBase = v
+	f.StreamInfo.TimeBase = v
 }
 
 func (f *Commons) GetDuration() int64 {
@@ -98,7 +98,7 @@ func (f *Commons) SetDTS(v int64) {
 }
 
 func (f *Commons) GetPTSAsDuration() time.Duration {
-	return avconv.Duration(f.Frame.Pts(), f.TimeBase)
+	return avconv.Duration(f.Frame.Pts(), f.StreamInfo.TimeBase)
 }
 
 func (f *Commons) GetResolution() codectypes.Resolution {

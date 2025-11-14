@@ -11,6 +11,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -153,6 +154,10 @@ func prepareError(ctx context.Context, err error, action string) error {
 	default:
 		return fmt.Errorf("unable to '%s': %w", action, err)
 	}
+}
+
+func (k *Base[H]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(k)
 }
 
 func (k *Base[H]) String() string {

@@ -260,6 +260,7 @@ func newOutput[C any](
 	}
 
 	o.InputFilter.AddPushPacketsTo(
+		ctx,
 		inputFixer,
 		packetfiltercondition.Packet{Condition: o.InputThrottler},
 		packetfiltercondition.Function(func(
@@ -278,19 +279,17 @@ func newOutput[C any](
 			return true
 		}),
 	)
-	o.InputFixer.AddPushPacketsTo(o.RecoderNode)
-	o.RecoderNode.AddPushPacketsTo(
-		o.MapIndices,
-	)
-	o.MapIndices.AddPushPacketsTo(outputFixer)
-	o.SendingFixer.AddPushPacketsTo(o.SendingSyncer)
+	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode)
+	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices)
+	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
+	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer)
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
 		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
 	if monotonicPTS == nil {
 		monotonicPTS = packetcondition.Static(true)
 	}
-	o.SendingSyncer.AddPushPacketsTo(o.SendingNode,
+	o.SendingSyncer.AddPushPacketsTo(ctx, o.SendingNode,
 		packetfiltercondition.Packet{Condition: packetcondition.And{
 			monotonicPTS,
 			o.SendingThrottler,
@@ -483,8 +482,8 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 
 	var errs []error
 
-	o.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Static(false))
-	o.FirstNodeAfterFilter().SetInputFrameFilter(framefiltercondition.Static(false))
+	node.AppendInputPacketFilter(o.FirstNodeAfterFilter(), packetfiltercondition.Static(false))
+	node.AppendInputFrameFilter(o.FirstNodeAfterFilter(), framefiltercondition.Static(false))
 	if shouldDrain {
 		if err := o.DrainAfterFilter(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))

@@ -120,7 +120,7 @@ func TestRecoderNoFailure(t *testing.T) {
 			)
 			inputNode.PushPacketsTos.Add(recodingNode)
 			finalNode = recodingNode
-			finalNode.AddPushPacketsTo(node.NewFromKernel(
+			finalNode.AddPushPacketsTo(ctx, node.NewFromKernel(
 				ctx,
 				output,
 				processor.OptionQueueSizeInputPacket(600),

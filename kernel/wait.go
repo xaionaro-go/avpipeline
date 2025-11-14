@@ -10,6 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -119,6 +120,10 @@ func (w *Wait) sendInputFrame(
 
 	outputFramesCh <- output
 	return nil
+}
+
+func (w *Wait) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(w)
 }
 
 func (w *Wait) String() string {

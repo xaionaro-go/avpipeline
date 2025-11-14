@@ -454,7 +454,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	)
 
 	if passthroughMode != types.PassthroughModeNever {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
 			s.NodeRecoder,
 			packetfiltercondition.Packet{
 				Condition: packetcondition.And{
@@ -463,7 +463,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				},
 			},
 		)
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
 			nodeFilterThrottle,
 			packetfiltercondition.Packet{
 				Condition: packetcondition.And{
@@ -481,8 +481,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}
 	} else {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(s.NodeRecoder)
-		s.MapInputStreamIndicesNode.AddPushFramesTo(s.NodeRecoder)
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx, s.NodeRecoder)
+		s.MapInputStreamIndicesNode.AddPushFramesTo(ctx, s.NodeRecoder)
 	}
 
 	s.NodeStreamFixerMain = autofix.New(
@@ -502,8 +502,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			passthroughOutputReference,
 		)
 		if s.NodeStreamFixerPassthrough != nil {
-			nodeFilterThrottle.AddPushPacketsTo(s.NodeStreamFixerPassthrough)
-			nodeFilterThrottle.AddPushFramesTo(s.NodeStreamFixerPassthrough)
+			nodeFilterThrottle.AddPushPacketsTo(ctx, s.NodeStreamFixerPassthrough)
+			nodeFilterThrottle.AddPushFramesTo(ctx, s.NodeStreamFixerPassthrough)
 		}
 
 		if startWithPassthrough {
@@ -552,7 +552,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.MapOutputStreamIndices,
 				processor.DefaultOptionsOutput()...,
 			)
-			nodeMapStreamIndices.AddPushPacketsTo(outputMain)
+			nodeMapStreamIndices.AddPushPacketsTo(ctx, outputMain)
 			sinkMain, sinkPassthrough = nodeMapStreamIndices, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = nodeMapStreamIndices
@@ -575,25 +575,25 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
 		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain, condRecoder...)
-			s.NodeStreamFixerMain.AddPushPacketsTo(sinkMain)
+			s.NodeRecoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain, condRecoder...)
+			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, sinkMain)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(sinkMain, condRecoder...)
+			s.NodeRecoder.AddPushPacketsTo(ctx, sinkMain, condRecoder...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
-			s.NodeStreamFixerPassthrough.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
+			s.NodeStreamFixerPassthrough.AddPushPacketsTo(ctx, sinkPassthrough, condPassthrough...)
 		} else {
-			nodeFilterThrottle.AddPushPacketsTo(sinkPassthrough, condPassthrough...)
+			nodeFilterThrottle.AddPushPacketsTo(ctx, sinkPassthrough, condPassthrough...)
 		}
 	} else {
 		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(s.NodeStreamFixerMain)
-			s.NodeRecoder.AddPushFramesTo(s.NodeStreamFixerMain)
-			s.NodeStreamFixerMain.AddPushPacketsTo(outputMain)
-			s.NodeStreamFixerMain.AddPushFramesTo(outputMain)
+			s.NodeRecoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain)
+			s.NodeRecoder.AddPushFramesTo(ctx, s.NodeStreamFixerMain)
+			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, outputMain)
+			s.NodeStreamFixerMain.AddPushFramesTo(ctx, outputMain)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(outputMain)
-			s.NodeRecoder.AddPushFramesTo(outputMain)
+			s.NodeRecoder.AddPushPacketsTo(ctx, outputMain)
+			s.NodeRecoder.AddPushFramesTo(ctx, outputMain)
 		}
 	}
 

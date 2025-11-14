@@ -99,8 +99,8 @@ func main() {
 
 	// route nodes: input -> recoder -> output
 
-	inputNode.AddPushPacketsTo(recodingNode)
-	recodingNode.AddPushPacketsTo(outputNode)
+	inputNode.AddPushPacketsTo(ctx, recodingNode)
+	recodingNode.AddPushPacketsTo(ctx, outputNode)
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 

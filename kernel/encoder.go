@@ -22,6 +22,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/resampler"
 	"github.com/xaionaro-go/avpipeline/scaler"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -325,6 +326,10 @@ func (e *Encoder[EF]) initEncoderFor(
 	encoder := &streamEncoder{Encoder: encoderInstance}
 	e.encoders[streamIndex] = encoder
 	return nil
+}
+
+func (e *Encoder[EF]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(e)
 }
 
 func (e *Encoder[EF]) String() string {

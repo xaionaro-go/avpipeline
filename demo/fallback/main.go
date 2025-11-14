@@ -143,19 +143,19 @@ func main() {
 	var filteredInputMain node.Abstract = inputMainNode
 	if nodeBSFMain != nil {
 		logger.Debugf(ctx, "inserting %s to the main pipeline", nodeBSFMain.Processor.Kernel)
-		filteredInputMain.AddPushPacketsTo(nodeBSFMain)
+		filteredInputMain.AddPushPacketsTo(ctx, nodeBSFMain)
 		filteredInputMain = nodeBSFMain
 	}
 
 	var filteredInputFallback node.Abstract = inputFallbackNode
 	if nodeBSFFallback != nil {
 		logger.Debugf(ctx, "inserting %s to the fallback pipeline", nodeBSFFallback.Processor.Kernel)
-		filteredInputFallback.AddPushPacketsTo(nodeBSFFallback)
+		filteredInputFallback.AddPushPacketsTo(ctx, nodeBSFFallback)
 		filteredInputFallback = nodeBSFFallback
 	}
 
 	lastDTS := int64(0)
-	filteredInputMain.AddPushPacketsTo(
+	filteredInputMain.AddPushPacketsTo(ctx,
 		outputNode,
 		packetfiltercondition.Packet{
 			Condition: condition.And{
@@ -179,7 +179,7 @@ func main() {
 			},
 		},
 	)
-	filteredInputFallback.AddPushPacketsTo(
+	filteredInputFallback.AddPushPacketsTo(ctx,
 		outputNode,
 		packetfiltercondition.Packet{
 			Condition: condition.And{

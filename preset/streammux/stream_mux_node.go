@@ -14,6 +14,7 @@ import (
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -98,6 +99,10 @@ func (s *StreamMux[C]) Serve(
 	}, rawErrCh, s.InputAll.Node)
 }
 
+func (s *StreamMux[C]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(s)
+}
+
 func (s *StreamMux[C]) String() string {
 	return "StreamMux"
 }
@@ -118,34 +123,68 @@ func (n *StreamMux[C]) OriginalNode() *NodeInput[C] {
 	return n.InputAll.Node
 }
 
-func (s *StreamMux[C]) GetPushPacketsTos() node.PushPacketsTos {
+func (s *StreamMux[C]) GetPushPacketsTos(
+	ctx context.Context,
+) node.PushPacketsTos {
 	return nil
 }
 
+func (a *StreamMux[C]) WithPushPacketsTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushPacketsTos),
+) {
+}
+
 func (s *StreamMux[C]) AddPushPacketsTo(
+	ctx context.Context,
 	dst node.Abstract,
 	conds ...packetfiltercondition.Condition,
 ) {
 }
 
 func (s *StreamMux[C]) SetPushPacketsTos(
+	ctx context.Context,
 	v node.PushPacketsTos,
 ) {
 }
 
-func (s *StreamMux[C]) GetPushFramesTos() node.PushFramesTos {
+func (s *StreamMux[C]) RemovePushPacketsTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
 	return nil
 }
 
+func (s *StreamMux[C]) GetPushFramesTos(
+	ctx context.Context,
+) node.PushFramesTos {
+	return nil
+}
+
+func (a *StreamMux[C]) WithPushFramesTos(
+	ctx context.Context,
+	callback func(context.Context, *node.PushFramesTos),
+) {
+}
+
 func (s *StreamMux[C]) AddPushFramesTo(
+	ctx context.Context,
 	dst node.Abstract,
 	conds ...framefiltercondition.Condition,
 ) {
 }
 
 func (s *StreamMux[C]) SetPushFramesTos(
+	ctx context.Context,
 	v node.PushFramesTos,
 ) {
+}
+
+func (s *StreamMux[C]) RemovePushFramesTo(
+	ctx context.Context,
+	dst node.Abstract,
+) error {
+	return nil
 }
 
 func (s *StreamMux[C]) GetProcessor() processor.Abstract {

@@ -7,6 +7,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type Kernel struct{}
@@ -14,6 +15,10 @@ type Kernel struct{}
 var _ kernel.Abstract = (*Kernel)(nil)
 var _ packet.Source = (*Kernel)(nil)
 var _ packet.Sink = (*Kernel)(nil)
+
+func (k *Kernel) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(k)
+}
 
 func (k *Kernel) SendInputPacket(
 	ctx context.Context,

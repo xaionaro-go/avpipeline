@@ -163,8 +163,9 @@ func main() {
 			)
 		}
 	}
-	finalNode.AddPushPacketsTo(node.New(output))
-	assert(ctx, len(finalNode.GetPushPacketsTos()) == 1, len(finalNode.GetPushPacketsTos()))
+	finalNode.AddPushPacketsTo(ctx, node.New(output))
+	pushTos := finalNode.GetPushPacketsTos(ctx)
+	assert(ctx, len(pushTos) == 1, len(pushTos))
 
 	l.Debugf("resulting pipeline: %s", inputNode.String())
 	l.Debugf("resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
@@ -207,7 +208,7 @@ func main() {
 			if err != nil {
 				l.Fatal(err)
 			}
-			outputStats := finalNode.GetPushPacketsTos()[0].Node.GetCountersPtr()
+			outputStats := pushTos[0].Node.GetCountersPtr()
 			outputStatsJSON, err := json.Marshal(outputStats)
 			if err != nil {
 				l.Fatal(err)
