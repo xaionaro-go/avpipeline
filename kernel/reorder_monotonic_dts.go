@@ -11,7 +11,7 @@ import (
 	"github.com/go-ng/xsort"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	"github.com/xaionaro-go/avpipeline/kernel/condition"
+	kernelcondition "github.com/xaionaro-go/avpipeline/kernel/condition"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -46,7 +46,7 @@ type ReorderMonotonicDTS struct {
 	ItemQueue             sort.InputPacketOrFrameUnionsByDTS
 	StreamsDTSs           map[InternalStreamKey]*xsort.OrderedAsc[int64]
 	MaxDTSDifference      uint64
-	StartCondition        condition.Condition[*ReorderMonotonicDTS]
+	StartCondition        kernelcondition.Condition[*ReorderMonotonicDTS]
 	Started               bool
 	PrevDTS               int64
 	DiscardUnorderedItems bool
@@ -59,7 +59,7 @@ var _ Abstract = (*ReorderMonotonicDTS)(nil)
 
 func NewReorderMonotonicDTS(
 	ctx context.Context,
-	startCondition condition.Condition[*ReorderMonotonicDTS],
+	startCondition kernelcondition.Condition[*ReorderMonotonicDTS],
 	maxBufferSize uint,
 	maxDTSDifference uint64,
 	discardUnorderedItems bool,
@@ -179,7 +179,6 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 		logger.Tracef(ctx, "not all streams have items yet (emptyQueuesCount: %d), waiting...", r.emptyQueuesCount)
 		return
 	}
-	logger.Tracef(ctx, "all %d streams have at least one item in the queue, so it is time to pull something out", len(r.StreamsDTSs))
 
 	if !r.Started {
 		r.ConditionArgumentNewItem = &item
@@ -187,8 +186,11 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 			logger.Tracef(ctx, "condition %s is not met, not starting yet", r.StartCondition)
 			return nil
 		}
+		logger.Tracef(ctx, "start condition met")
 		r.Started = true
 	}
+
+	logger.Tracef(ctx, "all %d streams have at least one item in the queue, so it is time to pull something out", len(r.StreamsDTSs))
 
 	if err := r.pullAndSendPendingItems(ctx, outputPacketsCh, outputFramesCh); err != nil {
 		return fmt.Errorf("unable to pull&send pending items: %w", err)

@@ -587,11 +587,12 @@ func (o *Output) SendInputPacket(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx,
-		"SendInputPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
-		inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(),
+		"SendInputPacket (stream: %d, pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
+		inputPkt.StreamIndex(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(),
 	)
 	defer func() {
-		logger.Tracef(ctx, "/SendInputPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d): %v", inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), _err)
+		logger.Tracef(ctx, "/SendInputPacket (stream: %d, pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d): %v",
+			inputPkt.StreamIndex(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), _err)
 	}()
 
 	pkt := inputPkt.Packet

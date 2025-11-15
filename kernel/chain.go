@@ -124,7 +124,15 @@ func (c *Chain[T]) sendInput(
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInPacketCh {
-					errCh <- k.SendInputPacket(ctx, packet.Input(pkt), curOutPacketCh, curOutFrameCh)
+					err := k.SendInputPacket(ctx, packet.Input(pkt), curOutPacketCh, curOutFrameCh)
+					if err != nil {
+						select {
+						case errCh <- err:
+						case <-ctx.Done():
+							return
+						default:
+						}
+					}
 				}
 			})
 			wg.Add(1)
@@ -133,7 +141,15 @@ func (c *Chain[T]) sendInput(
 				defer wg.Done()
 				defer kernelWG.Done()
 				for pkt := range curInFrameCh {
-					errCh <- k.SendInputFrame(ctx, frame.Input(pkt), curOutPacketCh, curOutFrameCh)
+					err := k.SendInputFrame(ctx, frame.Input(pkt), curOutPacketCh, curOutFrameCh)
+					if err != nil {
+						select {
+						case errCh <- err:
+						case <-ctx.Done():
+							return
+						default:
+						}
+					}
 				}
 			})
 			if idx != len(c.Kernels[1:])-1 {

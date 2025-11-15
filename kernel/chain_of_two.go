@@ -51,7 +51,14 @@ func (c *ChainOfTwo[A, B]) sendInputPacket(
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "sendInputPacket: stream:%d pkt:%p pos:%d pts:%d dts:%d dur:%d",
+		input.StreamIndex(), input.Packet, input.Packet.Pos(), input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration(),
+	)
+	defer func() {
+		logger.Tracef(ctx, "/sendInputPacket: stream:%d pkt:%p pos:%d pts:%d dts:%d dur:%d: %v",
+			input.StreamIndex(), input.Packet, input.Packet.Pos(), input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration(), _err)
+	}()
 	return c.sendInput(ctx, ptr(input), nil, outputPacketsCh, outputFramesCh)
 }
 
@@ -69,7 +76,11 @@ func (c *ChainOfTwo[A, B]) sendInputFrame(
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "sendInputFrame: stream:%d, frame:%p pts:%d", input.StreamIndex, input.Frame, input.Frame.Pts())
+	defer func() {
+		logger.Tracef(ctx, "/sendInputFrame: stream:%d, frame:%p pts:%d: %v", input.StreamIndex, input.Frame, input.Frame.Pts(), _err)
+	}()
 	return c.sendInput(ctx, nil, ptr(input), outputPacketsCh, outputFramesCh)
 }
 
@@ -79,30 +90,58 @@ func (c *ChainOfTwo[A, B]) sendInput(
 	inputFrame *frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
-) error {
+) (_err error) {
+	logger.Tracef(ctx, "sendInput")
+	defer func() { logger.Tracef(ctx, "/sendInput: %v", _err) }()
+
 	if inputPacket != nil && inputFrame != nil {
 		return fmt.Errorf("internal error: inputPacket != nil && inputFrame != nil")
 	}
+	ctx, cancelFn := context.WithCancel(ctx)
 
 	kernel1InPacketCh, kernel1InFrameCh := make(chan packet.Output), make(chan frame.Output)
-	errCh := make(chan error, 10)
+	errCh := make(chan error, 100)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
+		defer logger.Tracef(ctx, "detaching from kernel1 inputs: packets")
 		for pkt := range kernel1InPacketCh {
-			errCh <- c.Kernel1.SendInputPacket(ctx, packet.Input(pkt), outputPacketsCh, outputFramesCh)
+			logger.Tracef(ctx, "sending packet to kernel1: stream:%d pkt:%p pos:%d pts:%d dts:%d dur:%d",
+				pkt.StreamIndex(), pkt.Packet, pkt.Packet.Pos(), pkt.Packet.Pts(), pkt.Packet.Dts(), pkt.Packet.Duration(),
+			)
+			err := c.Kernel1.SendInputPacket(ctx, packet.Input(pkt), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				select {
+				case errCh <- err:
+				case <-ctx.Done():
+					return
+				default:
+				}
+			}
 		}
 	})
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
+		defer logger.Tracef(ctx, "detaching from kernel1 inputs: frames")
 		for f := range kernel1InFrameCh {
-			errCh <- c.Kernel1.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+			logger.Tracef(ctx, "sending frame to kernel1: stream:%d frame:%p pts:%d", f.StreamIndex, f.Frame, f.Frame.Pts())
+			err := c.Kernel1.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				select {
+				case errCh <- err:
+				case <-ctx.Done():
+					return
+				default:
+				}
+			}
 		}
 	})
 	observability.Go(ctx, func(ctx context.Context) {
 		wg.Wait()
+		logger.Tracef(ctx, "closing kernel1 outputs")
+		cancelFn()
 		close(errCh)
 	})
 
@@ -116,6 +155,7 @@ func (c *ChainOfTwo[A, B]) sendInput(
 	if err != nil {
 		return fmt.Errorf("unable to send to the first kernel: %w", err)
 	}
+	logger.Tracef(ctx, "closing kernel0 outputs")
 	close(kernel1InPacketCh)
 	close(kernel1InFrameCh)
 
