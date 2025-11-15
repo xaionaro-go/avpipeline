@@ -19,13 +19,14 @@ message Rational {
 message Packet {
   int64 pts = 1;
   int64 dts = 2;
-  bytes data = 3;
-  int32 streamIndex = 4;
-  uint32 flags = 5;
-  PacketSideData sideData = 6;
-  int64 duration = 7;
-  int64 pos = 8;
-  Rational timeBase = 9;
+  uint32 data_size = 3;
+  bytes data = 4;
+  int32 streamIndex = 5;
+  uint32 flags = 6;
+  PacketSideData sideData = 7;
+  int64 duration = 8;
+  int64 pos = 9;
+  Rational timeBase = 10;
 }
 
 message ChannelLayout {
@@ -102,42 +103,43 @@ message FrameSideData {
 }
 
 message Frame {
-  bytes data = 1;
-  repeated uint32 linesize = 2;
-  bytes extendedData = 3;
-  int32 width = 4;
-  int32 height = 5;
-  int32 nbSamples = 6;
-  int32 format = 7;
-  int32 keyFrame = 8;
-  uint32 pictType = 9;
-  Rational sampleAspectRatio = 10;
-  int64 pts = 11;
-  int64 pkt_dts = 12;
-  Rational timeBase = 13;
-  int32 quality = 14;
-  int32 repeatPict = 15;
-  int32 interlacedFrame = 16;
-  int32 topFieldFirst = 17;
-  int32 paletteHasChanged = 18;
-  int32 sampleRate = 19;
-  FrameSideData sideData = 20;
-  int32 flags = 21;
-  uint32 colorRange = 22;
-  uint32 colorTRC = 23;
-  uint32 colorSpace = 24;
-  uint32 chromaLocation = 25;
-  int64 bestEffortTimestamp = 26;
-  int64 pktPos = 27;
-  Dictionary metadata = 28;
-  int32 decodeErrorFlags = 29;
-  int32 pktSize = 30;
-  uint64 cropTop = 31;
-  uint64 cropBottom = 32;
-  uint64 cropLeft = 33;
-  uint64 cropRight = 34;
-  ChannelLayout chLayout = 35;
-  int64 duration = 36;
+  uint32 data_size = 1;
+  bytes data = 2;
+  repeated uint32 linesize = 3;
+  bytes extendedData = 4;
+  int32 width = 5;
+  int32 height = 6;
+  int32 nbSamples = 7;
+  int32 format = 8;
+  int32 keyFrame = 9;
+  uint32 pictType = 10;
+  Rational sampleAspectRatio = 11;
+  int64 pts = 12;
+  int64 pkt_dts = 13;
+  Rational timeBase = 14;
+  int32 quality = 15;
+  int32 repeatPict = 16;
+  int32 interlacedFrame = 17;
+  int32 topFieldFirst = 18;
+  int32 paletteHasChanged = 19;
+  int32 sampleRate = 20;
+  FrameSideData sideData = 21;
+  int32 flags = 22;
+  uint32 colorRange = 23;
+  uint32 colorTRC = 24;
+  uint32 colorSpace = 25;
+  uint32 chromaLocation = 26;
+  int64 bestEffortTimestamp = 27;
+  int64 pktPos = 28;
+  Dictionary metadata = 29;
+  int32 decodeErrorFlags = 30;
+  int32 pktSize = 31;
+  uint64 cropTop = 32;
+  uint64 cropBottom = 33;
+  uint64 cropLeft = 34;
+  uint64 cropRight = 35;
+  ChannelLayout chLayout = 36;
+  int64 duration = 37;
 }
 
 message Class {

@@ -11,6 +11,9 @@ import (
 func sourceNbStreams(ctx context.Context, s packet.Source) (_ret int) {
 	logger.Tracef(ctx, "sourceNbStreams: %s", s)
 	defer func() { logger.Tracef(ctx, "/sourceNbStreams: %s: %v", s, _ret) }()
+	if s == nil {
+		return 0
+	}
 	var result int
 	s.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		result = fmtCtx.NbStreams()

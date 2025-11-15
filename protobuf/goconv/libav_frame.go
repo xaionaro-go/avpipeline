@@ -19,7 +19,9 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 	if input.KeyFrame() {
 		keyFrame = 1
 	}
+	data, _ := input.Data().Bytes(0)
 	f := &Frame{
+		DataSize:          uint32(len(data)),
 		Linesize:          LinesizeFromGo(input.Linesize()).Protobuf(),
 		Width:             int32(input.Width()),
 		Height:            int32(input.Height()),
@@ -56,11 +58,7 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 		Duration: input.Duration(),
 	}
 	if includePayload {
-		var err error
-		f.Data, err = input.Data().Bytes(0)
-		if err != nil {
-			panic(err)
-		}
+		f.Data = data
 		//f.ExtendedData = input.ExtendedData()
 	}
 	return f

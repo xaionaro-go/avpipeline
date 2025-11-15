@@ -18,6 +18,7 @@ func PacketFromGo(input *astiav.Packet, includePayload bool) *Packet {
 	pkt := &Packet{
 		Pts:         input.Pts(),
 		Dts:         input.Dts(),
+		DataSize:    uint32(len(input.Data())),
 		StreamIndex: int32(input.StreamIndex()),
 		Flags:       uint32(input.Flags()),
 		SideData:    PacketSideDataFromGo(input.SideData()).Protobuf(),
