@@ -103,6 +103,7 @@ type pendingPacket struct {
 	InputStream *astiav.Stream
 }
 
+// Note: it is strongly recommended to put MonotonicDTS before Output.
 type Output struct {
 	ID            OutputID
 	StreamKey     secret.String

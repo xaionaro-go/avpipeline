@@ -12,7 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-func TestSequence(t *testing.T) {
+func TestChain(t *testing.T) {
 	ctx := context.Background()
 	d0 := &Dummy{
 		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
@@ -50,7 +50,7 @@ func TestSequence(t *testing.T) {
 			return nil
 		},
 	}
-	s := NewSequence(d0, d1, d2)
+	s := NewChain(d0, d1, d2)
 	err := s.Generate(ctx, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, d0.GenerateCallCount)

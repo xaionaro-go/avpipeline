@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -144,11 +145,21 @@ func getOutputMonitorer(
 	}
 
 	m, ok = proc.GetKernel().(kernel.OutputMonitorer)
-	if !ok {
-		return nil, fmt.Errorf("node %v does not support setting output monitor", n.GetObjectID())
+	if ok {
+		return m, nil
 	}
 
-	return m, nil
+	getKernelser, ok := proc.GetKernel().(kernel.GetKernelser)
+	if ok {
+		for _, k := range slices.Backward(getKernelser.GetKernels()) {
+			m, ok = k.(kernel.OutputMonitorer)
+			if ok {
+				return m, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("node %v does not support output monitor", n.GetObjectID())
 }
 
 func (m *Monitor) ObserveInputPacket(

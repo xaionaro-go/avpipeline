@@ -18,69 +18,69 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-// Note: Sequence is a very hacky thing, try to never use it. Pipelining
+// Note: Chain is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel.
-type Sequence[T Abstract] struct {
+type Chain[T Abstract] struct {
 	*closuresignaler.ClosureSignaler
 	Locker  xsync.Mutex
 	Kernels []T
 }
 
-var _ Abstract = (*Sequence[Abstract])(nil)
-var _ packet.Source = (*Sequence[Abstract])(nil)
-var _ packet.Sink = (*Sequence[Abstract])(nil)
+var _ Abstract = (*Chain[Abstract])(nil)
+var _ packet.Source = (*Chain[Abstract])(nil)
+var _ packet.Sink = (*Chain[Abstract])(nil)
 
-func NewSequence[T Abstract](kernels ...T) *Sequence[T] {
-	return &Sequence[T]{
+func NewChain[T Abstract](kernels ...T) *Chain[T] {
+	return &Chain[T]{
 		ClosureSignaler: closuresignaler.New(),
 		Kernels:         kernels,
 	}
 }
 
-func (s *Sequence[T]) SendInputPacket(
+func (c *Chain[T]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return xsync.DoA4R1(ctx, &s.Locker, s.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
+	return xsync.DoA4R1(ctx, &c.Locker, c.sendInputPacket, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[T]) sendInputPacket(
+func (c *Chain[T]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return s.sendInput(ctx, ptr(input), nil, outputPacketsCh, outputFramesCh)
+	return c.sendInput(ctx, ptr(input), nil, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[T]) SendInputFrame(
+func (c *Chain[T]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return xsync.DoA4R1(ctx, &s.Locker, s.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
+	return xsync.DoA4R1(ctx, &c.Locker, c.sendInputFrame, ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[T]) sendInputFrame(
+func (c *Chain[T]) sendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	return s.sendInput(ctx, nil, ptr(input), outputPacketsCh, outputFramesCh)
+	return c.sendInput(ctx, nil, ptr(input), outputPacketsCh, outputFramesCh)
 }
 
-func (s *Sequence[T]) sendInput(
+func (c *Chain[T]) sendInput(
 	ctx context.Context,
 	inputPacket *packet.Input,
 	inputFrame *frame.Input,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) error {
-	if len(s.Kernels) == 0 {
+	if len(c.Kernels) == 0 {
 		return nil
 	}
 	if inputPacket != nil && inputFrame != nil {
@@ -92,7 +92,7 @@ func (s *Sequence[T]) sendInput(
 		nextInPacketCh   chan packet.Output
 		nextInFrameCh    chan frame.Output
 	)
-	if len(s.Kernels) == 1 {
+	if len(c.Kernels) == 1 {
 		firstOutPacketCh = outputPacketsCh
 		firstOutFrameCh = outputFramesCh
 	} else {
@@ -103,7 +103,7 @@ func (s *Sequence[T]) sendInput(
 
 	errCh := make(chan error, 10)
 	var wg sync.WaitGroup
-	for idx, k := range s.Kernels[1:] {
+	for idx, k := range c.Kernels[1:] {
 		{
 			k := k
 			curInPacketCh, curInFrameCh := nextInPacketCh, nextInFrameCh
@@ -112,7 +112,7 @@ func (s *Sequence[T]) sendInput(
 				curOutPacketCh chan<- packet.Output
 				curOutFrameCh  chan<- frame.Output
 			)
-			if idx == len(s.Kernels[1:])-1 {
+			if idx == len(c.Kernels[1:])-1 {
 				curOutPacketCh, curOutFrameCh = outputPacketsCh, outputFramesCh
 			} else {
 				curOutPacketCh, curOutFrameCh = nextInPacketCh, nextInFrameCh
@@ -136,7 +136,7 @@ func (s *Sequence[T]) sendInput(
 					errCh <- k.SendInputFrame(ctx, frame.Input(pkt), curOutPacketCh, curOutFrameCh)
 				}
 			})
-			if idx != len(s.Kernels[1:])-1 {
+			if idx != len(c.Kernels[1:])-1 {
 				observability.Go(ctx, func(ctx context.Context) {
 					kernelWG.Wait()
 					close(curOutPacketCh)
@@ -152,10 +152,10 @@ func (s *Sequence[T]) sendInput(
 
 	var err error
 	if inputPacket != nil {
-		err = s.Kernels[0].SendInputPacket(ctx, *inputPacket, firstOutPacketCh, firstOutFrameCh)
+		err = c.Kernels[0].SendInputPacket(ctx, *inputPacket, firstOutPacketCh, firstOutFrameCh)
 	}
 	if inputFrame != nil {
-		err = s.Kernels[0].SendInputFrame(ctx, *inputFrame, firstOutPacketCh, firstOutFrameCh)
+		err = c.Kernels[0].SendInputFrame(ctx, *inputFrame, firstOutPacketCh, firstOutFrameCh)
 	}
 	if err != nil {
 		return fmt.Errorf("unable to send to the first kernel: %w", err)
@@ -178,23 +178,23 @@ func (s *Sequence[T]) sendInput(
 	return nil
 }
 
-func (s *Sequence[T]) GetObjectID() globaltypes.ObjectID {
-	return globaltypes.GetObjectID(s)
+func (c *Chain[T]) GetObjectID() globaltypes.ObjectID {
+	return globaltypes.GetObjectID(c)
 }
 
-func (s *Sequence[T]) String() string {
+func (c *Chain[T]) String() string {
 	var result []string
-	for _, node := range s.Kernels {
+	for _, node := range c.Kernels {
 		result = append(result, node.String())
 	}
 	var sample T
-	return fmt.Sprintf("Sequence[%T](\n\t%s,\n)", sample, strings.Join(result, ",\n\t"))
+	return fmt.Sprintf("Chain[%T](\n\t%s,\n)", sample, strings.Join(result, ",\n\t"))
 }
 
-func (s *Sequence[T]) Close(ctx context.Context) error {
-	s.ClosureSignaler.Close(ctx)
+func (c *Chain[T]) Close(ctx context.Context) error {
+	c.ClosureSignaler.Close(ctx)
 	var result []error
-	for idx, node := range s.Kernels {
+	for idx, node := range c.Kernels {
 		err := node.Close(ctx)
 		if err != nil {
 			result = append(result, fmt.Errorf("unable to close node#%d:%T: %w", idx, node, err))
@@ -203,7 +203,7 @@ func (s *Sequence[T]) Close(ctx context.Context) error {
 	return errors.Join(result...)
 }
 
-func (s *Sequence[T]) Generate(
+func (c *Chain[T]) Generate(
 	ctx context.Context,
 	_ chan<- packet.Output,
 	_ chan<- frame.Output,
@@ -219,7 +219,7 @@ func (s *Sequence[T]) Generate(
 	errCh := make(chan error, 1)
 
 	var kernelWG sync.WaitGroup
-	for _, k := range s.Kernels {
+	for _, k := range c.Kernels {
 		kernelWG.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer kernelWG.Done()
@@ -237,14 +237,14 @@ func (s *Sequence[T]) Generate(
 	observability.Go(ctx, func(ctx context.Context) {
 		defer readerWG.Done()
 		for range outputPacketsCh {
-			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
+			errCh <- fmt.Errorf("generators are not supported in Chain, yet")
 		}
 	})
 	readerWG.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer readerWG.Done()
 		for range outputFramesCh {
-			errCh <- fmt.Errorf("generators are not supported in Sequence, yet")
+			errCh <- fmt.Errorf("generators are not supported in Chain, yet")
 		}
 	})
 	observability.Go(ctx, func(ctx context.Context) {
@@ -264,11 +264,11 @@ func (s *Sequence[T]) Generate(
 	return errors.Join(errs...)
 }
 
-func (sw *Sequence[T]) WithInputFormatContext(
+func (c *Chain[T]) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	for _, k := range sw.Kernels {
+	for _, k := range c.Kernels {
 		sink, ok := any(k).(packet.Sink)
 		if !ok {
 			continue
@@ -285,11 +285,11 @@ func (sw *Sequence[T]) WithInputFormatContext(
 	}
 }
 
-func (sw *Sequence[T]) WithOutputFormatContext(
+func (c *Chain[T]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	for _, k := range slices.Backward(sw.Kernels) {
+	for _, k := range slices.Backward(c.Kernels) {
 		source, ok := any(k).(packet.Source)
 		if !ok {
 			continue
@@ -306,12 +306,12 @@ func (sw *Sequence[T]) WithOutputFormatContext(
 	}
 }
 
-func (sw *Sequence[T]) NotifyAboutPacketSource(
+func (c *Chain[T]) NotifyAboutPacketSource(
 	ctx context.Context,
 	prevSource packet.Source,
 ) error {
 	var errs []error
-	for idx, k := range sw.Kernels {
+	for idx, k := range c.Kernels {
 		sink, ok := any(k).(packet.Sink)
 		if ok {
 			err := sink.NotifyAboutPacketSource(ctx, prevSource)

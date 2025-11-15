@@ -27,7 +27,7 @@ type InternalStreamKey struct {
 	Source      packet.Source
 }
 
-// SyncStreams reorders packets/frames to make sure DTS is monotonic across multiple streams
+// MonotonicDTS reorders packets/frames to make sure DTS is monotonic across multiple streams
 // in the assumption that each stream already produces monotonic DTS.
 //
 // It works by making a queue of packets/frames from each stream, then:
@@ -37,28 +37,28 @@ type InternalStreamKey struct {
 // least one item; rinse and repeat.
 //
 // NOT TESTED
-type SyncStreams struct {
+type MonotonicDTS struct {
 	*closuresignaler.ClosureSignaler
 	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
 	ItemQueue        sort.InputPacketOrFrameUnions
 	StreamsDTSs      map[InternalStreamKey]*xsort.OrderedAsc[int64]
 	MaxDTSDifference uint64
-	StartCondition   condition.Condition[*SyncStreams]
+	StartCondition   condition.Condition[*MonotonicDTS]
 	Started          bool
 
 	emptyQueuesCount         int
 	ConditionArgumentNewItem *packetorframe.InputUnion
 }
 
-var _ Abstract = (*SyncStreams)(nil)
+var _ Abstract = (*MonotonicDTS)(nil)
 
 func NewMonotonicDTS(
 	ctx context.Context,
-	startCondition condition.Condition[*SyncStreams],
+	startCondition condition.Condition[*MonotonicDTS],
 	maxBufferSize uint,
 	maxDTSDifference uint64,
-) *SyncStreams {
-	return &SyncStreams{
+) *MonotonicDTS {
+	return &MonotonicDTS{
 		ClosureSignaler:  closuresignaler.New(),
 		ItemQueue:        make(sort.InputPacketOrFrameUnions, 0, maxBufferSize),
 		StreamsDTSs:      make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
@@ -68,7 +68,7 @@ func NewMonotonicDTS(
 	}
 }
 
-func (s *SyncStreams) SendInputPacket(
+func (s *MonotonicDTS) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -85,7 +85,7 @@ func (s *SyncStreams) SendInputPacket(
 	)
 }
 
-func (s *SyncStreams) SendInputFrame(
+func (s *MonotonicDTS) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -103,7 +103,7 @@ func (s *SyncStreams) SendInputFrame(
 	)
 }
 
-func (s *SyncStreams) CurrentDTS() typing.Optional[int64] {
+func (s *MonotonicDTS) CurrentDTS() typing.Optional[int64] {
 	if len(s.ItemQueue) == 0 {
 		return typing.Optional[int64]{}
 	}
@@ -111,7 +111,7 @@ func (s *SyncStreams) CurrentDTS() typing.Optional[int64] {
 	return typing.Opt(s.ItemQueue[0].Packet.Dts())
 }
 
-func (s *SyncStreams) pushToQueue(
+func (s *MonotonicDTS) pushToQueue(
 	ctx context.Context,
 	item packetorframe.InputUnion,
 	outputPacketsCh chan<- packet.Output,
@@ -171,13 +171,13 @@ func (s *SyncStreams) pushToQueue(
 	return nil
 }
 
-func (s *SyncStreams) EmptyQueuesCount(ctx context.Context) uint {
+func (s *MonotonicDTS) EmptyQueuesCount(ctx context.Context) uint {
 	return xsync.DoR1(ctx, &s.Locker, func() uint {
 		return uint(s.emptyQueuesCount)
 	})
 }
 
-func (s *SyncStreams) enforceLowDTSDifference(
+func (s *MonotonicDTS) enforceLowDTSDifference(
 	ctx context.Context,
 	newItemDTS int64,
 	outputPacketsCh chan<- packet.Output,
@@ -215,7 +215,7 @@ func (s *SyncStreams) enforceLowDTSDifference(
 	return true, nil
 }
 
-func (s *SyncStreams) sendOneItemFromQueue(
+func (s *MonotonicDTS) sendOneItemFromQueue(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
@@ -244,7 +244,7 @@ func (s *SyncStreams) sendOneItemFromQueue(
 	return nil
 }
 
-func (s *SyncStreams) pullAndSendPendingItems(
+func (s *MonotonicDTS) pullAndSendPendingItems(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
@@ -258,7 +258,7 @@ func (s *SyncStreams) pullAndSendPendingItems(
 	return nil
 }
 
-func (s *SyncStreams) doSendItem(
+func (s *MonotonicDTS) doSendItem(
 	ctx context.Context,
 	item packetorframe.InputUnion,
 	outputPacketsCh chan<- packet.Output,
@@ -273,7 +273,7 @@ func (s *SyncStreams) doSendItem(
 	return nil
 }
 
-func (s *SyncStreams) Close(ctx context.Context) error {
+func (s *MonotonicDTS) Close(ctx context.Context) error {
 	return xsync.DoR1(ctx, &s.Locker, func() error {
 		if s.ClosureSignaler.IsClosed() {
 			return nil
@@ -283,15 +283,15 @@ func (s *SyncStreams) Close(ctx context.Context) error {
 	})
 }
 
-func (s *SyncStreams) GetObjectID() globaltypes.ObjectID {
+func (s *MonotonicDTS) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(s)
 }
 
-func (s *SyncStreams) String() string {
+func (s *MonotonicDTS) String() string {
 	return "SyncStream"
 }
 
-func (s *SyncStreams) Generate(
+func (s *MonotonicDTS) Generate(
 	ctx context.Context,
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
