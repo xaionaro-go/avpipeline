@@ -164,9 +164,6 @@ func NewOutputFromURL(
 	defer func() {
 		logger.Debugf(ctx, "/NewOutputFromURL(ctx, '%s', streamKey, %s): %p %v", urlString, spew.Sdump(cfg), _ret, _err)
 	}()
-	if urlString == "" {
-		return nil, fmt.Errorf("the provided URL is empty")
-	}
 
 	url, err := url.Parse(urlString)
 	if err != nil {
@@ -593,7 +590,9 @@ func (o *Output) SendInputPacket(
 		"SendInputPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
 		inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(),
 	)
-	defer func() { logger.Tracef(ctx, "/SendInputPacket (pkt: %p): %v", inputPkt.Packet, _err) }()
+	defer func() {
+		logger.Tracef(ctx, "/SendInputPacket (pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d): %v", inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), _err)
+	}()
 
 	pkt := inputPkt.Packet
 	if pkt == nil {
