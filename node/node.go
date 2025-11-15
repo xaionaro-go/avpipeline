@@ -585,6 +585,9 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
 	for _, pushTo := range n.PushPacketsTos {
+		if pushTo.Node == nil {
+			continue
+		}
 		key := connectionKey{
 			From: n.Processor,
 			To:   pushTo.Node.GetProcessor(),
@@ -613,6 +616,9 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		)
 	}
 	for _, pushTo := range n.PushFramesTos {
+		if pushTo.Node == nil {
+			continue
+		}
 		key := connectionKey{
 			From: n.Processor,
 			To:   pushTo.Node.GetProcessor(),

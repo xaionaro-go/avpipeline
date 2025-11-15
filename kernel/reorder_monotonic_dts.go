@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/asticode/go-astiav"
 	"github.com/go-ng/container/heap"
@@ -41,13 +42,14 @@ type InternalStreamKey struct {
 // NOT TESTED
 type ReorderMonotonicDTS struct {
 	*closuresignaler.ClosureSignaler
-	Locker           xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
-	ItemQueue        sort.InputPacketOrFrameUnionsByDTS
-	StreamsDTSs      map[InternalStreamKey]*xsort.OrderedAsc[int64]
-	MaxDTSDifference uint64
-	StartCondition   condition.Condition[*ReorderMonotonicDTS]
-	Started          bool
-	PrevDTS          int64
+	Locker                xsync.Gorex // Gorex is not really tested well, so if you suspect corruptions due to concurrency, try replacing this with xsync.Mutex
+	ItemQueue             sort.InputPacketOrFrameUnionsByDTS
+	StreamsDTSs           map[InternalStreamKey]*xsort.OrderedAsc[int64]
+	MaxDTSDifference      uint64
+	StartCondition        condition.Condition[*ReorderMonotonicDTS]
+	Started               bool
+	PrevDTS               int64
+	DiscardUnorderedItems bool
 
 	emptyQueuesCount         int
 	ConditionArgumentNewItem *packetorframe.InputUnion
@@ -60,14 +62,15 @@ func NewReorderMonotonicDTS(
 	startCondition condition.Condition[*ReorderMonotonicDTS],
 	maxBufferSize uint,
 	maxDTSDifference uint64,
+	discardUnorderedItems bool,
 ) *ReorderMonotonicDTS {
 	return &ReorderMonotonicDTS{
-		ClosureSignaler:  closuresignaler.New(),
-		ItemQueue:        make(sort.InputPacketOrFrameUnionsByDTS, 0, maxBufferSize),
-		StreamsDTSs:      make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
-		MaxDTSDifference: maxDTSDifference,
-		StartCondition:   startCondition,
-		Started:          false,
+		ClosureSignaler:       closuresignaler.New(),
+		ItemQueue:             make(sort.InputPacketOrFrameUnionsByDTS, 0, maxBufferSize),
+		StreamsDTSs:           make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
+		MaxDTSDifference:      maxDTSDifference,
+		StartCondition:        startCondition,
+		DiscardUnorderedItems: discardUnorderedItems,
 	}
 }
 
@@ -139,9 +142,14 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 	}
 
 	if len(r.ItemQueue) >= cap(r.ItemQueue) {
-		logger.Warnf(ctx, "the queue is full, flushing one item from the queue to make space")
-		if err := r.sendOneItemFromQueue(ctx, outputPacketsCh, outputFramesCh); err != nil {
-			return nil
+		if r.DiscardUnorderedItems {
+			logger.Warnf(ctx, "the queue is full, discarding the DTS-oldest item")
+			heap.Pop(&r.ItemQueue)
+		} else {
+			logger.Warnf(ctx, "the queue is full, flushing one item from the queue to make space")
+			if err := r.sendOneItemFromQueue(ctx, outputPacketsCh, outputFramesCh); err != nil {
+				return nil
+			}
 		}
 	}
 	heap.Push(&r.ItemQueue, item)
@@ -300,11 +308,23 @@ func (r *ReorderMonotonicDTS) doSendItem(
 	}
 	r.PrevDTS = dts
 	if item.Frame != nil {
-		outputFramesCh <- frame.Output(*item.Frame)
+		select {
+		case outputFramesCh <- frame.Output(*item.Frame):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.CloseChan():
+			return io.EOF
+		}
 		return nil
 	}
 
-	outputPacketsCh <- packet.Output(*item.Packet)
+	select {
+	case outputPacketsCh <- packet.Output(*item.Packet):
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.CloseChan():
+		return io.EOF
+	}
 	return nil
 }
 

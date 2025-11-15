@@ -42,10 +42,10 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	})
 	defer belt.Flush(ctx)
 
-	k := NewReorderMonotonicDTS(ctx, nil, 10, 1000)
+	k := NewReorderMonotonicDTS(ctx, nil, 100, 1000, true)
 
-	chPktOut := make(chan packet.Output, 10)
-	chFrameOut := make(chan frame.Output, 10)
+	chPktOut := make(chan packet.Output, 100)
+	chFrameOut := make(chan frame.Output, 100)
 
 	out, err := NewOutputFromURL(ctx, "", secret.New(""), OutputConfig{
 		CustomOptions: globaltypes.DictionaryItems{{
@@ -65,34 +65,42 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	err = k.NotifyAboutPacketSource(ctx, packetSource)
 	require.NoError(t, err)
 
-	pkt0 := packet.Pool.Get()
-	pkt0.SetDts(1)
-	err = k.SendInputPacket(ctx,
-		packet.BuildInput(pkt0, &packet.StreamInfo{Stream: stream0, Source: packetSource}),
-		chPktOut, chFrameOut,
-	)
-	require.NoError(t, err)
+	for i := 0; i < 10; i++ {
+		pkt := packet.Pool.Get()
+		pkt.SetDts(5 + int64(i))
+		err = k.SendInputPacket(ctx,
+			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream0, Source: packetSource}),
+			chPktOut, chFrameOut,
+		)
+		require.NoError(t, err)
+	}
 
-	pkt1 := packet.Pool.Get()
-	pkt1.SetDts(0)
-	err = k.SendInputPacket(ctx,
-		packet.BuildInput(pkt1, &packet.StreamInfo{Stream: stream1, Source: packetSource}),
-		chPktOut, chFrameOut,
-	)
-	require.NoError(t, err)
+	for i := 0; i < 10; i++ {
+		pkt := packet.Pool.Get()
+		pkt.SetDts(0 + int64(i))
+		err = k.SendInputPacket(ctx,
+			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream1, Source: packetSource}),
+			chPktOut, chFrameOut,
+		)
+		require.NoError(t, err)
+	}
 
 	pktCount := 0
 	for {
 		select {
 		case outPkt := <-chPktOut:
+			expectedDTS := int64(pktCount)
+			if expectedDTS > 5 {
+				expectedDTS = 5 + int64(pktCount-5)/2
+			}
+			require.Equal(t, int64(expectedDTS), outPkt.Packet.Dts(), pktCount)
 			pktCount++
-			require.Equal(t, int64(0), outPkt.Packet.Dts())
 			continue
 		default:
 		}
 		break
 	}
-	require.Equal(t, 1, pktCount)
+	require.Equal(t, 15, pktCount)
 
 	select {
 	case outPkt := <-chFrameOut:
