@@ -15,6 +15,23 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
+type dummySource struct {
+	FormatContext *astiav.FormatContext
+}
+
+var _ packet.Source = (*dummySource)(nil)
+
+func (d *dummySource) WithOutputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	callback(d.FormatContext)
+}
+
+func (d *dummySource) String() string {
+	return "dummySource"
+}
+
 func TestReorderMonotonicDTS(t *testing.T) {
 	loggerLevel := logger.LevelTrace
 
@@ -37,20 +54,32 @@ func TestReorderMonotonicDTS(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
-
 	stream0 := out.FormatContext.NewStream(astiav.FindEncoder(astiav.CodecIDH264))
 	stream0.SetIndex(0)
-	pkt0 := packet.Pool.Get()
-	pkt0.SetDts(1)
-	err = k.SendInputPacket(ctx, packet.BuildInput(pkt0, &packet.StreamInfo{Stream: stream0}), chPktOut, chFrameOut)
-	require.NoError(t, err)
-
 	stream1 := out.FormatContext.NewStream(astiav.FindEncoder(astiav.CodecIDH264))
 	stream1.SetIndex(1)
+	packetSource := &dummySource{
+		FormatContext: out.FormatContext,
+	}
+
+	err = k.NotifyAboutPacketSource(ctx, packetSource)
+	require.NoError(t, err)
+
+	pkt0 := packet.Pool.Get()
+	pkt0.SetDts(1)
+	err = k.SendInputPacket(ctx,
+		packet.BuildInput(pkt0, &packet.StreamInfo{Stream: stream0, Source: packetSource}),
+		chPktOut, chFrameOut,
+	)
+	require.NoError(t, err)
+
 	pkt1 := packet.Pool.Get()
 	pkt1.SetDts(0)
-	err = k.SendInputPacket(ctx, packet.BuildInput(pkt1, &packet.StreamInfo{Stream: stream0}), chPktOut, chFrameOut)
-	require.Error(t, err)
+	err = k.SendInputPacket(ctx,
+		packet.BuildInput(pkt1, &packet.StreamInfo{Stream: stream1, Source: packetSource}),
+		chPktOut, chFrameOut,
+	)
+	require.NoError(t, err)
 
 	pktCount := 0
 	for {

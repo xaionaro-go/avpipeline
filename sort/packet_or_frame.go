@@ -32,16 +32,30 @@ func (s PacketOrFrames[T, TP]) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-type InputPacketOrFrameUnions []packetorframe.InputUnion
+type InputPacketOrFrameUnionsByPTS []packetorframe.InputUnion
 
-func (s InputPacketOrFrameUnions) Len() int {
+func (s InputPacketOrFrameUnionsByPTS) Len() int {
 	return len(s)
 }
 
-func (s InputPacketOrFrameUnions) Less(i, j int) bool {
+func (s InputPacketOrFrameUnionsByPTS) Less(i, j int) bool {
 	return s[i].GetPTS() < s[j].GetPTS()
 }
 
-func (s InputPacketOrFrameUnions) Swap(i, j int) {
+func (s InputPacketOrFrameUnionsByPTS) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type InputPacketOrFrameUnionsByDTS []packetorframe.InputUnion
+
+func (s InputPacketOrFrameUnionsByDTS) Len() int {
+	return len(s)
+}
+
+func (s InputPacketOrFrameUnionsByDTS) Less(i, j int) bool {
+	return s[i].GetDTS() < s[j].GetDTS()
+}
+
+func (s InputPacketOrFrameUnionsByDTS) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
