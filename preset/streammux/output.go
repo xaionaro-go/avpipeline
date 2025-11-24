@@ -144,7 +144,8 @@ func newOutput[C any](
 	senderFactory SenderFactory[C],
 	senderKey SenderKey,
 	outputSwitch barrierstategetter.StateGetter,
-	outputSyncer barrierstategetter.StateGetter,
+	sendingSyncer barrierstategetter.StateGetter,
+	allowCorrupt *atomic.Bool,
 	monotonicPTS packetcondition.Condition,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	streamsIniter OutputStreamsIniter,
@@ -196,6 +197,7 @@ func newOutput[C any](
 	if err != nil {
 		return nil, fmt.Errorf("failed to create recoder kernel: %w", err)
 	}
+	recoderKernel.Decoder.AllowBlankFrames = allowCorrupt
 
 	packetSinker, ok := senderNode.GetProcessor().(processor.GetPacketSinker)
 	if !ok {
@@ -231,7 +233,7 @@ func newOutput[C any](
 		),
 		SendingSyncer: node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
-			outputSyncer,
+			sendingSyncer,
 		)),
 		SendingNode:       senderNode,
 		FPSFractionGetter: fpsFractionGetter,
@@ -796,10 +798,10 @@ func (o *Output[C]) reconfigureEncoder(
 			}
 		}
 
-		{
+		if !codec.IsEncoderCopy(encoder) {
 			res := encoder.GetResolution(ctx)
 			if res == nil {
-				return fmt.Errorf("unable to get the current encoding resolution")
+				return fmt.Errorf("unable to get the current encoding resolution from encoder %s", encoder)
 			}
 			logger.Debugf(ctx,
 				"current resolution: %#+v; requested resolution: %#+v",

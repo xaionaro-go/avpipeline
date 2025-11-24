@@ -74,8 +74,9 @@ type Decoder[DF codec.DecoderFactory] struct {
 	OutputCodecParameters map[int]*astiav.CodecParameters
 	StreamInfo            xsync.Map[int, *frame.StreamInfo]
 
-	FormatContext *astiav.FormatContext
-	IsDirtyCache  atomic.Bool
+	FormatContext    *astiav.FormatContext
+	IsDirtyCache     atomic.Bool
+	AllowBlankFrames *atomic.Bool
 
 	SentPacketsWithoutDecodingFrames uint64
 }
@@ -93,6 +94,7 @@ func NewDecoder[DF codec.DecoderFactory](
 		Decoders:              map[int]*StreamDecoder{},
 		FormatContext:         astiav.AllocFormatContext(),
 		OutputCodecParameters: map[int]*astiav.CodecParameters{},
+		AllowBlankFrames:      &atomic.Bool{},
 	}
 	setFinalizerFree(ctx, d.FormatContext)
 	return d
@@ -268,7 +270,7 @@ func (d *Decoder[DF]) SendInputPacket(
 			switch {
 			case errors.Is(err, codec.ErrNotKeyFrame{}):
 				logger.Debugf(ctx, "the packet is not a keyframe and the decoder cannot decode it; dropping the packet")
-				if decoderSendBlankFrames {
+				if decoderSendBlankFrames && d.AllowBlankFrames.Load() {
 					err := d.sendBlankFrameForDroppedPacket(
 						ctx,
 						outputFramesCh,

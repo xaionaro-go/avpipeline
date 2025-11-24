@@ -106,13 +106,14 @@ type pendingPacket struct {
 
 // Note: it is strongly recommended to put MonotonicDTS before Output.
 type Output struct {
-	ID            OutputID
-	StreamKey     secret.String
-	InputStreams  map[int]OutputInputStream
-	OutputStreams map[int]*OutputStream
-	Filter        condition.Condition
-	SenderLocker  xsync.Mutex
-	Config        OutputConfig
+	ID                      OutputID
+	StreamKey               secret.String
+	InputStreams            map[int]OutputInputStream
+	OutputStreams           map[int]*OutputStream
+	Filter                  condition.Condition
+	SenderLocker            xsync.Mutex
+	Config                  OutputConfig
+	DiscardCorruptedPackets atomic.Bool
 
 	SequentialInvalidPacketsCount uint
 	OutputMonitor                 xatomic.Value[OutputPacketMonitor]
@@ -668,6 +669,11 @@ func (o *Output) send(
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) error {
+	if o.DiscardCorruptedPackets.Load() && pkt.Flags().Has(astiav.PacketFlagCorrupt) {
+		logger.Debugf(ctx, "the packet is corrupted and discarding of corrupted packets is enabled; discarding")
+		return nil
+	}
+
 	if o.started {
 		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}

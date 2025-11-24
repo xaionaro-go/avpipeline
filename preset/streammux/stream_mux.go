@@ -21,7 +21,6 @@ import (
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
-	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
@@ -83,10 +82,11 @@ type StreamMux[C any] struct {
 	nodeboilerplate.InputFilter
 
 	// private:
-	startedCh     *chan struct{}
-	waitGroup     sync.WaitGroup
-	lastKeyFrames map[int]*ringbuffer.RingBuffer[packet.Input]
-	nextOutputID  atomic.Uint32
+	startedCh           *chan struct{}
+	waitGroup           sync.WaitGroup
+	lastKeyFrames       map[int]*ringbuffer.RingBuffer[packet.Input]
+	nextOutputID        atomic.Uint32
+	allowCorruptPackets atomic.Bool
 }
 
 func New(
@@ -122,6 +122,18 @@ func NewWithCustomData[C any](
 		s.InputVideoOnly = newInput[C](ctx, s, InputTypeVideoOnly)
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
+		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames
+		s.InputVideoOnly.Node.SetInputPacketFilter(packetfiltercondition.Function(func(
+			ctx context.Context,
+			input packetfiltercondition.Input,
+		) bool {
+			if !input.Input.Flags().Has(astiav.PacketFlagKey) {
+				return true
+			}
+			logger.Debugf(ctx, "disallowing corrupt packets")
+			s.allowCorruptPackets.Store(false)
+			return true
+		}))
 	}
 	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
 	s.CurrentOtherInputBitRate.Store(0)
@@ -182,42 +194,31 @@ func (s *StreamMux[C]) initSwitches(
 	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 		inputType := input.GetType()
 
-		if err := input.OutputSwitch.SetValue(ctx, -1); err != nil {
-			return fmt.Errorf("unable to reset the switch value for %s input: %w", inputType, err)
-		}
-		if err := input.OutputSyncer.SetValue(ctx, -1); err != nil {
-			return fmt.Errorf("unable to reset the syncer value for %s input: %w", inputType, err)
-		}
+		input.OutputSwitch.CurrentValue.Store(math.MinInt32)
+		input.OutputSyncer.CurrentValue.Store(math.MinInt32)
 
 		if inputType.IncludesMediaType(astiav.MediaTypeVideo) {
 			keepUnlessConds := packetorframecondition.And{
 				packetorframecondition.MediaType(astiav.MediaTypeVideo),
 				packetorframecondition.Or{
 					packetorframecondition.IsKeyFrame(true),
-					packetorframecondition.Math(
-						mathcondition.GetterAtomic[int32]{
-							Integer: xatomic.Int32FromStd(&input.OutputSwitch.CurrentValue).Generic(),
-						},
-						mathcondition.Equal[int32](-1),
-					),
+					packetorframecondition.AtomicBool(&s.allowCorruptPackets),
 				},
 			}
 			logger.Debugf(ctx, "Switch[%s]: setting keep-unless conditions: %s", inputType, keepUnlessConds)
 			input.OutputSwitch.SetKeepUnless(keepUnlessConds)
 		}
 
-		if switchDebug {
-			input.OutputSwitch.SetOnBeforeSwitch(func(
-				ctx context.Context,
-				in packetorframe.InputUnion,
-				from, to int32,
-			) {
-				logger.Debugf(ctx,
-					"Switch[%s].SetOnBeforeSwitch: %d -> %d",
-					inputType, from, to,
-				)
-			})
-		}
+		input.OutputSwitch.SetOnBeforeSwitch(func(
+			ctx context.Context,
+			in packetorframe.InputUnion,
+			from, to int32,
+		) {
+			logger.Debugf(ctx,
+				"Switch[%s].SetOnBeforeSwitch: %d -> %d",
+				inputType, from, to,
+			)
+		})
 
 		input.OutputSwitch.SetOnAfterSwitch(func(
 			ctx context.Context,
@@ -246,7 +247,7 @@ func (s *StreamMux[C]) initSwitches(
 			}
 			observability.Go(ctx, func(ctx context.Context) {
 				defer s.OutputsLocker.ManualUnlock(ctx)
-				if from == -1 {
+				if from == math.MinInt32 {
 					return
 				}
 				outputPrev, _ := s.Outputs.Load(OutputID(from))
@@ -552,6 +553,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		s.SenderFactory, outputKey,
 		input.OutputSwitch.Output(int32(outputID)),
 		input.OutputSyncer.Output(int32(outputID)),
+		&s.allowCorruptPackets,
 		input.MonotonicPTSCondition,
 		newStreamIndexAssigner(s.MuxMode, outputID, input.Node.Processor.Kernel),
 		s,
