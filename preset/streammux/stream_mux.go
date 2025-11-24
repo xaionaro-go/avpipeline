@@ -14,12 +14,14 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/dustin/go-humanize"
+	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
+	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
@@ -188,10 +190,20 @@ func (s *StreamMux[C]) initSwitches(
 		}
 
 		if inputType.IncludesMediaType(astiav.MediaTypeVideo) {
-			input.OutputSwitch.SetKeepUnless(packetorframecondition.And{
+			keepUnlessConds := packetorframecondition.And{
 				packetorframecondition.MediaType(astiav.MediaTypeVideo),
-				packetorframecondition.IsKeyFrame(true),
-			})
+				packetorframecondition.Or{
+					packetorframecondition.IsKeyFrame(true),
+					packetorframecondition.Math(
+						mathcondition.GetterAtomic[int32]{
+							Integer: xatomic.Int32FromStd(&input.OutputSwitch.CurrentValue).Generic(),
+						},
+						mathcondition.Equal[int32](-1),
+					),
+				},
+			}
+			logger.Debugf(ctx, "Switch[%s]: setting keep-unless conditions: %s", inputType, keepUnlessConds)
+			input.OutputSwitch.SetKeepUnless(keepUnlessConds)
 		}
 
 		if switchDebug {
@@ -212,6 +224,9 @@ func (s *StreamMux[C]) initSwitches(
 			in packetorframe.InputUnion,
 			from, to int32,
 		) {
+			if v := in.Get(); v != nil {
+				ctx = belt.WithField(ctx, "media_type", v.GetMediaType().String())
+			}
 			logger.Debugf(ctx, "Switch[%s].SetOnAfterSwitch: %d -> %d", inputType, from, to)
 
 			logger.Debugf(ctx, "Syncer[%s].SetValue(ctx, %d): from %d", inputType, to, from)

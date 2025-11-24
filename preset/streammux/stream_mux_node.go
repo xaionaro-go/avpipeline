@@ -83,7 +83,16 @@ func (s *StreamMux[C]) Serve(
 						continue
 					}
 				} else {
-					logger.Errorf(ctx, "node %T:%s does not implement GetCustomDataer[OutputCustomData]; do not know how to handle error %v", nodeErr.Node, nodeErr.Node, nodeErr.Err)
+					err := nodeErr.Err
+					if h, ok := nodeErr.Node.GetProcessor().(globaltypes.ErrorHandler); ok {
+						err = h.HandleError(ctx, nodeErr.Err)
+					}
+					if err == nil {
+						logger.Debugf(ctx, "error from node %T:%s was 4r", nodeErr.Node, nodeErr.Node)
+						// the error was handled
+						continue
+					}
+					logger.Errorf(ctx, "node %T:%s does not implement GetCustomDataer[OutputCustomData]; do not know how to handle error %v (%v)", nodeErr.Node, nodeErr.Node, nodeErr.Err, err)
 				}
 				select {
 				case errCh <- nodeErr:

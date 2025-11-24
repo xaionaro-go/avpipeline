@@ -1,9 +1,15 @@
+//go:build with_libav
+// +build with_libav
+
 package monitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/asticode/go-astiav"
+	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -24,6 +30,8 @@ func (m *Monitor) newNode(
 }
 
 type monitorAsKernel Monitor
+
+var _ globaltypes.ErrorHandler = (*monitorAsKernel)(nil)
 
 func (m *monitorAsKernel) asMonitor() *Monitor {
 	return (*Monitor)(m)
@@ -71,5 +79,22 @@ func (m *monitorAsKernel) Generate(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	return nil
+}
+
+func (m *monitorAsKernel) HandleError(
+	ctx context.Context,
+	err error,
+) error {
+	switch {
+	case errors.Is(err, astiav.ErrEof):
+		logger.Debugf(ctx, "monitor kernel received EOF")
+		return nil
+	case errors.Is(err, context.Canceled):
+		logger.Debugf(ctx, "monitor kernel received context.Canceled")
+		return nil
+	default:
+		logger.Errorf(ctx, "monitor kernel received error: %v", err)
+	}
 	return nil
 }

@@ -26,8 +26,9 @@ const (
 )
 
 const (
-	decoderDebug       = true
-	enableAntiStucking = false
+	decoderDebug           = true
+	decoderSendBlankFrames = true
+	enableAntiStucking     = false
 )
 
 // TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
@@ -59,12 +60,17 @@ func packetInfoFromBytes(b []byte) *packetInfo {
 	}
 }
 
+type StreamDecoder struct {
+	*codec.Decoder
+	SentBlankKeyFrame bool
+}
+
 type Decoder[DF codec.DecoderFactory] struct {
 	*closuresignaler.ClosureSignaler
 
 	DecoderFactory        DF
 	Locker                xsync.Mutex
-	Decoders              map[int]*codec.Decoder
+	Decoders              map[int]*StreamDecoder
 	OutputCodecParameters map[int]*astiav.CodecParameters
 	StreamInfo            xsync.Map[int, *frame.StreamInfo]
 
@@ -84,7 +90,7 @@ func NewDecoder[DF codec.DecoderFactory](
 	d := &Decoder[DF]{
 		ClosureSignaler:       closuresignaler.New(),
 		DecoderFactory:        decoderFactory,
-		Decoders:              map[int]*codec.Decoder{},
+		Decoders:              map[int]*StreamDecoder{},
 		FormatContext:         astiav.AllocFormatContext(),
 		OutputCodecParameters: map[int]*astiav.CodecParameters{},
 	}
@@ -127,27 +133,63 @@ func (d *Decoder[DF]) Generate(
 func (d *Decoder[DF]) GetStreamDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
-) (*codec.Decoder, error) {
+) (*StreamDecoder, error) {
 	return xsync.DoA2R2(ctx, &d.Locker, d.getStreamDecoder, ctx, stream)
 }
 
 func (d *Decoder[DF]) getStreamDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
-) (*codec.Decoder, error) {
+) (*StreamDecoder, error) {
 	decoder := d.Decoders[stream.Index()]
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder != nil {
 		return decoder, nil
 	}
-	decoder, err := d.DecoderFactory.NewDecoder(ctx, stream)
+	rawDecoder, err := d.DecoderFactory.NewDecoder(ctx, stream)
 	if err != nil {
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
-	assert(ctx, decoder != nil)
+	assert(ctx, rawDecoder != nil)
+	decoder = &StreamDecoder{
+		Decoder: rawDecoder,
+	}
 	logger.Tracef(ctx, "initialized a decoder: %s", decoder)
 	d.Decoders[stream.Index()] = decoder
 	return decoder, nil
+}
+
+func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
+	ctx context.Context,
+	outputFramesCh chan<- frame.Output,
+	decoder *codec.DecoderLocked,
+	streamInfo *frame.StreamInfo,
+	packetInfo packetInfo,
+	isKeyFrame bool,
+) (_err error) {
+	logger.Debugf(ctx, "sendBlankFrameForDroppedPacket")
+	defer func() { logger.Debugf(ctx, "/sendBlankFrameForDroppedPacket: %v", _err) }()
+
+	codecParams := astiav.AllocCodecParameters()
+	defer codecParams.Free()
+	decoder.ToCodecParameters(codecParams)
+	f, err := frame.NewBlankVideo(ctx, codecParams)
+	if err != nil {
+		return fmt.Errorf("unable to create a blank frame: %w", err)
+	}
+
+	f.SetTimeBase(streamInfo.TimeBase)
+	f.SetPts(packetInfo.PTS)
+	f.SetPktDts(packetInfo.DTS)
+	f.SetDuration(packetInfo.Duration)
+	f.SetFlags(f.Flags().Add(astiav.FrameFlagCorrupt))
+	f.SetKeyFrame(isKeyFrame)
+	err = d.send(ctx, outputFramesCh, f, streamInfo)
+	if err != nil {
+		return fmt.Errorf("unable to send a blank frame: %w", err)
+	}
+
+	return nil
 }
 
 func (d *Decoder[DF]) SendInputPacket(
@@ -162,7 +204,7 @@ func (d *Decoder[DF]) SendInputPacket(
 		return io.ErrClosedPipe
 	}
 
-	streamDecoder, err := xsync.DoR2(ctx, &d.Locker, func() (*codec.Decoder, error) {
+	streamDecoder, err := xsync.DoR2(ctx, &d.Locker, func() (*StreamDecoder, error) {
 		return d.getStreamDecoder(ctx, input.Stream)
 	})
 	if err != nil {
@@ -194,17 +236,21 @@ func (d *Decoder[DF]) SendInputPacket(
 			return nil
 		}
 
-		if _, ok := d.StreamInfo.Load(streamIndex); !ok {
-			streamInfo := &frame.StreamInfo{
-				Source:           d.asSource(streamDecoder),
-				CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
-				StreamIndex:      streamIndex,
-				StreamsCount:     sourceNbStreams(ctx, input.Source),
-				TimeBase:         timeBase,
-				Duration:         input.Packet.Duration(),
-				PipelineSideData: nil,
+		var streamInfo *frame.StreamInfo
+		{
+			var ok bool
+			if streamInfo, ok = d.StreamInfo.Load(streamIndex); !ok {
+				streamInfo = &frame.StreamInfo{
+					Source:           d.asSource(streamDecoder.Decoder),
+					CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
+					StreamIndex:      streamIndex,
+					StreamsCount:     sourceNbStreams(ctx, input.Source),
+					TimeBase:         timeBase,
+					Duration:         input.Packet.Duration(),
+					PipelineSideData: nil,
+				}
+				d.StreamInfo.Store(streamIndex, streamInfo)
 			}
-			d.StreamInfo.Store(streamIndex, streamInfo)
 		}
 
 		packetInfo := packetInfo{
@@ -216,12 +262,30 @@ func (d *Decoder[DF]) SendInputPacket(
 
 		input.Packet.SetOpaque(packetInfo.Bytes())
 
+		logger.Tracef(ctx, "decoder.SendPacket(): sending a packet (pts=%d, dts=%d, dur=%d)", input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration())
 		if err := decoder.SendPacket(ctx, input.Packet); err != nil {
 			logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
-			/*if errors.Is(err, astiav.ErrEagain) {
+			switch {
+			case errors.Is(err, codec.ErrNotKeyFrame{}):
+				logger.Debugf(ctx, "the packet is not a keyframe and the decoder cannot decode it; dropping the packet")
+				if decoderSendBlankFrames {
+					err := d.sendBlankFrameForDroppedPacket(
+						ctx,
+						outputFramesCh,
+						decoder,
+						streamInfo,
+						packetInfo,
+						!streamDecoder.SentBlankKeyFrame,
+					)
+					if err != nil {
+						return fmt.Errorf("unable to send a blank frame for dropped non-keyframe packet: %w", err)
+					}
+					streamDecoder.SentBlankKeyFrame = true
+				}
 				return nil
-			}*/
-			return fmt.Errorf("unable to decode the packet: %w", err)
+			default:
+				return fmt.Errorf("unable to decode the packet: %w", err)
+			}
 		}
 		d.SentPacketsWithoutDecodingFrames++
 
@@ -291,17 +355,32 @@ func (d *Decoder[DF]) drain(
 			}
 			f.SetDuration(packetInfo.Duration)
 		}
-		frameToSend := frame.BuildOutput(
-			f,
-			streamInfo,
-		)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case outputFramesCh <- frameToSend:
+		err := d.send(ctx, outputFramesCh, f, streamInfo)
+		if err != nil {
+			return fmt.Errorf("unable to send decoded frame: %w", err)
 		}
 		return nil
 	})
+}
+
+func (d *Decoder[DF]) send(
+	ctx context.Context,
+	outputFramesCh chan<- frame.Output,
+	f *astiav.Frame,
+	streamInfo *frame.StreamInfo,
+) (_err error) {
+	frameToSend := frame.BuildOutput(
+		f,
+		streamInfo,
+	)
+	logger.Tracef(ctx, "sending a %s frame", frameToSend.GetMediaType())
+	defer func() { logger.Tracef(ctx, "/sending a %s frame", frameToSend.GetMediaType()) }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case outputFramesCh <- frameToSend:
+	}
+	return nil
 }
 
 type decoderAsSource[DF codec.DecoderFactory] struct {

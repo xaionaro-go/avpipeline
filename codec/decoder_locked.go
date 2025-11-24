@@ -13,6 +13,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/quality"
 )
 
+const (
+	decoderDropNonKeyFramesBeforeKeyFrame = true
+)
+
 type CallbackFrameReceiver func(
 	context.Context,
 	*DecoderLocked,
@@ -27,12 +31,13 @@ type DecoderLocked struct {
 }
 
 type DecoderInput struct {
-	CodecName          Name
-	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	Options            *astiav.Dictionary
-	Flags              int
+	CodecName             Name
+	CodecParameters       *astiav.CodecParameters
+	HardwareDeviceType    HardwareDeviceType
+	HardwareDeviceName    HardwareDeviceName
+	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
+	Options               *astiav.Dictionary
+	Flags                 int
 }
 
 func (d *DecoderLocked) AsUnlocked() *Decoder {
@@ -43,14 +48,19 @@ func (d *DecoderLocked) String() string {
 	return fmt.Sprintf("Decoder(%s)", d.codec.Name())
 }
 
+type ErrNotKeyFrame struct{}
+
+func (e ErrNotKeyFrame) Error() string {
+	return "not a key frame"
+}
+
 func (d *DecoderLocked) SendPacket(
 	ctx context.Context,
 	p *astiav.Packet,
 ) error {
 	if !d.receivedKeyFrame {
-		if !p.Flags().Has(astiav.PacketFlagKey) {
-			logger.Warnf(ctx, "%s: dropping non-keyframe packet before the first keyframe", d)
-			return nil
+		if decoderDropNonKeyFramesBeforeKeyFrame && d.codecContext.MediaType() == astiav.MediaTypeVideo && !p.Flags().Has(astiav.PacketFlagKey) {
+			return ErrNotKeyFrame{}
 		}
 		d.receivedKeyFrame = true
 	}

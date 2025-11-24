@@ -28,12 +28,13 @@ type NaiveDecoderFactory struct {
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
 
 type NaiveDecoderFactoryParams struct {
-	HardwareDeviceType HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	VideoOptions       *astiav.Dictionary
-	AudioOptions       *astiav.Dictionary
-	PreInitFunc        func(context.Context, *astiav.Stream, *DecoderInput)
-	PostInitFunc       func(context.Context, *Decoder)
+	HardwareDeviceType    HardwareDeviceType
+	HardwareDeviceName    HardwareDeviceName
+	VideoOptions          *astiav.Dictionary
+	AudioOptions          *astiav.Dictionary
+	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
+	PreInitFunc           func(context.Context, *astiav.Stream, *DecoderInput)
+	PostInitFunc          func(context.Context, *Decoder)
 }
 
 func DefaultNaiveDecoderFactory() *NaiveDecoderFactoryParams {
@@ -90,21 +91,23 @@ func (f *NaiveDecoderFactory) newDecoder(
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeAudio:
 		decInput = DecoderInput{
-			CodecName:          "",
-			CodecParameters:    codecParameters,
-			HardwareDeviceType: 0,
-			HardwareDeviceName: "",
-			Options:            f.AudioOptions,
-			Flags:              0,
+			CodecName:             "",
+			CodecParameters:       codecParameters,
+			HardwareDeviceType:    0,
+			HardwareDeviceName:    "",
+			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
+			Options:               f.AudioOptions,
+			Flags:                 0,
 		}
 	case astiav.MediaTypeVideo:
 		decInput = DecoderInput{
-			CodecName:          "",
-			CodecParameters:    codecParameters,
-			HardwareDeviceType: f.HardwareDeviceType,
-			HardwareDeviceName: f.HardwareDeviceName,
-			Options:            f.VideoOptions,
-			Flags:              0,
+			CodecName:             "",
+			CodecParameters:       codecParameters,
+			HardwareDeviceType:    f.HardwareDeviceType,
+			HardwareDeviceName:    f.HardwareDeviceName,
+			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
+			Options:               f.VideoOptions,
+			Flags:                 0,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveDecoderFactory, yet")

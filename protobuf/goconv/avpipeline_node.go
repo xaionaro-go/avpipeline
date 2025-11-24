@@ -19,7 +19,7 @@ func NodeToGRPC(
 	result := &avpipelinegrpc.Node{
 		Id:          uint64(n.GetObjectID()),
 		Type:        fmt.Sprintf("%T", n),
-		Description: fmt.Sprintf("%s", n),
+		Description: n.String(),
 		IsServing:   n.IsServing(),
 		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), n.GetProcessor().CountersPtr()),
 	}

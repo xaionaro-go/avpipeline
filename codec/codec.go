@@ -577,8 +577,10 @@ func newCodec(
 	flags2 := 0 |
 		astiav.CodecContextFlags2(astiav.CodecFlag2LocalHeader) | // to make sure we can route dynamically without issues
 		astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
+		//astiav.CodecContextFlags2(astiav.CodecFlag2ShowAll) // to do not skip frames (pre the first key frame)
 	c.codecContext.SetFlags(flags)
 	c.codecContext.SetFlags2(flags2)
+	c.codecContext.SetErrorRecognitionFlags(input.Params.ErrorRecognitionFlags)
 
 	if isEncoder {
 		if timeBase.Num() == 0 {

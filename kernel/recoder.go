@@ -23,6 +23,7 @@ import (
 
 const (
 	enableStreamCodecParametersUpdates = false
+	recoderWaitForStreamsStart         = true
 )
 
 // See also https://github.com/namndev/FFmpegTutorial/blob/master/learn-ffmpeg-libav-the-hard-way.md
@@ -51,7 +52,11 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	decoderFactory DF,
 	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
-) (*Recoder[DF, EF], error) {
+) (_ret *Recoder[DF, EF], _err error) {
+	logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v)", decoderFactory, encoderFactory, streamConfigurer)
+	defer func() {
+		logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v): %s, %v", decoderFactory, encoderFactory, streamConfigurer, _ret, _err)
+	}()
 	r := &Recoder[DF, EF]{
 		ClosureSignaler: closuresignaler.New(),
 		Decoder:         NewDecoder(ctx, decoderFactory),
@@ -113,7 +118,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		return io.ErrClosedPipe
 	}
 
-	if r.started {
+	if r.started || !recoderWaitForStreamsStart {
 		return r.process(ctx, input, outputPacketCh, outputFramesCh)
 	}
 
@@ -175,7 +180,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 
 	inputStreamsCount := sourceNbStreams(ctx, input.Source)
 	logger.Tracef(ctx, "input streams count: %d (source: %s), active streams count: %d", inputStreamsCount, input.Source, r.activeStreamsCount)
-	if int(r.activeStreamsCount) < inputStreamsCount {
+	if inputStreamsCount > int(r.activeStreamsCount) {
 		return err
 	}
 
@@ -239,8 +244,8 @@ func (r *Recoder[DF, EF]) decoderToEncoder(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_ret error) {
-	logger.Tracef(ctx, "recode")
-	defer func() { logger.Tracef(ctx, "/recode: %v", _ret) }()
+	logger.Tracef(ctx, "decoderToEncoder")
+	defer func() { logger.Tracef(ctx, "/decoderToEncoder: %v", _ret) }()
 
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer func() {

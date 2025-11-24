@@ -20,13 +20,14 @@ func NewDecoder(
 	input := Input{
 		IsEncoder: false,
 		Params: CodecParams{
-			CodecName:          decInput.CodecName,
-			CodecParameters:    _codecParameters,
-			HardwareDeviceType: decInput.HardwareDeviceType,
-			HardwareDeviceName: decInput.HardwareDeviceName,
-			TimeBase:           astiav.NewRational(0, 0),
-			Options:            decInput.Options,
-			HWDevFlags:         decInput.Flags,
+			CodecName:             decInput.CodecName,
+			CodecParameters:       _codecParameters,
+			HardwareDeviceType:    decInput.HardwareDeviceType,
+			HardwareDeviceName:    decInput.HardwareDeviceName,
+			ErrorRecognitionFlags: decInput.ErrorRecognitionFlags,
+			TimeBase:              astiav.NewRational(0, 0),
+			Options:               decInput.Options,
+			HWDevFlags:            decInput.Flags,
 		},
 		ReusableResources: nil,
 	}

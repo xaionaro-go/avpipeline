@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -69,7 +70,7 @@ func NewInputFromURL(
 		return nil, fmt.Errorf("the provided URL is empty")
 	}
 	urlParsed, err := url.Parse(urlString)
-	if err == nil && urlParsed.Scheme != "" {
+	if err == nil && strings.HasPrefix(urlParsed.Scheme, "rtmp") {
 		logger.Debugf(ctx, "URL: %#+v", urlParsed)
 		urlString += "/"
 	}

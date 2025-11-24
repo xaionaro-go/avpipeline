@@ -39,5 +39,5 @@ func sendingNodeSetDropOnClose[C any](
 	if !ok {
 		return ErrNoSetDropOnClose{}
 	}
-	return s.SetDropOnClose(ctx, true)
+	return s.SetDropOnClose(ctx, v)
 }

@@ -1,3 +1,6 @@
+//go:build with_libav
+// +build with_libav
+
 package monitor
 
 import (
@@ -44,6 +47,9 @@ func New(
 	includeFramePayload bool,
 	doDecode bool,
 ) (*Monitor, error) {
+	if node == nil {
+		return nil, fmt.Errorf("node is nil")
+	}
 	m := &Monitor{
 		Object: node,
 		Events: make(chan *avpipelinegrpc.MonitorEvent, 100),
@@ -57,7 +63,11 @@ func New(
 	if doDecode {
 		m.DecodedPackets = make(chan packet.Output, 100)
 		m.DecodedFrames = make(chan frame.Output, 100)
-		m.Decoder = kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx, nil))
+		m.Decoder = kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx,
+			&codec.NaiveDecoderFactoryParams{
+				ErrorRecognitionFlags: astiav.ErrorRecognitionFlags(astiav.ErrorRecognitionFlagIgnoreErr),
+			},
+		))
 		internal.SetFinalizerClose(ctx, m.Decoder)
 	}
 	err := m.inject(ctx)

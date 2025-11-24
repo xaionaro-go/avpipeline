@@ -10,7 +10,7 @@ require (
 	github.com/asticode/go-astikit v0.55.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250308011339-62fb7027b11f
-	github.com/go-ng/xatomic v0.0.0-20251114232902-e4086a074122
+	github.com/go-ng/xatomic v0.0.0-20251124145245-9a7a1838d3aa
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.11.0
@@ -48,8 +48,8 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
 	golang.org/x/image v0.27.0 // indirect
-	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -73,10 +73,11 @@ require (
 	github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d // indirect
 	github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f // indirect
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect
+	github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
-	golang.org/x/crypto v0.38.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
-	golang.org/x/sys v0.33.0
+	golang.org/x/sys v0.38.0
 	lukechampine.com/blake3 v1.4.0 // indirect
 	tailscale.com v1.86.5
 )

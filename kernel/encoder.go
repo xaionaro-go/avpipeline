@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -59,41 +58,6 @@ type Encoder[EF codec.EncoderFactory] struct {
 var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
 var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
-// TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
-type frameInfo struct {
-	PTS         int64
-	DTS         int64
-	TimeBase    astiav.Rational
-	Duration    int64
-	StreamIndex int
-}
-
-func (p *frameInfo) Bytes() []byte {
-	b := make([]byte, 48)
-	binary.NativeEndian.PutUint64(b[0:8], uint64(p.PTS))
-	binary.NativeEndian.PutUint64(b[8:16], uint64(p.DTS))
-	binary.NativeEndian.PutUint64(b[16:24], uint64(p.TimeBase.Num()))
-	binary.NativeEndian.PutUint64(b[24:32], uint64(p.TimeBase.Den()))
-	binary.NativeEndian.PutUint64(b[32:40], uint64(p.Duration))
-	binary.NativeEndian.PutUint64(b[40:48], uint64(p.StreamIndex))
-	return b
-}
-
-func frameInfoFromBytes(b []byte) *frameInfo {
-	if len(b) < 48 {
-		return nil
-	}
-	num := int(binary.NativeEndian.Uint64(b[16:24]))
-	den := int(binary.NativeEndian.Uint64(b[24:32]))
-	return &frameInfo{
-		PTS:         int64(binary.NativeEndian.Uint64(b[0:8])),
-		DTS:         int64(binary.NativeEndian.Uint64(b[8:16])),
-		TimeBase:    astiav.NewRational(num, den),
-		Duration:    int64(binary.NativeEndian.Uint64(b[32:40])),
-		StreamIndex: int(binary.NativeEndian.Uint64(b[40:48])),
-	}
-}
-
 type streamEncoder struct {
 	codec.Encoder
 	Resampler       *resampler.Resampler
@@ -107,9 +71,9 @@ func NewEncoder[EF codec.EncoderFactory](
 	ctx context.Context,
 	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
-) *Encoder[EF] {
+) (_ret *Encoder[EF]) {
 	logger.Tracef(ctx, "NewEncoder")
-	defer func() { logger.Tracef(ctx, "/NewEncoder") }()
+	defer func() { logger.Tracef(ctx, "/NewEncoder: %s", _ret) }()
 	e := &Encoder[EF]{
 		ClosureSignaler:     closuresignaler.New(),
 		EncoderFactory:      encoderFactory,
@@ -439,17 +403,18 @@ func (e *Encoder[EF]) SendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
+	ctx = belt.WithField(ctx, "encoder", e)
+	ctx = belt.WithField(ctx, "mode", "frame")
+	ctx = belt.WithField(ctx, "media_type", input.GetMediaType())
+	ctx = belt.WithField(ctx, "stream_index", input.GetStreamIndex())
+	ctx = belt.WithField(ctx, "is_key", input.Flags().Has(astiav.FrameFlagKey))
+	ctx = xsync.WithNoLogging(ctx, true)
+
 	logger.Tracef(ctx, "SendInputFrame")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
-
-	ctx = belt.WithField(ctx, "encoder", e)
-	ctx = belt.WithField(ctx, "mode", "frame")
-	ctx = belt.WithField(ctx, "media_type", input.GetMediaType())
-	ctx = belt.WithField(ctx, "stream_index", input.GetStreamIndex())
-	ctx = xsync.WithNoLogging(ctx, true)
 
 	streamEncoder, err := xsync.DoR2(ctx, &e.Locker, func() (*streamEncoder, error) {
 		streamEncoder := e.encoders[input.GetStreamIndex()]
@@ -569,12 +534,14 @@ func (e *Encoder[EF]) SendInputFrame(
 		return nil
 	}
 
-	frameInfo := frameInfo{
+	frameInfo := FrameInfo{
 		PTS:         input.Pts(),
 		DTS:         input.PktDts(),
 		Duration:    input.Frame.Duration(),
 		StreamIndex: input.StreamIndex,
 		TimeBase:    input.GetTimeBase(),
+		FrameFlags:  input.Flags(),
+		PictureType: input.Frame.PictureType(),
 	}
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
 		if encoder.Codec() == nil {
@@ -663,7 +630,7 @@ func (e *Encoder[EF]) drain(
 	outputPacketsCh chan<- packet.Output,
 	encoderDrainFn func(context.Context, codec.CallbackPacketReceiver) error,
 	outputStream *astiav.Stream,
-	frameInfo frameInfo,
+	frameInfo FrameInfo,
 ) (_err error) {
 	logger.Tracef(ctx, "drain")
 	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
@@ -682,7 +649,7 @@ func (e *Encoder[EF]) drain(
 		pkt.SetStreamIndex(outputStream.Index())
 
 		if opaque != nil {
-			frameInfoPtr := frameInfoFromBytes(opaque)
+			frameInfoPtr := FrameInfoFromBytes(opaque)
 			if frameInfoPtr == nil {
 				return fmt.Errorf("unable to parse the frame info from the packet opaque data: %v", opaque)
 			}
@@ -702,18 +669,18 @@ func (e *Encoder[EF]) drain(
 		}
 
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
-		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue {
+		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue && (frameInfo.PictureType == astiav.PictureTypeI || frameInfo.PictureType == astiav.PictureTypeP) {
 			if encoderDTSHigherPTSCorrect {
-				logger.Errorf(ctx, "DTS (%d) > PTS (%d) correcting DTS to %d", pkt.Dts(), pkt.Pts(), pkt.Pts())
+				logger.Errorf(ctx, "DTS (%d) > PTS (%d) correcting DTS to %d (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), pkt.Pts(), frameInfo.PictureType)
 				pkt.SetDts(pkt.Pts())
 			} else {
-				logger.Errorf(ctx, "DTS (%d) > PTS (%d) skipping the packet", pkt.Dts(), pkt.Pts())
+				logger.Errorf(ctx, "DTS (%d) > PTS (%d) skipping the packet (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), frameInfo.PictureType)
 				packet.Pool.Put(pkt)
 				return nil
 			}
 		}
 
-		err := e.send(ctx, pkt, nil, outputStream, outputPacketsCh)
+		err := e.send(ctx, pkt, []any{frameInfo}, outputStream, outputPacketsCh)
 		if err != nil {
 			return fmt.Errorf("unable to send a packet: %w", err)
 		}
@@ -1224,7 +1191,7 @@ func (e *Encoder[EF]) Flush(
 						outputPacketCh,
 						encoder.Flush,
 						e.outputStreams[streamIndex],
-						frameInfo{
+						FrameInfo{
 							StreamIndex: streamIndex,
 						},
 					)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/logger"
 )
 
 var DefaultOptionsRecoder = func() []Option {
@@ -23,7 +24,11 @@ func NewRecoder(
 	encoderFactory codec.EncoderFactory,
 	streamConfigurer kernel.StreamConfigurer,
 	processorOpts ...Option,
-) (*FromKernel[*kernel.Recoder[codec.DecoderFactory, codec.EncoderFactory]], error) {
+) (_ret *FromKernel[*kernel.Recoder[codec.DecoderFactory, codec.EncoderFactory]], _err error) {
+	logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v, %#+v)", decoderFactory, encoderFactory, streamConfigurer, processorOpts)
+	defer func() {
+		logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v, %#+v): %#+v, %v", decoderFactory, encoderFactory, streamConfigurer, processorOpts, _ret, _err)
+	}()
 	k, err := kernel.NewRecoder(
 		ctx,
 		decoderFactory,

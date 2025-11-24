@@ -9,6 +9,12 @@ import (
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
+type ErrNotFound struct{}
+
+func (e ErrNotFound) Error() string {
+	return "not found"
+}
+
 func FindNodeByObjectID(
 	ctx context.Context,
 	objID globaltypes.ObjectID,
@@ -19,16 +25,26 @@ func FindNodeByObjectID(
 			assert(ctx, _ret.GetObjectID() == objID, fmt.Sprintf("found an invalid node: %v != %v", _ret.GetObjectID(), objID))
 		}
 	}()
-	_err = Traverse(
-		ctx,
-		func(ctx context.Context, parent node.Abstract, item reflect.Type, n node.Abstract) error {
-			if n.GetObjectID() == objID {
-				_ret = n
+	var callback func(ctx context.Context, parent node.Abstract, item reflect.Type, n node.Abstract) error
+	callback = func(ctx context.Context, parent node.Abstract, item reflect.Type, n node.Abstract) error {
+		if n.GetObjectID() == objID {
+			_ret = n
+			return ErrTraverseStop{}
+		}
+		if n, ok := n.(node.OriginalNodeAbstracter); ok {
+			_err = Traverse(ctx, callback, n.OriginalNodeAbstract())
+			if _err != nil {
+				return _err
+			}
+			if _ret != nil {
 				return ErrTraverseStop{}
 			}
-			return nil
-		},
-		nodes...,
-	)
+		}
+		return nil
+	}
+	_err = Traverse(ctx, callback, nodes...)
+	if _err == nil && _ret == nil {
+		_err = ErrNotFound{}
+	}
 	return
 }

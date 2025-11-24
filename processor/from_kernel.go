@@ -35,6 +35,8 @@ type FromKernel[T kernel.Abstract] struct {
 	CountersStorage *Counters
 }
 
+var _ globaltypes.ErrorHandler = (*FromKernel[kernel.Abstract])(nil)
+
 type GetPacketSourcer interface {
 	GetPacketSource() packet.Source
 }
@@ -330,4 +332,14 @@ func (p *FromKernel[T]) Flush(
 	}
 
 	return flusher.Flush(ctx, p.preOutputPacketsCh, p.preOutputFramesCh)
+}
+
+func (p *FromKernel[T]) HandleError(
+	ctx context.Context,
+	err error,
+) error {
+	if h, ok := any(p.Kernel).(globaltypes.ErrorHandler); ok {
+		return h.HandleError(ctx, err)
+	}
+	return err
 }

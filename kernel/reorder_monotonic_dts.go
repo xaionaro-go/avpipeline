@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/go-ng/container/heap"
 	"github.com/go-ng/xsort"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	kernelcondition "github.com/xaionaro-go/avpipeline/kernel/condition"
@@ -48,7 +50,7 @@ type ReorderMonotonicDTS struct {
 	MaxDTSDifference      uint64
 	StartCondition        kernelcondition.Condition[*ReorderMonotonicDTS]
 	Started               bool
-	PrevDTS               int64
+	PrevDTS               time.Duration
 	DiscardUnorderedItems bool
 
 	emptyQueuesCount         int
@@ -304,9 +306,13 @@ func (r *ReorderMonotonicDTS) doSendItem(
 	defer func() {
 		logger.Tracef(ctx, "/sending out item: DTS:%d, stream:%d: %v", item.Packet.Dts(), item.GetStreamIndex(), _err)
 	}()
-	dts := item.GetDTS()
+	dts := avconv.Duration(item.GetDTS(), item.GetTimeBase())
 	if r.PrevDTS > dts {
-		return fmt.Errorf("DTS went backwards: previous DTS was %d, now it is %d", r.PrevDTS, dts)
+		if r.DiscardUnorderedItems {
+			logger.Warnf(ctx, "DTS went backwards: previous DTS was %v, now it is %v (%d); discarding the item", r.PrevDTS, dts, item.GetDTS())
+			return nil
+		}
+		return fmt.Errorf("DTS went backwards: previous DTS was %v, now it is %v (%d)", r.PrevDTS, dts, item.GetDTS())
 	}
 	r.PrevDTS = dts
 	if item.Frame != nil {

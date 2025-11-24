@@ -99,6 +99,7 @@ type OutputInputStream struct {
 
 type pendingPacket struct {
 	*astiav.Packet
+	FrameInfo   *FrameInfo
 	Source      packet.Source
 	InputStream *astiav.Stream
 }
@@ -625,8 +626,10 @@ func (o *Output) SendInputPacket(
 	}
 	assert(ctx, outputStream != nil)
 
+	frameInfo := FrameInfoFromPacketInput(inputPkt)
+
 	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
-		return o.send(ctx, pkt, inputPkt.Source, inputPkt.Stream, outputStream)
+		return o.send(ctx, pkt, frameInfo, inputPkt.Source, inputPkt.Stream, outputStream)
 	})
 	if err != nil {
 		return err
@@ -660,12 +663,13 @@ func (o *Output) String() string {
 func (o *Output) send(
 	ctx context.Context,
 	pkt *astiav.Packet,
+	frameInfo *FrameInfo,
 	source packet.Source,
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) error {
 	if o.started {
-		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
+		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}
 
 	mediaType := inputStream.CodecParameters().MediaType()
@@ -719,6 +723,7 @@ func (o *Output) send(
 	if outputSendPendingPackets {
 		o.pendingPackets = append(o.pendingPackets, pendingPacket{
 			Packet:      packet.CloneAsReferenced(pkt),
+			FrameInfo:   frameInfo,
 			Source:      source,
 			InputStream: inputStream,
 		})
@@ -778,13 +783,14 @@ func (o *Output) send(
 	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s %X", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), mediaType, pkt.Flags())
 
 	if !outputSendPendingPackets {
-		return o.doWritePacket(ctx, pkt, source, inputStream, outputStream)
+		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}
 	for _, pendingPkt := range o.pendingPackets {
 		//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
 		err := o.doWritePacket(
 			belt.WithField(ctx, "reason", "pending_packet"),
 			pendingPkt.Packet,
+			pendingPkt.FrameInfo,
 			pendingPkt.Source,
 			pendingPkt.InputStream,
 			outputStream,
@@ -836,6 +842,7 @@ func (o *Output) GetOutputMonitor(
 func (o *Output) doWritePacket(
 	ctx context.Context,
 	pkt *astiav.Packet,
+	frameInfo *FrameInfo,
 	source packet.Source,
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
@@ -893,7 +900,7 @@ func (o *Output) doWritePacket(
 	isNoDTS := pkt.Dts() == consts.NoPTSValue
 	isNoPTS := pkt.Pts() == consts.NoPTSValue
 	if !isNoDTS && !isNoPTS && pkt.Dts() > pkt.Pts() {
-		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS", pkt.Dts(), pkt.Pts())
+		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), frameInfo.GetPictureType())
 		pkt.SetDts(pkt.Pts())
 	}
 	if !isNoDTS && pkt.Dts() < outputStream.LastDTS {

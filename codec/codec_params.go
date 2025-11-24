@@ -7,13 +7,14 @@ import (
 )
 
 type CodecParams struct {
-	CodecName          Name
-	CodecParameters    *astiav.CodecParameters
-	HardwareDeviceType HardwareDeviceType
-	HardwareDeviceName HardwareDeviceName
-	TimeBase           astiav.Rational
-	Options            *astiav.Dictionary
-	HWDevFlags         int
+	CodecName             Name
+	CodecParameters       *astiav.CodecParameters
+	HardwareDeviceType    HardwareDeviceType
+	HardwareDeviceName    HardwareDeviceName
+	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
+	TimeBase              astiav.Rational
+	Options               *astiav.Dictionary
+	HWDevFlags            int
 }
 
 func (p CodecParams) Clone(ctx context.Context) CodecParams {
