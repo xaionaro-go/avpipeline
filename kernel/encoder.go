@@ -669,7 +669,7 @@ func (e *Encoder[EF]) drain(
 		}
 
 		//pkt.SetPos(-1) // <- TODO: should this happen? why?
-		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue && (frameInfo.PictureType == astiav.PictureTypeI || frameInfo.PictureType == astiav.PictureTypeP) {
+		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue && (frameInfo.PictureType != astiav.PictureTypeB) {
 			if encoderDTSHigherPTSCorrect {
 				logger.Errorf(ctx, "DTS (%d) > PTS (%d) correcting DTS to %d (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), pkt.Pts(), frameInfo.PictureType)
 				pkt.SetDts(pkt.Pts())
