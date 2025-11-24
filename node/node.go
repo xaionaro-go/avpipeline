@@ -58,6 +58,11 @@ type Abstract interface {
 	Flush(context.Context) error
 }
 
+type Pointer[T any] interface {
+	Abstract
+	*T
+}
+
 /* for easy copy-paste
 
 import (
@@ -147,11 +152,7 @@ func (n *MyFancyNodePlaceholder) SetPushFramesTos(
 
 }
 
-func (n *MyFancyNodePlaceholder) GetStatistics() *globaltypes.Statistics {
-
-}
-
-func (n *monitorAsNode) GetCountersPtr() *nodetypes.Counters {
+func (n *MyFancyNodePlaceholder) GetCountersPtr() *nodetypes.Counters {
 
 }
 
@@ -221,6 +222,7 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 	InputPacketFilter packetfiltercondition.Condition
 	InputFrameFilter  framefiltercondition.Condition
 	Locker            xsync.Mutex
+	ServeDebugData    any
 	IsServingValue    bool
 	IsDrainedValue    atomic.Bool
 	IsProcessorDirty  bool

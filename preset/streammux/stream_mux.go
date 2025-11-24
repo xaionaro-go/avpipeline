@@ -831,11 +831,11 @@ func (s *StreamMux[C]) Start(
 					logger.Debugf(ctx, "the error channel is closed")
 					return
 				}
-				if errors.Is(err.Err, node.ErrAlreadyStarted{}) {
+				cancelFn()
+				if errors.As(err.Err, &node.ErrAlreadyStarted{}) {
 					logger.Errorf(ctx, "%#+v", err)
 					continue
 				}
-				cancelFn()
 				if errors.Is(err.Err, context.Canceled) {
 					logger.Debugf(ctx, "cancelled: %#+v", err)
 					continue

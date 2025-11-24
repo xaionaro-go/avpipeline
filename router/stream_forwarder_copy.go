@@ -111,7 +111,9 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 		}
 	})
 	observability.Go(ctx, func(ctx context.Context) {
-		fwd.AutoFixer.Serve(ctx, node.ServeConfig{}, errCh)
+		fwd.AutoFixer.Serve(ctx, node.ServeConfig{
+			DebugData: fwd,
+		}, errCh)
 	})
 	return nil
 }

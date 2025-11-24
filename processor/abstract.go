@@ -23,6 +23,9 @@ type Abstract interface {
 
 /* for easier copy&paste:
 
+func (p *MyFancyProcessorPlaceholder) String() string {
+
+}
 func (p *MyFancyProcessorPlaceholder) Close(ctx context.Context) error {
 
 }
@@ -39,6 +42,9 @@ func (p *MyFancyProcessorPlaceholder) OutputFrameChan() <-chan frame.Output {
 
 }
 func (p *MyFancyProcessorPlaceholder) ErrorChan() <-chan error {
+
+}
+func (p *MyFancyProcessorPlaceholder) CountersPtr() *Counters {
 
 }
 

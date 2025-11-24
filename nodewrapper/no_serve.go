@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -14,14 +15,14 @@ import (
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
-type NoServe[T node.Abstract] struct {
-	Node T
+type NoServe[N node.Abstract] struct {
+	Node N
 }
 
 var _ node.Abstract = (*NoServe[node.Abstract])(nil)
 var _ node.DotBlockContentStringWriteToer = (*NoServe[node.Abstract])(nil)
 
-func (n *NoServe[T]) Serve(
+func (n *NoServe[N]) Serve(
 	ctx context.Context,
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
@@ -29,19 +30,23 @@ func (n *NoServe[T]) Serve(
 	logger.Debugf(ctx, "NoServe")
 }
 
-func (n *NoServe[T]) GetObjectID() globaltypes.ObjectID {
+func (n *NoServe[N]) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(n)
 }
 
-func (n *NoServe[T]) OriginalNodeAbstract() node.Abstract {
-	return n.OriginalNode() // TODO: fix the nil value, it should be untyped
+func (n *NoServe[N]) OriginalNodeAbstract() node.Abstract {
+	orig := n.OriginalNode()
+	if reflect.ValueOf(orig).IsZero() {
+		return nil
+	}
+	return orig
 }
 
-func (n *NoServe[T]) OriginalNode() T {
+func (n *NoServe[N]) OriginalNode() N {
 	return n.Node
 }
 
-func (n *NoServe[T]) DotBlockContentStringWriteTo(
+func (n *NoServe[N]) DotBlockContentStringWriteTo(
 	w io.Writer,
 	alreadyPrinted map[processor.Abstract]struct{},
 ) {
@@ -50,7 +55,7 @@ func (n *NoServe[T]) DotBlockContentStringWriteTo(
 	}
 }
 
-func (n *NoServe[T]) String() string {
+func (n *NoServe[N]) String() string {
 	stringer, ok := any(n.Node).(fmt.Stringer)
 	if !ok {
 		return "NoServe"
@@ -58,125 +63,123 @@ func (n *NoServe[T]) String() string {
 	return fmt.Sprintf("NoServe(%s)", stringer)
 }
 
-func (n *NoServe[T]) GetPushPacketsTos(
+func (n *NoServe[N]) GetPushPacketsTos(
 	ctx context.Context,
 ) node.PushPacketsTos {
-	return n.Node.GetPushPacketsTos(ctx)
+	return nil
 }
 
-func (n *NoServe[T]) WithPushPacketsTos(
+func (n *NoServe[N]) WithPushPacketsTos(
 	ctx context.Context,
 	callback func(context.Context, *node.PushPacketsTos),
 ) {
-	n.Node.WithPushPacketsTos(ctx, callback)
 }
 
-func (n *NoServe[T]) AddPushPacketsTo(
+func (n *NoServe[N]) AddPushPacketsTo(
 	ctx context.Context,
 	dst node.Abstract,
 	conds ...packetcondition.Condition,
 ) {
-	n.Node.AddPushPacketsTo(ctx, dst, conds...)
+	panic("NoServe cannot add PushPacketsTo")
 }
 
-func (n *NoServe[T]) SetPushPacketsTos(
+func (n *NoServe[N]) SetPushPacketsTos(
 	ctx context.Context,
 	pushTos node.PushPacketsTos,
 ) {
-	n.Node.SetPushPacketsTos(ctx, pushTos)
+	panic("NoServe cannot set PushPacketsTos")
 }
 
-func (n *NoServe[T]) RemovePushPacketsTo(
+func (n *NoServe[N]) RemovePushPacketsTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return n.Node.RemovePushPacketsTo(ctx, dst)
+	panic("NoServe cannot remove PushPacketsTo")
 }
 
-func (n *NoServe[T]) GetPushFramesTos(
+func (n *NoServe[N]) GetPushFramesTos(
 	ctx context.Context,
 ) node.PushFramesTos {
-	return n.Node.GetPushFramesTos(ctx)
+	return nil
 }
 
-func (n *NoServe[T]) WithPushFramesTos(
+func (n *NoServe[N]) WithPushFramesTos(
 	ctx context.Context,
 	callback func(context.Context, *node.PushFramesTos),
 ) {
-	n.Node.WithPushFramesTos(ctx, callback)
 }
 
-func (n *NoServe[T]) AddPushFramesTo(
+func (n *NoServe[N]) AddPushFramesTo(
 	ctx context.Context,
 	dst node.Abstract,
 	conds ...framecondition.Condition,
 ) {
-	n.Node.AddPushFramesTo(ctx, dst, conds...)
+	panic("NoServe cannot add PushFramesTo")
 }
 
-func (n *NoServe[T]) SetPushFramesTos(
+func (n *NoServe[N]) SetPushFramesTos(
 	ctx context.Context,
 	pushTos node.PushFramesTos,
 ) {
-	n.Node.SetPushFramesTos(ctx, pushTos)
+	panic("NoServe cannot set PushFramesTos")
 }
 
-func (n *NoServe[T]) RemovePushFramesTo(
+func (n *NoServe[N]) RemovePushFramesTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return n.Node.RemovePushFramesTo(ctx, dst)
+	panic("NoServe cannot remove PushFramesTo")
 }
 
-func (n *NoServe[T]) IsServing() bool {
+func (n *NoServe[N]) IsServing() bool {
 	return n.Node.IsServing()
 }
 
-func (n *NoServe[T]) GetCountersPtr() *nodetypes.Counters {
+func (n *NoServe[N]) GetCountersPtr() *nodetypes.Counters {
 	return n.Node.GetCountersPtr()
 }
 
-func (n *NoServe[T]) GetProcessor() processor.Abstract {
+func (n *NoServe[N]) GetProcessor() processor.Abstract {
 	return n.Node.GetProcessor()
 }
 
-func (n *NoServe[T]) GetInputPacketFilter() packetcondition.Condition {
+func (n *NoServe[N]) GetInputPacketFilter() packetcondition.Condition {
 	return n.Node.GetInputPacketFilter()
 }
 
-func (n *NoServe[T]) SetInputPacketFilter(cond packetcondition.Condition) {
+func (n *NoServe[N]) SetInputPacketFilter(cond packetcondition.Condition) {
 	n.Node.SetInputPacketFilter(cond)
 }
 
-func (n *NoServe[T]) GetInputFrameFilter() framecondition.Condition {
+func (n *NoServe[N]) GetInputFrameFilter() framecondition.Condition {
 	return n.Node.GetInputFrameFilter()
 }
 
-func (n *NoServe[T]) SetInputFrameFilter(cond framecondition.Condition) {
+func (n *NoServe[N]) SetInputFrameFilter(cond framecondition.Condition) {
 	n.Node.SetInputFrameFilter(cond)
 }
 
-func (n *NoServe[T]) GetChangeChanIsServing() <-chan struct{} {
+func (n *NoServe[N]) GetChangeChanIsServing() <-chan struct{} {
 	return n.Node.GetChangeChanIsServing()
 }
 
-func (n *NoServe[T]) GetChangeChanPushPacketsTo() <-chan struct{} {
+func (n *NoServe[N]) GetChangeChanPushPacketsTo() <-chan struct{} {
 	return n.Node.GetChangeChanPushPacketsTo()
 }
 
-func (n *NoServe[T]) GetChangeChanPushFramesTo() <-chan struct{} {
+func (n *NoServe[N]) GetChangeChanPushFramesTo() <-chan struct{} {
 	return n.Node.GetChangeChanPushFramesTo()
 }
 
-func (n *NoServe[T]) GetChangeChanDrained() <-chan struct{} {
+func (n *NoServe[N]) GetChangeChanDrained() <-chan struct{} {
 	return n.Node.GetChangeChanDrained()
 }
 
-func (n *NoServe[T]) IsDrained(ctx context.Context) bool {
+func (n *NoServe[N]) IsDrained(ctx context.Context) bool {
 	return n.Node.IsDrained(ctx)
 }
 
-func (n *NoServe[T]) Flush(
+func (n *NoServe[N]) Flush(
 	ctx context.Context,
 ) error {
 	return n.Node.Flush(ctx)

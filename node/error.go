@@ -3,8 +3,9 @@ package node
 import "fmt"
 
 type Error struct {
-	Node Abstract
-	Err  error
+	Node      Abstract
+	Err       error
+	DebugData any
 }
 
 func (e Error) Error() string {
@@ -15,7 +16,9 @@ func (e Error) Unwrap() error {
 	return e.Err
 }
 
-type ErrAlreadyStarted struct{}
+type ErrAlreadyStarted struct {
+	PreviousDebugData any
+}
 
 func (ErrAlreadyStarted) Error() string {
 	return "already started serving"

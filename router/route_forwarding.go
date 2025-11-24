@@ -102,8 +102,8 @@ func (fwd *RouteForwarding[T]) start(
 }
 
 func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "startLocked")
-	defer func() { logger.Debugf(ctx, "/startLocked: %v", _err) }()
+	logger.Debugf(ctx, "startLocked: %p", fwd)
+	defer func() { logger.Debugf(ctx, "/startLocked: %p: %v", fwd, _err) }()
 
 	select {
 	case <-ctx.Done():

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -24,17 +25,45 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+	logger.Tracef(ctx, "AutoFixer[%p: %p, %p]: Serve: %s", a, a.AutoHeadersNode, a.MapStreamIndicesNode, debug.Stack())
+	defer logger.Tracef(ctx, "AutoFixer[%p: %p, %p]: /Serve", a, a.AutoHeadersNode, a.MapStreamIndicesNode)
+
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
+
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	if a.AutoHeadersNode != nil {
+	if a.AutoHeadersNode != nil { // TODO: this block is not thread-safe, fix
+		if a.AutoHeadersNode.IsServing() {
+			logger.Errorf(ctx, "AutoHeadersNode[%p] is already serving", a.AutoHeadersNode)
+			errCh <- node.Error{
+				Node: a.AutoHeadersNode,
+				Err: fmt.Errorf("%w: %s", node.ErrAlreadyStarted{
+					PreviousDebugData: a.AutoHeadersNode.ServeDebugData,
+				}, debug.Stack()),
+			}
+			cancelFn()
+			return
+		}
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
 			a.AutoHeadersNode.Serve(ctx, cfg, errCh)
 		})
 	}
-	if a.MapStreamIndicesNode != nil {
+	if a.MapStreamIndicesNode != nil { // TODO: this block is not thread-safe, fix
+		if a.MapStreamIndicesNode.IsServing() {
+			logger.Errorf(ctx, "MapStreamIndicesNode[%p] is already serving", a.MapStreamIndicesNode)
+			errCh <- node.Error{
+				Node: a.MapStreamIndicesNode,
+				Err: fmt.Errorf("%w: %s", node.ErrAlreadyStarted{
+					PreviousDebugData: a.MapStreamIndicesNode.ServeDebugData,
+				}, debug.Stack()),
+			}
+			cancelFn()
+			return
+		}
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()

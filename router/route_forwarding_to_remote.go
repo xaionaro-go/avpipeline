@@ -96,7 +96,9 @@ func (fwd *RouteForwardingToRemote[T]) init(
 	}
 	observability.Go(ctx, func(ctx context.Context) {
 		defer close(fwd.ErrChan)
-		fwd.Output.Serve(ctx, node.ServeConfig{}, fwd.ErrChan)
+		fwd.Output.Serve(ctx, node.ServeConfig{
+			DebugData: fwd,
+		}, fwd.ErrChan)
 	})
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range fwd.ErrChan {

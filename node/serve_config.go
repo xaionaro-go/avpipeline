@@ -4,4 +4,6 @@ type ServeConfig struct {
 	FrameDropAudio bool
 	FrameDropVideo bool
 	FrameDropOther bool
+
+	DebugData any
 }

@@ -415,16 +415,27 @@ func asPacketSink(proc processor.Abstract) packet.Sink {
 	return nil
 }
 
+type DebugData struct {
+	Transcoder any
+	Original   any
+}
+
 func (s *TranscoderWithPassthrough[C, P]) Start(
 	ctx context.Context,
 	passthroughMode types.PassthroughMode,
 	serveCfg avpipeline.ServeConfig,
 ) (_err error) {
-	logger.Debugf(ctx, "Start(ctx, %s)", passthroughMode)
-	defer logger.Debugf(ctx, "/Start(ctx, %s): %v", passthroughMode, _err)
+	logger.Debugf(ctx, "Start(ctx, %s): %p", passthroughMode, s)
+	defer logger.Debugf(ctx, "/Start(ctx, %s): %p: %v", passthroughMode, s, _err)
 	if s.Recoder == nil {
 		return fmt.Errorf("s.Recoder is not configured")
 	}
+
+	serveCfg.EachNode.DebugData = DebugData{
+		Transcoder: s,
+		Original:   serveCfg.EachNode.DebugData,
+	}
+
 	outputMain := &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[0]}
 	outputAsPacketSink := asPacketSink(outputMain.GetProcessor())
 	if outputAsPacketSink == nil {
@@ -616,11 +627,11 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 					logger.Debugf(ctx, "the error channel is closed")
 					return
 				}
-				if errors.Is(err.Err, node.ErrAlreadyStarted{}) {
+				cancelFn()
+				if errors.As(err.Err, &node.ErrAlreadyStarted{}) {
 					logger.Errorf(ctx, "%#+v", err)
 					continue
 				}
-				cancelFn()
 				if errors.Is(err.Err, context.Canceled) {
 					logger.Debugf(ctx, "cancelled: %#+v", err)
 					continue

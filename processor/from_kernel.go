@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astikit"
+	xruntime "github.com/facebookincubator/go-belt/pkg/runtime"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
@@ -206,7 +207,8 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 }
 
 func (p *FromKernel[T]) Close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "Close[%T]", p.Kernel)
+	f, l := xruntime.Caller(nil).FileLine()
+	logger.Debugf(ctx, "Close[%T]: called from %s:%d", p.Kernel, f, l)
 	defer func() { logger.Debugf(ctx, "/Close[%T]: %v", p.Kernel, _err) }()
 	var err error
 	p.closeOnce.Do(func() {

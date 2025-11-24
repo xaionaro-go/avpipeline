@@ -52,8 +52,9 @@ func (n *NodeWithCustomData[C, T]) Serve(
 		}
 		select {
 		case errCh <- Error{
-			Node: n,
-			Err:  err,
+			Node:      n,
+			Err:       err,
+			DebugData: serveConfig.DebugData,
 		}:
 		default:
 			logger.Errorf(ctx, "error queue is full, cannot send error: '%v'", err)
@@ -72,9 +73,12 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	if err := xsync.DoR1(ctx, &n.Locker, func() error {
 		if n.IsServingValue {
 			logger.Debugf(ctx, "double-start: %T: %s", n.CustomData, nodeKey)
-			return ErrAlreadyStarted{}
+			return ErrAlreadyStarted{
+				PreviousDebugData: n.ServeDebugData,
+			}
 		}
 		n.IsServingValue = true
+		n.ServeDebugData = serveConfig.DebugData
 		close(*xatomic.SwapPointer(&n.ChangeChanIsServing, ptr(make(chan struct{}))))
 		return nil
 	}); err != nil {
@@ -176,7 +180,7 @@ func pushFurther[
 	serveConfig *ServeConfig,
 	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
 	getInputCondition func(Abstract) C,
-	getPushChan func(processor.Abstract) chan<- I,
+	getPushChan func(processor.Abstract) (chan<- I, bool),
 	poolPutInput func(I),
 	poolPutOutput func(O),
 	countersSubSectionID globaltypes.CountersSubSectionID,
@@ -270,7 +274,7 @@ func pushToDestination[
 	serveConfig *ServeConfig,
 	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
 	getInputCondition func(Abstract) C,
-	getPushChan func(processor.Abstract) chan<- I,
+	getPushChan func(processor.Abstract) (chan<- I, bool),
 	poolPutInput func(I),
 	countersSubSectionID globaltypes.CountersSubSectionID,
 ) {
@@ -312,7 +316,7 @@ func pushToDestination[
 			return
 		}
 
-		pushChan := getPushChan(pushTo.Node.GetProcessor())
+		pushChan, isDiscard := getPushChan(pushTo.Node.GetProcessor())
 		logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 		frameDrop := false
 		switch mediaType {
@@ -323,7 +327,15 @@ func pushToDestination[
 		default:
 			frameDrop = serveConfig.FrameDropOther
 		}
-		if frameDrop {
+		switch {
+		case isDiscard:
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				logger.Tracef(ctx, "discarding %s for %s", mediaType, pushTo.Node.GetProcessor())
+			}
+		case frameDrop:
 			select {
 			case <-ctx.Done():
 				return
@@ -334,7 +346,7 @@ func pushToDestination[
 				poolPutInput(inputObj)
 				return
 			}
-		} else {
+		default:
 			select {
 			case <-ctx.Done():
 				return
@@ -392,16 +404,18 @@ func getInputPacketFilter(n Abstract) packetcondition.Condition {
 	return n.GetInputPacketFilter()
 }
 
-func getInputPacketChan(p processor.Abstract) chan<- packet.Input {
-	return p.InputPacketChan()
+func getInputPacketChan(p processor.Abstract) (chan<- packet.Input, bool) {
+	ch := p.InputPacketChan()
+	return ch, ch == processor.DiscardInputPacketChan
 }
 
 func getInputFrameFilter(n Abstract) framecondition.Condition {
 	return n.GetInputFrameFilter()
 }
 
-func getInputFrameChan(p processor.Abstract) chan<- frame.Input {
-	return p.InputFrameChan()
+func getInputFrameChan(p processor.Abstract) (chan<- frame.Input, bool) {
+	ch := p.InputFrameChan()
+	return ch, ch == processor.DiscardInputFrameChan
 }
 
 func poolPutPacketInput(p packet.Input) {
