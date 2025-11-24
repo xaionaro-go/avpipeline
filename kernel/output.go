@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"runtime/debug"
@@ -394,7 +395,7 @@ func (o *Output) Close(
 				}()
 				logger.Debugf(ctx, "writing the trailer")
 				err := o.FormatContext.WriteTrailer()
-				logger.Debugf(ctx, "write the trailer, result: %v", err)
+				logger.Debugf(ctx, "wrote the trailer, result: %v", err)
 				return err
 			}()
 			if err != nil {
@@ -959,6 +960,10 @@ func (o *Output) doWritePacket(
 	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
 	var err error
 	o.formatContextLocker.Do(ctx, func() {
+		if o.FormatContext == nil {
+			err = io.EOF
+			return
+		}
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
 	})
 	if err != nil {
