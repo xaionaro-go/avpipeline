@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/indicator"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/typing"
 	"github.com/xaionaro-go/xsync"
 )
@@ -33,6 +35,7 @@ type EncoderFullLocked struct {
 	IsDirtyValue      atomic.Bool
 	CallCount         atomic.Int64
 	ForceNextKeyFrame bool
+	AverageFPS        *indicator.MAMA[float64]
 }
 
 func newEncoderFullLocked(
@@ -81,6 +84,7 @@ func newEncoderFullLocked(
 		EncoderFullBackend: c,
 		ReusableResources:  reusableResources,
 		InitTS:             time.Now(),
+		AverageFPS:         indicator.NewMAMA[float64](60, 0.1, 0.01),
 	}
 	switch e.MediaType() {
 	case astiav.MediaTypeVideo:
@@ -170,8 +174,12 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 		return
 	}
 	timeBase := e.codecContext.TimeBase()
-	fps := timeBase.Invert()
-	fps.SetNum(fps.Num() / int(dur))
+	curFPS := timeBase.Invert()
+	curFPS.SetNum(curFPS.Num() / int(dur))
+	avgFPS := e.AverageFPS.Update(curFPS.Float64())
+	_fps := globaltypes.RationalFromApproxFloat64(avgFPS)
+	fps := astiav.NewRational(_fps.Num, _fps.Den)
+	logger.Tracef(ctx, "calculated FPS from frame duration: dur:%d time_base:%f fps:%v avg_fps:%f (~= %v = %v = %f)", dur, timeBase.Float64(), curFPS, avgFPS, _fps, fps, fps.Float64())
 	oldFPS := e.InitParams.CodecParameters.FrameRate()
 	if oldFPS == fps {
 		if encoderDebug {
@@ -179,19 +187,27 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 		}
 		return
 	}
+	if !e.AverageFPS.Valid() {
+		logger.Debugf(ctx, "waiting for more samples to stabilize framerate: curFPS:%v avgFPS:%f", curFPS, avgFPS)
+		return
+	}
 
-	logger.Debugf(ctx, "setting FPS to %v->%v (codec: '%s')", oldFPS, fps, e.codec.Name())
+	if encoderDebug {
+		logger.Tracef(ctx, "setting FPS to %v->%v (codec: '%s')", oldFPS, avgFPS, e.codec.Name())
+	}
 	e.InitParams.CodecParameters.SetFrameRate(fps)
 	switch {
 	case strings.HasSuffix(e.codec.Name(), "_nvenc"):
 		fpsChangeFactor := math.Abs((fps.Float64() - oldFPS.Float64()) / math.Max(fps.Float64(), oldFPS.Float64()))
 		if fpsChangeFactor < 0.2 {
-			logger.Debugf(ctx, "the framerate change is negligible (%v -> %v: %f), not reinitializing the encoder", oldFPS, fps, fpsChangeFactor)
+			if encoderDebug {
+				logger.Tracef(ctx, "the framerate change is negligible (%v -> %v: %f), not reinitializing the encoder", oldFPS, fps, fpsChangeFactor)
+			}
 			return
 		}
 		// NVENC seems to ignore codec context framerate
 		// so we just need to reinit the encoder
-		logger.Warnf(ctx, "reinitializing encoder to apply new framerate %v", fps)
+		logger.Warnf(ctx, "reinitializing encoder to apply new framerate %f (%v); fps_change_factor:%f, dur:%v, time_base:%f", fps.Float64(), fps, fpsChangeFactor, dur, timeBase.Float64())
 		err := e.reinitEncoder(ctx)
 		if err != nil {
 			logger.Errorf(ctx, "unable to reinit the encoder after framerate (%v -> %v) change: %v", oldFPS, fps, err)

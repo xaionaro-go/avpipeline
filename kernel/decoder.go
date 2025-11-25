@@ -349,6 +349,9 @@ func (d *Decoder[DF]) drain(
 				logger.Tracef(ctx, "setting frame PTS from packet PTS: %d", packetInfo.PTS)
 			}
 			f.SetPts(packetInfo.PTS)
+			if f.Pts() == astiav.NoPtsValue {
+				logger.Warnf(ctx, "frame PTS is not set: %d (packetInfo: %#+v)", f.Pts(), packetInfo)
+			}
 		}
 
 		if f.Duration() <= 0 {
@@ -356,6 +359,9 @@ func (d *Decoder[DF]) drain(
 				logger.Tracef(ctx, "setting frame duration from packet duration: %d", packetInfo.Duration)
 			}
 			f.SetDuration(packetInfo.Duration)
+			if f.Duration() <= 0 {
+				logger.Warnf(ctx, "frame duration is not set: %d (packetInfo: %#+v)", f.Duration(), packetInfo)
+			}
 		}
 		err := d.send(ctx, outputFramesCh, f, streamInfo)
 		if err != nil {

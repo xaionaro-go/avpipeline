@@ -27,25 +27,27 @@ func newNTSCRationalFromFloat64(f float64) *big.Rat {
 	return nil
 }
 
-func RationalFromApproxFloat64(fps float64) Rational {
-	var r Rational
+func RationalFromApproxFloat64(fps float64) (r Rational) {
 	if float64(int(fps)) == fps {
 		r.Num = int(fps)
 		r.Den = 1
-		return r
+		return
 	}
+
 	rat := newNTSCRationalFromFloat64(fps)
-	if rat == nil {
-		for _, order := range []float64{1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6} {
-			rat = dectofrac.NewRatP(fps, order)
-			if v, _ := rat.Float64(); v != math.Round(fps) {
-				break
-			}
-		}
+	if rat != nil {
+		r.Num = int(rat.Num().Int64())
+		r.Den = int(rat.Denom().Int64())
+		return
 	}
-	r.Num = int(rat.Num().Int64())
-	r.Den = int(rat.Denom().Int64())
-	return r
+
+	r.Num = int(fps * 1000000)
+	r.Den = 1000000
+
+	gcd := big.NewInt(0).GCD(nil, nil, big.NewInt(int64(r.Num)), big.NewInt(int64(r.Den))).Int64()
+	r.Num /= int(gcd)
+	r.Den /= int(gcd)
+	return
 }
 
 func RationalFromFloat64(fps float64) Rational {

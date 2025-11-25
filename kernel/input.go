@@ -18,7 +18,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
@@ -26,18 +25,18 @@ import (
 )
 
 const (
-	inputCorrectZeroDurationPackets = false
-	inputDefaultWidth               = 1920
-	inputDefaultHeight              = 1080
+	inputDefaultWidth  = 1920
+	inputDefaultHeight = 1080
 )
 
 type InputConfig struct {
-	CustomOptions  types.DictionaryItems
-	RecvBufferSize uint
-	AsyncOpen      bool
-	OnPostOpen     func(context.Context, *Input) error
-	OnPreClose     func(context.Context, *Input) error
-	KeepOpen       bool
+	CustomOptions       globaltypes.DictionaryItems
+	RecvBufferSize      uint
+	AsyncOpen           bool
+	OnPostOpen          func(context.Context, *Input) error
+	OnPreClose          func(context.Context, *Input) error
+	KeepOpen            bool
+	CorrectZeroDuration bool
 }
 
 type Input struct {
@@ -54,9 +53,11 @@ type Input struct {
 	DefaultWidth  int
 	DefaultHeight int
 
-	KeepOpen   bool
-	OnPreClose func(context.Context, *Input) error
-	WaitGroup  sync.WaitGroup
+	KeepOpen            bool
+	OnPreClose          func(context.Context, *Input) error
+	CorrectZeroDuration bool
+
+	WaitGroup sync.WaitGroup
 }
 
 var _ Abstract = (*Input)(nil)
@@ -88,8 +89,9 @@ func NewInputFromURL(
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
 
-		KeepOpen:   cfg.KeepOpen,
-		OnPreClose: cfg.OnPreClose,
+		KeepOpen:            cfg.KeepOpen,
+		OnPreClose:          cfg.OnPreClose,
+		CorrectZeroDuration: cfg.CorrectZeroDuration,
 	}
 
 	var formatName string
@@ -315,17 +317,16 @@ func (i *Input) Generate(
 		return nil
 	}
 
-	var curPkt *packet.Output
+	curPkts := map[int]*packet.Output{}
 	defer func() {
-		if curPkt == nil {
-			return
+		for _, pkt := range curPkts {
+			select {
+			case <-ctx.Done():
+			case <-i.CloseChan():
+			default:
+			}
+			sendPkt(pkt)
 		}
-		select {
-		case <-ctx.Done():
-		case <-i.CloseChan():
-		default:
-		}
-		sendPkt(curPkt)
 	}()
 	for {
 		select {
@@ -338,19 +339,20 @@ func (i *Input) Generate(
 		err := i.readIntoPacket(ctx, pkt)
 		switch err {
 		case nil:
-			stream := avconv.FindStreamByIndex(ctx, i.FormatContext, pkt.StreamIndex())
+			streamIndex := pkt.StreamIndex()
+			stream := avconv.FindStreamByIndex(ctx, i.FormatContext, streamIndex)
 			logger.Tracef(
 				ctx,
 				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d",
 				stream.CodecParameters().MediaType(),
-				pkt.StreamIndex(),
+				streamIndex,
 				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
 				pkt.Flags().Has(astiav.PacketFlagKey),
 				len(pkt.Data()),
 			)
 
-			prevPkt := curPkt
-			curPkt = ptr(packet.BuildOutput(
+			prevPkt := curPkts[streamIndex]
+			curPkt := ptr(packet.BuildOutput(
 				pkt,
 				packet.BuildStreamInfo(
 					stream,
@@ -360,24 +362,26 @@ func (i *Input) Generate(
 			))
 			if prevPkt != nil {
 				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
-				if stream.TimeBase().Float64()*float64(suggestedDuration) > 0 { // implies less than 1 FPS
-					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it")
+				if stream.TimeBase().Float64()*float64(suggestedDuration) > 1 { // implies less than 1 FPS
+					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
 				} else {
 					prevPkt.Packet.SetDuration(suggestedDuration)
-					logger.Debugf(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
+					logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
 				}
 
 				if err := sendPkt(prevPkt); err != nil {
 					return err
 				}
+				delete(curPkts, streamIndex)
 			}
 
-			if curPkt.Duration() <= 0 && inputCorrectZeroDurationPackets {
+			if curPkt.Duration() <= 0 && i.CorrectZeroDuration {
+				logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
+				curPkts[streamIndex] = curPkt
 				continue
 			}
 			// no correction is needed, let's send immediately
 			err := sendPkt(curPkt)
-			curPkt = nil
 			if err != nil {
 				return err
 			}

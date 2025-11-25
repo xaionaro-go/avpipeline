@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	encoderDebug = false
+	encoderDebug = true
 )
 
 type CallbackPacketReceiver func(
