@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"slices"
+	"time"
 
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/sockopt"
 	"github.com/xaionaro-go/xsync"
@@ -58,7 +61,8 @@ var _ GetInternalQueueSizer = (*Output)(nil)
 // Warning! The implementation intrudes into private structures, which is unsafe.
 func (r *Output) GetInternalQueueSize(
 	ctx context.Context,
-) map[string]uint64 {
+) (_ret map[string]uint64) {
+	defer func() { logger.Tracef(ctx, "GetInternalQueueSize: %#+v", _ret) }()
 	defer func() {
 		if rec := recover(); rec != nil {
 			logger.Debugf(ctx, "panic recovered in %s in GetInternalQueueSize: %v\n%s", r, rec, debug.Stack())
@@ -193,4 +197,72 @@ func (r *Output) getInternalQueueSizeRTMP(
 	}
 
 	return result
+}
+
+var _ kerneltypes.UnsafeGetOldestDTSInTheQueuer = (*Output)(nil)
+
+func (r *Output) UnsafeGetOldestDTSInTheQueue(
+	ctx context.Context,
+) (_ret time.Duration, _err error) {
+	logger.Tracef(ctx, "UnsafeGetOldestDTSInTheQueue")
+	defer func() { logger.Tracef(ctx, "/UnsafeGetOldestDTSInTheQueue: %v %v", _ret, _err) }()
+
+	queueSize := r.GetInternalQueueSize(ctx)
+	var queueSizeTotal uint64
+	for _, v := range queueSize {
+		queueSizeTotal += v
+	}
+
+	if queueSizeTotal == 0 {
+		return 0, nil
+	}
+
+	logger.Tracef(ctx, "queueSizeTotal == %d", queueSizeTotal)
+
+	outTSs := r.outTSs.GetAll()
+	accountedQueueSize := uint64(0)
+	for idx, outTS := range slices.Backward(outTSs) {
+		accountedQueueSize += outTS.PacketSize
+		if accountedQueueSize >= queueSizeTotal && outTS.DTS > 0 {
+			dts := outTS.DTS
+			pts := outTS.PTS
+			logger.Tracef(ctx, "accountedQueueSize == %d (/%d) at idx %d (/%d); dts == %v; pts == %v", accountedQueueSize, queueSizeTotal, len(outTSs)-1-idx, len(outTSs), dts, pts)
+			return dts, nil
+		}
+	}
+
+	if accountedQueueSize == 0 {
+		return 0, fmt.Errorf("no information about sent packets' DTSs")
+	}
+
+	var oldestDTS, earliestDTS time.Duration
+	for _, outTS := range outTSs {
+		if outTS.DTS > 0 {
+			oldestDTS = outTS.DTS
+			break
+		}
+	}
+	for _, outTS := range slices.Backward(outTSs) {
+		if outTS.DTS > 0 {
+			earliestDTS = outTS.DTS
+			break
+		}
+	}
+
+	knownLatency := earliestDTS - oldestDTS
+	k := float64(queueSizeTotal) / float64(accountedQueueSize)
+	estimatedLatency := time.Duration(float64(knownLatency) * k)
+	logger.Tracef(ctx, "oldestDTS=%v earliestDTS=%v knownLatency=%v accountedQueueSize=%d k=%v estimatedLatency=%v", oldestDTS, earliestDTS, knownLatency, accountedQueueSize, k, estimatedLatency)
+
+	if estimatedLatency < 0 {
+		return 0, fmt.Errorf("calculated negative estimated latency: %v (%v * %v)", estimatedLatency, knownLatency, k)
+	}
+
+	return oldestDTS + estimatedLatency, ErrApproximateValue{}
+}
+
+type ErrApproximateValue struct{}
+
+func (e ErrApproximateValue) Error() string {
+	return "approximate value"
 }

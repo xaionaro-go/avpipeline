@@ -7,12 +7,14 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astikit"
 	xruntime "github.com/facebookincubator/go-belt/pkg/runtime"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
@@ -342,4 +344,16 @@ func (p *FromKernel[T]) HandleError(
 		return h.HandleError(ctx, err)
 	}
 	return err
+}
+
+var _ processortypes.UnsafeGetOldestDTSInTheQueuer = (*FromKernel[kernel.Abstract])(nil)
+
+func (p *FromKernel[T]) UnsafeGetOldestDTSInTheQueue(
+	ctx context.Context,
+) (_ret time.Duration, _err error) {
+	queuer, ok := any(p.Kernel).(kerneltypes.UnsafeGetOldestDTSInTheQueuer)
+	if !ok {
+		return 0, ErrNotImplemented{Err: kerneltypes.ErrNotImplemented{}}
+	}
+	return queuer.UnsafeGetOldestDTSInTheQueue(ctx)
 }

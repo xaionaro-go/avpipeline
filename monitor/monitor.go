@@ -10,16 +10,17 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/internal"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
-	"github.com/xaionaro-go/avpipeline/protobuf/goconv"
+	goconvavp "github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipeline"
+	goconvlibav "github.com/xaionaro-go/avpipeline/protobuf/goconv/libav"
 	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -221,9 +222,9 @@ func (m *Monitor) observePacket(
 	event := &avpipelinegrpc.MonitorEvent{
 		TimestampNs:      uint64(time.Now().UnixNano()),
 		SourceKernelId:   uint64(sourceKernelID),
-		Stream:           goconv.StreamFromGo(streamInfo.Stream).Protobuf(),
-		Packet:           goconv.PacketFromGo(pkt, m.IncludePacketPayload).Protobuf(),
-		PipelineSideData: goconv.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
+		Stream:           goconvlibav.StreamFromGo(streamInfo.Stream).Protobuf(),
+		Packet:           goconvlibav.PacketFromGo(pkt, m.IncludePacketPayload).Protobuf(),
+		PipelineSideData: goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
 	}
 	if m.DoDecode {
 		frames, err := m.decodeFrames(ctx, pkt, streamInfo)
@@ -231,7 +232,7 @@ func (m *Monitor) observePacket(
 			return fmt.Errorf("unable to decode packet for monitoring: %w", err)
 		}
 		for _, fr := range frames {
-			event.Frames = append(event.Frames, goconv.FrameFromGo(fr, m.IncludeFramePayload).Protobuf())
+			event.Frames = append(event.Frames, goconvlibav.FrameFromGo(fr, m.IncludeFramePayload).Protobuf())
 		}
 	}
 	select {
@@ -263,12 +264,12 @@ func (m *Monitor) observeFrame(
 		SourceKernelId: uint64(sourceKernelID),
 		Stream: &libav_proto.Stream{
 			Index:           int32(streamInfo.StreamIndex),
-			CodecParameters: goconv.CodecParametersFromGo(streamInfo.CodecParameters).Protobuf(),
-			TimeBase:        goconv.RationalFromGo(ptr(streamInfo.TimeBase)).Protobuf(),
+			CodecParameters: goconvlibav.CodecParametersFromGo(streamInfo.CodecParameters).Protobuf(),
+			TimeBase:        goconvlibav.RationalFromGo(ptr(streamInfo.TimeBase)).Protobuf(),
 			Duration:        streamInfo.Duration,
 		},
-		Frames:           []*libav_proto.Frame{goconv.FrameFromGo(fr, m.IncludeFramePayload).Protobuf()},
-		PipelineSideData: goconv.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
+		Frames:           []*libav_proto.Frame{goconvlibav.FrameFromGo(fr, m.IncludeFramePayload).Protobuf()},
+		PipelineSideData: goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
 	}
 	select {
 	case <-ctx.Done():

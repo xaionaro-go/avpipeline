@@ -639,11 +639,18 @@ func (o *Output[C]) reconfigureRecoder(
 	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
 
-	if err := o.reconfigureDecoder(ctx, cfg); err != nil {
-		return fmt.Errorf("unable to reconfigure the decoder: %w", err)
-	}
-	if err := o.reconfigureEncoder(ctx, cfg); err != nil {
+	isCopyEncoder, err := o.reconfigureEncoder(ctx, cfg)
+	if err != nil {
 		return fmt.Errorf("unable to reconfigure the encoder: %w", err)
+	}
+	if cfg.Output.VideoTrackConfigs[0].CodecName == codectypes.Name(codec.NameCopy) && !isCopyEncoder {
+		logger.Errorf(ctx, "the encoder is not a copy encoder despite it should be")
+		isCopyEncoder = true
+	}
+	if !isCopyEncoder {
+		if err := o.reconfigureDecoder(ctx, cfg); err != nil {
+			return fmt.Errorf("unable to reconfigure the decoder: %w", err)
+		}
 	}
 
 	o.RecoderNode.SetInputPacketFilter(nil)
@@ -700,13 +707,13 @@ func (o *Output[C]) reconfigureDecoder(
 func (o *Output[C]) reconfigureEncoder(
 	ctx context.Context,
 	cfg types.RecoderConfig,
-) (_err error) {
+) (_isCopyEncoder bool, _err error) {
 	logger.Tracef(ctx, "reconfigureEncoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureEncoder: %#+v: %v", cfg, _err) }()
 
 	var videoCfg types.OutputVideoTrackConfig
 	if len(cfg.Output.VideoTrackConfigs) > 1 {
-		return fmt.Errorf("currently we support only one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
+		return false, fmt.Errorf("currently we support only one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
 	if len(cfg.Output.VideoTrackConfigs) > 0 {
 		videoCfg = cfg.Output.VideoTrackConfigs[0]
@@ -714,7 +721,7 @@ func (o *Output[C]) reconfigureEncoder(
 
 	var audioCfg types.OutputAudioTrackConfig
 	if len(cfg.Output.AudioTrackConfigs) > 1 {
-		return fmt.Errorf("currently we support only one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
+		return false, fmt.Errorf("currently we support only one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
 	}
 	if len(cfg.Output.AudioTrackConfigs) > 0 {
 		audioCfg = cfg.Output.AudioTrackConfigs[0]
@@ -758,6 +765,7 @@ func (o *Output[C]) reconfigureEncoder(
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
 		encoder := encoderFactory.VideoEncoders[0]
+		_isCopyEncoder = codec.IsEncoderCopy(encoder)
 
 		if videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
 			return fmt.Errorf("unable to change the hardware device type on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceType, encoderFactory.HardwareDeviceType)
@@ -798,7 +806,7 @@ func (o *Output[C]) reconfigureEncoder(
 			}
 		}
 
-		if !codec.IsEncoderCopy(encoder) {
+		if !_isCopyEncoder {
 			res := encoder.GetResolution(ctx)
 			if res == nil {
 				return fmt.Errorf("unable to get the current encoding resolution from encoder %s", encoder)
@@ -817,10 +825,10 @@ func (o *Output[C]) reconfigureEncoder(
 		return nil
 	})
 	if err != nil {
-		return err
+		return _isCopyEncoder, err
 	}
 
-	return nil
+	return _isCopyEncoder, nil
 }
 
 func canonicalizeCodecName(ctx context.Context, name codec.Name) codectypes.Name {

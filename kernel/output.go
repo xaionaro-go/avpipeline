@@ -31,6 +31,7 @@ import (
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/xsync"
+	"tailscale.com/util/ringbuffer"
 )
 
 const (
@@ -106,6 +107,12 @@ type pendingPacket struct {
 	InputStream *astiav.Stream
 }
 
+type outTS struct {
+	PacketSize uint64
+	PTS        time.Duration
+	DTS        time.Duration
+}
+
 // Note: it is strongly recommended to put MonotonicDTS before Output.
 type Output struct {
 	ID            OutputID
@@ -128,6 +135,7 @@ type Output struct {
 	URL       string
 	URLParsed *url.URL
 
+	LatestSentPTS time.Duration
 	LatestSentDTS time.Duration
 
 	PreallocatedAudioStreams []*OutputStream
@@ -136,6 +144,8 @@ type Output struct {
 	started          bool
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
+	outputFormatName string
+	outTSs           *ringbuffer.RingBuffer[outTS]
 
 	*closuresignaler.ClosureSignaler
 	*astiav.FormatContext
@@ -198,6 +208,7 @@ func NewOutputFromURL(
 
 		formatContextLocker: make(xsync.CtxLocker, 1),
 		waitingKeyFrames:    make(map[int]struct{}),
+		outTSs:              ringbuffer.New[outTS](10000),
 	}
 
 	rtmpAppName := strings.Trim(url.Path, "/")
@@ -344,6 +355,7 @@ func (o *Output) doOpen(
 
 	formatName := o.FormatContext.OutputFormat().Name()
 	logger.Debugf(ctx, "output format name: '%s'", formatName)
+	o.outputFormatName = formatName
 
 	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
 		// if output is not a file then nothing else to do
@@ -950,6 +962,26 @@ func (o *Output) doWritePacket(
 		return nil
 	}
 
+	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
+
+	var ptsDuration time.Duration
+	if pts == consts.NoPTSValue {
+		logger.Warnf(ctx, "PTS is missing in the packet")
+	} else {
+		ptsDuration = avconv.Duration(pts, outputStream.TimeBase())
+	}
+	var dtsDuration time.Duration
+	if dts == consts.NoPTSValue {
+		dtsDuration = ptsDuration
+	} else {
+		dtsDuration = avconv.Duration(dts, outputStream.TimeBase())
+	}
+	o.outTSs.Add(outTS{
+		PTS:        ptsDuration,
+		DTS:        dtsDuration,
+		PacketSize: o.getBinarySize(ctx, pkt),
+	})
+
 	var dataLen int
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		resolution := codectypes.Resolution{
@@ -961,7 +993,7 @@ func (o *Output) doWritePacket(
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
 			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (res: %s, sample_rate: %v, channels: %v, time_base: %v) with flags 0x%016X and data length %d",
-			pkt.Pos(), pkt.Pts(), avconv.Duration(pkt.Pts(), outputStream.TimeBase()), pkt.Dts(), pkt.Duration(), outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
+			pos, pts, ptsDuration, dts, dur, outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), resolution, sampleRate, channels, outputStream.TimeBase(),
 			pkt.Flags(),
@@ -973,7 +1005,6 @@ func (o *Output) doWritePacket(
 		outputMonitor.ObserveOutputPacket(ctx, outputStream.Stream, pkt)
 	}
 
-	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
 	var err error
 	o.formatContextLocker.Do(ctx, func() {
 		if o.FormatContext == nil {
@@ -996,7 +1027,8 @@ func (o *Output) doWritePacket(
 		return err
 	}
 	outputStream.LastDTS = dts
-	o.LatestSentDTS = avconv.Duration(dts, outputStream.TimeBase())
+	o.LatestSentPTS = ptsDuration
+	o.LatestSentDTS = dtsDuration
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
 			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s; len:%d: %v",
@@ -1011,6 +1043,28 @@ func (o *Output) doWritePacket(
 		logger.Tracef(ctx, "current queue size: %#+v", o.GetInternalQueueSize(ctx))
 	}
 	return nil
+}
+
+func (o *Output) getBinarySize(
+	ctx context.Context,
+	pkt *astiav.Packet,
+) (_ret uint64) {
+	defer func() { logger.Tracef(ctx, "getBinarySize: %d", _ret) }()
+	var size uint64
+	size += uint64(pkt.Size())
+	switch o.outputFormatName {
+	case "flv":
+		// FLV tag header + PreviousTagSize
+		size += 11 + 4
+	}
+	switch o.URLParsed.Scheme {
+	case "rtmp", "rtmps":
+		// 1 byte:  FrameType + CodecID (VideoTagHeader)
+		// 1 byte:  AVCPacketType
+		// 3 bytes: CompositionTime
+		size += 5
+	}
+	return size
 }
 
 func (o *Output) WithInputFormatContext(

@@ -42,6 +42,9 @@ func (s *StreamMux[C]) Serve(
 	observability.Go(ctx, func(ctx context.Context) {
 		s.inputBitRateMeasurerLoop(ctx)
 	})
+	observability.Go(ctx, func(ctx context.Context) {
+		s.latencyMeasurerLoop(ctx)
+	})
 	rawErrCh := make(chan node.Error, 100)
 	defer close(rawErrCh)
 	observability.Go(ctx, func(ctx context.Context) {

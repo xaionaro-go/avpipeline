@@ -1,4 +1,4 @@
-package goconv
+package libav
 
 import (
 	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"

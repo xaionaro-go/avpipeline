@@ -1,4 +1,4 @@
-package kernel
+package types
 
 type ErrNotImplemented struct{}
 

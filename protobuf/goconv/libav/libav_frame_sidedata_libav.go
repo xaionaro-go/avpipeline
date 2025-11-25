@@ -1,13 +1,13 @@
 //go:build with_libav
 // +build with_libav
 
-package goconv
+package libav
 
 import (
 	"github.com/asticode/go-astiav"
 )
 
-func PacketSideDataFromGo(input *astiav.PacketSideData) *PacketSideData {
+func FrameSideDataFromGo(input *astiav.FrameSideData) *FrameSideData {
 	if input == nil {
 		return nil
 	}
@@ -15,7 +15,7 @@ func PacketSideDataFromGo(input *astiav.PacketSideData) *PacketSideData {
 	return nil
 }
 
-func (f *PacketSideData) Go() *astiav.PacketSideData {
+func (f *FrameSideData) Go() *astiav.FrameSideData {
 	if f == nil {
 		return nil
 	}

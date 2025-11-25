@@ -1,4 +1,4 @@
-package goconv
+package avpipeline
 
 import (
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"

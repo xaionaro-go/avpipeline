@@ -1,7 +1,7 @@
 //go:build with_libav
 // +build with_libav
 
-package goconv
+package libav
 
 import (
 	"github.com/asticode/go-astiav"

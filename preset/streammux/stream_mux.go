@@ -17,6 +17,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -29,6 +30,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
+	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
@@ -38,6 +40,8 @@ import (
 const (
 	switchTimeout = time.Hour
 	switchDebug   = false
+
+	latenciesEnableAudioLatencyDetection = true
 )
 
 var (
@@ -76,6 +80,9 @@ type StreamMux[C any] struct {
 	CurrentOtherEncodedBitRate      atomic.Uint64
 	CurrentOtherOutputBitRate       atomic.Uint64
 	CurrentBitRateMeasurementsCount atomic.Uint64
+	InputAudioDTS                   atomic.Uint64
+	InputVideoDTS                   atomic.Uint64
+	LatencyTotal                    atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Counters
@@ -122,18 +129,7 @@ func NewWithCustomData[C any](
 		s.InputVideoOnly = newInput[C](ctx, s, InputTypeVideoOnly)
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
-		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames
-		s.InputVideoOnly.Node.SetInputPacketFilter(packetfiltercondition.Function(func(
-			ctx context.Context,
-			input packetfiltercondition.Input,
-		) bool {
-			if !input.Input.Flags().Has(astiav.PacketFlagKey) {
-				return true
-			}
-			logger.Debugf(ctx, "disallowing corrupt packets")
-			s.allowCorruptPackets.Store(false)
-			return true
-		}))
+		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames (this is applicable not only to MuxModeDifferentOutputsSameTracksSplitAV, but we tested it only here for now)
 	}
 	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
 	s.CurrentOtherInputBitRate.Store(0)
@@ -966,7 +962,22 @@ func (s *StreamMux[C]) getActiveVideoOutputLocked(
 	ctx context.Context,
 ) *Output[C] {
 	outputID := s.getVideoInput().OutputSwitch.CurrentValue.Load()
-	logger.Tracef(ctx, "getActiveOutputLocked: outputID=%d", outputID)
+	logger.Tracef(ctx, "getActiveVideoOutputLocked: outputID=%d", outputID)
+	output, _ := s.Outputs.Load(OutputID(outputID))
+	return output
+}
+
+func (s *StreamMux[C]) GetActiveAudioOutput(
+	ctx context.Context,
+) *Output[C] {
+	return xsync.DoA1R1(ctx, &s.OutputsLocker, s.getActiveAudioOutputLocked, ctx)
+}
+
+func (s *StreamMux[C]) getActiveAudioOutputLocked(
+	ctx context.Context,
+) *Output[C] {
+	outputID := s.getAudioInput().OutputSwitch.CurrentValue.Load()
+	logger.Tracef(ctx, "getActiveAudioOutputLocked: outputID=%d", outputID)
 	output, _ := s.Outputs.Load(OutputID(outputID))
 	return output
 }
@@ -1304,6 +1315,18 @@ func (s *StreamMux[C]) onInputPacket(
 	logger.Tracef(ctx, "onInputPacket: %v", pkt.GetPTS())
 	defer func() { logger.Tracef(ctx, "/onInputPacket: %v: %v", pkt.GetPTS(), _err) }()
 
+	if dtsInt := pkt.Dts(); dtsInt > 0 && dtsInt != astiav.NoPtsValue {
+		dts := avconv.Duration(dtsInt, pkt.StreamInfo.TimeBase())
+		switch pkt.GetMediaType() {
+		case astiav.MediaTypeAudio:
+			logger.Tracef(ctx, "setting InputAudioDTS to %v (%v)", dts, dtsInt)
+			s.InputAudioDTS.Store(uint64(dts.Nanoseconds()))
+		case astiav.MediaTypeVideo:
+			logger.Tracef(ctx, "setting InputVideoDTS to %v (%v)", dts, dtsInt)
+			s.InputVideoDTS.Store(uint64(dts.Nanoseconds()))
+		}
+	}
+
 	if pkt.GetMediaType() != astiav.MediaTypeVideo {
 		return nil
 	}
@@ -1312,6 +1335,7 @@ func (s *StreamMux[C]) onInputPacket(
 	if !isKey {
 		return nil
 	}
+	s.allowCorruptPackets.Store(false)
 
 	streamIndex := pkt.StreamIndex()
 
@@ -1398,4 +1422,96 @@ func (s *StreamMux[C]) GetBitRates(
 	}
 
 	return result, nil
+}
+
+func (s *StreamMux[C]) updateLatencyValues(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "updateLatencyValues")
+	defer func() { logger.Tracef(ctx, "/updateLatencyValues: %v", _err) }()
+
+	outputVideo := s.GetActiveVideoOutput(ctx)
+	if outputVideo == nil {
+		return fmt.Errorf("no active video output")
+	}
+
+	videoQueuer, ok := outputVideo.SendingNode.GetProcessor().(processortypes.UnsafeGetOldestDTSInTheQueuer)
+	if !ok {
+		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputVideo.SendingNode.GetProcessor())
+	}
+	videoOutputDTS, err := videoQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get the oldest DTS in the video output queuer: %w", err)
+	}
+	videoInputDTS := time.Nanosecond * time.Duration(s.InputVideoDTS.Load())
+	logger.Tracef(ctx, "latencies: video output DTS: %v, video input DTS: %v", videoOutputDTS, videoInputDTS)
+	var videoLatency time.Duration
+	if videoOutputDTS > 0 { // there is something in the queue
+		videoLatency = videoInputDTS - videoOutputDTS
+	}
+	if videoLatency < 0 {
+		logger.Tracef(ctx, "video latency is negative: %v; setting to 0", videoLatency)
+		videoLatency = 0
+	}
+
+	var audioLatency time.Duration
+	if latenciesEnableAudioLatencyDetection {
+		outputAudio := s.GetActiveAudioOutput(ctx)
+		if outputAudio == nil {
+			return fmt.Errorf("no active audio output")
+		}
+
+		audioQueuer, ok := outputAudio.SendingNode.GetProcessor().(processortypes.UnsafeGetOldestDTSInTheQueuer)
+		if !ok {
+			return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
+		}
+		audioOutputDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
+		}
+		audioInputDTS := time.Nanosecond * time.Duration(s.InputAudioDTS.Load())
+		logger.Tracef(ctx, "latencies: audio output DTS: %v, audio input DTS: %v", audioOutputDTS, audioInputDTS)
+		if audioOutputDTS > 0 { // there is something in the queue
+			audioLatency = audioInputDTS - audioOutputDTS
+		}
+		if audioLatency < 0 {
+			logger.Tracef(ctx, "audio latency is negative: %v; setting to 0", audioLatency)
+			audioLatency = 0
+		}
+	}
+
+	totalLatency := uint64(max(audioLatency, videoLatency).Nanoseconds())
+	logger.Debugf(ctx, "latencies: video=%v audio=%v total=%v", videoLatency, audioLatency, time.Duration(totalLatency))
+	s.LatencyTotal.Store(totalLatency)
+	return nil
+}
+
+func (s *StreamMux[C]) latencyMeasurerLoop(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "latencyMeasurerLoop")
+	defer func() { logger.Debugf(ctx, "/latencyMeasurerLoop: %v", _err) }()
+
+	t := time.NewTicker(time.Second / 4)
+	defer t.Stop()
+
+	prevTS := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case newTS := <-t.C:
+			tsDiff := newTS.Sub(prevTS)
+			prevTS = newTS
+			func() {
+				ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+				defer cancelFn()
+				err := s.updateLatencyValues(ctx)
+				if err != nil {
+					logger.Errorf(ctx, "unable to update latency values: %v", err)
+					s.LatencyTotal.Store(s.LatencyTotal.Load() + uint64(tsDiff.Nanoseconds()))
+				}
+			}()
+		}
+	}
 }
