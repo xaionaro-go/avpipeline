@@ -27,6 +27,8 @@ import (
 
 const (
 	inputCorrectZeroDurationPackets = false
+	inputDefaultWidth               = 1920
+	inputDefaultHeight              = 1080
 )
 
 type InputConfig struct {
@@ -46,9 +48,11 @@ type Input struct {
 	*astiav.IOInterrupter
 	*astiav.Dictionary
 
-	ID        InputID
-	URL       string
-	URLParsed *url.URL
+	ID            InputID
+	URL           string
+	URLParsed     *url.URL
+	DefaultWidth  int
+	DefaultHeight int
 
 	KeepOpen   bool
 	OnPreClose func(context.Context, *Input) error
@@ -75,9 +79,11 @@ func NewInputFromURL(
 		urlString += "/"
 	}
 	i := &Input{
-		ID:        InputID(nextInputID.Add(1)),
-		URL:       urlString,
-		URLParsed: urlParsed,
+		ID:            InputID(nextInputID.Add(1)),
+		URL:           urlString,
+		URLParsed:     urlParsed,
+		DefaultWidth:  inputDefaultWidth,
+		DefaultHeight: inputDefaultHeight,
 
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
@@ -91,13 +97,22 @@ func NewInputFromURL(
 		i.Dictionary = astiav.NewDictionary()
 		setFinalizerFree(ctx, i.Dictionary)
 		for _, opt := range cfg.CustomOptions {
-			if opt.Key == "f" {
+			switch opt.Key {
+			case "f":
 				formatName = opt.Value
 				logger.Debugf(ctx, "overriding input format to '%s'", opt.Value)
-				continue
+			case "video_size":
+				logger.Debugf(ctx, "setting input size to '%s'", opt.Value)
+				var w, h int
+				_, err := fmt.Sscanf(opt.Value, "%dx%d", &w, &h)
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse input size '%s': %w", opt.Value, err)
+				}
+				i.Dictionary.Set("video_size", opt.Value, 0)
+			default:
+				logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
+				i.Dictionary.Set(opt.Key, opt.Value, 0)
 			}
-			logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
-			i.Dictionary.Set(opt.Key, opt.Value, 0)
 		}
 	}
 
@@ -257,14 +272,37 @@ func (i *Input) Generate(
 	})
 
 	sendPkt := func(outPkt *packet.Output) error {
+		codecParams := outPkt.Stream.CodecParameters()
+		switch codecParams.MediaType() {
+		case astiav.MediaTypeVideo:
+			if outPkt.CodecParameters().Width() != 0 && outPkt.CodecParameters().Width() != codecParams.Width() {
+				logger.Debugf(ctx, "correcting packet width from %d to %d", outPkt.CodecParameters().Width(), codecParams.Width())
+				codecParams.SetWidth(outPkt.CodecParameters().Width())
+			}
+			if codecParams.Width() == 0 {
+				logger.Warnf(ctx, "width is zero, defaulting to %d", i.DefaultWidth)
+				codecParams.SetWidth(i.DefaultWidth)
+				outPkt.CodecParameters().SetWidth(i.DefaultWidth)
+			}
+			if outPkt.CodecParameters().Height() != 0 && outPkt.CodecParameters().Height() != codecParams.Height() {
+				logger.Debugf(ctx, "correcting packet height from %d to %d", outPkt.CodecParameters().Height(), codecParams.Height())
+				codecParams.SetHeight(outPkt.CodecParameters().Height())
+			}
+			if codecParams.Height() == 0 {
+				logger.Warnf(ctx, "height is zero, defaulting to %d", i.DefaultHeight)
+				codecParams.SetHeight(i.DefaultHeight)
+				outPkt.CodecParameters().SetHeight(i.DefaultHeight)
+			}
+		}
 		logger.Tracef(
 			ctx,
-			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d",
-			outPkt.Stream.CodecParameters().MediaType(),
+			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d, res:%dx%d",
+			codecParams.MediaType(),
 			outPkt.StreamIndex(),
 			outPkt.Pos(), outPkt.Pts(), outPkt.Dts(), outPkt.Packet.Duration(),
 			outPkt.Flags().Has(astiav.PacketFlagKey),
 			len(outPkt.Data()),
+			codecParams.Width(), codecParams.Height(),
 		)
 
 		select {

@@ -46,6 +46,7 @@ const (
 	outputAcceptOnlyKeyFramesUntilStart = true
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
+	outputWriteTrailer                  = true
 	outputDebug                         = true
 	revert0c55f85                       = false
 )
@@ -107,20 +108,20 @@ type pendingPacket struct {
 
 // Note: it is strongly recommended to put MonotonicDTS before Output.
 type Output struct {
-	ID                      OutputID
-	StreamKey               secret.String
-	InputStreams            map[int]OutputInputStream
-	OutputStreams           map[int]*OutputStream
-	Filter                  condition.Condition
-	SenderLocker            xsync.Mutex
-	Config                  OutputConfig
-	DiscardCorruptedPackets atomic.Bool
+	ID            OutputID
+	StreamKey     secret.String
+	InputStreams  map[int]OutputInputStream
+	OutputStreams map[int]*OutputStream
+	Filter        condition.Condition
+	SenderLocker  xsync.Mutex
+	Config        OutputConfig
 
 	SequentialInvalidPacketsCount uint
 	OutputMonitor                 xatomic.Value[OutputPacketMonitor]
 
-	ioContext *astiav.IOContext
-	proxy     *proxy.TCPProxy
+	headerSent bool
+	ioContext  *astiav.IOContext
+	proxy      *proxy.TCPProxy
 
 	formatContextLocker xsync.CtxLocker
 
@@ -393,9 +394,13 @@ func (o *Output) Close(
 						result = append(result, fmt.Errorf("got panic: %v:\n%s\n\r", r, debug.Stack()))
 					}
 				}()
+				if !o.headerSent || !outputWriteTrailer {
+					return nil
+				}
 				logger.Debugf(ctx, "writing the trailer")
 				err := o.FormatContext.WriteTrailer()
 				logger.Debugf(ctx, "wrote the trailer, result: %v", err)
+				o.headerSent = false
 				return err
 			}()
 			if err != nil {
@@ -406,6 +411,7 @@ func (o *Output) Close(
 			if err := o.ioContext.Close(); err != nil {
 				result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
 			}
+			o.ioContext = nil
 		}
 		o.FormatContext = nil
 	})
@@ -541,6 +547,15 @@ func (o *Output) configureOutputStream(
 		outputStream.CodecParameters().SetCodecTag(0)
 	}
 
+	switch outputStream.CodecParameters().MediaType() {
+	case astiav.MediaTypeVideo:
+		w, h := outputStream.CodecParameters().Width(), outputStream.CodecParameters().Height()
+		if w == 0 || h == 0 {
+			return fmt.Errorf("video stream has invalid dimensions: %dx%d", w, h)
+		}
+		logger.Debugf(ctx, "video stream dimensions: %dx%d", w, h)
+	}
+
 	return nil
 }
 
@@ -670,11 +685,6 @@ func (o *Output) send(
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) error {
-	if o.DiscardCorruptedPackets.Load() && pkt.Flags().Has(astiav.PacketFlagCorrupt) {
-		logger.Debugf(ctx, "the packet is corrupted and discarding of corrupted packets is enabled; discarding")
-		return nil
-	}
-
 	if o.started {
 		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}
@@ -769,18 +779,24 @@ func (o *Output) send(
 	}
 	o.started = true
 
-	logger.Debugf(
-		ctx,
-		"writing the header; streams: *:%d/%d, a:%d/%d, v:%d/%d; len(waitingKeyFrames): %d",
-		activeStreamCount, expectedStreamsCount,
-		activeAudioStreamCount, expectedStreamsAudioCount,
-		activeVideoStreamCount, expectedStreamsVideoCount,
-		len(o.waitingKeyFrames),
-	)
 	var err error
 	if outputWriteHeaders {
 		o.formatContextLocker.Do(ctx, func() {
+			if o.FormatContext == nil {
+				err = io.EOF
+				return
+			}
+			logger.Debugf(
+				ctx,
+				"writing the header; streams: *:%d/%d, a:%d/%d, v:%d/%d; len(waitingKeyFrames): %d",
+				activeStreamCount, expectedStreamsCount,
+				activeAudioStreamCount, expectedStreamsAudioCount,
+				activeVideoStreamCount, expectedStreamsVideoCount,
+				len(o.waitingKeyFrames),
+			)
 			err = o.FormatContext.WriteHeader(nil)
+			o.headerSent = true
+			logger.Debugf(ctx, "wrote the header: %v", err)
 		})
 	}
 	if err != nil {
