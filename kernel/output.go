@@ -923,7 +923,7 @@ func (o *Output) doWritePacket(
 	isNoDTS := pkt.Dts() == consts.NoPTSValue
 	isNoPTS := pkt.Pts() == consts.NoPTSValue
 	if !isNoDTS && !isNoPTS && pkt.Dts() > pkt.Pts() {
-		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), frameInfo.GetPictureType())
+		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), int(frameInfo.GetPictureType()))
 		pkt.SetDts(pkt.Pts())
 	}
 	if !isNoDTS && pkt.Dts() < outputStream.LastDTS {
