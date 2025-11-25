@@ -226,7 +226,7 @@ func (s *SwitchOutput) GetState(
 				logger.Debugf(ctx, "found a good entrance and switched to the next value: %d -> %d", currentValue, nextValue)
 				onBefore := s.GetOnBeforeSwitch()
 				if onBefore != nil {
-					onBefore(ctx, pkt, previousValue, currentValue)
+					onBefore(ctx, pkt, currentValue, nextValue)
 				}
 				if !s.CurrentValue.CompareAndSwap(int32(currentValue), int32(nextValue)) {
 					logger.Debugf(ctx, "the current value changed concurrently; restarting the calculation")

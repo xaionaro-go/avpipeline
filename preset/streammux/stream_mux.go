@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -1467,7 +1468,12 @@ func (s *StreamMux[C]) updateLatencyValues(
 		}
 		audioOutputDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
 		if err != nil {
-			return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
+			switch {
+			case errors.As(err, kernel.ErrApproximateValue{}):
+				logger.Warnf(ctx, "receive an significantly imprecise audio DTS value from the queuer")
+			default:
+				return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
+			}
 		}
 		audioInputDTS := time.Nanosecond * time.Duration(s.InputAudioDTS.Load())
 		logger.Tracef(ctx, "latencies: audio output DTS: %v, audio input DTS: %v", audioOutputDTS, audioInputDTS)

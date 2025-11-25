@@ -71,7 +71,11 @@ func (s *StreamMux[C]) Serve(
 						case errors.Is(nodeErr.Err, context.Canceled):
 							logger.Debugf(ctx, "node <%T> was canceled, closing it", nodeErr.Node)
 						default:
-							logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
+							if r := processPlatformSpecificError(ctx, nodeErr.Err); r == nil {
+								logger.Debugf(ctx, "got a platform-specific non-active output error %d: %v, closing it", output.ID, nodeErr.Err)
+							} else {
+								logger.Errorf(ctx, "got an error on a non-active output %d: %v, closing it", output.ID, nodeErr.Err)
+							}
 						}
 						if s.OutputsMap.CompareAndDelete(output.GetKey(), output) {
 							logger.Debugf(ctx, "output %d removed from OutputsMap", output.ID)
@@ -97,6 +101,7 @@ func (s *StreamMux[C]) Serve(
 					}
 					logger.Errorf(ctx, "node %T:%s does not implement GetCustomDataer[OutputCustomData]; do not know how to handle error %v (%v)", nodeErr.Node, nodeErr.Node, nodeErr.Err, err)
 				}
+				logger.Debugf(ctx, "forwarding error from node %T:%s to errCh: %v", nodeErr.Node, nodeErr.Node, nodeErr.Err)
 				select {
 				case errCh <- nodeErr:
 				case <-ctx.Done():

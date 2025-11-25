@@ -1,3 +1,6 @@
+//go:build with_libav
+// +build with_libav
+
 package server
 
 import (
@@ -5,7 +8,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/kernel"
-	"github.com/xaionaro-go/avpipeline/kernel/server/grpc/common/goconv"
+	goconvlibav "github.com/xaionaro-go/avpipeline/kernel/server/grpc/common/goconv/libav"
 	kernel_grpc "github.com/xaionaro-go/avpipeline/kernel/server/grpc/kernel"
 	"github.com/xaionaro-go/avpipeline/packet"
 	libav_protobuf "github.com/xaionaro-go/avpipeline/protobuf/libav"
@@ -91,7 +94,7 @@ func (s *Server[K]) GetOutputFormatContext(
 
 	var fmtCtx *libav_protobuf.FormatContext
 	packetSource.WithOutputFormatContext(ctx, func(input *astiav.FormatContext) {
-		fmtCtx = goconv.FormatContextFromGo(input).Protobuf()
+		fmtCtx = goconvlibav.FormatContextFromGo(input).Protobuf()
 	})
 	return &kernel_grpc.GetOutputFormatContextReply{
 		FormatContext: fmtCtx,
@@ -109,7 +112,7 @@ func (s *Server[K]) GetInputFormatContext(
 
 	var fmtCtx *libav_protobuf.FormatContext
 	packetSource.WithInputFormatContext(ctx, func(input *astiav.FormatContext) {
-		fmtCtx = goconv.FormatContextFromGo(input).Protobuf()
+		fmtCtx = goconvlibav.FormatContextFromGo(input).Protobuf()
 	})
 	return &kernel_grpc.GetInputFormatContextReply{
 		FormatContext: fmtCtx,

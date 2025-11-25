@@ -264,10 +264,17 @@ func (d *Decoder[DF]) SendInputPacket(
 
 		input.Packet.SetOpaque(packetInfo.Bytes())
 
-		logger.Tracef(ctx, "decoder.SendPacket(): sending a packet (pts=%d, dts=%d, dur=%d)", input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration())
-		if err := decoder.SendPacket(ctx, input.Packet); err != nil {
-			logger.Debugf(ctx, "decoder.CodecContext().SendPacket(): %v", err)
+		for tryCount := 0; ; tryCount++ {
+			logger.Tracef(ctx, "decoder.SendPacket(): sending a packet (pts=%d, dts=%d, dur=%d)", input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration())
+			err := decoder.SendPacket(ctx, input.Packet)
+			logger.Tracef(ctx, "/decoder.SendPacket(): %v", err)
+			shouldRetry := false
 			switch {
+			case err == nil:
+				d.SentPacketsWithoutDecodingFrames++
+			case errors.Is(err, astiav.ErrEagain):
+				logger.Debugf(ctx, "the decoder is not ready to accept new packets; draining and retrying")
+				shouldRetry = true
 			case errors.Is(err, codec.ErrNotKeyFrame{}):
 				logger.Debugf(ctx, "the packet is not a keyframe and the decoder cannot decode it; dropping the packet")
 				if decoderSendBlankFrames && d.AllowBlankFrames.Load() {
@@ -288,12 +295,15 @@ func (d *Decoder[DF]) SendInputPacket(
 			default:
 				return fmt.Errorf("unable to decode the packet: %w", err)
 			}
-		}
-		d.SentPacketsWithoutDecodingFrames++
-
-		err = d.drain(ctx, outputFramesCh, decoder.Drain, packetInfo)
-		if err != nil {
-			return fmt.Errorf("unable to drain the decoder: %w", err)
+			if err := d.drain(ctx, outputFramesCh, decoder.Drain, packetInfo); err != nil {
+				return fmt.Errorf("unable to drain the decoder: %w", err)
+			}
+			if !shouldRetry {
+				break
+			}
+			if tryCount > 10 {
+				return fmt.Errorf("too many retries to send the packet to the decoder: err: %w", err)
+			}
 		}
 
 		if enableAntiStucking {

@@ -204,7 +204,8 @@ func (i *Input) doOpen(
 func (i *Input) Close(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "Close[%s]", i)
+	f, l := getCaller()
+	logger.Debugf(ctx, "Close[%s]: called from %s:%d", i, f, l)
 	defer func() { logger.Debugf(ctx, "/Close[%s]: %v", i, _err) }()
 	if i == nil {
 		return nil
@@ -352,6 +353,7 @@ func (i *Input) Generate(
 			)
 
 			prevPkt := curPkts[streamIndex]
+			curPkts[streamIndex] = nil
 			curPkt := ptr(packet.BuildOutput(
 				pkt,
 				packet.BuildStreamInfo(
@@ -362,8 +364,9 @@ func (i *Input) Generate(
 			))
 			if prevPkt != nil {
 				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
-				if stream.TimeBase().Float64()*float64(suggestedDuration) > 1 { // implies less than 1 FPS
-					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
+				frameSecs := stream.TimeBase().Float64() * float64(suggestedDuration)
+				if frameSecs > 1 || suggestedDuration <= 0 {
+					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f (if suggested_duration is negative then maybe B-frames are enabled)", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
 				} else {
 					prevPkt.Packet.SetDuration(suggestedDuration)
 					logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
@@ -375,7 +378,7 @@ func (i *Input) Generate(
 				delete(curPkts, streamIndex)
 			}
 
-			if curPkt.Duration() <= 0 && i.CorrectZeroDuration {
+			if curPkt.Duration() <= 1 && i.CorrectZeroDuration {
 				logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
 				curPkts[streamIndex] = curPkt
 				continue

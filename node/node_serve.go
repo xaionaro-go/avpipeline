@@ -204,9 +204,7 @@ func pushFurther[
 			sentCount := nodeCountsItem.Count.Load()
 			generatedCount := procCounts.Generated.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType)).Count.Load()
 			omittedCount := procCounts.Omitted.Get(countersSubSectionID).Get(globaltypes.MediaType(mediaType)).Count.Load()
-			if sentCount > generatedCount+omittedCount {
-				panic(fmt.Sprintf("sent more objects than generated, this is a bug: %d > %d (a possible issue: are you pushing data directly to processor's output chan? you should not; you should count the objects first)", sentCount, generatedCount))
-			}
+			assertSoft(ctx, sentCount <= generatedCount+omittedCount, fmt.Sprintf("sent more objects than generated, this is a bug: %d > %d+%d (a possible issue: are you pushing data directly to processor's output chan? you should not or at least you should count the generated objects first)", sentCount, generatedCount, omittedCount))
 		}
 	}()
 

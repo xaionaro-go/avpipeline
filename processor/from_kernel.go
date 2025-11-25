@@ -210,8 +210,19 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 	})
 }
 
+func getCaller() (string, int) {
+	cnt := 0
+	return xruntime.Caller(func(pc uintptr) bool {
+		if cnt >= 2 {
+			return true
+		}
+		cnt++
+		return false
+	}).FileLine()
+}
+
 func (p *FromKernel[T]) Close(ctx context.Context) (_err error) {
-	f, l := xruntime.Caller(nil).FileLine()
+	f, l := getCaller()
 	logger.Debugf(ctx, "Close[%T]: called from %s:%d", p.Kernel, f, l)
 	defer func() { logger.Debugf(ctx, "/Close[%T]: %v", p.Kernel, _err) }()
 	var err error
