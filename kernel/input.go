@@ -27,6 +27,7 @@ import (
 const (
 	inputDefaultWidth  = 1920
 	inputDefaultHeight = 1080
+	inputDefaultFPS    = 30
 )
 
 type InputConfig struct {
@@ -52,9 +53,11 @@ type Input struct {
 	URLParsed     *url.URL
 	DefaultWidth  int
 	DefaultHeight int
+	DefaultFPS    astiav.Rational
 
 	KeepOpen            bool
 	OnPreClose          func(context.Context, *Input) error
+	CorrectDTS          bool
 	CorrectZeroDuration bool
 
 	WaitGroup sync.WaitGroup
@@ -93,6 +96,7 @@ func NewInputFromURL(
 		OnPreClose:          cfg.OnPreClose,
 		CorrectZeroDuration: cfg.CorrectZeroDuration,
 	}
+	defaultFPS := float64(inputDefaultFPS)
 
 	var formatName string
 	if len(cfg.CustomOptions) > 0 {
@@ -110,13 +114,27 @@ func NewInputFromURL(
 				if err != nil {
 					return nil, fmt.Errorf("unable to parse input size '%s': %w", opt.Value, err)
 				}
+				i.DefaultWidth = w
+				i.DefaultHeight = h
 				i.Dictionary.Set("video_size", opt.Value, 0)
+			case "framerate":
+				logger.Debugf(ctx, "setting input framerate to '%s'", opt.Value)
+				var r float64
+				_, err := fmt.Sscanf(opt.Value, "%f", &r)
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse input framerate '%s': %w", opt.Value, err)
+				}
+				defaultFPS = r
+				i.Dictionary.Set("framerate", opt.Value, 0)
 			default:
 				logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
 				i.Dictionary.Set(opt.Key, opt.Value, 0)
 			}
 		}
 	}
+
+	defaultFPSRational := globaltypes.RationalFromApproxFloat64(defaultFPS)
+	i.DefaultFPS = astiav.NewRational(defaultFPSRational.Num, defaultFPSRational.Den)
 
 	var inputFormat *astiav.InputFormat
 	if formatName != "" {
@@ -274,6 +292,7 @@ func (i *Input) Generate(
 		i.IOInterrupter.Interrupt()
 	})
 
+	lastDuration := map[int]int64{}
 	sendPkt := func(outPkt *packet.Output) error {
 		codecParams := outPkt.Stream.CodecParameters()
 		switch codecParams.MediaType() {
@@ -308,6 +327,7 @@ func (i *Input) Generate(
 			codecParams.Width(), codecParams.Height(),
 		)
 
+		lastDuration[outPkt.StreamIndex()] = outPkt.Duration()
 		select {
 		case outputPacketsCh <- *outPkt:
 		case <-ctx.Done():
@@ -318,7 +338,7 @@ func (i *Input) Generate(
 		return nil
 	}
 
-	prevPkts := map[int]packet.Output{}
+	prevPkts := map[int]*packet.Output{}
 	defer func() {
 		for _, pkt := range prevPkts {
 			select {
@@ -326,7 +346,7 @@ func (i *Input) Generate(
 			case <-i.CloseChan():
 			default:
 			}
-			sendPkt(&pkt)
+			sendPkt(pkt)
 		}
 	}()
 	for {
@@ -352,51 +372,76 @@ func (i *Input) Generate(
 				len(pkt.Data()),
 			)
 
-			prevPkt, prevPktIsSet := prevPkts[streamIndex]
-			curPkt := packet.BuildOutput(
+			prevPkt := prevPkts[streamIndex]
+			curPkt := ptr(packet.BuildOutput(
 				pkt,
 				packet.BuildStreamInfo(
 					stream,
 					i,
 					nil,
 				),
-			)
+			))
 
-			if prevPktIsSet {
+			if i.CorrectZeroDuration && prevPkt != nil {
+				assert(ctx, prevPkt.Pts() != astiav.NoPtsValue, "previous packet PTS is not set")
+				assert(ctx, prevPkt.Pts() >= 0, "previous packet PTS is negative")
 				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
 				frameSecs := stream.TimeBase().Float64() * float64(suggestedDuration)
 				if frameSecs > 1 || suggestedDuration <= 0 {
-					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f (if suggested_duration is negative then maybe B-frames are enabled)", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
+					logger.Tracef(ctx, "the packet had no duration set; cannot use cur.pts - prev.pts: %d-%d=%d as it suggests too large or invalid duration (%f secs); trying last known duration", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, frameSecs)
+					suggestedDuration = lastDuration[streamIndex]
+				}
+				if frameSecs > 1 || suggestedDuration <= 0 {
+					logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
 				} else {
 					prevPkt.Packet.SetDuration(suggestedDuration)
 					logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
 				}
 
-				if err := sendPkt(&prevPkt); err != nil {
+				if err := sendPkt(prevPkt); err != nil {
 					return err
 				}
 			}
 
-			if curPkt.Duration() <= 1 && i.CorrectZeroDuration {
-				logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
-				if prevPkt.Packet != nil {
-					packet.Pool.Put(prevPkt.Packet)
-					prevPkt = packet.Output{}
-				}
-				prevPkts[streamIndex] = packet.BuildOutput(
-					packet.CloneAsReferenced(curPkt.Packet),
-					curPkt.StreamInfo,
-				)
-				continue
-			} else {
-				if prevPktIsSet {
-					packet.Pool.Put(prevPkt.Packet)
+			if i.CorrectDTS && curPkt.Dts() == astiav.NoPtsValue {
+				curPkt.Packet.SetDts(curPkt.Pts())
+				logger.Tracef(ctx, "the packet had no DTS set; setting DTS=PTS: %d", curPkt.Pts())
+			}
+
+			if i.CorrectZeroDuration {
+				isDurationIncorrect := curPkt.Duration() <= 1
+				if isDurationIncorrect {
+					switch curPkt.GetMediaType() {
+					case astiav.MediaTypeVideo:
+						fps := stream.CodecParameters().FrameRate()
+						if fps.Num() == 0 || fps.Den() == 0 {
+							logger.Tracef(ctx, "the video packet had no duration set; stream has no FPS set; using default FPS %d", i.DefaultFPS.Float64())
+							fps = i.DefaultFPS
+						}
+						duration := int(float64(1) / fps.Float64() / stream.TimeBase().Float64())
+						curPkt.Packet.SetDuration(int64(duration))
+						logger.Tracef(ctx, "the video packet had no duration set; setting duration to default FPS %d: %d", fps.Float64(), curPkt.Packet.Duration())
+					default:
+						if curPkt.Pts() >= curPkt.Dts() && // not a B-frame-like packet
+							curPkt.Pts() != astiav.NoPtsValue { // PTS is set (thus duration can be calculated)
+							assert(ctx, curPkt.Pts() >= 0, "previous packet PTS is negative")
+							logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
+							prevPkt = nil
+							prevPkts[streamIndex] = curPkt
+							continue
+						} else {
+							logger.Tracef(ctx, "the B-frame packet has no duration set; using the last known duration")
+							curPkt.SetDuration(lastDuration[streamIndex])
+						}
+					}
+				} else {
+					prevPkt = nil
 					delete(prevPkts, streamIndex)
 				}
 			}
 
 			// no correction is needed, let's send immediately
-			err := sendPkt(&curPkt)
+			err := sendPkt(curPkt)
 			if err != nil {
 				return err
 			}
