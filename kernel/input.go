@@ -318,15 +318,15 @@ func (i *Input) Generate(
 		return nil
 	}
 
-	curPkts := map[int]*packet.Output{}
+	prevPkts := map[int]packet.Output{}
 	defer func() {
-		for _, pkt := range curPkts {
+		for _, pkt := range prevPkts {
 			select {
 			case <-ctx.Done():
 			case <-i.CloseChan():
 			default:
 			}
-			sendPkt(pkt)
+			sendPkt(&pkt)
 		}
 	}()
 	for {
@@ -352,17 +352,17 @@ func (i *Input) Generate(
 				len(pkt.Data()),
 			)
 
-			prevPkt := curPkts[streamIndex]
-			curPkts[streamIndex] = nil
-			curPkt := ptr(packet.BuildOutput(
+			prevPkt, prevPktIsSet := prevPkts[streamIndex]
+			curPkt := packet.BuildOutput(
 				pkt,
 				packet.BuildStreamInfo(
 					stream,
 					i,
 					nil,
 				),
-			))
-			if prevPkt != nil {
+			)
+
+			if prevPktIsSet {
 				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
 				frameSecs := stream.TimeBase().Float64() * float64(suggestedDuration)
 				if frameSecs > 1 || suggestedDuration <= 0 {
@@ -372,19 +372,31 @@ func (i *Input) Generate(
 					logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
 				}
 
-				if err := sendPkt(prevPkt); err != nil {
+				if err := sendPkt(&prevPkt); err != nil {
 					return err
 				}
-				delete(curPkts, streamIndex)
 			}
 
 			if curPkt.Duration() <= 1 && i.CorrectZeroDuration {
 				logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
-				curPkts[streamIndex] = curPkt
+				if prevPkt.Packet != nil {
+					packet.Pool.Put(prevPkt.Packet)
+					prevPkt = packet.Output{}
+				}
+				prevPkts[streamIndex] = packet.BuildOutput(
+					packet.CloneAsReferenced(curPkt.Packet),
+					curPkt.StreamInfo,
+				)
 				continue
+			} else {
+				if prevPktIsSet {
+					packet.Pool.Put(prevPkt.Packet)
+					delete(prevPkts, streamIndex)
+				}
 			}
+
 			// no correction is needed, let's send immediately
-			err := sendPkt(curPkt)
+			err := sendPkt(&curPkt)
 			if err != nil {
 				return err
 			}
