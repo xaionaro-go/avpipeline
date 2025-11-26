@@ -1,10 +1,10 @@
-package condition
+package gettercondition
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 )
 
 type Not struct {
@@ -19,7 +19,7 @@ func (n Not) String() string {
 
 func (n Not) Match(
 	ctx context.Context,
-	f resourcegetter.Input,
+	f resource.GetterInput,
 ) bool {
 	return !n.Condition.Match(ctx, f)
 }

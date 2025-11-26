@@ -1,4 +1,4 @@
-package resourcegetter
+package resource
 
 import (
 	"github.com/asticode/go-astiav"

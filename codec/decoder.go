@@ -26,10 +26,11 @@ func NewDecoder(
 			HardwareDeviceName:    decInput.HardwareDeviceName,
 			ErrorRecognitionFlags: decInput.ErrorRecognitionFlags,
 			TimeBase:              astiav.NewRational(0, 0),
-			Options:               decInput.Options,
+			CustomOptions:         decInput.CustomOptions,
 			HWDevFlags:            decInput.Flags,
+			ResourceManager:       decInput.ResourceManager,
+			Options:               decInput.Options,
 		},
-		ReusableResources: nil,
 	}
 	c, err := newCodec(
 		ctx,

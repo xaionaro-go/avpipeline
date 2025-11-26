@@ -71,9 +71,14 @@ func (r *Recoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Close")
 	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
 	r.ClosureSignaler.Close(ctx)
-	r.Decoder.ClosureSignaler.Close(ctx)
-	r.Encoder.ClosureSignaler.Close(ctx)
-	return nil
+	var errs []error
+	if err := r.Decoder.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close the decoder: %w", err))
+	}
+	if err := r.Encoder.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close the encoder: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 func (r *Recoder[DF, EF]) Generate(

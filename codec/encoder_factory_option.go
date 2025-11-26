@@ -4,25 +4,20 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec/types"
 )
 
-type EncoderFactoryOption = types.EncoderFactoryOption
-type EncoderFactoryOptions = types.EncoderFactoryOptions
-type EncoderFactoryOptionCommons = types.EncoderFactoryOptionCommons
+type Option = types.Option
+type Options = types.Options
+type OptionCommons = types.OptionCommons
 
-func EncoderFactoryOptionLatest[T EncoderFactoryOption](s []EncoderFactoryOption) (ret T, ok bool) {
-	return types.EncoderFactoryOptionLatest[T](s)
+func EncoderFactoryOptionLatest[T Option](s []Option) (ret T, ok bool) {
+	return types.OptionLatest[T](s)
 }
 
 type EncoderFactoryOptionGetDecoderer struct {
-	EncoderFactoryOptionCommons
+	OptionCommons
 	GetDecoderer
 }
 
 type EncoderFactoryOptionOnlyDummy struct {
-	EncoderFactoryOptionCommons
+	OptionCommons
 	OnlyDummy bool
-}
-
-type EncoderFactoryOptionReusableResources struct {
-	EncoderFactoryOptionCommons
-	*Resources
 }

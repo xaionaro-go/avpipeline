@@ -1,4 +1,4 @@
-package resourcegetter
+package resource
 
 import (
 	"context"
@@ -31,20 +31,20 @@ func (c *Conditional) String() string {
 
 func (c *Conditional) GetResources(
 	ctx context.Context,
+	isEncoder bool,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
-	opts ...types.EncoderFactoryOption,
+	opts ...types.Option,
 ) *Resources {
 	if c.Condition == nil {
 		logger.Tracef(ctx, "no condition set, so always matching")
-		return c.ResourcesGetter.GetResources(ctx, params, timeBase, opts...)
+		return c.ResourcesGetter.GetResources(ctx, isEncoder, params, timeBase)
 	}
-	if c.Condition.Match(ctx, Input{
+	if c.Condition.Match(ctx, GetterInput{
 		Params:   params,
 		TimeBase: timeBase,
-		Options:  opts,
 	}) {
-		return c.ResourcesGetter.GetResources(ctx, params, timeBase, opts...)
+		return c.ResourcesGetter.GetResources(ctx, isEncoder, params, timeBase)
 	}
 	return nil
 }

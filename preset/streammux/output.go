@@ -11,8 +11,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec"
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
-	resourcegettercondition "github.com/xaionaro-go/avpipeline/codec/resourcegetter/condition"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/frame"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
@@ -67,21 +66,22 @@ type OutputStreamsIniter interface {
 }
 
 type Output[C any] struct {
-	ID                OutputID
-	InputFrom         *NodeInput[C]
-	InputFilter       *NodeBarrier[OutputCustomData[C]]
-	InputThrottler    *packetcondition.VideoAverageBitrateLower
-	InputFixer        *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
-	RecoderNode       *NodeRecoder[OutputCustomData[C]]
-	SendingThrottler  *packetcondition.VideoAverageBitrateLower
-	MapIndices        *NodeMapStreamIndexes[OutputCustomData[C]]
-	SendingFixer      *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
-	SendingSyncer     *NodeBarrier[OutputCustomData[C]]
-	SendingNode       SendingNode[C]
-	SendingNodeProps  types.SenderNodeProps
-	FPSFractionGetter FPSFractionGetter
-	InitOnce          sync.Once
-	IsClosedValue     bool
+	ID                    OutputID
+	InputFrom             *NodeInput[C]
+	InputFilter           *NodeBarrier[OutputCustomData[C]]
+	InputThrottler        *packetcondition.VideoAverageBitrateLower
+	InputFixer            *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
+	RecoderNode           *NodeRecoder[OutputCustomData[C]]
+	SendingThrottler      *packetcondition.VideoAverageBitrateLower
+	MapIndices            *NodeMapStreamIndexes[OutputCustomData[C]]
+	SendingFixer          *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
+	SendingSyncer         *NodeBarrier[OutputCustomData[C]]
+	SendingNode           SendingNode[C]
+	SendingNodeProps      types.SenderNodeProps
+	FPSFractionGetter     FPSFractionGetter
+	InitOnce              sync.Once
+	IsClosedValue         bool
+	ParentResourceManager ResourceManager
 }
 
 type initOutputConfig struct{}
@@ -102,6 +102,10 @@ func (opts InitOutputOptions) config() initOutputConfig {
 	cfg := initOutputConfig{}
 	opts.apply(&cfg)
 	return cfg
+}
+
+type ResourceManager interface {
+	resource.FreeUnneededer
 }
 
 // An example with two Outputs:
@@ -149,6 +153,7 @@ func newOutput[C any](
 	monotonicPTS packetcondition.Condition,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	streamsIniter OutputStreamsIniter,
+	resourceManager ResourceManager,
 	fpsFractionGetter FPSFractionGetter,
 ) (_ret *Output[C], _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
@@ -235,14 +240,20 @@ func newOutput[C any](
 			belt.WithField(ctx, "output_chain_step", "OutputSyncer"),
 			sendingSyncer,
 		)),
-		SendingNode:       senderNode,
-		FPSFractionGetter: fpsFractionGetter,
+		SendingNode:           senderNode,
+		FPSFractionGetter:     fpsFractionGetter,
+		ParentResourceManager: resourceManager,
 	}
 	customData := OutputCustomData[C]{Output: o}
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.RecoderNode.CustomData = customData
 	o.RecoderNode.SetInputPacketFilter(packetfiltercondition.Panic("the recoder is not configured, yet!"))
+	codecOpts := []codec.Option{CodecOptionOutputID{OutputID: o.ID}}
+	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
+	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
+	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourceManager = o.asCodecResourceManager()
+	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.Options = codecOpts
 	o.MapIndices.CustomData = customData
 	o.SendingFixer.SetCustomData(customData)
 	o.SendingSyncer.CustomData = customData
@@ -422,51 +433,16 @@ func (o *Output[C]) initReuseDecoderResources(
 			return
 		}
 
-		if input.Options == nil {
-			input.Options = astiav.NewDictionary()
-			setFinalizerFree(ctx, input.Options)
+		if input.CustomOptions == nil {
+			input.CustomOptions = astiav.NewDictionary()
+			setFinalizerFree(ctx, input.CustomOptions)
 		}
 
 		if input.HardwareDeviceType == globaltypes.HardwareDeviceTypeMediaCodec {
-			logIfError(ctx, input.Options.Set("pixel_format", "mediacodec", 0))
-			logIfError(ctx, input.Options.Set("create_window", "1", 0))
+			logIfError(ctx, input.CustomOptions.Set("pixel_format", "mediacodec", 0))
+			logIfError(ctx, input.CustomOptions.Set("create_window", "1", 0))
 		}
 	}
-
-	// allow sharing the resources between decoder and encoder
-	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourcesGetter = resourcegetter.NewConditional(
-		o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory,
-		resourcegettercondition.Function(func(
-			ctx context.Context,
-			f resourcegetter.Input,
-		) (_ret bool) {
-			logger.Tracef(ctx, "checking if we can reuse resources")
-			defer func() { logger.Tracef(ctx, "/checking if we can reuse resources: %v", _ret) }()
-
-			getDecoderer, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionGetDecoderer](f.Options)
-			if !ok {
-				logger.Debugf(ctx, "unable to find FrameSource in the EncoderFactory options: %#+v", f.Options)
-				return false
-			}
-
-			// we can reuse the resources only if no scaling is required
-			if f.Params.Width() != int(encRes.Width) {
-				return false
-			}
-			if f.Params.Height() != int(encRes.Height) {
-				return false
-			}
-
-			// we can reuse the resources only if pixel format is the same
-			decoder := getDecoderer.GetDecoderer.GetDecoder()
-			if f.Params.PixelFormat() != astiav.PixelFormatNone {
-				if f.Params.PixelFormat() != decoder.CodecContext().PixelFormat() {
-					return false
-				}
-			}
-			return true
-		}),
-	)
 }
 
 func (o *Output[C]) Close(ctx context.Context) (_err error) {
@@ -491,22 +467,22 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 			errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
 		}
 	}
-	if err := o.InputFilter.GetProcessor().Close(ctx); err != nil {
+	if err := o.InputFilter.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close input filter for output %d: %w", o.ID, err))
 	}
 	if err := o.InputFixer.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close input fixer for output %d: %w", o.ID, err))
 	}
-	if err := o.RecoderNode.GetProcessor().Close(ctx); err != nil {
+	if err := o.RecoderNode.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close recoder node for output %d: %w", o.ID, err))
 	}
-	if err := o.MapIndices.GetProcessor().Close(ctx); err != nil {
+	if err := o.MapIndices.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close map indices for output %d: %w", o.ID, err))
 	}
 	if err := o.SendingFixer.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output fixer for output %d: %w", o.ID, err))
 	}
-	if err := o.SendingSyncer.GetProcessor().Close(ctx); err != nil {
+	if err := o.SendingSyncer.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output sync filter for output %d: %w", o.ID, err))
 	}
 	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {

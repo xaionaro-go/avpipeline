@@ -36,8 +36,10 @@ type DecoderInput struct {
 	HardwareDeviceType    HardwareDeviceType
 	HardwareDeviceName    HardwareDeviceName
 	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
-	Options               *astiav.Dictionary
+	CustomOptions         *astiav.Dictionary
 	Flags                 int
+	ResourceManager       ResourceManager
+	Options               []Option
 }
 
 func (d *DecoderLocked) AsUnlocked() *Decoder {

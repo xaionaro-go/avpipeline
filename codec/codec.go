@@ -15,6 +15,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
@@ -230,9 +231,8 @@ func findCodec(
 }
 
 type Input struct {
-	IsEncoder         bool // otherwise: decoder
-	Params            CodecParams
-	ReusableResources *Resources
+	IsEncoder bool // otherwise: decoder
+	Params    CodecParams
 }
 
 func newCodec(
@@ -241,14 +241,24 @@ func newCodec(
 ) (_ret *Codec, _err error) {
 	isEncoder := input.IsEncoder
 	params := input.Params.Clone(ctx)
-	reusableResources := input.ReusableResources
 	codecName := params.CodecName
 	codecParameters := params.CodecParameters
 	hardwareDeviceType := params.HardwareDeviceType
 	hardwareDeviceName := params.HardwareDeviceName
 	timeBase := params.TimeBase
-	options := params.Options
+	customOptions := params.CustomOptions
 	hwDevFlags := params.HWDevFlags
+	opts := params.Options
+	var reusableResources *Resources
+	if input.Params.ResourceManager != nil {
+		reusableResources = input.Params.ResourceManager.GetReusable(
+			ctx,
+			input.IsEncoder,
+			params.CodecParameters,
+			params.TimeBase,
+			opts...,
+		)
+	}
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
 	if codecParameters.CodecID() != astiav.CodecIDNone {
 		ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
@@ -256,9 +266,9 @@ func newCodec(
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 
-	logger.Tracef(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, hwDevFlags)
+	logger.Debugf(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts)
 	defer func() {
-		logger.Tracef(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, options, hwDevFlags, _ret, _err)
+		logger.Debugf(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, _ret, _err)
 	}()
 	c := &Codec{
 		codecInternals: &codecInternals{
@@ -275,11 +285,11 @@ func newCodec(
 	}()
 
 	lazyInitOptions := func() {
-		if options != nil {
+		if customOptions != nil {
 			return
 		}
-		options = astiav.NewDictionary()
-		setFinalizerFree(ctx, options)
+		customOptions = astiav.NewDictionary()
+		setFinalizerFree(ctx, customOptions)
 	}
 
 	logIfError := func(err error) {
@@ -359,13 +369,13 @@ func newCodec(
 				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
 			}
 			logger.Debugf(ctx, "MediaCodec: enforcing NDK codec")
-			options.Set("ndk_codec", "1", 0) // NDK path
-			options.Set("ndk_async", "0", 0) // disable async (avoid restart-after-flush issue)
+			customOptions.Set("ndk_codec", "1", 0) // NDK path
+			customOptions.Set("ndk_async", "0", 0) // disable async (avoid restart-after-flush issue)
 		}
 
 		if isEncoder {
-			options.Set("gpu", "0", 0)
-			if v := options.Get("g", nil, 0); v == nil {
+			customOptions.Set("gpu", "0", 0)
+			if v := customOptions.Get("g", nil, 0); v == nil {
 				fps := codecParameters.FrameRate().Float64()
 				if fps < 1 {
 					logger.Warnf(ctx, "unable to detect the FPS, assuming 30")
@@ -373,15 +383,15 @@ func newCodec(
 				}
 				gopSize = int64(0.999+fps) * 2
 				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS*2 value (%d <- %f)", gopSize, fps)
-				logIfError(options.Set("g", fmt.Sprintf("%d", gopSize), 0))
+				logIfError(customOptions.Set("g", fmt.Sprintf("%d", gopSize), 0))
 			} else {
 				var err error
 				gopSize, err = strconv.ParseInt(v.Value(), 10, 64)
 				logIfError(err)
 			}
-			if v := options.Get("bf", nil, 0); v == nil {
+			if v := customOptions.Get("bf", nil, 0); v == nil {
 				logger.Debugf(ctx, "bf is not set, defaulting to zero")
-				logIfError(options.Set("bf", "0", 0))
+				logIfError(customOptions.Set("bf", "0", 0))
 				bFrames = 0
 			} else {
 				var err error
@@ -389,20 +399,20 @@ func newCodec(
 				logIfError(err)
 			}
 			if bFrames == 0 {
-				logIfError(options.Set("pts_as_dts", "1", 0))
+				logIfError(customOptions.Set("pts_as_dts", "1", 0))
 			}
-			if v := options.Get("forced-idr", nil, 0); v == nil {
+			if v := customOptions.Get("forced-idr", nil, 0); v == nil {
 				logger.Debugf(ctx, "forced-idr is not set, defaulting to 1")
-				logIfError(options.Set("forced-idr", "1", 0))
+				logIfError(customOptions.Set("forced-idr", "1", 0))
 			}
 			if codecParameters.BitRate() > 0 {
-				options.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
+				customOptions.Set("b", fmt.Sprintf("%d", codecParameters.BitRate()), 0) // TODO: figure out: do we need this?
 				rcMode := "vbr"
-				if v := options.Get("rc", nil, 0); v == nil {
-					options.Set("rc", rcMode, 0)
+				if v := customOptions.Get("rc", nil, 0); v == nil {
+					customOptions.Set("rc", rcMode, 0)
 				}
-				if v := options.Get("bitrate_mode", nil, 0); v == nil {
-					options.Set("bitrate_mode", rcMode, 0) // TODO: do we need to deduplicate this with the line above?
+				if v := customOptions.Get("bitrate_mode", nil, 0); v == nil {
+					customOptions.Set("bitrate_mode", rcMode, 0) // TODO: do we need to deduplicate this with the line above?
 				}
 			}
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
@@ -416,45 +426,45 @@ func newCodec(
 					switch {
 					case h <= 360:
 						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 80")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "80", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "82", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "84", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "80", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "82", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "84", 0)
 					case h <= 560:
 						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 60")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "60", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "62", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "64", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "60", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "62", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "64", 0)
 					case h <= 640:
 						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 48")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "48", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "50", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "52", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "48", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "50", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "52", 0)
 					case h <= 720:
 						logger.Debugf(ctx, "setting qp parameters for MediaCodec: 38")
-						options.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "38", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "40", 0)
-						options.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "42", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_I_MIN, "38", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_B_MIN, "40", 0)
+						customOptions.Set(mediacodec.KEY_VIDEO_QP_P_MIN, "42", 0)
 					}
 				}
 
-				if options.Get("pix_fmt", nil, 0) == nil {
+				if customOptions.Get("pix_fmt", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
-					logIfError(options.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
+					logIfError(customOptions.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
 					forcePixelFormat = defaultMediaCodecPixelFormat
 				}
 			}
 		} else {
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
-				if options.Get("pixel_format", nil, 0) == nil {
+				if customOptions.Get("pixel_format", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
-					logIfError(options.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
+					logIfError(customOptions.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
 					forcePixelFormat = defaultMediaCodecPixelFormat
 				}
 
 				height := codecParameters.Height()
 				alignedHeight := (height + 15) &^ 15
 				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
-				if alignedHeight != height && options.Get("create_window", nil, 0) == nil {
+				if alignedHeight != height && customOptions.Get("create_window", nil, 0) == nil {
 					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle you may want to use create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
 				}
 			}
@@ -469,7 +479,7 @@ func newCodec(
 			ctx,
 			hardwareDeviceType,
 			hardwareDeviceName,
-			options,
+			customOptions,
 			hwDevFlags,
 			reusableResources,
 		)
@@ -532,8 +542,8 @@ func newCodec(
 		)
 	case astiav.MediaTypeAudio:
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
-		if options != nil {
-			if v := options.Get("ac", nil, 0); v != nil {
+		if customOptions != nil {
+			if v := customOptions.Get("ac", nil, 0); v != nil {
 				logger.Debugf(ctx, "ac option is set to '%s'", v.Value())
 				channels, err := strconv.ParseInt(v.Value(), 10, 64)
 				if err != nil {
@@ -592,9 +602,32 @@ func newCodec(
 
 	c.setQuirks(ctx)
 	c.logHints(ctx)
-	logger.Tracef(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, options)
-	if err := c.codecContext.Open(c.codec, options); err != nil {
-		return nil, fmt.Errorf("unable to open codec context: %w", err)
+	logger.Debugf(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, customOptions)
+	err := c.codecContext.Open(c.codec, customOptions)
+	switch {
+	case err == nil:
+	case errors.Is(err, astiav.ErrExternal):
+		// "Generic error in an external library"
+		if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+			// there were known cases where MediaCodec returned ErrExternal due to
+			// "ERROR_INSUFFICIENT_RESOURCE" (https://developer.android.com/reference/android/media/MediaCodec.CodecException#ERROR_INSUFFICIENT_RESOURCE)
+			if input.Params.ResourceManager == nil {
+				return nil, fmt.Errorf("MediaCodec returned ErrExternal: %w", err)
+			}
+			logger.Warnf(ctx, "MediaCodec returned ErrExternal, which could be due to ERROR_INSUFFICIENT_RESOURCE (1100); calling FreeUnneeded() and retrying")
+			resourceType := resource.TypeDecoder
+			if isEncoder {
+				resourceType = resource.TypeEncoder
+			}
+			cnt := input.Params.ResourceManager.FreeUnneeded(ctx, resourceType, c.codec, opts...)
+			logger.Infof(ctx, "FreeUnneeded() freed %d %ss; retrying to open the codec context", cnt, resourceType)
+			newErr := c.codecContext.Open(c.codec, customOptions)
+			if newErr != nil {
+				return nil, fmt.Errorf("unable to open codec context (case #1): %w (before an attempt to remediate: %w)", newErr, err)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unable to open codec context (case #0): %w", err)
 	}
 
 	setFinalizer(ctx, c.codecInternals, func(c *codecInternals) { c.closeLocked(ctx) })

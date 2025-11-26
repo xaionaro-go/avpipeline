@@ -13,7 +13,7 @@ import (
 type DecoderFactory interface {
 	fmt.Stringer
 
-	NewDecoder(ctx context.Context, stream *astiav.Stream) (*Decoder, error)
+	NewDecoder(ctx context.Context, stream *astiav.Stream, opts ...Option) (*Decoder, error)
 
 	Reset(ctx context.Context) error
 }
@@ -35,6 +35,8 @@ type NaiveDecoderFactoryParams struct {
 	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
 	PreInitFunc           func(context.Context, *astiav.Stream, *DecoderInput)
 	PostInitFunc          func(context.Context, *Decoder)
+	ResourceManager       ResourceManager
+	Options               []Option
 }
 
 func DefaultNaiveDecoderFactory() *NaiveDecoderFactoryParams {
@@ -56,13 +58,15 @@ func NewNaiveDecoderFactory(
 func (f *NaiveDecoderFactory) NewDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
+	opts ...Option,
 ) (_ret *Decoder, _err error) {
-	return xsync.DoA2R2(ctx, &f.Locker, f.newDecoder, ctx, stream)
+	return xsync.DoA3R2(ctx, &f.Locker, f.newDecoder, ctx, stream, opts)
 }
 
 func (f *NaiveDecoderFactory) newDecoder(
 	ctx context.Context,
 	stream *astiav.Stream,
+	opts []Option,
 ) (_ret *Decoder, _err error) {
 	if fn := f.PostInitFunc; fn != nil {
 		defer func() {
@@ -87,6 +91,10 @@ func (f *NaiveDecoderFactory) newDecoder(
 		}
 	}()
 
+	optsCombined := make([]Option, 0, len(f.Options)+len(opts))
+	optsCombined = append(optsCombined, f.Options...)
+	optsCombined = append(optsCombined, opts...)
+
 	var decInput DecoderInput
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeAudio:
@@ -96,8 +104,10 @@ func (f *NaiveDecoderFactory) newDecoder(
 			HardwareDeviceType:    0,
 			HardwareDeviceName:    "",
 			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
-			Options:               f.AudioOptions,
+			CustomOptions:         f.AudioOptions,
 			Flags:                 0,
+			ResourceManager:       f.ResourceManager,
+			Options:               optsCombined,
 		}
 	case astiav.MediaTypeVideo:
 		decInput = DecoderInput{
@@ -106,8 +116,10 @@ func (f *NaiveDecoderFactory) newDecoder(
 			HardwareDeviceType:    f.HardwareDeviceType,
 			HardwareDeviceName:    f.HardwareDeviceName,
 			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
-			Options:               f.VideoOptions,
+			CustomOptions:         f.VideoOptions,
 			Flags:                 0,
+			ResourceManager:       f.ResourceManager,
+			Options:               optsCombined,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveDecoderFactory, yet")
@@ -143,9 +155,10 @@ var _ ResourcesGetter = (*NaiveDecoderFactory)(nil)
 
 func (f *NaiveDecoderFactory) GetResources(
 	ctx context.Context,
+	isEncoder bool,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
-	opts ...EncoderFactoryOption,
+	opts ...Option,
 ) (_ret *Resources) {
 	logger.Tracef(ctx, "GetResources: %#+v, %s, %#+v", params, timeBase, opts)
 	defer func() { logger.Tracef(ctx, "/GetResources: %#+v, %s, %#+v: %#+v", params, timeBase, opts, _ret) }()
@@ -156,7 +169,7 @@ func (f *NaiveDecoderFactory) getResources(
 	ctx context.Context,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
-	opts []EncoderFactoryOption,
+	opts []Option,
 ) (_ret *Resources) {
 	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionGetDecoderer](opts); ok {
 		getDecoderer := v.GetDecoderer

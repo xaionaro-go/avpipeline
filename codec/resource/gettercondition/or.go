@@ -1,11 +1,11 @@
-package condition
+package gettercondition
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 )
 
 type Or []Condition
@@ -27,7 +27,7 @@ func (s Or) String() string {
 
 func (s Or) Match(
 	ctx context.Context,
-	f resourcegetter.Input,
+	f resource.GetterInput,
 ) bool {
 	for _, item := range s {
 		if item.Match(ctx, f) {

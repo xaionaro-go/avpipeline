@@ -554,6 +554,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		input.MonotonicPTSCondition,
 		newStreamIndexAssigner(s.MuxMode, outputID, input.Node.Processor.Kernel),
 		s,
+		s.asCodecResourceManager(),
 		s,
 	)
 	if err != nil {

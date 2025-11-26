@@ -28,7 +28,6 @@ var _ Encoder = (*EncoderFull)(nil)
 
 type EncoderFullLocked struct {
 	*EncoderFullBackend
-	ReusableResources *Resources
 	Quality           Quality
 	InitTS            time.Time
 	Next              typing.Optional[SwitchEncoderParams]
@@ -42,7 +41,6 @@ func newEncoderFullLocked(
 	ctx context.Context,
 	params CodecParams,
 	overrideQuality Quality,
-	opts ...EncoderFactoryOption,
 ) (_ret *EncoderFullLocked, _err error) {
 	res := Resolution{
 		Width:  uint32(params.CodecParameters.Width()),
@@ -63,14 +61,9 @@ func newEncoderFullLocked(
 			return nil, fmt.Errorf("unable to apply quality override %#+v: %w", overrideQuality, err)
 		}
 	}
-	var reusableResources *Resources
-	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionReusableResources](opts); ok {
-		reusableResources = v.Resources
-	}
 	input := Input{
-		IsEncoder:         true,
-		Params:            params,
-		ReusableResources: reusableResources,
+		IsEncoder: true,
+		Params:    params,
 	}
 	c, err := newCodec(
 		ctx,
@@ -82,7 +75,6 @@ func newEncoderFullLocked(
 
 	e := &EncoderFullLocked{
 		EncoderFullBackend: c,
-		ReusableResources:  reusableResources,
 		InitTS:             time.Now(),
 		AverageFPS:         indicator.NewMAMA[float64](60, 0.1, 0.01),
 	}
@@ -256,7 +248,7 @@ func (e *EncoderFullLocked) Close(ctx context.Context) (_err error) {
 	if err := e.EncoderFullBackend.closeLocked(ctx); err != nil {
 		result = append(result, fmt.Errorf("unable to close the old encoder: %w", err))
 	}
-	e.InitParams.Options = nil
+	e.InitParams.CustomOptions = nil
 	e.InitParams.CodecParameters = nil
 	return errors.Join(result...)
 }
@@ -271,11 +263,7 @@ func (e *EncoderFullLocked) reinitEncoder(
 		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
 	}
 
-	var opts EncoderFactoryOptions
-	if e.ReusableResources != nil {
-		opts = append(opts, EncoderFactoryOptionReusableResources{Resources: e.ReusableResources})
-	}
-	newEncoder, err := newEncoderFullLocked(ctx, e.InitParams, e.Quality, opts...)
+	newEncoder, err := newEncoderFullLocked(ctx, e.InitParams, e.Quality)
 	if err != nil {
 		return fmt.Errorf("unable to initialize new encoder: %w", err)
 	}
@@ -286,7 +274,6 @@ func (e *EncoderFullLocked) reinitEncoder(
 	e.IsDirtyValue.Store(false)
 	e.InitTS = newEncoder.InitTS
 	e.Quality = newEncoder.Quality
-	e.ReusableResources = newEncoder.ReusableResources
 	e.Next = newEncoder.Next
 
 	switch e.MediaType() {

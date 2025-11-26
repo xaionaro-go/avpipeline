@@ -86,14 +86,30 @@ func NewEncoder[EF codec.EncoderFactory](
 	return e
 }
 
-func (e *Encoder[EF]) Close(ctx context.Context) error {
+func (e *Encoder[EF]) Close(ctx context.Context) (_err error) {
+	return xsync.DoA1R1(ctx, &e.Locker, e.closeLocked, ctx)
+}
+
+func (e *Encoder[EF]) closeLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "closeLocked")
+	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
 	e.ClosureSignaler.Close(ctx)
+	var errs []error
+	if err := e.EncoderFactory.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the encoder factory: %w", err))
+	}
 	for key, encoder := range e.encoders {
-		err := encoder.Close(ctx)
-		logger.Debugf(ctx, "encoder closed: %v", err)
+		if err := encoder.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close the encoder for stream #%d: %w", key, err))
+		}
 		delete(e.encoders, key)
 	}
-	return nil
+	e.outputFormatContextLocker.Do(ctx, func() {
+		if err := e.outputFormatContext.Flush(); err != nil {
+			errs = append(errs, fmt.Errorf("unable to flush the output format context: %w", err))
+		}
+	})
+	return errors.Join(errs...)
 }
 
 func (e *Encoder[EF]) initOutputStreamCopy(
@@ -238,6 +254,10 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	if encoder == nil {
 		return fmt.Errorf("internal error: encoder for stream index %d is nil after an explicit request for initialization", streamIndex)
 	}
+	if _, ok := e.outputStreams[streamIndex]; ok {
+		logger.Warnf(ctx, "output stream for stream index %d already exists; reusing (was the Encoder kernel reset?)", streamIndex)
+		return nil
+	}
 	switch {
 	case codec.IsEncoderCopy(encoder.Encoder):
 		err = e.initOutputStreamCopy(ctx, streamIndex, params, timeBase)
@@ -269,7 +289,7 @@ func (e *Encoder[EF]) initEncoderFor(
 		return fmt.Errorf("TimeBase must be set")
 	}
 
-	var opts []codec.EncoderFactoryOption
+	var opts []codec.Option
 	if getDecoderer, ok := frameSource.(codec.GetDecoderer); ok {
 		opts = append(opts, codec.EncoderFactoryOptionGetDecoderer{GetDecoderer: getDecoderer})
 	} else {

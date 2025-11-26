@@ -7,7 +7,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/xsync"
 )
@@ -18,12 +18,12 @@ type EncoderFactory interface {
 		ctx context.Context,
 		params *astiav.CodecParameters,
 		timeBase astiav.Rational,
-		opts ...EncoderFactoryOption,
+		opts ...Option,
 	) (Encoder, error)
 	Reset(ctx context.Context) error
 }
 
-type ResourcesGetter = resourcegetter.ResourcesGetter
+type ResourcesGetter = resource.ResourcesGetter
 
 type NaiveEncoderFactory struct {
 	NaiveEncoderFactoryParams
@@ -31,7 +31,7 @@ type NaiveEncoderFactory struct {
 	Locker          xsync.Mutex
 	VideoEncoders   []Encoder
 	AudioEncoders   []Encoder
-	ResourcesGetter ResourcesGetter
+	ResourceManager ResourceManager
 }
 
 type NaiveEncoderFactoryParams struct {
@@ -45,6 +45,7 @@ type NaiveEncoderFactoryParams struct {
 	VideoResolution       *Resolution
 	VideoAverageFrameRate astiav.Rational
 	AudioSampleRate       audio.SampleRate
+	Options               []Option
 }
 
 func DefaultNaiveEncoderFactoryParams() *NaiveEncoderFactoryParams {
@@ -91,7 +92,7 @@ func (f *NaiveEncoderFactory) NewEncoder(
 	ctx context.Context,
 	params *astiav.CodecParameters,
 	timeBase astiav.Rational,
-	opts ...EncoderFactoryOption,
+	opts ...Option,
 ) (_ret Encoder, _err error) {
 	logger.Tracef(ctx, "NewEncoder: %#+v, %s", params, timeBase)
 	defer func() { logger.Tracef(ctx, "/NewEncoder: %#+v, %s: %T %v", params, timeBase, _ret, _err) }()
@@ -104,7 +105,7 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 	ctx context.Context,
 	codecParamsOrig *astiav.CodecParameters,
 	timeBase astiav.Rational,
-	opts ...EncoderFactoryOption,
+	opts ...Option,
 ) (_ret Encoder, _err error) {
 	if timeBase.Num() == 0 {
 		return nil, fmt.Errorf("TimeBase must be set")
@@ -125,6 +126,10 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 		}
 	}()
 
+	optsCombined := make([]Option, 0, len(f.Options)+len(opts))
+	optsCombined = append(optsCombined, f.Options...)
+	optsCombined = append(optsCombined, opts...)
+
 	var encParams *CodecParams
 	switch codecParams.MediaType() {
 	case astiav.MediaTypeVideo:
@@ -137,27 +142,24 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 			HardwareDeviceType: f.HardwareDeviceType,
 			HardwareDeviceName: f.HardwareDeviceName,
 			TimeBase:           timeBase,
-			Options:            f.VideoOptions,
+			CustomOptions:      f.VideoOptions,
+			ResourceManager:    f.ResourceManager,
+			Options:            optsCombined,
 		}
 	case astiav.MediaTypeAudio:
 		encParams = &CodecParams{
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParams,
 			TimeBase:        timeBase,
-			Options:         f.AudioOptions,
+			CustomOptions:   f.AudioOptions,
+			ResourceManager: f.ResourceManager,
+			Options:         optsCombined,
 		}
 	default:
 		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
 	}
 
-	if f.ResourcesGetter != nil {
-		logger.Tracef(ctx, "getting reusable resources from %s", f.ResourcesGetter)
-		reusableResources := f.ResourcesGetter.GetResources(ctx, codecParams, timeBase, opts...)
-		if reusableResources != nil {
-			opts = append(opts, EncoderFactoryOptionReusableResources{Resources: reusableResources})
-		}
-	}
-	return NewEncoder(ctx, *encParams, opts...)
+	return NewEncoder(ctx, *encParams)
 }
 
 func (f *NaiveEncoderFactory) Reset(

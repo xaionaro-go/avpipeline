@@ -1,10 +1,10 @@
-package condition
+package gettercondition
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 )
 
 type Static bool
@@ -15,6 +15,6 @@ func (v Static) String() string {
 	return fmt.Sprintf("%t", v)
 }
 
-func (v Static) Match(context.Context, resourcegetter.Input) bool {
+func (v Static) Match(context.Context, resource.GetterInput) bool {
 	return (bool)(v)
 }

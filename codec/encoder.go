@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/codec/resourcegetter"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 	"github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
@@ -46,7 +46,7 @@ type Encoder interface {
 	GetPCMAudioFormat(ctx context.Context) *PCMAudioFormat
 	LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error
 }
-type EncoderInput = resourcegetter.Input
+type EncoderInput = resource.GetterInput
 
 type SwitchEncoderParams struct {
 	When       condition.Condition
@@ -81,7 +81,7 @@ func (ErrNotDummy) Error() string {
 	return "not a dummy encoder"
 }
 
-type Resources = resourcegetter.Resources
+type Resources = resource.Resources
 
 func IsDummyEncoder(encoder Encoder) bool {
 	return IsEncoderCopy(encoder) || IsEncoderRaw(encoder)

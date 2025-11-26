@@ -101,19 +101,28 @@ func NewDecoder[DF codec.DecoderFactory](
 }
 
 func (d *Decoder[DF]) Close(ctx context.Context) error {
-	return xsync.DoA1R1(ctx, &d.Locker, d.close, ctx)
+	return xsync.DoA1R1(ctx, &d.Locker, d.closeLocked, ctx)
 }
 
-func (d *Decoder[DF]) close(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "close()")
-	defer func() { logger.Debugf(ctx, "/close(): %v", _err) }()
+func (d *Decoder[DF]) closeLocked(ctx context.Context) (_err error) {
+	logger.Debugf(ctx, "closeLocked()")
+	defer func() { logger.Debugf(ctx, "/closeLocked(): %v", _err) }()
 	d.ClosureSignaler.Close(ctx)
+
+	var errs []error
+	if err := d.DecoderFactory.Reset(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset the decoder factory: %w", err))
+	}
 	for key, decoder := range d.Decoders {
-		err := decoder.Close(ctx)
-		logger.Tracef(ctx, "decoder for stream #%d closed: %v", key, err)
+		if err := decoder.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close the decoder for stream #%d: %w", key, err))
+		}
 		delete(d.Decoders, key)
 	}
-	return nil
+	if err := d.FormatContext.Flush(); err != nil {
+		errs = append(errs, fmt.Errorf("unable to flush the format context: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 func (d *Decoder[DF]) GetObjectID() globaltypes.ObjectID {

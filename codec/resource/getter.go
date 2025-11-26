@@ -1,4 +1,4 @@
-package resourcegetter
+package resource
 
 import (
 	"context"
@@ -12,8 +12,9 @@ type ResourcesGetter interface {
 	fmt.Stringer
 	GetResources(
 		ctx context.Context,
+		isEncoder bool,
 		params *astiav.CodecParameters,
 		timeBase astiav.Rational,
-		opts ...types.EncoderFactoryOption,
+		opts ...types.Option,
 	) *Resources
 }

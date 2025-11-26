@@ -17,7 +17,6 @@ var _ Encoder = (*EncoderFull)(nil)
 func NewEncoder(
 	ctx context.Context,
 	params CodecParams,
-	opts ...EncoderFactoryOption,
 ) (_ret Encoder, _err error) {
 	logger.Tracef(ctx, "NewEncoder(%#+v)", params)
 	defer func() { logger.Tracef(ctx, "/NewEncoder(%#+v): %T %v", params, _ret, _err) }()
@@ -27,12 +26,12 @@ func NewEncoder(
 	case NameRaw:
 		return EncoderRaw{}, nil
 	}
-	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionOnlyDummy](opts); ok {
+	if v, ok := EncoderFactoryOptionLatest[EncoderFactoryOptionOnlyDummy](params.Options); ok {
 		if v.OnlyDummy {
 			return nil, ErrNotDummy{}
 		}
 	}
-	e, err := newEncoderFullLocked(ctx, params, nil, opts...)
+	e, err := newEncoderFullLocked(ctx, params, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -2,8 +2,10 @@ package codec
 
 import (
 	"context"
+	"slices"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/codec/resource"
 )
 
 type CodecParams struct {
@@ -13,9 +15,13 @@ type CodecParams struct {
 	HardwareDeviceName    HardwareDeviceName
 	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
 	TimeBase              astiav.Rational
-	Options               *astiav.Dictionary
+	CustomOptions         *astiav.Dictionary
 	HWDevFlags            int
+	ResourceManager       ResourceManager
+	Options               []Option
 }
+
+type ResourceManager = resource.ResourceManager
 
 func (p CodecParams) Clone(ctx context.Context) CodecParams {
 	if p.CodecParameters != nil {
@@ -24,13 +30,14 @@ func (p CodecParams) Clone(ctx context.Context) CodecParams {
 		p.CodecParameters.Copy(cp)
 		p.CodecParameters = cp
 	}
-	if p.Options != nil {
-		if v := p.Options.Pack(); len(v) > 0 {
+	if p.CustomOptions != nil {
+		if v := p.CustomOptions.Pack(); len(v) > 0 {
 			opts := astiav.NewDictionary()
 			setFinalizerFree(ctx, opts)
-			opts.Unpack(p.Options.Pack())
-			p.Options = opts
+			opts.Unpack(p.CustomOptions.Pack())
+			p.CustomOptions = opts
 		}
 	}
+	p.Options = slices.Clone(p.Options)
 	return p
 }
