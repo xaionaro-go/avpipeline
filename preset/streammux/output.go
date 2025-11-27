@@ -13,7 +13,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/resource"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
-	"github.com/xaionaro-go/avpipeline/frame"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -54,7 +53,7 @@ type OutputCustomData[C any] struct {
 }
 
 type FPSFractionGetter interface {
-	GetFPSFraction(ctx context.Context) (num, den uint32)
+	GetFPSFraction(ctx context.Context) globaltypes.Rational
 }
 
 type OutputStreamsIniter interface {
@@ -296,7 +295,7 @@ func newOutput[C any](
 	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices)
 	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
 	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer)
-	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func() uint64 {
+	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func(context.Context) uint64 {
 		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
 	if monotonicPTS == nil {
@@ -353,52 +352,12 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 	logger.Tracef(ctx, "initFPSFractioner()")
 	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
 
-	var frameCount atomic.Uint32
-	lastSentFramePTS := astiav.NoPtsValue
-	o.RecoderNode.Processor.Kernel.Filter = framecondition.Function(func(
-		ctx context.Context,
-		i frame.Input,
-	) (_ret bool) {
-		if i.GetMediaType() != astiav.MediaTypeVideo {
-			return true
-		}
-
-		if !enableFPSFractioner {
-			return true
-		}
-
-		num, den := o.FPSFractionGetter.GetFPSFraction(ctx)
-		if outputDebug {
-			logger.Tracef(ctx, "frame %p from stream %d: pts:%d, dur:%d: %v/%v", i.Frame, i.StreamIndex, i.Frame.Pts(), i.Frame.Duration(), num, den)
-			defer func() {
-				logger.Tracef(ctx, "/frame %p from stream %d: pts:%d, dur:%d: %v/%v: %v", i.Frame, i.StreamIndex, i.Frame.Pts(), i.Frame.Duration(), num, den, _ret)
-			}()
-		}
-		if den == 0 {
-			return true
-		}
-		frameID := frameCount.Add(1)
-		shouldPass := frameID%den < num
-		if outputDebug {
-			logger.Tracef(ctx, "shouldPass: %t: frameID=%d, num=%d, den=%d", shouldPass, frameID, num, den)
-		}
-		if !shouldPass {
-			return
-		}
-		if lastSentFramePTS != astiav.NoPtsValue {
-			duration := i.Frame.Pts() - lastSentFramePTS
-			expectedDuration := float64(i.Frame.Duration()) * float64(den) / float64(num)
-			if duration > int64(expectedDuration)*2 {
-				duration = int64(expectedDuration)
-			}
-			i.Frame.SetDuration(duration)
-			if outputDebug {
-				logger.Tracef(ctx, "dur: %d", i.Frame.Duration())
-			}
-		}
-		lastSentFramePTS = i.Frame.Pts()
-		return true
-	})
+	o.RecoderNode.Processor.Kernel.Filter = framecondition.Or{
+		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
+		framecondition.ReduceFramerateFraction(mathcondition.GetterFunction[globaltypes.Rational](
+			o.FPSFractionGetter.GetFPSFraction,
+		)),
+	}
 }
 
 func (o *Output[C]) initReuseDecoderResources(

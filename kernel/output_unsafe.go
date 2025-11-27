@@ -82,7 +82,7 @@ func (r *Output) unsafeGetInternalQueueSize(
 	case "rtmp", "rtmps":
 		return r.getInternalQueueSizeRTMP(ctx)
 	default:
-		logger.Debugf(ctx, "getting the internal queue size from '%s', yet", r.URLParsed.Scheme)
+		logger.Debugf(ctx, "getting the internal queue size from '%s' is not implemented, yet", r.URLParsed.Scheme)
 		return nil // not implemented, yet
 	}
 }

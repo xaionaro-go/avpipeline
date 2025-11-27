@@ -2,6 +2,7 @@ package condition
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 )
 
@@ -17,7 +18,8 @@ func (n Not[T]) String() string {
 }
 
 func (n Not[T]) Match(
+	ctx context.Context,
 	v T,
 ) bool {
-	return !And[T](n).Match(v)
+	return !And[T](n).Match(ctx, v)
 }

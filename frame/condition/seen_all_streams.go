@@ -2,7 +2,6 @@ package condition
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/xsync"
@@ -37,7 +36,7 @@ func (c *SeenAllStreamsT) match(
 }
 
 func (c *SeenAllStreamsT) String() string {
-	return fmt.Sprintf("StreamAllStreams")
+	return "StreamAllStreams"
 }
 
 func (c *SeenAllStreamsT) acknowledgeInput(

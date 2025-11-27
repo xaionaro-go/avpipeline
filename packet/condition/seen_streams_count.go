@@ -38,7 +38,7 @@ func (c *SeenStreamsCountT) match(
 	c.acknowledgeInput(ctx, pkt)
 	streamCount := c.getActiveStreamsCount()
 	logger.Tracef(ctx, "streamCount: %d", streamCount)
-	return c.Is.Match(streamCount)
+	return c.Is.Match(ctx, streamCount)
 }
 
 func (c *SeenStreamsCountT) String() string {

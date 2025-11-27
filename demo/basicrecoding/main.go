@@ -10,15 +10,18 @@ import (
 	"os"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/spf13/pflag"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
+	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
-	"github.com/xaionaro-go/avpipeline/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
@@ -37,6 +40,7 @@ func main() {
 	pflag.Var(&loggerLevel, "log-level", "Log level")
 	videoCodec := pflag.String("vcodec", string(codec.NameCopy), "")
 	hwDeviceName := pflag.String("hwdevice", "", "")
+	scaleVideoFrameRate := pflag.Float64("scale-video-framerate", 1, "")
 	frameDrop := pflag.Bool("framedrop", false, "")
 
 	pflag.Parse()
@@ -88,7 +92,7 @@ func main() {
 			AudioCodec:         codec.NameCopy,
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDevName,
-			VideoOptions:       xastiav.DictionaryItemsToAstiav(ctx, types.DictionaryItems{{Key: "bf", Value: "0"}}),
+			VideoOptions:       xastiav.DictionaryItemsToAstiav(ctx, globaltypes.DictionaryItems{{Key: "bf", Value: "0"}}),
 		}),
 		nil,
 	)
@@ -96,6 +100,25 @@ func main() {
 	defer recoder.Close(ctx)
 	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
 	recodingNode := node.New(recoder)
+
+	// configure optional FPS downscaling
+
+	if *scaleVideoFrameRate != 1 {
+		if *videoCodec == string(codec.NameCopy) {
+			logger.Fatalf(ctx, "scaling video framerate down with 'copy' codec is not supported, please choose a re-encoding codec")
+		}
+		logger.Debugf(ctx, "scaling video framerate down by %f...", *scaleVideoFrameRate)
+		fps := globaltypes.RationalFromApproxFloat64(*scaleVideoFrameRate)
+		if fps.Float64() > 1 {
+			logger.Fatalf(ctx, "scaling video framerate up is not supported in this demo, yet: %v", fps.Float64())
+		}
+		recodingNode.Processor.Kernel.Filter = framecondition.Or{
+			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
+			framecondition.ReduceFramerateFraction(mathcondition.GetterStatic[globaltypes.Rational]{
+				StaticValue: fps,
+			}),
+		}
+	}
 
 	// route nodes: input -> recoder -> output
 

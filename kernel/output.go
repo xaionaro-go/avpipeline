@@ -48,7 +48,7 @@ const (
 	outputSetRTMPAppName                = false
 	outputWriteHeaders                  = true
 	outputWriteTrailer                  = true
-	outputDebug                         = true
+	outputDebug                         = false
 	revert0c55f85                       = false
 )
 

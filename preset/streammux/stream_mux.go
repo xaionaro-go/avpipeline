@@ -1072,11 +1072,16 @@ func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {
 	s.FPSFractionNumDen.Store((uint64(num) << 32) | uint64(den))
 }
 
-func (s *StreamMux[C]) GetFPSFraction(ctx context.Context) (num, den uint32) {
+func (s *StreamMux[C]) GetFPSFraction(ctx context.Context) globaltypes.Rational {
+	var r globaltypes.Rational
 	numDen := s.FPSFractionNumDen.Load()
-	num = uint32(numDen >> 32)
-	den = uint32(numDen & 0xFFFFFFFF)
-	return
+	r.Num = int(numDen >> 32)
+	r.Den = int(numDen & 0xFFFFFFFF)
+	if r.Den == 0 {
+		// unset, yet
+		return globaltypes.Rational{Num: 1, Den: 1}
+	}
+	return r
 }
 
 func (s *StreamMux[C]) inputBitRateMeasurerLoop(

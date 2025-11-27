@@ -2,10 +2,11 @@ package condition
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 )
 
 type Condition[T cmp.Ordered] interface {
 	fmt.Stringer
-	Match(T) bool
+	Match(context.Context, T) bool
 }

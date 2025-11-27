@@ -2,6 +2,7 @@ package condition
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"strings"
 )
@@ -24,10 +25,11 @@ func (s And[T]) String() string {
 }
 
 func (s And[T]) Match(
+	ctx context.Context,
 	v T,
 ) bool {
 	for _, item := range s {
-		if !item.Match(v) {
+		if !item.Match(ctx, v) {
 			return false
 		}
 	}

@@ -28,6 +28,6 @@ func (c PTSCond) Match(
 	ctx context.Context,
 	in packetorframe.InputUnion,
 ) bool {
-	PTS := in.GetPTS()
-	return c.Condition.Match(PTS)
+	pts := in.GetPTS()
+	return c.Condition.Match(ctx, pts)
 }

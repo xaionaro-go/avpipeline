@@ -36,7 +36,7 @@ func (c *SeenStreamsCountT) match(
 ) bool {
 	c.acknowledgeInput(ctx, f)
 	streamCount := c.getActiveStreamsCount()
-	return c.Is.Match(streamCount)
+	return c.Is.Match(ctx, streamCount)
 }
 
 func (c *SeenStreamsCountT) String() string {

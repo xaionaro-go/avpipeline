@@ -47,7 +47,7 @@ func (c *PushQueueSizeCond) Match(
 		}
 	}
 	logger.Tracef(ctx, "queue size: %d", queueSizeBytes)
-	return c.QueueSizeCond.Match(uint64(queueSizeBytes))
+	return c.QueueSizeCond.Match(ctx, uint64(queueSizeBytes))
 }
 
 func (c *PushQueueSizeCond) String() string {

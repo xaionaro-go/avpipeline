@@ -29,5 +29,5 @@ func (c DTSCond) Match(
 	in packetorframe.InputUnion,
 ) bool {
 	dts := in.GetDTS()
-	return c.Condition.Match(dts)
+	return c.Condition.Match(ctx, dts)
 }

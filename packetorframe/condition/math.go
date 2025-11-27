@@ -34,5 +34,5 @@ func (c MathCond[T]) Match(
 	ctx context.Context,
 	in packetorframe.InputUnion,
 ) bool {
-	return c.MathCondition.Match(c.ValueGetter.Get())
+	return c.MathCondition.Match(ctx, c.ValueGetter.Get(ctx))
 }

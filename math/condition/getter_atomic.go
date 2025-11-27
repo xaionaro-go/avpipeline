@@ -1,6 +1,7 @@
 package condition
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -20,6 +21,6 @@ func (g GetterAtomic[T]) String() string {
 	return fmt.Sprintf("Atomic%s(%v)", typeName, g.Integer.Load())
 }
 
-func (g GetterAtomic[T]) Get() T {
+func (g GetterAtomic[T]) Get(context.Context) T {
 	return g.Integer.Load()
 }

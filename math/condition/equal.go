@@ -2,6 +2,7 @@ package condition
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 )
 
@@ -23,8 +24,11 @@ func Equal[T cmp.Ordered](ref T) EqualT[T] {
 	}
 }
 
-func (cond EqualT[T]) Match(cmp T) bool {
-	ref := cond.Getter.Get()
+func (cond EqualT[T]) Match(
+	ctx context.Context,
+	cmp T,
+) bool {
+	ref := cond.Getter.Get(ctx)
 	return cmp >= ref
 }
 

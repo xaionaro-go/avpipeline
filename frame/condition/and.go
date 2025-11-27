@@ -18,6 +18,9 @@ func (s *And) Add(item Condition) *And {
 }
 
 func (s And) String() string {
+	if len(s) == 1 {
+		return s[0].String()
+	}
 	var result []string
 	for _, cond := range s {
 		result = append(result, cond.String())

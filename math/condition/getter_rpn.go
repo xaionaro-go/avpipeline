@@ -1,6 +1,7 @@
 package condition
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/xaionaro-go/rpn"
@@ -22,7 +23,7 @@ func (g GetterRPN[A, T]) String() string {
 	return fmt.Sprintf("RPN(%s)", g.Expr)
 }
 
-func (g GetterRPN[A, T]) Get() T {
+func (g GetterRPN[A, T]) Get(context.Context) T {
 	if g.Expr == nil {
 		var zeroValue T
 		return zeroValue

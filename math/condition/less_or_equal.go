@@ -2,6 +2,7 @@ package condition
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 )
 
@@ -23,8 +24,11 @@ func LessOrEqual[T cmp.Ordered](ref T) LessOrEqualT[T] {
 	}
 }
 
-func (cond LessOrEqualT[T]) Match(cmp T) bool {
-	ref := cond.Getter.Get()
+func (cond LessOrEqualT[T]) Match(
+	ctx context.Context,
+	cmp T,
+) bool {
+	ref := cond.Getter.Get(ctx)
 	return cmp <= ref
 }
 
