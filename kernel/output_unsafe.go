@@ -183,7 +183,8 @@ func (r *Output) unsafeGetRawRTMPContext(
 
 func (r *Output) getInternalQueueSizeRTMP(
 	ctx context.Context,
-) map[string]uint64 {
+) (_ret map[string]uint64) {
+	defer func() { logger.Tracef(ctx, "getInternalQueueSizeRTMP: %#+v", _ret) }()
 
 	avioCtx := r.unsafeGetRawAVIOContext(ctx)
 	avioBytes := avioCtx.Buffer()
@@ -204,22 +205,31 @@ var _ kerneltypes.UnsafeGetOldestDTSInTheQueuer = (*Output)(nil)
 func (r *Output) UnsafeGetOldestDTSInTheQueue(
 	ctx context.Context,
 ) (_ret time.Duration, _err error) {
-	logger.Tracef(ctx, "UnsafeGetOldestDTSInTheQueue")
-	defer func() { logger.Tracef(ctx, "/UnsafeGetOldestDTSInTheQueue: %v %v", _ret, _err) }()
+	logger.Tracef(ctx, "UnsafeGetOldestDTSInTheQueue[%s]", r.URL)
+	defer func() { logger.Tracef(ctx, "/UnsafeGetOldestDTSInTheQueue[%s]: %v %v", r.URL, _ret, _err) }()
+
+	outTSs := r.outTSs.GetAll()
 
 	queueSize := r.GetInternalQueueSize(ctx)
+	if queueSize == nil {
+		return 0, fmt.Errorf("unable to get the internal queue size")
+	}
+
 	var queueSizeTotal uint64
 	for _, v := range queueSize {
 		queueSizeTotal += v
 	}
+	logger.Tracef(ctx, "queueSizeTotal == %d", queueSizeTotal)
 
 	if queueSizeTotal == 0 {
+		for _, outTS := range slices.Backward(outTSs) {
+			if outTS.DTS > 0 {
+				return outTS.DTS, nil
+			}
+		}
 		return 0, nil
 	}
 
-	logger.Tracef(ctx, "queueSizeTotal == %d", queueSizeTotal)
-
-	outTSs := r.outTSs.GetAll()
 	accountedQueueSize := uint64(0)
 	for idx, outTS := range slices.Backward(outTSs) {
 		accountedQueueSize += outTS.PacketSize
@@ -258,7 +268,7 @@ func (r *Output) UnsafeGetOldestDTSInTheQueue(
 		return 0, fmt.Errorf("calculated negative estimated latency: %v (%v * %v)", estimatedLatency, knownLatency, k)
 	}
 
-	return oldestDTS + estimatedLatency, ErrApproximateValue{}
+	return earliestDTS - estimatedLatency, ErrApproximateValue{}
 }
 
 type ErrApproximateValue struct{}

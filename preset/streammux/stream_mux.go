@@ -84,6 +84,7 @@ type StreamMux[C any] struct {
 	InputAudioDTS                   atomic.Uint64
 	InputVideoDTS                   atomic.Uint64
 	LatencyTotal                    atomic.Uint64
+	LastLatencyCheckTS              atomic.Uint64
 
 	// to become a fake node myself:
 	nodeboilerplate.Counters
@@ -1431,6 +1432,10 @@ func (s *StreamMux[C]) GetBitRates(
 	return result, nil
 }
 
+func nanosecondsToDuration(nanoseconds uint64) time.Duration {
+	return time.Nanosecond * time.Duration(nanoseconds)
+}
+
 func (s *StreamMux[C]) updateLatencyValues(
 	ctx context.Context,
 ) (_err error) {
@@ -1447,7 +1452,11 @@ func (s *StreamMux[C]) updateLatencyValues(
 		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputVideo.SendingNode.GetProcessor())
 	}
 	videoOutputDTS, err := videoQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.As(err, &kernel.ErrApproximateValue{}):
+		logger.Warnf(ctx, "receive an significantly imprecise video DTS value from the queuer")
+	default:
 		return fmt.Errorf("unable to get the oldest DTS in the video output queuer: %w", err)
 	}
 	videoInputDTS := time.Nanosecond * time.Duration(s.InputVideoDTS.Load())
@@ -1473,13 +1482,12 @@ func (s *StreamMux[C]) updateLatencyValues(
 			return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
 		}
 		audioOutputDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
-		if err != nil {
-			switch {
-			case errors.As(err, kernel.ErrApproximateValue{}):
-				logger.Warnf(ctx, "receive an significantly imprecise audio DTS value from the queuer")
-			default:
-				return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
-			}
+		switch {
+		case err == nil:
+		case errors.As(err, &kernel.ErrApproximateValue{}):
+			logger.Warnf(ctx, "receive an significantly imprecise audio DTS value from the queuer")
+		default:
+			return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
 		}
 		audioInputDTS := time.Nanosecond * time.Duration(s.InputAudioDTS.Load())
 		logger.Tracef(ctx, "latencies: audio output DTS: %v, audio input DTS: %v", audioOutputDTS, audioInputDTS)
@@ -1513,15 +1521,15 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 		case <-ctx.Done():
 			return ctx.Err()
 		case newTS := <-t.C:
-			tsDiff := newTS.Sub(prevTS)
 			prevTS = newTS
 			func() {
 				ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 				defer cancelFn()
 				err := s.updateLatencyValues(ctx)
 				if err != nil {
-					logger.Errorf(ctx, "unable to update latency values: %v", err)
-					s.LatencyTotal.Store(s.LatencyTotal.Load() + uint64(tsDiff.Nanoseconds()))
+					tsDiff := time.Since(prevTS)
+					newValue := s.LatencyTotal.Swap(s.LatencyTotal.Load() + uint64(tsDiff.Nanoseconds()))
+					logger.Errorf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(newValue), tsDiff, tsDiff+nanosecondsToDuration(newValue))
 				}
 			}()
 		}
