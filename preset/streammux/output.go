@@ -10,6 +10,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
+	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/resource"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -349,11 +350,16 @@ func (o *Output[C]) onRecoderInput(
 	ctx context.Context,
 	i packetfiltercondition.Input,
 ) bool {
+	dtsRaw := i.Input.GetDTS()
+	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
+		dtsRaw = i.Input.GetPTS()
+	}
+	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
 	switch i.Input.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		o.Measurements.RecodingStartVideoDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.RecodingStartVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
-		o.Measurements.RecodingStartAudioDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.RecodingStartAudioDTS.Store(uint64(dts))
 	}
 	return true
 }
@@ -362,11 +368,16 @@ func (o *Output[C]) onRecoderOutput(
 	ctx context.Context,
 	i packetfiltercondition.Input,
 ) bool {
+	dtsRaw := i.Input.GetDTS()
+	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
+		dtsRaw = i.Input.GetPTS()
+	}
+	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
 	switch i.Input.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		o.Measurements.RecodingEndVideoDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.RecodingEndVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
-		o.Measurements.RecodingEndAudioDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.RecodingEndAudioDTS.Store(uint64(dts))
 	}
 	return true
 }
@@ -375,11 +386,16 @@ func (o *Output[C]) onSenderInput(
 	ctx context.Context,
 	i packetfiltercondition.Input,
 ) bool {
+	dtsRaw := i.Input.GetDTS()
+	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
+		dtsRaw = i.Input.GetPTS()
+	}
+	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
 	switch i.Input.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		o.Measurements.LastSendingAudioDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.LastSendingVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
-		o.Measurements.LastSendingAudioDTS.Store(uint64(i.Input.GetDTS()))
+		o.Measurements.LastSendingAudioDTS.Store(uint64(dts))
 	}
 	return true
 }

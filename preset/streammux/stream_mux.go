@@ -1538,8 +1538,8 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 func (s *StreamMux[C]) GetLatencies(
 	ctx context.Context,
 ) (_ret *types.Latencies, _err error) {
-	logger.Tracef(ctx, "GetLatencies")
-	defer func() { logger.Tracef(ctx, "/GetLatencies: %v, %v", _ret, _err) }()
+	logger.Debugf(ctx, "GetLatencies")
+	defer func() { logger.Debugf(ctx, "/GetLatencies: %v, %v", _ret, _err) }()
 
 	outputVideo := s.GetActiveVideoOutput(ctx)
 	if outputVideo == nil {
@@ -1551,26 +1551,25 @@ func (s *StreamMux[C]) GetLatencies(
 		return nil, fmt.Errorf("no active audio output")
 	}
 
-	audioPreRecodingLatency := nanosecondsToDuration(
-		outputAudio.Measurements.RecodingStartAudioDTS.Load() - s.InputAudioDTS.Load(),
-	)
-	videoPreRecodingLatency := nanosecondsToDuration(
-		outputVideo.Measurements.RecodingStartVideoDTS.Load() - s.InputVideoDTS.Load(),
-	)
+	lastSendingAudioDTS, lastSendingVideoDTS := outputAudio.Measurements.LastSendingAudioDTS.Load(), outputVideo.Measurements.LastSendingVideoDTS.Load()
 
-	audioRecodingLatency := nanosecondsToDuration(
-		outputAudio.Measurements.RecodingEndAudioDTS.Load() - outputAudio.Measurements.RecodingStartAudioDTS.Load(),
-	)
-	videoRecodingLatency := nanosecondsToDuration(
-		outputVideo.Measurements.RecodingEndVideoDTS.Load() - outputVideo.Measurements.RecodingStartVideoDTS.Load(),
-	)
+	recodingEndAudioDTS, recodingEndVideoDTS := outputAudio.Measurements.RecodingEndAudioDTS.Load(), outputVideo.Measurements.RecodingEndVideoDTS.Load()
 
-	audioRecodedPreSendLatency := nanosecondsToDuration(
-		outputAudio.Measurements.LastSendingAudioDTS.Load() - outputAudio.Measurements.RecodingEndAudioDTS.Load(),
-	)
-	videoRecodedPreSendLatency := nanosecondsToDuration(
-		outputVideo.Measurements.LastSendingVideoDTS.Load() - outputVideo.Measurements.RecodingEndVideoDTS.Load(),
-	)
+	recodingStartAudioDTS, recodingStartVideoDTS := outputAudio.Measurements.RecodingStartAudioDTS.Load(), outputVideo.Measurements.RecodingStartVideoDTS.Load()
+
+	inputAudioDts, inputVideoDTS := s.InputAudioDTS.Load(), s.InputVideoDTS.Load()
+
+	audioPreRecodingLatency := nanosecondsToDuration(inputAudioDts - recodingStartAudioDTS)
+	videoPreRecodingLatency := nanosecondsToDuration(inputVideoDTS - recodingStartVideoDTS)
+
+	audioRecodingLatency := nanosecondsToDuration(recodingStartAudioDTS - recodingEndAudioDTS)
+	videoRecodingLatency := nanosecondsToDuration(recodingStartVideoDTS - recodingEndVideoDTS)
+
+	audioRecodedPreSendLatency := nanosecondsToDuration(recodingEndAudioDTS - lastSendingAudioDTS)
+	videoRecodedPreSendLatency := nanosecondsToDuration(recodingEndVideoDTS - lastSendingVideoDTS)
+
+	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v recoding=%v recoded-pre-send=%v sending=%v", audioPreRecodingLatency, audioRecodingLatency, audioRecodedPreSendLatency, nanosecondsToDuration(s.SendingLatencyAudio.Load()))
+	logger.Debugf(ctx, "latencies: video: pre-encoding=%v recoding=%v recoded-pre-send=%v (%v-%v) sending=%v", videoPreRecodingLatency, videoRecodingLatency, videoRecodedPreSendLatency, recodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(s.SendingLatencyVideo.Load()))
 
 	return &types.Latencies{
 		Audio: types.TrackLatencies{
