@@ -64,6 +64,15 @@ type OutputStreamsIniter interface {
 	) error
 }
 
+type OutputMeasurements struct {
+	RecodingStartAudioDTS atomic.Uint64
+	RecodingStartVideoDTS atomic.Uint64
+	RecodingEndAudioDTS   atomic.Uint64
+	RecodingEndVideoDTS   atomic.Uint64
+	LastSendingAudioDTS   atomic.Uint64
+	LastSendingVideoDTS   atomic.Uint64
+}
+
 type Output[C any] struct {
 	ID                    OutputID
 	InputFrom             *NodeInput[C]
@@ -81,6 +90,8 @@ type Output[C any] struct {
 	InitOnce              sync.Once
 	IsClosedValue         bool
 	ParentResourceManager ResourceManager
+
+	Measurements OutputMeasurements
 }
 
 type initOutputConfig struct{}
@@ -291,10 +302,10 @@ func newOutput[C any](
 			return true
 		}),
 	)
-	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode)
-	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices)
+	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode, packetfiltercondition.Function(o.onRecoderInput))
+	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.Function(o.onRecoderOutput))
 	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
-	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer)
+	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer, packetfiltercondition.Function(o.onSenderInput))
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func(context.Context) uint64 {
 		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
@@ -332,6 +343,45 @@ func logIfError(ctx context.Context, err error) {
 		return
 	}
 	logger.Errorf(ctx, "got an error: %v", err)
+}
+
+func (o *Output[C]) onRecoderInput(
+	ctx context.Context,
+	i packetfiltercondition.Input,
+) bool {
+	switch i.Input.GetMediaType() {
+	case astiav.MediaTypeVideo:
+		o.Measurements.RecodingStartVideoDTS.Store(uint64(i.Input.GetDTS()))
+	case astiav.MediaTypeAudio:
+		o.Measurements.RecodingStartAudioDTS.Store(uint64(i.Input.GetDTS()))
+	}
+	return true
+}
+
+func (o *Output[C]) onRecoderOutput(
+	ctx context.Context,
+	i packetfiltercondition.Input,
+) bool {
+	switch i.Input.GetMediaType() {
+	case astiav.MediaTypeVideo:
+		o.Measurements.RecodingEndVideoDTS.Store(uint64(i.Input.GetDTS()))
+	case astiav.MediaTypeAudio:
+		o.Measurements.RecodingEndAudioDTS.Store(uint64(i.Input.GetDTS()))
+	}
+	return true
+}
+
+func (o *Output[C]) onSenderInput(
+	ctx context.Context,
+	i packetfiltercondition.Input,
+) bool {
+	switch i.Input.GetMediaType() {
+	case astiav.MediaTypeVideo:
+		o.Measurements.LastSendingAudioDTS.Store(uint64(i.Input.GetDTS()))
+	case astiav.MediaTypeAudio:
+		o.Measurements.LastSendingAudioDTS.Store(uint64(i.Input.GetDTS()))
+	}
+	return true
 }
 
 func (o *Output[C]) String() string {

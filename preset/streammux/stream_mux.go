@@ -41,8 +41,6 @@ import (
 const (
 	switchTimeout = time.Hour
 	switchDebug   = false
-
-	latenciesEnableAudioLatencyDetection = true
 )
 
 var (
@@ -83,7 +81,8 @@ type StreamMux[C any] struct {
 	CurrentBitRateMeasurementsCount atomic.Uint64
 	InputAudioDTS                   atomic.Uint64
 	InputVideoDTS                   atomic.Uint64
-	LatencyTotal                    atomic.Uint64
+	SendingLatencyAudio             atomic.Uint64
+	SendingLatencyVideo             atomic.Uint64
 	LastLatencyCheckTS              atomic.Uint64
 
 	// to become a fake node myself:
@@ -1436,11 +1435,11 @@ func nanosecondsToDuration(nanoseconds uint64) time.Duration {
 	return time.Nanosecond * time.Duration(nanoseconds)
 }
 
-func (s *StreamMux[C]) updateLatencyValues(
+func (s *StreamMux[C]) updateSendingLatencyValues(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "updateLatencyValues")
-	defer func() { logger.Tracef(ctx, "/updateLatencyValues: %v", _err) }()
+	logger.Tracef(ctx, "updateSendingLatencyValues")
+	defer func() { logger.Tracef(ctx, "/updateSendingLatencyValues: %v", _err) }()
 
 	outputVideo := s.GetActiveVideoOutput(ctx)
 	if outputVideo == nil {
@@ -1451,7 +1450,9 @@ func (s *StreamMux[C]) updateLatencyValues(
 	if !ok {
 		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputVideo.SendingNode.GetProcessor())
 	}
-	videoOutputDTS, err := videoQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+
+	videoSendingOldestDTS, err := videoQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	videoSendingEarliestDTS := time.Nanosecond * time.Duration(outputVideo.Measurements.LastSendingVideoDTS.Load())
 	switch {
 	case err == nil:
 	case errors.As(err, &kernel.ErrApproximateValue{}):
@@ -1459,50 +1460,48 @@ func (s *StreamMux[C]) updateLatencyValues(
 	default:
 		return fmt.Errorf("unable to get the oldest DTS in the video output queuer: %w", err)
 	}
-	videoInputDTS := time.Nanosecond * time.Duration(s.InputVideoDTS.Load())
-	logger.Tracef(ctx, "latencies: video output DTS: %v, video input DTS: %v", videoOutputDTS, videoInputDTS)
+	logger.Tracef(ctx, "sending latencies: video output DTS: %v, video input DTS: %v", videoSendingOldestDTS, videoSendingEarliestDTS)
 	var videoLatency time.Duration
-	if videoOutputDTS > 0 { // there is something in the queue
-		videoLatency = videoInputDTS - videoOutputDTS
+	if videoSendingOldestDTS > 0 { // there is something in the queue
+		videoLatency = videoSendingEarliestDTS - videoSendingOldestDTS
 	}
 	if videoLatency < 0 {
 		logger.Tracef(ctx, "video latency is negative: %v; setting to 0", videoLatency)
 		videoLatency = 0
 	}
+	s.SendingLatencyVideo.Store(uint64(videoLatency.Nanoseconds()))
 
-	var audioLatency time.Duration
-	if latenciesEnableAudioLatencyDetection {
-		outputAudio := s.GetActiveAudioOutput(ctx)
-		if outputAudio == nil {
-			return fmt.Errorf("no active audio output")
-		}
-
-		audioQueuer, ok := outputAudio.SendingNode.GetProcessor().(processortypes.UnsafeGetOldestDTSInTheQueuer)
-		if !ok {
-			return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
-		}
-		audioOutputDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
-		switch {
-		case err == nil:
-		case errors.As(err, &kernel.ErrApproximateValue{}):
-			logger.Warnf(ctx, "receive an significantly imprecise audio DTS value from the queuer")
-		default:
-			return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
-		}
-		audioInputDTS := time.Nanosecond * time.Duration(s.InputAudioDTS.Load())
-		logger.Tracef(ctx, "latencies: audio output DTS: %v, audio input DTS: %v", audioOutputDTS, audioInputDTS)
-		if audioOutputDTS > 0 { // there is something in the queue
-			audioLatency = audioInputDTS - audioOutputDTS
-		}
-		if audioLatency < 0 {
-			logger.Tracef(ctx, "audio latency is negative: %v; setting to 0", audioLatency)
-			audioLatency = 0
-		}
+	outputAudio := s.GetActiveAudioOutput(ctx)
+	if outputAudio == nil {
+		return fmt.Errorf("no active audio output")
 	}
 
-	totalLatency := uint64(max(audioLatency, videoLatency).Nanoseconds())
-	logger.Debugf(ctx, "latencies: video=%v audio=%v total=%v", videoLatency, audioLatency, time.Duration(totalLatency))
-	s.LatencyTotal.Store(totalLatency)
+	audioQueuer, ok := outputAudio.SendingNode.GetProcessor().(processortypes.UnsafeGetOldestDTSInTheQueuer)
+	if !ok {
+		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
+	}
+	audioSendingOldestDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	audioSendingEarliestDTS := time.Nanosecond * time.Duration(outputVideo.Measurements.LastSendingAudioDTS.Load())
+	switch {
+	case err == nil:
+	case errors.As(err, &kernel.ErrApproximateValue{}):
+		logger.Warnf(ctx, "receive an significantly imprecise audio DTS value from the queuer")
+	default:
+		return fmt.Errorf("unable to get the oldest DTS in the audio output queuer: %w", err)
+	}
+	logger.Tracef(ctx, "sending latencies: audio output DTS: %v, audio input DTS: %v", audioSendingOldestDTS, audioSendingEarliestDTS)
+	var audioLatency time.Duration
+	if audioSendingOldestDTS > 0 { // there is something in the queue
+		audioLatency = audioSendingEarliestDTS - audioSendingOldestDTS
+	}
+	if audioLatency < 0 {
+		logger.Tracef(ctx, "audio latency is negative: %v; setting to 0", audioLatency)
+		audioLatency = 0
+	}
+	s.SendingLatencyAudio.Store(uint64(audioLatency.Nanoseconds()))
+
+	maxLatency := uint64(max(audioLatency, videoLatency).Nanoseconds())
+	logger.Debugf(ctx, "sending latencies: video=%v audio=%v max=%v", videoLatency, audioLatency, time.Duration(maxLatency))
 	return nil
 }
 
@@ -1525,13 +1524,66 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 			func() {
 				ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 				defer cancelFn()
-				err := s.updateLatencyValues(ctx)
+				err := s.updateSendingLatencyValues(ctx)
 				if err != nil {
 					tsDiff := time.Since(prevTS)
-					newValue := s.LatencyTotal.Swap(s.LatencyTotal.Load() + uint64(tsDiff.Nanoseconds()))
+					newValue := s.SendingLatencyAudio.Swap(s.SendingLatencyAudio.Load() + uint64(tsDiff.Nanoseconds()))
 					logger.Errorf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(newValue), tsDiff, tsDiff+nanosecondsToDuration(newValue))
 				}
 			}()
 		}
 	}
+}
+
+func (s *StreamMux[C]) GetLatencies(
+	ctx context.Context,
+) (_ret *types.Latencies, _err error) {
+	logger.Tracef(ctx, "GetLatencies")
+	defer func() { logger.Tracef(ctx, "/GetLatencies: %v, %v", _ret, _err) }()
+
+	outputVideo := s.GetActiveVideoOutput(ctx)
+	if outputVideo == nil {
+		return nil, fmt.Errorf("no active video output")
+	}
+
+	outputAudio := s.GetActiveAudioOutput(ctx)
+	if outputAudio == nil {
+		return nil, fmt.Errorf("no active audio output")
+	}
+
+	audioPreRecodingLatency := nanosecondsToDuration(
+		outputAudio.Measurements.RecodingStartAudioDTS.Load() - s.InputAudioDTS.Load(),
+	)
+	videoPreRecodingLatency := nanosecondsToDuration(
+		outputVideo.Measurements.RecodingStartVideoDTS.Load() - s.InputVideoDTS.Load(),
+	)
+
+	audioRecodingLatency := nanosecondsToDuration(
+		outputAudio.Measurements.RecodingEndAudioDTS.Load() - outputAudio.Measurements.RecodingStartAudioDTS.Load(),
+	)
+	videoRecodingLatency := nanosecondsToDuration(
+		outputVideo.Measurements.RecodingEndVideoDTS.Load() - outputVideo.Measurements.RecodingStartVideoDTS.Load(),
+	)
+
+	audioRecodedPreSendLatency := nanosecondsToDuration(
+		outputAudio.Measurements.LastSendingAudioDTS.Load() - outputAudio.Measurements.RecodingEndAudioDTS.Load(),
+	)
+	videoRecodedPreSendLatency := nanosecondsToDuration(
+		outputVideo.Measurements.LastSendingVideoDTS.Load() - outputVideo.Measurements.RecodingEndVideoDTS.Load(),
+	)
+
+	return &types.Latencies{
+		Audio: types.TrackLatencies{
+			PreEncoding:    audioPreRecodingLatency,
+			Recoding:       audioRecodingLatency,
+			RecodedPreSend: audioRecodedPreSendLatency,
+			Sending:        nanosecondsToDuration(s.SendingLatencyAudio.Load()),
+		},
+		Video: types.TrackLatencies{
+			PreEncoding:    videoPreRecodingLatency,
+			Recoding:       videoRecodingLatency,
+			RecodedPreSend: videoRecodedPreSendLatency,
+			Sending:        nanosecondsToDuration(s.SendingLatencyVideo.Load()),
+		},
+	}, nil
 }
