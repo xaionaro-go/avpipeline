@@ -1573,13 +1573,13 @@ func (s *StreamMux[C]) GetLatencies(
 
 	return &types.Latencies{
 		Audio: types.TrackLatencies{
-			PreEncoding:    audioPreRecodingLatency,
+			PreRecoding:    audioPreRecodingLatency,
 			Recoding:       audioRecodingLatency,
 			RecodedPreSend: audioRecodedPreSendLatency,
 			Sending:        nanosecondsToDuration(s.SendingLatencyAudio.Load()),
 		},
 		Video: types.TrackLatencies{
-			PreEncoding:    videoPreRecodingLatency,
+			PreRecoding:    videoPreRecodingLatency,
 			Recoding:       videoRecodingLatency,
 			RecodedPreSend: videoRecodedPreSendLatency,
 			Sending:        nanosecondsToDuration(s.SendingLatencyVideo.Load()),

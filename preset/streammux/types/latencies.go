@@ -10,7 +10,7 @@ type Latencies struct {
 }
 
 type TrackLatencies struct {
-	PreEncoding    time.Duration
+	PreRecoding    time.Duration
 	Recoding       time.Duration
 	RecodedPreSend time.Duration
 	Sending        time.Duration
