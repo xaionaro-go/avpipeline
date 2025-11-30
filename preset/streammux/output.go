@@ -228,7 +228,7 @@ func newOutput[C any](
 			outputSwitch,
 		)),
 		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
-		InputFixer: autofix.NewWithCustomData[OutputCustomData[C]](
+		InputFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
 			inputNode.Processor.Kernel,
 			recoderKernel.Decoder,
@@ -241,7 +241,7 @@ func newOutput[C any](
 		),
 		SendingThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
-		SendingFixer: autofix.NewWithCustomData[OutputCustomData[C]](
+		SendingFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
 			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
@@ -347,7 +347,7 @@ func logIfError(ctx context.Context, err error) {
 }
 
 func (o *Output[C]) onRecoderInput(
-	ctx context.Context,
+	_ context.Context,
 	i packetfiltercondition.Input,
 ) bool {
 	dtsRaw := i.Input.GetDTS()
@@ -365,7 +365,7 @@ func (o *Output[C]) onRecoderInput(
 }
 
 func (o *Output[C]) onRecoderOutput(
-	ctx context.Context,
+	_ context.Context,
 	i packetfiltercondition.Input,
 ) bool {
 	dtsRaw := i.Input.GetDTS()
@@ -383,7 +383,7 @@ func (o *Output[C]) onRecoderOutput(
 }
 
 func (o *Output[C]) onSenderInput(
-	ctx context.Context,
+	_ context.Context,
 	i packetfiltercondition.Input,
 ) bool {
 	dtsRaw := i.Input.GetDTS()
