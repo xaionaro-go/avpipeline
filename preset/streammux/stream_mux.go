@@ -64,7 +64,7 @@ type StreamMux[C any] struct {
 	SenderFactory SenderFactory[C]
 
 	// aux
-	AutoBitRateHandler      *AutoBitRateHandler[C]
+	VideoAutoBitRateHandler *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
 	VideoOutputBeforeBypass *Output[C]
 
@@ -100,13 +100,11 @@ type StreamMux[C any] struct {
 func New(
 	ctx context.Context,
 	muxMode types.MuxMode,
-	autoBitRate *AutoBitRateConfig,
 	senderFactory SenderFactory[struct{}],
 ) (*StreamMux[struct{}], error) {
 	return NewWithCustomData[struct{}](
 		ctx,
 		muxMode,
-		autoBitRate,
 		senderFactory,
 	)
 }
@@ -114,7 +112,6 @@ func New(
 func NewWithCustomData[C any](
 	ctx context.Context,
 	muxMode types.MuxMode,
-	autoBitRate *AutoBitRateConfig,
 	senderFactory SenderFactory[C],
 ) (*StreamMux[C], error) {
 	s := &StreamMux[C]{
@@ -137,25 +134,58 @@ func NewWithCustomData[C any](
 	if err := s.initSwitches(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize switches: %w", err)
 	}
+	s.CurrentVideoInputBitRate.Store(20_000_000) // some reasonable high end guess
+	return s, nil
+}
 
-	if autoBitRate != nil {
-		logger.Tracef(ctx, "enabling automatic bitrate control")
-		if len(autoBitRate.ResolutionsAndBitRates) == 0 {
-			return nil, fmt.Errorf("at least one resolution must be specified for automatic bitrate control")
+func (s *StreamMux[C]) GetAutoBitRateHandler() *AutoBitRateHandler[C] {
+	return xatomic.LoadPointer(&s.VideoAutoBitRateHandler)
+}
+
+func (s *StreamMux[C]) swapAutoBitRateHandler(
+	h *AutoBitRateHandler[C],
+	old *AutoBitRateHandler[C],
+) bool {
+	return xatomic.CompareAndSwapPointer(&s.VideoAutoBitRateHandler, h, old)
+}
+
+func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
+	ctx context.Context,
+	autoBitRate *AutoBitRateVideoConfig,
+) (_err error) {
+	logger.Debugf(ctx, "SetAutoBitRateVideoConfig(%#+v)", autoBitRate)
+	defer func() { logger.Debugf(ctx, "/SetAutoBitRateVideoConfig(%#+v): %v", autoBitRate, _err) }()
+
+	oldAutoBitRate := s.GetAutoBitRateHandler()
+	if autoBitRate == nil {
+		if oldAutoBitRate == nil {
+			logger.Debugf(ctx, "automatic bitrate control is already disabled")
+			return nil
 		}
-		h := s.initAutoBitRateHandler(*autoBitRate)
-		observability.Go(ctx, func(ctx context.Context) {
-			defer logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): done")
-			err := h.ServeContext(ctx)
-			logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
-		})
-		bestCfg := autoBitRate.ResolutionsAndBitRates.Best()
-		s.CurrentVideoInputBitRate.Store(uint64(bestCfg.BitrateHigh)) // some reasonable high end guess
-	} else {
-		s.CurrentVideoInputBitRate.Store(math.MaxUint64)
+
+		logger.Debugf(ctx, "disabling automatic bitrate control")
+		err := s.removeAutoBitRateHandler(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to stop auto bitrate handler: %w", err)
+		}
 	}
 
-	return s, nil
+	logger.Debugf(ctx, "enabling automatic bitrate control")
+	h, err := s.newAutoBitRateHandler(ctx, *autoBitRate)
+	if err != nil {
+		return fmt.Errorf("unable to initialize auto bitrate handler: %w", err)
+	}
+	if !s.swapAutoBitRateHandler(h, oldAutoBitRate) {
+		if err := h.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close superfluous auto bitrate handler: %v", err)
+		}
+		return fmt.Errorf("unable to set auto bitrate handler, concurrent modification detected")
+	}
+	err = h.start(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to start auto bitrate handler: %w", err)
+	}
+	return nil
 }
 
 func (s *StreamMux[C]) ForEachInput(
@@ -346,8 +376,8 @@ func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 			return true
 		})
 	})
-	if s.AutoBitRateHandler != nil {
-		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
+	if s.VideoAutoBitRateHandler != nil {
+		if err := s.VideoAutoBitRateHandler.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler: %w", err))
 		}
 	}

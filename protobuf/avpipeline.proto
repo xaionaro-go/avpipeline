@@ -105,6 +105,45 @@ message MovingAverageConfig {
   }
 }
 
+message Resolution {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+message FPSReductionRange {
+  uint64 bitrateMinBps = 1;
+  uint64 bitrateMaxBps = 2;
+  uint32 fractionNum = 3;
+  uint32 fractionDen = 4;
+}
+
+message FPSReducerConfig {
+  repeated FPSReductionRange ranges = 1;
+}
+
+message AutoBitRateResolutionAndBitRateConfig {
+  Resolution resolution = 1;
+  uint64 bitrateHighBps = 2;
+  uint64 bitrateLowBps = 3;
+}
+
+message AutoBitRateResolutionAndBitRateConfigs {
+  repeated AutoBitRateResolutionAndBitRateConfig configs = 1;
+}
+
+message AutoBitrateVideoConfig {
+  AutoBitRateResolutionAndBitRateConfigs resolutionsAndBitRates = 1;
+  AutoBitrateCalculator calculator = 2;
+  FPSReducerConfig fpsReducer = 3;
+  uint64 checkIntervalMS = 4;
+  bool autoByPass = 5;
+  uint64 maxBitRateBps = 6;
+  uint64 minBitRateBps = 7;
+  uint64 bitRateIncreaseSlowdownMS = 8;
+  uint64 resolutionSlowdownDurationUpgradeMS = 9;
+  uint64 resolutionSlowdownDurationDowngradeMS = 10;
+}
+
 message AutoBitrateCalculatorLogK {
   uint64 queueOptimalMS = 1;
   double inertia = 2; // [0.0..1.0]
@@ -113,7 +152,7 @@ message AutoBitrateCalculatorLogK {
 
 message AutoBitrateCalculatorQueueSizeGapDecay {
   uint64 queueOptimalMS = 1;
-  uint64 queueSizeMin = 2; // in bits
+  uint64 queueSizeMin = 2;
   uint64 gapDecayMS = 3;
   uint64 increaseInertiaMS = 4;
   MovingAverageConfig derivativeSmoothed = 5;

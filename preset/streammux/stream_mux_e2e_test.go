@@ -156,9 +156,9 @@ func runTest(
 	streamMux := must(streammux.New(
 		ctx,
 		muxMode,
-		ptr(streammux.DefaultAutoBitrateConfig(codecID)),
 		outputFactory,
 	))
+	streamMux.SetAutoBitRateVideoConfig(ctx, ptr(streammux.DefaultAutoBitRateVideoConfig(codecID)))
 
 	var vcodecName codectypes.Name
 	var hardwareDeviceType codec.HardwareDeviceType

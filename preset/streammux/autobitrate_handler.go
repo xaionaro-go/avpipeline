@@ -23,7 +23,7 @@ import (
 )
 
 type AutoBitRateCalculator = types.AutoBitRateCalculator
-type AutoBitRateConfig = types.AutoBitRateVideoConfig
+type AutoBitRateVideoConfig = types.AutoBitRateVideoConfig
 type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
 type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
 type BitRateChangeRequest = types.BitRateChangeRequest
@@ -80,7 +80,7 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 	case astiav.CodecIDAv1:
 		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.7)
 	default:
-		panic(fmt.Errorf("unsupported codec for DefaultAutoBitrateConfig: %s", codecID))
+		panic(fmt.Errorf("unsupported codec for DefaultAutoBitRateVideoConfig: %s", codecID))
 	}
 }
 
@@ -105,13 +105,13 @@ func DefaultFPSReducerConfig() FPSReducerConfig {
 	return types.DefaultFPSReducerConfig()
 }
 
-func DefaultAutoBitrateConfig(
+func DefaultAutoBitRateVideoConfig(
 	codecID astiav.CodecID,
-) AutoBitRateConfig {
+) AutoBitRateVideoConfig {
 	resolutions := GetDefaultAutoBitrateResolutionsConfig(codecID)
 	resBest := resolutions.Best()
 	resWorst := resolutions.Worst()
-	result := AutoBitRateConfig{
+	result := AutoBitRateVideoConfig{
 		ResolutionsAndBitRates: resolutions,
 		FPSReducer:             DefaultFPSReducerConfig(),
 		Calculator:             DefaultAutoBitrateCalculatorQueueSizeGapDecay(),
@@ -126,19 +126,29 @@ func DefaultAutoBitrateConfig(
 	return result
 }
 
-func (s *StreamMux[C]) initAutoBitRateHandler(
-	cfg AutoBitRateConfig,
-) *AutoBitRateHandler[C] {
-	if s.AutoBitRateHandler != nil {
-		panic("AutoBitRateHandler is already initialized")
+func (s *StreamMux[C]) newAutoBitRateHandler(
+	ctx context.Context,
+	cfg AutoBitRateVideoConfig,
+) (_ret *AutoBitRateHandler[C], _err error) {
+	logger.Debugf(ctx, "newAutoBitRateHandler()")
+	defer func() { logger.Debugf(ctx, "/newAutoBitRateHandler(): %v", _err) }()
+	if len(cfg.ResolutionsAndBitRates) == 0 {
+		return nil, fmt.Errorf("at least one resolution must be specified for automatic bitrate control")
 	}
-	r := &AutoBitRateHandler[C]{
-		AutoBitRateConfig: cfg,
-		StreamMux:         s,
-		closureSignaler:   closuresignaler.New(),
+	h := &AutoBitRateHandler[C]{
+		AutoBitRateVideoConfig: cfg,
+		StreamMux:              s,
+		closureSignaler:        closuresignaler.New(),
 	}
-	s.AutoBitRateHandler = r
-	return r
+	return h, nil
+}
+
+func (s *StreamMux[C]) removeAutoBitRateHandler(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "removeAutoBitRateHandler()")
+	defer func() { logger.Debugf(ctx, "/removeAutoBitRateHandler(): %v", _err) }()
+	return nil
 }
 
 type resolutionChangeRequest struct {
@@ -148,7 +158,7 @@ type resolutionChangeRequest struct {
 }
 
 type AutoBitRateHandler[C any] struct {
-	AutoBitRateConfig
+	AutoBitRateVideoConfig
 	StreamMux                      *StreamMux[C]
 	closureSignaler                *closuresignaler.ClosureSignaler
 	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
@@ -157,6 +167,15 @@ type AutoBitRateHandler[C any] struct {
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
 	lastBitRateDecreaseTS          time.Time
+}
+
+func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
+	observability.Go(ctx, func(ctx context.Context) {
+		defer logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): done")
+		err := h.ServeContext(ctx)
+		logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
+	})
+	return nil
 }
 
 func (h *AutoBitRateHandler[C]) String() string {
@@ -235,7 +254,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			queueCheckTimeout := max(h.AutoBitRateConfig.CheckInterval/4-50*time.Millisecond, 50*time.Millisecond)
+			queueCheckTimeout := max(h.AutoBitRateVideoConfig.CheckInterval/4-50*time.Millisecond, 50*time.Millisecond)
 			nodeReqCtx, cancelFn := context.WithTimeout(ctx, queueCheckTimeout)
 			defer cancelFn()
 			queueSize := proc.GetInternalQueueSize(nodeReqCtx)
@@ -308,7 +327,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
 			QueueSize:             types.UB(totalQueue.Load()),
 			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
-			Config:                &h.AutoBitRateConfig,
+			Config:                &h.AutoBitRateVideoConfig,
 		},
 	)
 	if bitRateRequest.BitRate == 0 {
@@ -404,7 +423,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 
 	videoInputBitRate := types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
-	if h.StreamMux.AutoBitRateHandler.AutoByPass {
+	if h.StreamMux.VideoAutoBitRateHandler.AutoByPass {
 		byPassEnabled := h.isBypassEnabled(ctx)
 		logger.Tracef(ctx, "AutoByPass is enabled: oldBitRate:%v reqBitRate:%v inputBitRate:%v; byPass:%t", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate), byPassEnabled)
 		if byPassEnabled {
@@ -442,7 +461,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 	logger.Debugf(ctx, "clamped bitrate: %v (min:%v, max:%v, input:%v)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
 
-	fpsFractionNum, fpsFractionDen := h.AutoBitRateConfig.FPSReducer.GetFraction(req.BitRate)
+	fpsFractionNum, fpsFractionDen := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(req.BitRate)
 	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
 
 	allowTrafficLoss := false
@@ -465,7 +484,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		return fmt.Errorf("unable to get current resolution")
 	}
 
-	resCfg := h.AutoBitRateConfig.ResolutionsAndBitRates.Find(*res)
+	resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Find(*res)
 	if resCfg == nil {
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
@@ -505,7 +524,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return fmt.Errorf("unable to get current resolution")
 	}
 
-	resCfg := h.AutoBitRateConfig.ResolutionsAndBitRates.Find(*res)
+	resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Find(*res)
 	if resCfg == nil {
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
@@ -515,9 +534,9 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	var newRes AutoBitRateResolutionAndBitRateConfig
 	switch {
 	case bitrate < resCfg.BitrateLow:
-		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
+		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
 		if _newRes == nil {
-			_newRes = h.AutoBitRateConfig.ResolutionsAndBitRates.Worst()
+			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Worst()
 		}
 		if _newRes.Resolution == *res {
 			logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %v), minBitRate: %d", *res, resCfg, resCfg.BitrateLow)
@@ -525,9 +544,9 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		}
 		newRes = *_newRes
 	case bitrate > resCfg.BitrateHigh:
-		_newRes := h.AutoBitRateConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
+		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
 		if _newRes == nil {
-			_newRes = h.AutoBitRateConfig.ResolutionsAndBitRates.Best()
+			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best()
 		}
 		if _newRes.Resolution == *res {
 			logger.Debugf(ctx, "already at the highest resolution %v (resCfg: %v), maxBitRate: %d", *res, resCfg, resCfg.BitrateHigh)

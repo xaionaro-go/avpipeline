@@ -418,6 +418,10 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 	logger.Tracef(ctx, "initFPSFractioner()")
 	defer func() { logger.Tracef(ctx, "/initFPSFractioner()") }()
 
+	if o.FPSFractionGetter == nil {
+		return
+	}
+
 	o.RecoderNode.Processor.Kernel.Filter = framecondition.Or{
 		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
 		framecondition.ReduceFramerateFraction(mathcondition.GetterFunction[globaltypes.Rational](
