@@ -143,10 +143,10 @@ func (s *StreamMux[C]) GetAutoBitRateHandler() *AutoBitRateHandler[C] {
 }
 
 func (s *StreamMux[C]) swapAutoBitRateHandler(
-	h *AutoBitRateHandler[C],
+	new *AutoBitRateHandler[C],
 	old *AutoBitRateHandler[C],
 ) bool {
-	return xatomic.CompareAndSwapPointer(&s.AutoBitRateHandler, h, old)
+	return xatomic.CompareAndSwapPointer(&s.AutoBitRateHandler, old, new)
 }
 
 func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
