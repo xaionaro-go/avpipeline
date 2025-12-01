@@ -120,7 +120,7 @@ func DefaultAutoBitRateVideoConfig(
 		MaxBitRate:             resBest.BitrateHigh * 2, // limiting since there is no need to consume more channel if we already provide enough bitrate
 
 		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
-		ResolutionSlowdownDurationUpgrade:   time.Second * 5,
+		ResolutionSlowdownDurationUpgrade:   time.Second * 15,
 		ResolutionSlowdownDurationDowngrade: time.Second * 2,
 	}
 	return result
