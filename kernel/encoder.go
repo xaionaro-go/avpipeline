@@ -224,6 +224,9 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	timeBase astiav.Rational,
 	frameSource frame.Source,
 ) (_err error) {
+	if params == nil {
+		return fmt.Errorf("codec parameters must be set")
+	}
 	res := codec.Resolution{
 		Width:  uint32(params.Width()),
 		Height: uint32(params.Height()),

@@ -1057,12 +1057,14 @@ func (o *Output) getBinarySize(
 		// FLV tag header + PreviousTagSize
 		size += 11 + 4
 	}
-	switch o.URLParsed.Scheme {
-	case "rtmp", "rtmps":
-		// 1 byte:  FrameType + CodecID (VideoTagHeader)
-		// 1 byte:  AVCPacketType
-		// 3 bytes: CompositionTime
-		size += 5
+	if o.URLParsed != nil {
+		switch o.URLParsed.Scheme {
+		case "rtmp", "rtmps":
+			// 1 byte:  FrameType + CodecID (VideoTagHeader)
+			// 1 byte:  AVCPacketType
+			// 3 bytes: CompositionTime
+			size += 5
+		}
 	}
 	return size
 }

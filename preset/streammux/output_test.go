@@ -59,6 +59,9 @@ func TestOutputNodes(t *testing.T) {
 	var expectedValues []node.Abstract
 	for i := range v.NumField() {
 		fT := v.Type().Field(i)
+		if fT.Name == "InputFrom" {
+			continue
+		}
 		fTT := fT.Type
 		if !fTT.Implements(reflect.TypeOf((*node.Abstract)(nil)).Elem()) {
 			continue
