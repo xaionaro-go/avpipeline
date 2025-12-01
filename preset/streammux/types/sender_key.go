@@ -48,10 +48,6 @@ func (k SenderKey) Compare(b SenderKey) int {
 		if b.VideoCodec == codectypes.NameCopy {
 			return -1
 		}
-		if k.VideoCodec > b.VideoCodec { // TODO: determine better codec by some other way?
-			return 1
-		}
-		return -1
 	}
 	resK := k.VideoResolution.Width * k.VideoResolution.Height
 	resB := b.VideoResolution.Width * b.VideoResolution.Height
@@ -68,7 +64,9 @@ func (k SenderKey) Compare(b SenderKey) int {
 		if b.AudioCodec == codectypes.NameCopy {
 			return -1
 		}
-		if k.AudioCodec > b.AudioCodec { // TODO: determine better codec by some other way?
+	}
+	if k.AudioSampleRate != b.AudioSampleRate {
+		if k.AudioSampleRate > b.AudioSampleRate {
 			return 1
 		}
 		return -1

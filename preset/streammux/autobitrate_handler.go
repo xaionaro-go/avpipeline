@@ -119,6 +119,7 @@ func DefaultAutoBitRateVideoConfig(
 		CheckInterval:          time.Second / 4,
 		MinBitRate:             resWorst.BitrateLow,     // limiting just to avoid nonsensical values that makes automation and calculations weird
 		MaxBitRate:             resBest.BitrateHigh * 2, // limiting since there is no need to consume more channel if we already provide enough bitrate
+		MinFPSFraction:         0.2,
 
 		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
 		ResolutionSlowdownDurationUpgrade:   time.Second * 15,
@@ -141,7 +142,7 @@ func (s *StreamMux[C]) newAutoBitRateHandler(
 		StreamMux:              s,
 		closureSignaler:        closuresignaler.New(),
 	}
-	h.resetTemporaryFPSReduction(ctx)
+	h.resetTemporaryFPSReduction(ctx, cfg.ResolutionsAndBitRates.Best().BitrateHigh)
 	return h, nil
 }
 
@@ -343,11 +344,6 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}
 	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
 
-	if bitRateRequest.BitRate == curReqBitRate {
-		logger.Tracef(ctx, "bitrate remains unchanged: %v", curReqBitRate)
-		return
-	}
-
 	if err := h.trySetVideoBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
 		return
@@ -454,6 +450,8 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		return nil
 	}
 
+	h.updateFPSFraction(ctx, req.BitRate)
+
 	maxVideoBitRate := h.MaxBitRate
 	if videoInputBitRate > h.MinBitRate*2 && float64(videoInputBitRate)*1.5 < float64(maxVideoBitRate) {
 		maxVideoBitRate = types.Ubps(1.5 * float64(videoInputBitRate))
@@ -468,13 +466,6 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 	logger.Debugf(ctx, "clamped bitrate: %v (min:%v, max:%v, input:%v)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
 
-	fpsFraction := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(req.BitRate).Mul(h.temporaryFPSReductionMultiplier)
-	if fpsFraction.Float64() < h.AutoBitRateVideoConfig.MinFPSFraction {
-		fpsFraction = globaltypes.RationalFromApproxFloat64(h.AutoBitRateVideoConfig.MinFPSFraction)
-		logger.Debugf(ctx, "clamped fpsFraction %v to minFPSFraction %v", fpsFraction, h.AutoBitRateVideoConfig.MinFPSFraction)
-	}
-	h.StreamMux.SetFPSFraction(ctx, fpsFraction)
-
 	allowTrafficLoss := false
 	if req.BitRate < oldBitRate && req.IsCritical {
 		allowTrafficLoss = true
@@ -483,16 +474,18 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical, allowTrafficLoss)
 	switch {
 	case err == nil:
+		h.resetTemporaryFPSReduction(ctx, req.BitRate)
 	case errors.Is(err, ErrNotThisTime{}):
 		if req.BitRate < oldBitRate {
 			if err := h.temporaryReduceFPS(ctx, req.BitRate); err != nil {
 				logger.Errorf(ctx, "unable to temporary reduce FPS before resolution change: %v", err)
 			}
+		} else {
+			h.resetTemporaryFPSReduction(ctx, req.BitRate)
 		}
 	default:
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
-	h.resetTemporaryFPSReduction(ctx)
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
@@ -523,13 +516,25 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	return nil
 }
 
+func (h *AutoBitRateHandler[C]) updateFPSFraction(
+	ctx context.Context,
+	bitRate types.Ubps,
+) {
+	fpsFraction := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(bitRate).Mul(h.temporaryFPSReductionMultiplier)
+	if fpsFraction.Float64() < h.AutoBitRateVideoConfig.MinFPSFraction {
+		fpsFraction = globaltypes.RationalFromApproxFloat64(h.AutoBitRateVideoConfig.MinFPSFraction)
+		logger.Debugf(ctx, "clamped fpsFraction %v to minFPSFraction %v", fpsFraction, h.AutoBitRateVideoConfig.MinFPSFraction)
+	}
+	h.StreamMux.SetFPSFraction(ctx, fpsFraction)
+}
+
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	ctx context.Context,
 	bitrate types.Ubps,
 	force bool,
 	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t)", bitrate, force)
+	logger.Tracef(ctx, "changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t)", bitrate, force, allowTrafficLoss)
 	defer func() {
 		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t): %v", bitrate, force, allowTrafficLoss, _err)
 	}()
@@ -660,12 +665,13 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 			videoOutputKey.VideoResolution = curRes
 		}
 	}
-	logger.Tracef(ctx, "target output key: %v", videoOutputKey)
 
 	videoOutputCur := h.StreamMux.GetActiveVideoOutput(ctx)
+	videoOutputCurKey := videoOutputCur.GetKey()
+	logger.Tracef(ctx, "target output key: %v (cur: %v)", videoOutputKey, videoOutputCurKey)
 
 	isUpgrade := false
-	switch videoOutputKey.Compare(videoOutputCur.GetKey()) {
+	switch videoOutputKey.Compare(videoOutputCurKey) {
 	case 0:
 		return fmt.Errorf("output is already set to %v", videoOutputKey)
 	case 1:
@@ -673,7 +679,7 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	case -1:
 		isUpgrade = false
 	default:
-		return fmt.Errorf("unable to compare output keys: %v and %v", videoOutputKey, videoOutputCur.GetKey())
+		return fmt.Errorf("unable to compare output keys: %v and %v", videoOutputKey, videoOutputCurKey)
 	}
 
 	if force {
@@ -763,13 +769,20 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(h.temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate))
 	logger.Debugf(ctx, "temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v->%v", types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, fpsReductionMultiplier)
 	h.temporaryFPSReductionMultiplier = fpsReductionMultiplier
+	h.updateFPSFraction(ctx, bitrate)
 	return nil
 }
 
 func (h *AutoBitRateHandler[C]) resetTemporaryFPSReduction(
 	ctx context.Context,
+	bitrate types.Ubps,
 ) {
 	logger.Tracef(ctx, "resetTemporaryFPSReduction")
 	defer func() { logger.Tracef(ctx, "/resetTemporaryFPSReduction") }()
+	if h.temporaryFPSReductionMultiplier.Num == 1 && h.temporaryFPSReductionMultiplier.Den == 1 {
+		return
+	}
+	logger.Debugf(ctx, "resetting temporary FPS reduction multiplier: %v->1", h.temporaryFPSReductionMultiplier)
 	h.temporaryFPSReductionMultiplier = globaltypes.Rational{Num: 1, Den: 1}
+	h.updateFPSFraction(ctx, bitrate)
 }
