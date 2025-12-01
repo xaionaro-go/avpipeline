@@ -64,7 +64,7 @@ type StreamMux[C any] struct {
 	SenderFactory SenderFactory[C]
 
 	// aux
-	VideoAutoBitRateHandler *AutoBitRateHandler[C]
+	AutoBitRateHandler      *AutoBitRateHandler[C]
 	FPSFractionNumDen       atomic.Uint64
 	VideoOutputBeforeBypass *Output[C]
 
@@ -139,14 +139,14 @@ func NewWithCustomData[C any](
 }
 
 func (s *StreamMux[C]) GetAutoBitRateHandler() *AutoBitRateHandler[C] {
-	return xatomic.LoadPointer(&s.VideoAutoBitRateHandler)
+	return xatomic.LoadPointer(&s.AutoBitRateHandler)
 }
 
 func (s *StreamMux[C]) swapAutoBitRateHandler(
 	h *AutoBitRateHandler[C],
 	old *AutoBitRateHandler[C],
 ) bool {
-	return xatomic.CompareAndSwapPointer(&s.VideoAutoBitRateHandler, h, old)
+	return xatomic.CompareAndSwapPointer(&s.AutoBitRateHandler, h, old)
 }
 
 func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
@@ -376,8 +376,8 @@ func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 			return true
 		})
 	})
-	if s.VideoAutoBitRateHandler != nil {
-		if err := s.VideoAutoBitRateHandler.Close(ctx); err != nil {
+	if s.AutoBitRateHandler != nil {
+		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler: %w", err))
 		}
 	}

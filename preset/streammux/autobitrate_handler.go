@@ -423,7 +423,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 
 	videoInputBitRate := types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
-	if h.StreamMux.VideoAutoBitRateHandler.AutoByPass {
+	if h.StreamMux.AutoBitRateHandler.AutoByPass {
 		byPassEnabled := h.isBypassEnabled(ctx)
 		logger.Tracef(ctx, "AutoByPass is enabled: oldBitRate:%v reqBitRate:%v inputBitRate:%v; byPass:%t", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate), byPassEnabled)
 		if byPassEnabled {
