@@ -18,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/quality"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -140,6 +141,7 @@ func (s *StreamMux[C]) newAutoBitRateHandler(
 		StreamMux:              s,
 		closureSignaler:        closuresignaler.New(),
 	}
+	h.resetTemporaryFPSReduction(ctx)
 	return h, nil
 }
 
@@ -159,15 +161,16 @@ type resolutionChangeRequest struct {
 
 type AutoBitRateHandler[C any] struct {
 	AutoBitRateVideoConfig
-	StreamMux                      *StreamMux[C]
-	wg                             sync.WaitGroup
-	closureSignaler                *closuresignaler.ClosureSignaler
-	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
-	lastVideoBitRate               uint64
-	lastTotalQueueSize             uint64
-	lastCheckTS                    time.Time
-	currentResolutionChangeRequest *resolutionChangeRequest
-	lastBitRateDecreaseTS          time.Time
+	StreamMux                       *StreamMux[C]
+	wg                              sync.WaitGroup
+	closureSignaler                 *closuresignaler.ClosureSignaler
+	previousQueueSize               xsync.Map[kernel.GetInternalQueueSizer, uint64]
+	lastVideoBitRate                uint64
+	lastTotalQueueSize              uint64
+	lastCheckTS                     time.Time
+	currentResolutionChangeRequest  *resolutionChangeRequest
+	lastBitRateDecreaseTS           time.Time
+	temporaryFPSReductionMultiplier globaltypes.Rational
 }
 
 func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
@@ -465,17 +468,31 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 	logger.Debugf(ctx, "clamped bitrate: %v (min:%v, max:%v, input:%v)", clampedVideoBitRate, h.MinBitRate, maxVideoBitRate, videoInputBitRate)
 
-	fpsFractionNum, fpsFractionDen := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(req.BitRate)
-	h.StreamMux.SetFPSFraction(ctx, fpsFractionNum, fpsFractionDen)
+	fpsFraction := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(req.BitRate).Mul(h.temporaryFPSReductionMultiplier)
+	if fpsFraction.Float64() < h.AutoBitRateVideoConfig.MinFPSFraction {
+		fpsFraction = globaltypes.RationalFromApproxFloat64(h.AutoBitRateVideoConfig.MinFPSFraction)
+		logger.Debugf(ctx, "clamped fpsFraction %v to minFPSFraction %v", fpsFraction, h.AutoBitRateVideoConfig.MinFPSFraction)
+	}
+	h.StreamMux.SetFPSFraction(ctx, fpsFraction)
 
 	allowTrafficLoss := false
 	if req.BitRate < oldBitRate && req.IsCritical {
 		allowTrafficLoss = true
 	}
 
-	if err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical, allowTrafficLoss); err != nil {
+	err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical, allowTrafficLoss)
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrNotThisTime{}):
+		if req.BitRate < oldBitRate {
+			if err := h.temporaryReduceFPS(ctx, req.BitRate); err != nil {
+				logger.Errorf(ctx, "unable to temporary reduce FPS before resolution change: %v", err)
+			}
+		}
+	default:
 		return fmt.Errorf("unable to change resolution: %w", err)
 	}
+	h.resetTemporaryFPSReduction(ctx)
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
@@ -672,7 +689,7 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 				LatestAt:  now,
 			}
 			logger.Debugf(ctx, "started resolution change request: %v (prev: %v, isUpgrade: %v)", h.currentResolutionChangeRequest, prevRequest, isUpgrade)
-			return nil
+			return ErrNotThisTime{}
 		}
 		prevRequest.LatestAt = now
 
@@ -680,10 +697,10 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		switch {
 		case isUpgrade && reqDur < h.ResolutionSlowdownDurationUpgrade:
 			logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationUpgrade)
-			return nil
+			return ErrNotThisTime{}
 		case !isUpgrade && reqDur < h.ResolutionSlowdownDurationDowngrade:
-			logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationDowngrade)
-			return nil
+			logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v; meanwhile just trying to temporary reduce the FPS", reqDur, h.ResolutionSlowdownDurationDowngrade)
+			return ErrNotThisTime{}
 		}
 		h.currentResolutionChangeRequest = nil
 	}
@@ -727,4 +744,32 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	default:
 		return fmt.Errorf("unable to set resolution to %v: %w", videoOutputKey.VideoResolution, err)
 	}
+}
+
+type ErrNotThisTime struct{}
+
+func (e ErrNotThisTime) Error() string {
+	return "not this time"
+}
+
+func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
+	ctx context.Context,
+	bitrate types.Ubps,
+) (_err error) {
+	logger.Tracef(ctx, "temporaryReduceFPS: %v: ", bitrate)
+	defer func() { logger.Tracef(ctx, "/temporaryReduceFPS: %v: %v", bitrate, _err) }()
+
+	curBitRate := h.StreamMux.CurrentVideoEncodedBitRate.Load()
+	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(h.temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate))
+	logger.Debugf(ctx, "temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v->%v", types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, fpsReductionMultiplier)
+	h.temporaryFPSReductionMultiplier = fpsReductionMultiplier
+	return nil
+}
+
+func (h *AutoBitRateHandler[C]) resetTemporaryFPSReduction(
+	ctx context.Context,
+) {
+	logger.Tracef(ctx, "resetTemporaryFPSReduction")
+	defer func() { logger.Tracef(ctx, "/resetTemporaryFPSReduction") }()
+	h.temporaryFPSReductionMultiplier = globaltypes.Rational{Num: 1, Den: 1}
 }

@@ -3,6 +3,7 @@ package avpipeline
 import (
 	smtypes "github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 func FPSReductionRangeFromProto(r *avpipelinegrpc.FPSReductionRange) *smtypes.FPSReductionRange {
@@ -10,10 +11,12 @@ func FPSReductionRangeFromProto(r *avpipelinegrpc.FPSReductionRange) *smtypes.FP
 		return nil
 	}
 	return &smtypes.FPSReductionRange{
-		BitrateMin:  smtypes.Ubps(r.GetBitrateMinBps()),
-		BitrateMax:  smtypes.Ubps(r.GetBitrateMaxBps()),
-		FractionNum: r.GetFractionNum(),
-		FractionDen: r.GetFractionDen(),
+		BitrateMin: smtypes.Ubps(r.GetBitrateMinBps()),
+		BitrateMax: smtypes.Ubps(r.GetBitrateMaxBps()),
+		Fraction: globaltypes.Rational{
+			Num: int(r.GetFractionNum()),
+			Den: int(r.GetFractionDen()),
+		},
 	}
 }
 
@@ -24,8 +27,8 @@ func FPSReductionRangeToProto(r *smtypes.FPSReductionRange) *avpipelinegrpc.FPSR
 	return &avpipelinegrpc.FPSReductionRange{
 		BitrateMinBps: uint64(r.BitrateMin),
 		BitrateMaxBps: uint64(r.BitrateMax),
-		FractionNum:   r.FractionNum,
-		FractionDen:   r.FractionDen,
+		FractionNum:   uint32(r.Fraction.Num),
+		FractionDen:   uint32(r.Fraction.Den),
 	}
 }
 

@@ -16,6 +16,13 @@ type Rational struct {
 	Den int
 }
 
+func (r Rational) Mul(other Rational) Rational {
+	return Rational{
+		Num: r.Num * other.Num,
+		Den: r.Den * other.Den,
+	}
+}
+
 func newNTSCRationalFromFloat64(f float64) *big.Rat {
 	den := 1001 // common denominator for NTSC frame rates
 	num := math.Ceil(f) * 1000

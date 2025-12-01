@@ -6,6 +6,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 const (
@@ -142,6 +143,7 @@ type AutoBitRateVideoConfig struct {
 	AutoByPass             bool
 	MaxBitRate             Ubps
 	MinBitRate             Ubps
+	MinFPSFraction         float64
 
 	BitRateIncreaseSlowdown             time.Duration
 	ResolutionSlowdownDurationUpgrade   time.Duration
@@ -151,28 +153,29 @@ type AutoBitRateVideoConfig struct {
 type FPSReducerConfig []FPSReductionRange
 
 type FPSReductionRange struct {
-	BitrateMin  Ubps
-	BitrateMax  Ubps
-	FractionNum uint32
-	FractionDen uint32
+	BitrateMin Ubps
+	BitrateMax Ubps
+	Fraction   globaltypes.Rational
 }
 
 func DefaultFPSReducerConfig() FPSReducerConfig {
 	return FPSReducerConfig{
 		{
-			BitrateMax:  500_000,
-			BitrateMin:  0,
-			FractionNum: 1,
-			FractionDen: 2,
+			BitrateMax: 500_000,
+			BitrateMin: 0,
+			Fraction: globaltypes.Rational{
+				Num: 1,
+				Den: 2,
+			},
 		},
 	}
 }
 
-func (r FPSReducerConfig) GetFraction(bitrate Ubps) (num, den uint32) {
+func (r FPSReducerConfig) GetFraction(bitrate Ubps) globaltypes.Rational {
 	for i := range r {
 		if r[i].BitrateMin <= bitrate && bitrate <= r[i].BitrateMax {
-			return r[i].FractionNum, r[i].FractionDen
+			return r[i].Fraction
 		}
 	}
-	return 1, 1
+	return globaltypes.Rational{Num: 1, Den: 1}
 }

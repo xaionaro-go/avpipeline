@@ -1097,9 +1097,16 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	return nil
 }
 
-func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, num, den uint32) {
-	logger.Debugf(ctx, "SetFPSFraction: %d/%d", num, den)
-	s.FPSFractionNumDen.Store((uint64(num) << 32) | uint64(den))
+func (s *StreamMux[C]) SetFPSFraction(ctx context.Context, f globaltypes.Rational) {
+	logger.Debugf(ctx, "SetFPSFraction: %s", f)
+	if f.Num > math.MaxUint32 || f.Den > math.MaxUint32 {
+		logger.Errorf(ctx, "FPS fraction %s is too large, scaling down", f)
+		for f.Num > math.MaxUint32 || f.Den > math.MaxUint32 {
+			f.Num /= 2
+			f.Den /= 2
+		}
+	}
+	s.FPSFractionNumDen.Store((uint64(f.Num) << 32) | uint64(f.Den))
 }
 
 func (s *StreamMux[C]) GetFPSFraction(ctx context.Context) globaltypes.Rational {
