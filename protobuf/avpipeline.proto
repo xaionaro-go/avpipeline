@@ -131,7 +131,7 @@ message AutoBitRateResolutionAndBitRateConfigs {
   repeated AutoBitRateResolutionAndBitRateConfig configs = 1;
 }
 
-message AutoBitrateVideoConfig {
+message AutoBitRateVideoConfig {
   AutoBitRateResolutionAndBitRateConfigs resolutionsAndBitRates = 1;
   AutoBitrateCalculator calculator = 2;
   FPSReducerConfig fpsReducer = 3;

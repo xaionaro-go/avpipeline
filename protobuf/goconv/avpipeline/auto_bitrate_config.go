@@ -69,7 +69,7 @@ func AutoBitRateResolutionAndBitRateConfigsToProto(
 }
 
 func AutoBitRateVideoConfigFromProto(
-	cfg *avpipelinegrpc.AutoBitrateVideoConfig,
+	cfg *avpipelinegrpc.AutoBitRateVideoConfig,
 ) (*smtypes.AutoBitRateVideoConfig, error) {
 	if cfg == nil {
 		return nil, nil
@@ -96,7 +96,7 @@ func AutoBitRateVideoConfigFromProto(
 
 func AutoBitRateVideoConfigToProto(
 	cfg *smtypes.AutoBitRateVideoConfig,
-) (*avpipelinegrpc.AutoBitrateVideoConfig, error) {
+) (*avpipelinegrpc.AutoBitRateVideoConfig, error) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -106,7 +106,7 @@ func AutoBitRateVideoConfigToProto(
 		return nil, fmt.Errorf("failed to convert AutoBitRateCalculator: %w", err)
 	}
 
-	return &avpipelinegrpc.AutoBitrateVideoConfig{
+	return &avpipelinegrpc.AutoBitRateVideoConfig{
 		ResolutionsAndBitRates:                AutoBitRateResolutionAndBitRateConfigsToProto(cfg.ResolutionsAndBitRates),
 		Calculator:                            calc,
 		FpsReducer:                            FPSReducerConfigToProto(cfg.FPSReducer),

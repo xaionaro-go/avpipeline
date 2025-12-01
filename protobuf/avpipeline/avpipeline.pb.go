@@ -1250,7 +1250,7 @@ func (x *AutoBitRateResolutionAndBitRateConfigs) GetConfigs() []*AutoBitRateReso
 	return nil
 }
 
-type AutoBitrateVideoConfig struct {
+type AutoBitRateVideoConfig struct {
 	state                                 protoimpl.MessageState                  `protogen:"open.v1"`
 	ResolutionsAndBitRates                *AutoBitRateResolutionAndBitRateConfigs `protobuf:"bytes,1,opt,name=resolutionsAndBitRates,proto3" json:"resolutionsAndBitRates,omitempty"`
 	Calculator                            *AutoBitrateCalculator                  `protobuf:"bytes,2,opt,name=calculator,proto3" json:"calculator,omitempty"`
@@ -1266,20 +1266,20 @@ type AutoBitrateVideoConfig struct {
 	sizeCache                             protoimpl.SizeCache
 }
 
-func (x *AutoBitrateVideoConfig) Reset() {
-	*x = AutoBitrateVideoConfig{}
+func (x *AutoBitRateVideoConfig) Reset() {
+	*x = AutoBitRateVideoConfig{}
 	mi := &file_avpipeline_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AutoBitrateVideoConfig) String() string {
+func (x *AutoBitRateVideoConfig) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AutoBitrateVideoConfig) ProtoMessage() {}
+func (*AutoBitRateVideoConfig) ProtoMessage() {}
 
-func (x *AutoBitrateVideoConfig) ProtoReflect() protoreflect.Message {
+func (x *AutoBitRateVideoConfig) ProtoReflect() protoreflect.Message {
 	mi := &file_avpipeline_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1291,75 +1291,75 @@ func (x *AutoBitrateVideoConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AutoBitrateVideoConfig.ProtoReflect.Descriptor instead.
-func (*AutoBitrateVideoConfig) Descriptor() ([]byte, []int) {
+// Deprecated: Use AutoBitRateVideoConfig.ProtoReflect.Descriptor instead.
+func (*AutoBitRateVideoConfig) Descriptor() ([]byte, []int) {
 	return file_avpipeline_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *AutoBitrateVideoConfig) GetResolutionsAndBitRates() *AutoBitRateResolutionAndBitRateConfigs {
+func (x *AutoBitRateVideoConfig) GetResolutionsAndBitRates() *AutoBitRateResolutionAndBitRateConfigs {
 	if x != nil {
 		return x.ResolutionsAndBitRates
 	}
 	return nil
 }
 
-func (x *AutoBitrateVideoConfig) GetCalculator() *AutoBitrateCalculator {
+func (x *AutoBitRateVideoConfig) GetCalculator() *AutoBitrateCalculator {
 	if x != nil {
 		return x.Calculator
 	}
 	return nil
 }
 
-func (x *AutoBitrateVideoConfig) GetFpsReducer() *FPSReducerConfig {
+func (x *AutoBitRateVideoConfig) GetFpsReducer() *FPSReducerConfig {
 	if x != nil {
 		return x.FpsReducer
 	}
 	return nil
 }
 
-func (x *AutoBitrateVideoConfig) GetCheckIntervalMS() uint64 {
+func (x *AutoBitRateVideoConfig) GetCheckIntervalMS() uint64 {
 	if x != nil {
 		return x.CheckIntervalMS
 	}
 	return 0
 }
 
-func (x *AutoBitrateVideoConfig) GetAutoByPass() bool {
+func (x *AutoBitRateVideoConfig) GetAutoByPass() bool {
 	if x != nil {
 		return x.AutoByPass
 	}
 	return false
 }
 
-func (x *AutoBitrateVideoConfig) GetMaxBitRateBps() uint64 {
+func (x *AutoBitRateVideoConfig) GetMaxBitRateBps() uint64 {
 	if x != nil {
 		return x.MaxBitRateBps
 	}
 	return 0
 }
 
-func (x *AutoBitrateVideoConfig) GetMinBitRateBps() uint64 {
+func (x *AutoBitRateVideoConfig) GetMinBitRateBps() uint64 {
 	if x != nil {
 		return x.MinBitRateBps
 	}
 	return 0
 }
 
-func (x *AutoBitrateVideoConfig) GetBitRateIncreaseSlowdownMS() uint64 {
+func (x *AutoBitRateVideoConfig) GetBitRateIncreaseSlowdownMS() uint64 {
 	if x != nil {
 		return x.BitRateIncreaseSlowdownMS
 	}
 	return 0
 }
 
-func (x *AutoBitrateVideoConfig) GetResolutionSlowdownDurationUpgradeMS() uint64 {
+func (x *AutoBitRateVideoConfig) GetResolutionSlowdownDurationUpgradeMS() uint64 {
 	if x != nil {
 		return x.ResolutionSlowdownDurationUpgradeMS
 	}
 	return 0
 }
 
-func (x *AutoBitrateVideoConfig) GetResolutionSlowdownDurationDowngradeMS() uint64 {
+func (x *AutoBitRateVideoConfig) GetResolutionSlowdownDurationDowngradeMS() uint64 {
 	if x != nil {
 		return x.ResolutionSlowdownDurationDowngradeMS
 	}
@@ -1874,7 +1874,7 @@ var file_avpipeline_proto_rawDesc = string([]byte{
 	0x6f, 0x42, 0x69, 0x74, 0x52, 0x61, 0x74, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x6c, 0x75, 0x74, 0x69,
 	0x6f, 0x6e, 0x41, 0x6e, 0x64, 0x42, 0x69, 0x74, 0x52, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6e, 0x66,
 	0x69, 0x67, 0x52, 0x07, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x73, 0x22, 0x81, 0x05, 0x0a, 0x16,
-	0x41, 0x75, 0x74, 0x6f, 0x42, 0x69, 0x74, 0x72, 0x61, 0x74, 0x65, 0x56, 0x69, 0x64, 0x65, 0x6f,
+	0x41, 0x75, 0x74, 0x6f, 0x42, 0x69, 0x74, 0x52, 0x61, 0x74, 0x65, 0x56, 0x69, 0x64, 0x65, 0x6f,
 	0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x6a, 0x0a, 0x16, 0x72, 0x65, 0x73, 0x6f, 0x6c, 0x75,
 	0x74, 0x69, 0x6f, 0x6e, 0x73, 0x41, 0x6e, 0x64, 0x42, 0x69, 0x74, 0x52, 0x61, 0x74, 0x65, 0x73,
 	0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x32, 0x2e, 0x61, 0x76, 0x70, 0x69, 0x70, 0x65, 0x6c,
@@ -2022,7 +2022,7 @@ var file_avpipeline_proto_goTypes = []any{
 	(*FPSReducerConfig)(nil),                       // 15: avpipeline.FPSReducerConfig
 	(*AutoBitRateResolutionAndBitRateConfig)(nil),  // 16: avpipeline.AutoBitRateResolutionAndBitRateConfig
 	(*AutoBitRateResolutionAndBitRateConfigs)(nil), // 17: avpipeline.AutoBitRateResolutionAndBitRateConfigs
-	(*AutoBitrateVideoConfig)(nil),                 // 18: avpipeline.AutoBitrateVideoConfig
+	(*AutoBitRateVideoConfig)(nil),                 // 18: avpipeline.AutoBitRateVideoConfig
 	(*AutoBitrateCalculatorLogK)(nil),              // 19: avpipeline.AutoBitrateCalculatorLogK
 	(*AutoBitrateCalculatorQueueSizeGapDecay)(nil), // 20: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay
 	(*MonitorRequest)(nil),                         // 21: avpipeline.MonitorRequest
@@ -2060,9 +2060,9 @@ var file_avpipeline_proto_depIdxs = []int32{
 	14, // 23: avpipeline.FPSReducerConfig.ranges:type_name -> avpipeline.FPSReductionRange
 	13, // 24: avpipeline.AutoBitRateResolutionAndBitRateConfig.resolution:type_name -> avpipeline.Resolution
 	16, // 25: avpipeline.AutoBitRateResolutionAndBitRateConfigs.configs:type_name -> avpipeline.AutoBitRateResolutionAndBitRateConfig
-	17, // 26: avpipeline.AutoBitrateVideoConfig.resolutionsAndBitRates:type_name -> avpipeline.AutoBitRateResolutionAndBitRateConfigs
-	8,  // 27: avpipeline.AutoBitrateVideoConfig.calculator:type_name -> avpipeline.AutoBitrateCalculator
-	15, // 28: avpipeline.AutoBitrateVideoConfig.fpsReducer:type_name -> avpipeline.FPSReducerConfig
+	17, // 26: avpipeline.AutoBitRateVideoConfig.resolutionsAndBitRates:type_name -> avpipeline.AutoBitRateResolutionAndBitRateConfigs
+	8,  // 27: avpipeline.AutoBitRateVideoConfig.calculator:type_name -> avpipeline.AutoBitrateCalculator
+	15, // 28: avpipeline.AutoBitRateVideoConfig.fpsReducer:type_name -> avpipeline.FPSReducerConfig
 	12, // 29: avpipeline.AutoBitrateCalculatorLogK.movingAverage:type_name -> avpipeline.MovingAverageConfig
 	12, // 30: avpipeline.AutoBitrateCalculatorQueueSizeGapDecay.derivativeSmoothed:type_name -> avpipeline.MovingAverageConfig
 	0,  // 31: avpipeline.MonitorRequest.event_type:type_name -> avpipeline.MonitorEventType
