@@ -160,6 +160,7 @@ type resolutionChangeRequest struct {
 type AutoBitRateHandler[C any] struct {
 	AutoBitRateVideoConfig
 	StreamMux                      *StreamMux[C]
+	wg                             sync.WaitGroup
 	closureSignaler                *closuresignaler.ClosureSignaler
 	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
 	lastVideoBitRate               uint64
@@ -170,7 +171,9 @@ type AutoBitRateHandler[C any] struct {
 }
 
 func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
+	h.wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
+		defer h.wg.Done()
 		defer logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): done")
 		err := h.ServeContext(ctx)
 		logger.Debugf(ctx, "autoBitRateHandler.ServeContext(): %v", err)
@@ -186,6 +189,7 @@ func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Close()")
 	defer func() { logger.Debugf(ctx, "/Close(): %v", _err) }()
 	h.closureSignaler.Close(ctx)
+	h.wg.Wait()
 	return nil
 }
 
