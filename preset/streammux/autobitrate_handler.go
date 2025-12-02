@@ -162,16 +162,18 @@ type resolutionChangeRequest struct {
 
 type AutoBitRateHandler[C any] struct {
 	AutoBitRateVideoConfig
-	StreamMux                       *StreamMux[C]
-	wg                              sync.WaitGroup
-	closureSignaler                 *closuresignaler.ClosureSignaler
-	previousQueueSize               xsync.Map[kernel.GetInternalQueueSizer, uint64]
-	lastVideoBitRate                uint64
-	lastTotalQueueSize              uint64
-	lastCheckTS                     time.Time
-	currentResolutionChangeRequest  *resolutionChangeRequest
-	lastBitRateDecreaseTS           time.Time
-	temporaryFPSReductionMultiplier globaltypes.Rational
+	StreamMux                      *StreamMux[C]
+	wg                             sync.WaitGroup
+	closureSignaler                *closuresignaler.ClosureSignaler
+	previousQueueSize              xsync.Map[kernel.GetInternalQueueSizer, uint64]
+	lastVideoBitRate               uint64
+	lastTotalQueueSize             uint64
+	lastCheckTS                    time.Time
+	currentResolutionChangeRequest *resolutionChangeRequest
+	lastBitRateDecreaseTS          time.Time
+
+	temporaryFPSReductionMultiplier          globaltypes.Rational
+	temporaryFPSReductionMultiplierUpdatedAt time.Time
 }
 
 func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
@@ -764,11 +766,17 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 ) (_err error) {
 	logger.Tracef(ctx, "temporaryReduceFPS: %v: ", bitrate)
 	defer func() { logger.Tracef(ctx, "/temporaryReduceFPS: %v: %v", bitrate, _err) }()
+	now := time.Now()
+	if now.Sub(h.temporaryFPSReductionMultiplierUpdatedAt) < time.Second {
+		logger.Tracef(ctx, "temporary FPS reduction was updated recently at %v; skipping update", h.temporaryFPSReductionMultiplierUpdatedAt)
+		return nil
+	}
 
 	curBitRate := h.StreamMux.CurrentVideoEncodedBitRate.Load()
 	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(h.temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate))
 	logger.Debugf(ctx, "temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v->%v", types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, fpsReductionMultiplier)
 	h.temporaryFPSReductionMultiplier = fpsReductionMultiplier
+	h.temporaryFPSReductionMultiplierUpdatedAt = now
 	h.updateFPSFraction(ctx, bitrate)
 	return nil
 }
@@ -784,5 +792,6 @@ func (h *AutoBitRateHandler[C]) resetTemporaryFPSReduction(
 	}
 	logger.Debugf(ctx, "resetting temporary FPS reduction multiplier: %v->1", h.temporaryFPSReductionMultiplier)
 	h.temporaryFPSReductionMultiplier = globaltypes.Rational{Num: 1, Den: 1}
+	h.temporaryFPSReductionMultiplierUpdatedAt = time.Time{}
 	h.updateFPSFraction(ctx, bitrate)
 }
