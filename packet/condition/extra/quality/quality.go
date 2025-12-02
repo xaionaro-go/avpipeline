@@ -2,6 +2,7 @@ package quality
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/packet/condition/extra/quality/types"
 )
 
 type Quality []*StreamQualityWithMediaType
@@ -53,14 +54,5 @@ func (q Quality) Aggregate() *QualityAggregated {
 	}
 }
 
-type QualityAggregated struct {
-	Audio StreamQuality
-	Video StreamQuality
-}
-
-type StreamQuality struct {
-	Continuity float64
-	Overlap    float64
-	FrameRate  float64
-	InvalidDTS uint
-}
+type StreamQuality = types.StreamQuality
+type QualityAggregated = types.QualityAggregated
