@@ -527,10 +527,21 @@ func (h *AutoBitRateHandler[C]) updateFPSFraction(
 	ctx context.Context,
 	bitRate types.Ubps,
 ) {
-	fpsFraction := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(bitRate).Mul(h.temporaryFPSReductionMultiplier)
+	fpsFractionReq := h.AutoBitRateVideoConfig.FPSReducer.GetFraction(bitRate)
+	fpsFraction := fpsFractionReq.Mul(h.temporaryFPSReductionMultiplier)
+	if fpsFraction.Float64() > 1.0 {
+		logger.Errorf(ctx, "fpsFraction %v is greater than 1.0; clamping to 1.0: %v * %v == %v", fpsFractionReq, h.temporaryFPSReductionMultiplier, fpsFraction)
+		fpsFraction.Num = 1
+		fpsFraction.Den = 1
+	}
 	if fpsFraction.Float64() < h.AutoBitRateVideoConfig.MinFPSFraction {
 		fpsFraction = globaltypes.RationalFromApproxFloat64(h.AutoBitRateVideoConfig.MinFPSFraction)
 		logger.Debugf(ctx, "clamped fpsFraction %v to minFPSFraction %v", fpsFraction, h.AutoBitRateVideoConfig.MinFPSFraction)
+		if fpsFraction.Float64() > 1.0 {
+			logger.Errorf(ctx, "fpsFraction %v is greater than 1.0; clamping to 1.0: %f was approximated to be %v (%f)", h.AutoBitRateVideoConfig.MinFPSFraction, fpsFraction.Float64(), fpsFraction, fpsFraction.Float64())
+			fpsFraction.Num = 1
+			fpsFraction.Den = 1
+		}
 	}
 	h.StreamMux.SetFPSFraction(ctx, fpsFraction)
 }
