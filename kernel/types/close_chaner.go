@@ -1,5 +1,7 @@
 package types
 
-type CloseChaner interface {
-	CloseChan() <-chan struct{}
-}
+import (
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
+)
+
+type CloseChaner = typesnolibav.CloseChaner

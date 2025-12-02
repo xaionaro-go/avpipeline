@@ -1,13 +1,11 @@
 package types
 
 import (
-	"context"
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 )
-
-type GetInternalQueueSizer interface {
-	GetInternalQueueSize(context.Context) map[string]uint64
-}
 
 type GetKerneler interface {
 	GetKernel() Abstract
 }
+
+type GetInternalQueueSizer = typesnolibav.GetInternalQueueSizer

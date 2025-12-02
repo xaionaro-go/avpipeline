@@ -1,10 +1,7 @@
 package types
 
 import (
-	"context"
-	"time"
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 )
 
-type UnsafeGetOldestDTSInTheQueuer interface {
-	UnsafeGetOldestDTSInTheQueue(context.Context) (time.Duration, error)
-}
+type UnsafeGetOldestDTSInTheQueuer = typesnolibav.UnsafeGetOldestDTSInTheQueuer

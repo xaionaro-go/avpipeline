@@ -1,7 +1,7 @@
 package types
 
-type ErrNotImplemented struct{}
+import (
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
+)
 
-func (ErrNotImplemented) Error() string {
-	return "not implemented"
-}
+type ErrNotImplemented = typesnolibav.ErrNotImplemented
