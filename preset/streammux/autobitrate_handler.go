@@ -350,7 +350,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
 		return
 	}
-	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); queue size: %d", bitRateRequest.BitRate, curReqBitRate, totalQueue.Load())
+	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); isCritical: %t; queue size: %d", bitRateRequest.BitRate, curReqBitRate, bitRateRequest.IsCritical, totalQueue.Load())
 
 	if err := h.trySetVideoBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
 		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
@@ -835,7 +835,7 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(fpsReductionMultiplierAvg)
 	logger.Infof(ctx,
 		"temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v (%f) -> %v (%f): ((%f * %f / %f) + (%f / (%f + %f))) / 2",
-		types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, temporaryFPSReductionMultiplier.Float64(), fpsReductionMultiplier, fpsReductionMultiplier.Float64(),
+		types.Ubps(curBitRate), bitrate, temporaryFPSReductionMultiplier.Rational, temporaryFPSReductionMultiplier.Float64(), fpsReductionMultiplier, fpsReductionMultiplier.Float64(),
 		temporaryFPSReductionMultiplier.Float64(), float64(bitrate), float64(curBitRate),
 		float64(bitrate), float64(bitrate), -float64(bitrateBeyondThreshold),
 	)
