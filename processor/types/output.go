@@ -1,7 +1,7 @@
 package types
 
 import (
-	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 )
 
 type UnsafeGetOldestDTSInTheQueuer = kerneltypes.UnsafeGetOldestDTSInTheQueuer
