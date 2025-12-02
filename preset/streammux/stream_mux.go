@@ -215,6 +215,28 @@ func (s *StreamMux[C]) ForEachInput(
 	return nil
 }
 
+func (s *StreamMux[C]) GetVideoInput(
+	ctx context.Context,
+) *Input[C] {
+	if s.InputVideoOnly != nil {
+		return s.InputVideoOnly
+	}
+	return &s.InputAll
+}
+
+func (s *StreamMux[C]) GetVideoOutputIDSwitchingTo(
+	ctx context.Context,
+) (_ret *OutputID) {
+	logger.Tracef(ctx, "GetVideoOutputIDSwitchingTo()")
+	defer func() { logger.Tracef(ctx, "/GetVideoOutputIDSwitchingTo(): %v", _ret) }()
+	input := s.GetVideoInput(ctx)
+	outputID := input.OutputSwitch.NextValue.Load()
+	if outputID < 0 {
+		return nil
+	}
+	return ptr(OutputID(outputID))
+}
+
 func (s *StreamMux[C]) initSwitches(
 	ctx context.Context,
 ) error {
@@ -268,6 +290,9 @@ func (s *StreamMux[C]) initSwitches(
 				s.OutputsLocker.ManualUnlock(ctx)
 				input.OutputSyncer.SetValue(ctx, from)
 				return
+			}
+			if h := s.GetAutoBitRateHandler(); h != nil {
+				h.onOutputSwitch(ctx, inputType, from, to)
 			}
 			if err := outputNext.SetForceNextFrameKey(ctx, true); err != nil {
 				logger.Errorf(ctx, "Switch[%s]: unable to set force key frame on the output %d: %v", inputType, to, err)

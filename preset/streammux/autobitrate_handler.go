@@ -142,7 +142,7 @@ func (s *StreamMux[C]) newAutoBitRateHandler(
 		StreamMux:              s,
 		closureSignaler:        closuresignaler.New(),
 	}
-	h.resetTemporaryFPSReduction(ctx, cfg.ResolutionsAndBitRates.Best().BitrateHigh)
+	h.resetTemporaryFPSReduction(ctx, cfg.ResolutionsAndBitRates.Best().BitrateHigh, "initialization")
 	return h, nil
 }
 
@@ -474,16 +474,21 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}
 
 	err := h.changeResolutionIfNeeded(ctx, clampedVideoBitRate, req.IsCritical, allowTrafficLoss)
+	var errNotThisTime ErrNotThisTime
 	switch {
 	case err == nil:
-		h.resetTemporaryFPSReduction(ctx, req.BitRate)
-	case errors.Is(err, ErrNotThisTime{}):
-		if req.BitRate < oldBitRate {
-			if err := h.temporaryReduceFPS(ctx, req.BitRate); err != nil {
+		if h.StreamMux.GetVideoOutputIDSwitchingTo(ctx) == nil {
+			h.resetTemporaryFPSReduction(ctx, clampedVideoBitRate, "no output switching in progress")
+		}
+	case errors.As(err, &errNotThisTime):
+		if errNotThisTime.BitrateBeyondThreshold < 0 {
+			if err := h.temporaryReduceFPS(ctx, req.BitRate, errNotThisTime.BitrateBeyondThreshold); err != nil {
 				logger.Errorf(ctx, "unable to temporary reduce FPS before resolution change: %v", err)
 			}
 		} else {
-			h.resetTemporaryFPSReduction(ctx, req.BitRate)
+			if h.StreamMux.GetVideoOutputIDSwitchingTo(ctx) == nil {
+				h.resetTemporaryFPSReduction(ctx, clampedVideoBitRate, "no downgrading output switching in progress")
+			}
 		}
 	default:
 		return fmt.Errorf("unable to change resolution: %w", err)
@@ -530,6 +535,19 @@ func (h *AutoBitRateHandler[C]) updateFPSFraction(
 	h.StreamMux.SetFPSFraction(ctx, fpsFraction)
 }
 
+func (h *AutoBitRateHandler[C]) onOutputSwitch(
+	ctx context.Context,
+	inputType InputType,
+	from int32,
+	to int32,
+) {
+	if inputType != InputTypeVideoOnly {
+		return
+	}
+	logger.Debugf(ctx, "onOutputSwitch: from %v to %v", from, to)
+	h.resetTemporaryFPSReduction(ctx, h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best().BitrateHigh, "output switch ended")
+}
+
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	ctx context.Context,
 	bitrate types.Ubps,
@@ -560,6 +578,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	logger.Tracef(ctx, "current resolution: %v; resCfg: %v", *res, resCfg)
 
 	var newRes AutoBitRateResolutionAndBitRateConfig
+	var bitrateBeyondThreshold types.Ubps
 	switch {
 	case bitrate < resCfg.BitrateLow:
 		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
@@ -571,6 +590,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 			return nil
 		}
 		newRes = *_newRes
+		bitrateBeyondThreshold = bitrate - resCfg.BitrateLow
 	case bitrate > resCfg.BitrateHigh:
 		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
 		if _newRes == nil {
@@ -588,6 +608,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 				return fmt.Errorf("unable to enable bypass mode: %w", err)
 			}
 		}
+		bitrateBeyondThreshold = bitrate - resCfg.BitrateHigh
 	default:
 		return nil
 	}
@@ -595,10 +616,16 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 	err := h.setVideoOutput(ctx, &SenderKey{
 		VideoResolution: newRes.Resolution,
 	}, bitrate, force, allowTrafficLoss)
-	if err != nil {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNotThisTime{}):
+		return ErrNotThisTime{
+			BitrateBeyondThreshold: bitrateBeyondThreshold,
+		}
+	default:
 		return fmt.Errorf("unable to set new resolution %v: %w", newRes.Resolution, err)
 	}
-	return nil
 }
 
 func (h *AutoBitRateHandler[C]) setVideoOutput(
@@ -754,18 +781,28 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	}
 }
 
-type ErrNotThisTime struct{}
+type ErrNotThisTime struct {
+	BitrateBeyondThreshold types.Ubps
+}
 
 func (e ErrNotThisTime) Error() string {
+	if e.BitrateBeyondThreshold != 0 {
+		return fmt.Sprintf("not this time; bitrate beyond threshold: %s", e.BitrateBeyondThreshold)
+	}
 	return "not this time"
 }
 
 func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	ctx context.Context,
 	bitrate types.Ubps,
+	bitrateBeyondThreshold types.Ubps,
 ) (_err error) {
 	logger.Tracef(ctx, "temporaryReduceFPS: %v: ", bitrate)
 	defer func() { logger.Tracef(ctx, "/temporaryReduceFPS: %v: %v", bitrate, _err) }()
+	assert(ctx, bitrateBeyondThreshold < 0)
+	// this is essentially a pre-emergency mechanism that prevents output channel congestion
+	// by reducing FPS temporarily until resolution change can be performed, so that the encoder
+	// is capable to produce lower overall bitrate.
 	now := time.Now()
 	if now.Sub(h.temporaryFPSReductionMultiplierUpdatedAt) < time.Second {
 		logger.Tracef(ctx, "temporary FPS reduction was updated recently at %v; skipping update", h.temporaryFPSReductionMultiplierUpdatedAt)
@@ -773,8 +810,16 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	}
 
 	curBitRate := h.StreamMux.CurrentVideoEncodedBitRate.Load()
-	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(h.temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate))
-	logger.Debugf(ctx, "temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v->%v", types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, fpsReductionMultiplier)
+	fpsReductionMultiplier0 := h.temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate)
+	fpsReductionMultiplier1 := float64(bitrate) / float64(bitrate-bitrateBeyondThreshold)
+	fpsReductionMultiplierAvg := (fpsReductionMultiplier0 + fpsReductionMultiplier1) / 2
+	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(fpsReductionMultiplierAvg)
+	logger.Debugf(ctx,
+		"temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v (%f) -> %v (%f): ((%f * %f / %f) + (%f / (%f + %f))) / 2",
+		types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, h.temporaryFPSReductionMultiplier.Float64(), fpsReductionMultiplier, fpsReductionMultiplier.Float64(),
+		h.temporaryFPSReductionMultiplier.Float64(), float64(bitrate), float64(curBitRate),
+		float64(bitrate), float64(bitrate), -float64(bitrateBeyondThreshold),
+	)
 	h.temporaryFPSReductionMultiplier = fpsReductionMultiplier
 	h.temporaryFPSReductionMultiplierUpdatedAt = now
 	h.updateFPSFraction(ctx, bitrate)
@@ -784,13 +829,14 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 func (h *AutoBitRateHandler[C]) resetTemporaryFPSReduction(
 	ctx context.Context,
 	bitrate types.Ubps,
+	reason string,
 ) {
 	logger.Tracef(ctx, "resetTemporaryFPSReduction")
 	defer func() { logger.Tracef(ctx, "/resetTemporaryFPSReduction") }()
 	if h.temporaryFPSReductionMultiplier.Num == 1 && h.temporaryFPSReductionMultiplier.Den == 1 {
 		return
 	}
-	logger.Debugf(ctx, "resetting temporary FPS reduction multiplier: %v->1", h.temporaryFPSReductionMultiplier)
+	logger.Debugf(ctx, "resetting temporary FPS reduction multiplier: %v (%f) -> 1 due to: '%s'", h.temporaryFPSReductionMultiplier, h.temporaryFPSReductionMultiplier.Float64(), reason)
 	h.temporaryFPSReductionMultiplier = globaltypes.Rational{Num: 1, Den: 1}
 	h.temporaryFPSReductionMultiplierUpdatedAt = time.Time{}
 	h.updateFPSFraction(ctx, bitrate)
