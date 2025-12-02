@@ -1,11 +1,16 @@
-//go:build with_libav
-// +build with_libav
-
 package libav
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/libavnolibav"
+	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
 )
+
+type Stream = libavnolibav.Stream
+
+func StreamFromProtobuf(input *libav_proto.Stream) *Stream {
+	return libavnolibav.StreamFromProtobuf(input)
+}
 
 func StreamFromGo(input *astiav.Stream) *Stream {
 	if input == nil {
@@ -29,11 +34,4 @@ func StreamFromGo(input *astiav.Stream) *Stream {
 		RFrameRate: RationalFromGo(ptr(input.RFrameRate())).Protobuf(),
 		//PtsWrapBits: int32(input.PtsWrapBits()),
 	}
-}
-
-func (s *Stream) Go() *astiav.Stream {
-	if s == nil {
-		return nil
-	}
-	panic("not implemented")
 }

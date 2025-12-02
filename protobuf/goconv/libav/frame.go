@@ -1,11 +1,16 @@
-//go:build with_libav
-// +build with_libav
-
 package libav
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/libavnolibav"
+	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
 )
+
+type Frame = libavnolibav.Frame
+
+func FrameFromProtobuf(input *libav_proto.Frame) *Frame {
+	return libavnolibav.FrameFromProtobuf(input)
+}
 
 func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 	if input == nil {
@@ -58,11 +63,4 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 		//f.ExtendedData = input.ExtendedData()
 	}
 	return f
-}
-
-func (f *Frame) Go() *astiav.Frame {
-	if f == nil {
-		return nil
-	}
-	panic("not implemented")
 }

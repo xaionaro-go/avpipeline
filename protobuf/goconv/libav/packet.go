@@ -1,11 +1,16 @@
-//go:build with_libav
-// +build with_libav
-
 package libav
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/libavnolibav"
+	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
 )
+
+type Packet = libavnolibav.Packet
+
+func PacketFromProtobuf(input *libav_proto.Packet) *Packet {
+	return libavnolibav.PacketFromProtobuf(input)
+}
 
 func PacketFromGo(input *astiav.Packet, includePayload bool) *Packet {
 	if input == nil {
@@ -26,11 +31,4 @@ func PacketFromGo(input *astiav.Packet, includePayload bool) *Packet {
 		pkt.Data = input.Data()
 	}
 	return pkt
-}
-
-func (f *Packet) Go() *astiav.Packet {
-	if f == nil {
-		return nil
-	}
-	panic("not implemented")
 }

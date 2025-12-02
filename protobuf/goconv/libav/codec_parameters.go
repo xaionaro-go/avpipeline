@@ -1,11 +1,16 @@
-//go:build with_libav
-// +build with_libav
-
 package libav
 
 import (
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/libavnolibav"
+	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
 )
+
+type CodecParameters = libavnolibav.CodecParameters
+
+func CodecParametersFromProtobuf(input *libav_proto.CodecParameters) *CodecParameters {
+	return libavnolibav.CodecParametersFromProtobuf(input)
+}
 
 func CodecParametersFromGo(input *astiav.CodecParameters) *CodecParameters {
 	if input == nil {
@@ -41,11 +46,4 @@ func CodecParametersFromGo(input *astiav.CodecParameters) *CodecParameters {
 		//TrailingPadding:   int64(input.TrailingPadding()),
 		//SeekPreroll:       int64(input.SeekPreroll()),
 	}
-}
-
-func (f *CodecParameters) Go() *astiav.CodecParameters {
-	if f == nil {
-		return nil
-	}
-	panic("not implemented")
 }

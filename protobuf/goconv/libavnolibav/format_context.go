@@ -1,4 +1,4 @@
-package libav
+package libavnolibav
 
 import (
 	libav_proto "github.com/xaionaro-go/avpipeline/protobuf/libav"
