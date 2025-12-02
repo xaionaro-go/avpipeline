@@ -1,121 +1,43 @@
 package avpipeline
 
 import (
-	"fmt"
-	"time"
-
 	smtypes "github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipelinenolibav"
 )
 
 func AutoBitRateResolutionAndBitRateConfigFromProto(
 	rc *avpipelinegrpc.AutoBitRateResolutionAndBitRateConfig,
 ) *smtypes.AutoBitRateResolutionAndBitRateConfig {
-	if rc == nil {
-		return nil
-	}
-	res := ResolutionFromProto(rc.GetResolution())
-	if res == nil {
-		return nil
-	}
-	return &smtypes.AutoBitRateResolutionAndBitRateConfig{
-		Resolution:  *res,
-		BitrateHigh: smtypes.Ubps(rc.GetBitrateHighBps()),
-		BitrateLow:  smtypes.Ubps(rc.GetBitrateLowBps()),
-	}
+	return avpipelinenolibav.AutoBitRateResolutionAndBitRateConfigFromProto(rc)
 }
 
 func AutoBitRateResolutionAndBitRateConfigToProto(
 	rc *smtypes.AutoBitRateResolutionAndBitRateConfig,
 ) *avpipelinegrpc.AutoBitRateResolutionAndBitRateConfig {
-	if rc == nil {
-		return nil
-	}
-	return &avpipelinegrpc.AutoBitRateResolutionAndBitRateConfig{
-		Resolution:     ResolutionToProto(rc.Resolution),
-		BitrateHighBps: uint64(rc.BitrateHigh),
-		BitrateLowBps:  uint64(rc.BitrateLow),
-	}
+	return avpipelinenolibav.AutoBitRateResolutionAndBitRateConfigToProto(rc)
 }
 
 func AutoBitRateResolutionAndBitRateConfigsFromProto(
 	in *avpipelinegrpc.AutoBitRateResolutionAndBitRateConfigs,
 ) smtypes.AutoBitRateResolutionAndBitRateConfigs {
-	if in == nil {
-		return nil
-	}
-	out := make(smtypes.AutoBitRateResolutionAndBitRateConfigs, 0, len(in.GetConfigs()))
-	for _, rc := range in.GetConfigs() {
-		if cfg := AutoBitRateResolutionAndBitRateConfigFromProto(rc); cfg != nil {
-			out = append(out, *cfg)
-		}
-	}
-	return out
+	return avpipelinenolibav.AutoBitRateResolutionAndBitRateConfigsFromProto(in)
 }
 
 func AutoBitRateResolutionAndBitRateConfigsToProto(
 	in smtypes.AutoBitRateResolutionAndBitRateConfigs,
 ) *avpipelinegrpc.AutoBitRateResolutionAndBitRateConfigs {
-	if in == nil {
-		return nil
-	}
-	protoCfgs := make([]*avpipelinegrpc.AutoBitRateResolutionAndBitRateConfig, 0, len(in))
-	for _, rc := range in {
-		protoCfgs = append(protoCfgs, AutoBitRateResolutionAndBitRateConfigToProto(&rc))
-	}
-	return &avpipelinegrpc.AutoBitRateResolutionAndBitRateConfigs{
-		Configs: protoCfgs,
-	}
+	return avpipelinenolibav.AutoBitRateResolutionAndBitRateConfigsToProto(in)
 }
 
 func AutoBitRateVideoConfigFromProto(
 	cfg *avpipelinegrpc.AutoBitRateVideoConfig,
 ) (*smtypes.AutoBitRateVideoConfig, error) {
-	if cfg == nil {
-		return nil, nil
-	}
-
-	calc, err := AutoBitRateCalculatorFromProto(cfg.GetCalculator())
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert AutoBitRateCalculator: %w", err)
-	}
-
-	return &smtypes.AutoBitRateVideoConfig{
-		ResolutionsAndBitRates:              AutoBitRateResolutionAndBitRateConfigsFromProto(cfg.ResolutionsAndBitRates),
-		Calculator:                          calc,
-		FPSReducer:                          FPSReducerConfigFromProto(cfg.GetFpsReducer()),
-		CheckInterval:                       time.Duration(cfg.GetCheckIntervalMS()) * time.Millisecond,
-		AutoByPass:                          cfg.GetAutoByPass(),
-		MaxBitRate:                          smtypes.Ubps(cfg.GetMaxBitRateBps()),
-		MinBitRate:                          smtypes.Ubps(cfg.GetMinBitRateBps()),
-		BitRateIncreaseSlowdown:             time.Duration(cfg.GetBitRateIncreaseSlowdownMS()) * time.Millisecond,
-		ResolutionSlowdownDurationUpgrade:   time.Duration(cfg.GetResolutionSlowdownDurationUpgradeMS()) * time.Millisecond,
-		ResolutionSlowdownDurationDowngrade: time.Duration(cfg.GetResolutionSlowdownDurationDowngradeMS()) * time.Millisecond,
-	}, nil
+	return avpipelinenolibav.AutoBitRateVideoConfigFromProto(cfg)
 }
 
 func AutoBitRateVideoConfigToProto(
 	cfg *smtypes.AutoBitRateVideoConfig,
 ) (*avpipelinegrpc.AutoBitRateVideoConfig, error) {
-	if cfg == nil {
-		return nil, nil
-	}
-
-	calc, err := AutoBitRateCalculatorToProto(cfg.Calculator)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert AutoBitRateCalculator: %w", err)
-	}
-
-	return &avpipelinegrpc.AutoBitRateVideoConfig{
-		ResolutionsAndBitRates:                AutoBitRateResolutionAndBitRateConfigsToProto(cfg.ResolutionsAndBitRates),
-		Calculator:                            calc,
-		FpsReducer:                            FPSReducerConfigToProto(cfg.FPSReducer),
-		CheckIntervalMS:                       uint64(cfg.CheckInterval / time.Millisecond),
-		AutoByPass:                            cfg.AutoByPass,
-		MaxBitRateBps:                         uint64(cfg.MaxBitRate),
-		MinBitRateBps:                         uint64(cfg.MinBitRate),
-		BitRateIncreaseSlowdownMS:             uint64(cfg.BitRateIncreaseSlowdown / time.Millisecond),
-		ResolutionSlowdownDurationUpgradeMS:   uint64(cfg.ResolutionSlowdownDurationUpgrade / time.Millisecond),
-		ResolutionSlowdownDurationDowngradeMS: uint64(cfg.ResolutionSlowdownDurationDowngrade / time.Millisecond),
-	}, nil
+	return avpipelinenolibav.AutoBitRateVideoConfigToProto(cfg)
 }

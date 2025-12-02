@@ -1,28 +1,15 @@
 package avpipeline
 
 import (
-	"encoding/json"
-
-	"github.com/xaionaro-go/polyjson"
+	"github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipelinenolibav"
 )
 
-type PipelineSideData json.RawMessage
+type PipelineSideData = avpipelinenolibav.PipelineSideData
 
 func PipelineSideDataFromProtobuf(input []byte) PipelineSideData {
-	return (PipelineSideData)(input)
+	return avpipelinenolibav.PipelineSideDataFromProtobuf(input)
 }
 
 func PipelineSideDataFromGo(input any) PipelineSideData {
-	if input == nil {
-		return nil
-	}
-	b, err := polyjson.MarshalWithTypeIDs(input, polyjson.TypeRegistry())
-	if err != nil {
-		panic("unable to marshal pipeline side data: " + err.Error())
-	}
-	return b
-}
-
-func (f PipelineSideData) Protobuf() []byte {
-	return f
+	return avpipelinenolibav.PipelineSideDataFromGo(input)
 }

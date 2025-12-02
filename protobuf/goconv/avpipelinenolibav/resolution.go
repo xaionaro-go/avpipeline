@@ -1,15 +1,23 @@
-package avpipeline
+package avpipelinenolibav
 
 import (
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
-	"github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipelinenolibav"
 )
 
 func ResolutionFromProto(r *avpipelinegrpc.Resolution) *codectypes.Resolution {
-	return avpipelinenolibav.ResolutionFromProto(r)
+	if r == nil {
+		return nil
+	}
+	return &codectypes.Resolution{
+		Width:  r.GetWidth(),
+		Height: r.GetHeight(),
+	}
 }
 
 func ResolutionToProto(r codectypes.Resolution) *avpipelinegrpc.Resolution {
-	return avpipelinenolibav.ResolutionToProto(r)
+	return &avpipelinegrpc.Resolution{
+		Width:  r.Width,
+		Height: r.Height,
+	}
 }
