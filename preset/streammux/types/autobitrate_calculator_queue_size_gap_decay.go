@@ -92,6 +92,6 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 	)
 	return BitRateChangeRequest{
 		BitRate:    Ubps(newBitRate),
-		IsCritical: newBitRate < max(req.ActualOutputBitrate, req.InputBitrate)/2,
+		IsCritical: bitRateDiff < 0 && newBitRate < max(req.ActualOutputBitrate, req.InputBitrate)/5,
 	}
 }
