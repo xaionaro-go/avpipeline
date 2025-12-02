@@ -1586,7 +1586,8 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case newTS := <-t.C:
+		case <-t.C:
+			newTS := time.Now()
 			func() {
 				ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 				defer cancelFn()
@@ -1594,7 +1595,7 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 				if err == nil {
 					return
 				}
-				tsDiff := time.Since(prevTS)
+				tsDiff := newTS.Sub(prevTS)
 				newValue := s.SendingLatencyAudio.Swap(s.SendingLatencyAudio.Load() + uint64(tsDiff.Nanoseconds()))
 				logger.Debugf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(newValue), tsDiff, tsDiff+nanosecondsToDuration(newValue))
 			}()

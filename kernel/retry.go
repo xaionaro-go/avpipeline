@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -313,4 +315,33 @@ type ErrRetry struct {
 
 func (e ErrRetry) Error() string {
 	return fmt.Sprintf("%s [please retry]", e.Err)
+}
+
+var _ types.UnsafeGetOldestDTSInTheQueuer = (*Retry[Abstract])(nil)
+
+func (r *Retry[T]) UnsafeGetOldestDTSInTheQueue(
+	ctx context.Context,
+) (time.Duration, error) {
+	kernel := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() *T {
+		if r.KernelIsSet {
+			return &r.Kernel
+		}
+		return nil
+	})
+	if kernel == nil {
+		return 0, ErrKernelNotSet{}
+	}
+
+	queuer, ok := any(*kernel).(types.UnsafeGetOldestDTSInTheQueuer)
+	if !ok {
+		return 0, ErrNotImplemented{}
+	}
+
+	return queuer.UnsafeGetOldestDTSInTheQueue(ctx)
+}
+
+type ErrKernelNotSet struct{}
+
+func (e ErrKernelNotSet) Error() string {
+	return "kernel is not set"
 }
