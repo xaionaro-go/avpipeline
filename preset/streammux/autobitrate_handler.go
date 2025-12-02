@@ -825,7 +825,7 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	fpsReductionMultiplier1 := float64(bitrate) / float64(bitrate-bitrateBeyondThreshold)
 	fpsReductionMultiplierAvg := (fpsReductionMultiplier0 + fpsReductionMultiplier1) / 2
 	fpsReductionMultiplier := globaltypes.RationalFromApproxFloat64(fpsReductionMultiplierAvg)
-	logger.Debugf(ctx,
+	logger.Infof(ctx,
 		"temporaryReduceFPS: current encoded bitrate: %v; requested bitrate: %v; fpsReductionMultiplier: %v (%f) -> %v (%f): ((%f * %f / %f) + (%f / (%f + %f))) / 2",
 		types.Ubps(curBitRate), bitrate, h.temporaryFPSReductionMultiplier, h.temporaryFPSReductionMultiplier.Float64(), fpsReductionMultiplier, fpsReductionMultiplier.Float64(),
 		h.temporaryFPSReductionMultiplier.Float64(), float64(bitrate), float64(curBitRate),
