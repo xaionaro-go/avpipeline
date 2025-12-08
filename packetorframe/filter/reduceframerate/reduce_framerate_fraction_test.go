@@ -1,4 +1,4 @@
-package condition
+package reduceframerate
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
@@ -28,7 +29,7 @@ func TestReduceFramerate(t *testing.T) {
 	defer belt.Flush(ctx)
 
 	t.Run("audio", func(t *testing.T) {
-		f := ReduceFramerateFraction(mathcondition.GetterStatic[globaltypes.Rational]{
+		f := New(mathcondition.GetterStatic[globaltypes.Rational]{
 			StaticValue: globaltypes.Rational{
 				Num: 3,
 				Den: 7,
@@ -42,15 +43,18 @@ func TestReduceFramerate(t *testing.T) {
 			},
 		}
 		frame.StreamInfo.CodecParameters.SetMediaType(astiav.MediaTypeAudio)
+		in := packetorframe.InputUnion{
+			Frame: &frame,
+		}
 
 		for i := range 10 { // frames 0..69
-			require.True(t, f.Match(ctx, frame), i)  // (i*7+0) % 7 -> 0 % 2.(3) = 0.0   <  1 -> pass
-			require.False(t, f.Match(ctx, frame), i) // (i*7+1) % 7 -> 1 % 2.(3) = 1.0   >= 1 -> drop
-			require.False(t, f.Match(ctx, frame), i) // (i*7+2) % 7 -> 2 % 2.(3) = 2.0   >= 1 -> drop
-			require.True(t, f.Match(ctx, frame), i)  // (i*7+3) % 7 -> 3 % 2.(3) = 0.(6) <  1 -> pass
-			require.False(t, f.Match(ctx, frame), i) // (i*7+4) % 7 -> 4 % 2.(3) = 1.(6) >= 1 -> drop
-			require.True(t, f.Match(ctx, frame), i)  // (i*7+5) % 7 -> 5 % 2.(3) = 0.(3) <  1 -> pass
-			require.False(t, f.Match(ctx, frame), i) // (i*7+6) % 7 -> 6 % 2.(3) = 1.(3) >= 1 -> drop
+			require.True(t, f.Match(ctx, in), i)  // (i*7+0) % 7 -> 0 % 2.(3) = 0.0   <  1 -> pass
+			require.False(t, f.Match(ctx, in), i) // (i*7+1) % 7 -> 1 % 2.(3) = 1.0   >= 1 -> drop
+			require.False(t, f.Match(ctx, in), i) // (i*7+2) % 7 -> 2 % 2.(3) = 2.0   >= 1 -> drop
+			require.True(t, f.Match(ctx, in), i)  // (i*7+3) % 7 -> 3 % 2.(3) = 0.(6) <  1 -> pass
+			require.False(t, f.Match(ctx, in), i) // (i*7+4) % 7 -> 4 % 2.(3) = 1.(6) >= 1 -> drop
+			require.True(t, f.Match(ctx, in), i)  // (i*7+5) % 7 -> 5 % 2.(3) = 0.(3) <  1 -> pass
+			require.False(t, f.Match(ctx, in), i) // (i*7+6) % 7 -> 6 % 2.(3) = 1.(3) >= 1 -> drop
 		}
 	})
 }

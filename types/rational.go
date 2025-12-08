@@ -16,10 +16,24 @@ type Rational struct {
 	Den int
 }
 
+func (r Rational) Reverse() Rational {
+	return Rational{
+		Num: r.Den,
+		Den: r.Num,
+	}
+}
+
 func (r Rational) Mul(other Rational) Rational {
 	return Rational{
 		Num: r.Num * other.Num,
 		Den: r.Den * other.Den,
+	}
+}
+
+func (r Rational) Div(other Rational) Rational {
+	return Rational{
+		Num: r.Num * other.Den,
+		Den: r.Den * other.Num,
 	}
 }
 

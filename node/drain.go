@@ -26,20 +26,20 @@ func SetBlockInput(
 		logger.Debugf(ctx, "/SetBlockInput(%v, %p:%p:%v): %v", blocked, node, node.GetProcessor(), node, _err)
 	}()
 
-	cond := node.GetInputPacketFilter()
+	cond := node.GetInputPacketFilter(ctx)
 	condPause, ok := cond.(*packetfiltercondition.PauseCond)
 	if !ok {
 		if !blocked {
 			return nil
 		}
 		condPause = packetfiltercondition.Pause(ctx, cond)
-		node.SetInputPacketFilter(condPause)
+		node.SetInputPacketFilter(ctx, condPause)
 	}
 	if blocked {
 		return nil
 	}
 	condPause.ReleasePauseFn()
-	node.SetInputPacketFilter(condPause.OriginalCondition)
+	node.SetInputPacketFilter(ctx, condPause.OriginalCondition)
 	return nil
 }
 

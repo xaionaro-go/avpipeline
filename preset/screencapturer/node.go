@@ -167,20 +167,30 @@ func (a *ScreenCapturer[C]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *ScreenCapturer[C]) GetInputPacketFilter() packetfiltercondition.Condition {
-	return a.Input().GetInputPacketFilter()
+func (a *ScreenCapturer[C]) GetInputPacketFilter(
+	ctx context.Context,
+) packetfiltercondition.Condition {
+	return a.Input().GetInputPacketFilter(ctx)
 }
 
-func (a *ScreenCapturer[C]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
-	a.Input().SetInputPacketFilter(cond)
+func (a *ScreenCapturer[C]) SetInputPacketFilter(
+	ctx context.Context,
+	cond packetfiltercondition.Condition,
+) {
+	a.Input().SetInputPacketFilter(ctx, cond)
 }
 
-func (a *ScreenCapturer[C]) GetInputFrameFilter() framefiltercondition.Condition {
-	return a.Input().GetInputFrameFilter()
+func (a *ScreenCapturer[C]) GetInputFrameFilter(
+	ctx context.Context,
+) framefiltercondition.Condition {
+	return a.Input().GetInputFrameFilter(ctx)
 }
 
-func (a *ScreenCapturer[C]) SetInputFrameFilter(cond framefiltercondition.Condition) {
-	a.Input().SetInputFrameFilter(cond)
+func (a *ScreenCapturer[C]) SetInputFrameFilter(
+	ctx context.Context,
+	cond framefiltercondition.Condition,
+) {
+	a.Input().SetInputFrameFilter(ctx, cond)
 }
 
 func (a *ScreenCapturer[C]) GetChangeChanIsServing() <-chan struct{} {

@@ -300,20 +300,30 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetProcessor() processor.Abstract 
 	return fwd.Output.GetProcessor()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputPacketFilter() packetfiltercondition.Condition {
-	return fwd.Output.GetInputPacketFilter()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputPacketFilter(
+	ctx context.Context,
+) packetfiltercondition.Condition {
+	return fwd.Output.GetInputPacketFilter(ctx)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
-	fwd.Output.SetInputPacketFilter(cond)
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputPacketFilter(
+	ctx context.Context,
+	cond packetfiltercondition.Condition,
+) {
+	fwd.Output.SetInputPacketFilter(ctx, cond)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameFilter() framefiltercondition.Condition {
-	return fwd.Output.GetInputFrameFilter()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameFilter(
+	ctx context.Context,
+) framefiltercondition.Condition {
+	return fwd.Output.GetInputFrameFilter(ctx)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameFilter(cond framefiltercondition.Condition) {
-	fwd.Output.SetInputFrameFilter(cond)
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameFilter(
+	ctx context.Context,
+	cond framefiltercondition.Condition,
+) {
+	fwd.Output.SetInputFrameFilter(ctx, cond)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanIsServing() <-chan struct{} {

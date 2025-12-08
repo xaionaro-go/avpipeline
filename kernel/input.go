@@ -368,10 +368,10 @@ func (i *Input) Generate(
 			codecParams := stream.CodecParameters()
 			logger.Tracef(
 				ctx,
-				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d, extraData:%s",
+				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, extraData:%s",
 				codecParams.MediaType(),
 				streamIndex,
-				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
+				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), stream.TimeBase(),
 				pkt.Flags().Has(astiav.PacketFlagKey),
 				len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
 			)

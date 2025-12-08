@@ -88,10 +88,10 @@ func (m *Monitor) inject(
 ) error {
 	switch m.Type {
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_RECEIVE:
-		assert(ctx, m.Object.GetInputPacketFilter() == nil, "input packet filter is already set for node %v", m.Object.GetObjectID())
-		assert(ctx, m.Object.GetInputFrameFilter() == nil, "input frame filter is already set for node %v", m.Object.GetObjectID())
-		m.Object.SetInputPacketFilter(m.asPacketFilterCondition())
-		m.Object.SetInputFrameFilter(m.asFrameFilterCondition())
+		assert(ctx, m.Object.GetInputPacketFilter(ctx) == nil, "input packet filter is already set for node %v", m.Object.GetObjectID())
+		assert(ctx, m.Object.GetInputFrameFilter(ctx) == nil, "input frame filter is already set for node %v", m.Object.GetObjectID())
+		m.Object.SetInputPacketFilter(ctx, m.asPacketFilterCondition())
+		m.Object.SetInputFrameFilter(ctx, m.asFrameFilterCondition())
 		return nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_SEND:
 		assert(ctx, m.Node == nil, "internal error: push to monitor is already set for node %v", m.Object.GetObjectID())
@@ -117,10 +117,10 @@ func (m *Monitor) uninject(
 ) error {
 	switch m.Type {
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_RECEIVE:
-		assert(ctx, m.Object.GetInputPacketFilter() != nil, "input packet filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputPacketFilter())
-		assert(ctx, m.Object.GetInputFrameFilter() != nil, "input frame filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputFrameFilter())
-		m.Object.SetInputPacketFilter(nil)
-		m.Object.SetInputFrameFilter(nil)
+		assert(ctx, m.Object.GetInputPacketFilter(ctx) != nil, "input packet filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputPacketFilter(ctx))
+		assert(ctx, m.Object.GetInputFrameFilter(ctx) != nil, "input frame filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputFrameFilter(ctx))
+		m.Object.SetInputPacketFilter(ctx, nil)
+		m.Object.SetInputFrameFilter(ctx, nil)
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_SEND:
 		n := m.Node
 		assert(ctx, n != nil, "internal error: push to monitor is already unset for node %v", m.Object.GetObjectID())

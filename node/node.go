@@ -44,10 +44,10 @@ type Abstract interface {
 	GetProcessor() processor.Abstract
 	GetCountersPtr() *types.Counters
 
-	GetInputPacketFilter() packetfiltercondition.Condition
-	SetInputPacketFilter(packetfiltercondition.Condition)
-	GetInputFrameFilter() framefiltercondition.Condition
-	SetInputFrameFilter(framefiltercondition.Condition)
+	GetInputPacketFilter(context.Context) packetfiltercondition.Condition
+	SetInputPacketFilter(context.Context, packetfiltercondition.Condition)
+	GetInputFrameFilter(context.Context) framefiltercondition.Condition
+	SetInputFrameFilter(context.Context, framefiltercondition.Condition)
 
 	GetChangeChanIsServing() <-chan struct{}
 	GetChangeChanPushPacketsTo() <-chan struct{}
@@ -505,35 +505,33 @@ func (n *NodeWithCustomData[C, T]) SetPushFramesTos(
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputPacketFilter() (_ret packetfiltercondition.Condition) {
+func (n *NodeWithCustomData[C, T]) GetInputPacketFilter(ctx context.Context) (_ret packetfiltercondition.Condition) {
 	if n == nil {
 		return packetfiltercondition.Static(false)
 	}
-	ctx := context.TODO()
 	n.Locker.ManualLock(ctx)
 	defer n.Locker.ManualUnlock(ctx)
 	return n.InputPacketFilter
 }
 
-func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
-	n.Locker.Do(context.TODO(), func() {
+func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(ctx context.Context, cond packetfiltercondition.Condition) {
+	n.Locker.Do(ctx, func() {
 		n.InputPacketFilter = cond
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetInputFrameFilter() (_ret framefiltercondition.Condition) {
+func (n *NodeWithCustomData[C, T]) GetInputFrameFilter(ctx context.Context) (_ret framefiltercondition.Condition) {
 	if n == nil {
 		return framefiltercondition.Static(false)
 	}
-	ctx := context.TODO()
 	n.Locker.Do(ctx, func() {
 		_ret = n.InputFrameFilter
 	})
 	return
 }
 
-func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(cond framefiltercondition.Condition) {
-	n.Locker.Do(context.TODO(), func() {
+func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(ctx context.Context, cond framefiltercondition.Condition) {
+	n.Locker.Do(ctx, func() {
 		n.InputFrameFilter = cond
 	})
 }

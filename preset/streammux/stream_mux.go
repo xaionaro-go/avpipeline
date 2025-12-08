@@ -326,7 +326,7 @@ func (s *StreamMux[C]) initSwitches(
 					logger.Errorf(ctx, "Switch[%s]: unable to close the output %d: %v", inputType, from, err)
 				}
 
-				outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(packetfiltercondition.Panic("Switch[" + inputType.String() + "]: somehow received a packet, while the output is closed"))
+				outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(ctx, packetfiltercondition.Panic("Switch["+inputType.String()+"]: somehow received a packet, while the output is closed"))
 
 				observability.Go(ctx, func(ctx context.Context) {
 					s.Locker.Do(ctx, func() {

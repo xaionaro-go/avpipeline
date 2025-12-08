@@ -25,6 +25,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	extrapacketcondition "github.com/xaionaro-go/avpipeline/packet/condition/extra"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/reduceframerate"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -259,7 +260,7 @@ func newOutput[C any](
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.RecoderNode.CustomData = customData
-	o.RecoderNode.SetInputPacketFilter(packetfiltercondition.Panic("the recoder is not configured, yet!"))
+	o.RecoderNode.SetInputPacketFilter(ctx, packetfiltercondition.Panic("the recoder is not configured, yet!"))
 	codecOpts := []codec.Option{CodecOptionOutputID{OutputID: o.ID}}
 	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
 	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
@@ -424,9 +425,11 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 
 	o.RecoderNode.Processor.Kernel.Filter = framecondition.Or{
 		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-		framecondition.ReduceFramerateFraction(mathcondition.GetterFunction[globaltypes.Rational](
-			o.FPSFractionGetter.GetFPSFraction,
-		)),
+		framecondition.PacketOrFrame{
+			reduceframerate.New(mathcondition.GetterFunction[globaltypes.Rational](
+				o.FPSFractionGetter.GetFPSFraction,
+			)),
+		},
 	}
 }
 
@@ -489,8 +492,8 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 
 	var errs []error
 
-	node.AppendInputPacketFilter(o.FirstNodeAfterFilter(), packetfiltercondition.Static(false))
-	node.AppendInputFrameFilter(o.FirstNodeAfterFilter(), framefiltercondition.Static(false))
+	node.AppendInputPacketFilter(ctx, o.FirstNodeAfterFilter(), packetfiltercondition.Static(false))
+	node.AppendInputFrameFilter(ctx, o.FirstNodeAfterFilter(), framefiltercondition.Static(false))
 	if shouldDrain {
 		if err := o.DrainAfterFilter(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
@@ -658,7 +661,7 @@ func (o *Output[C]) reconfigureRecoder(
 		}
 	}
 
-	o.RecoderNode.SetInputPacketFilter(nil)
+	o.RecoderNode.SetInputPacketFilter(ctx, nil)
 	return nil
 }
 

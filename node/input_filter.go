@@ -1,36 +1,38 @@
 package node
 
 import (
+	"context"
+
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 )
 
-func AppendInputPacketFilter(n Abstract, cond packetfiltercondition.Condition) {
-	f := n.GetInputPacketFilter()
+func AppendInputPacketFilter(ctx context.Context, n Abstract, cond packetfiltercondition.Condition) {
+	f := n.GetInputPacketFilter(ctx)
 	if f == nil {
-		n.SetInputPacketFilter(cond)
+		n.SetInputPacketFilter(ctx, cond)
 		return
 	}
 
 	if f, ok := f.(packetfiltercondition.And); ok {
-		n.SetInputPacketFilter(append(f, cond))
+		n.SetInputPacketFilter(ctx, append(f, cond))
 		return
 	}
 
-	n.SetInputPacketFilter(&packetfiltercondition.And{f, cond})
+	n.SetInputPacketFilter(ctx, &packetfiltercondition.And{f, cond})
 }
 
-func AppendInputFrameFilter(n Abstract, cond framefiltercondition.Condition) {
-	f := n.GetInputFrameFilter()
+func AppendInputFrameFilter(ctx context.Context, n Abstract, cond framefiltercondition.Condition) {
+	f := n.GetInputFrameFilter(ctx)
 	if f == nil {
-		n.SetInputFrameFilter(cond)
+		n.SetInputFrameFilter(ctx, cond)
 		return
 	}
 
 	if f, ok := f.(framefiltercondition.And); ok {
-		n.SetInputFrameFilter(append(f, cond))
+		n.SetInputFrameFilter(ctx, append(f, cond))
 		return
 	}
 
-	n.SetInputFrameFilter(&framefiltercondition.And{f, cond})
+	n.SetInputFrameFilter(ctx, &framefiltercondition.And{f, cond})
 }

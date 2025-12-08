@@ -200,20 +200,30 @@ func (a *AutoFixerWithCustomData[T]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *AutoFixerWithCustomData[T]) GetInputPacketFilter() packetfiltercondition.Condition {
-	return a.Input().GetInputPacketFilter()
+func (a *AutoFixerWithCustomData[T]) GetInputPacketFilter(
+	ctx context.Context,
+) packetfiltercondition.Condition {
+	return a.Input().GetInputPacketFilter(ctx)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetInputPacketFilter(cond packetfiltercondition.Condition) {
-	a.Input().SetInputPacketFilter(cond)
+func (a *AutoFixerWithCustomData[T]) SetInputPacketFilter(
+	ctx context.Context,
+	cond packetfiltercondition.Condition,
+) {
+	a.Input().SetInputPacketFilter(ctx, cond)
 }
 
-func (a *AutoFixerWithCustomData[T]) GetInputFrameFilter() framefiltercondition.Condition {
-	return a.Input().GetInputFrameFilter()
+func (a *AutoFixerWithCustomData[T]) GetInputFrameFilter(
+	ctx context.Context,
+) framefiltercondition.Condition {
+	return a.Input().GetInputFrameFilter(ctx)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetInputFrameFilter(cond framefiltercondition.Condition) {
-	a.Input().SetInputFrameFilter(cond)
+func (a *AutoFixerWithCustomData[T]) SetInputFrameFilter(
+	ctx context.Context,
+	cond framefiltercondition.Condition,
+) {
+	a.Input().SetInputFrameFilter(ctx, cond)
 }
 
 func (a *AutoFixerWithCustomData[T]) GetChangeChanIsServing() <-chan struct{} {

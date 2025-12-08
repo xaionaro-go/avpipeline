@@ -143,20 +143,28 @@ func (n *NoServe[N]) GetProcessor() processor.Abstract {
 	return n.Node.GetProcessor()
 }
 
-func (n *NoServe[N]) GetInputPacketFilter() packetcondition.Condition {
-	return n.Node.GetInputPacketFilter()
+func (n *NoServe[N]) GetInputPacketFilter(
+	ctx context.Context,
+) packetcondition.Condition {
+	return n.Node.GetInputPacketFilter(ctx)
 }
 
-func (n *NoServe[N]) SetInputPacketFilter(cond packetcondition.Condition) {
-	n.Node.SetInputPacketFilter(cond)
+func (n *NoServe[N]) SetInputPacketFilter(
+	ctx context.Context,
+	cond packetcondition.Condition,
+) {
+	n.Node.SetInputPacketFilter(ctx, cond)
 }
 
-func (n *NoServe[N]) GetInputFrameFilter() framecondition.Condition {
-	return n.Node.GetInputFrameFilter()
+func (n *NoServe[N]) GetInputFrameFilter(ctx context.Context) framecondition.Condition {
+	return n.Node.GetInputFrameFilter(ctx)
 }
 
-func (n *NoServe[N]) SetInputFrameFilter(cond framecondition.Condition) {
-	n.Node.SetInputFrameFilter(cond)
+func (n *NoServe[N]) SetInputFrameFilter(
+	ctx context.Context,
+	cond framecondition.Condition,
+) {
+	n.Node.SetInputFrameFilter(ctx, cond)
 }
 
 func (n *NoServe[N]) GetChangeChanIsServing() <-chan struct{} {

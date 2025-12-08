@@ -27,6 +27,7 @@ import (
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	"github.com/xaionaro-go/avpipeline/node/filter/packetfilter/preset/monotonicpts"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitframerate"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
@@ -59,7 +60,7 @@ func main() {
 	encoderVideoCodec := pflag.String("encoder-video-codec", "libx264", "encoding video codec")
 	encoderAudioCodec := pflag.String("encoder-audio-codec", "aac", "encoding audio codec")
 	encoderAudioChannels := pflag.Int("encoder-audio-channels", 2, "encoding audio channels")
-	videoFPSScale := pflag.Float64("video-fps-scale", 1, "video FPS scale factor; currently supported only values 0..1")
+	videoMaxFPS := pflag.Float64("video-framerate", -1, "maximal video FPS; currently supports only downscaling; -1 means no limit")
 	videoGOP := pflag.Int("video-gop", 60, "video GOP size in frames")
 
 	pflag.Parse()
@@ -215,11 +216,11 @@ func main() {
 
 	// route nodes:
 	//
-	//
+	//                              ReduceFPS
 	// input (main) -----> switch ->--------> MonotonicPTS + decoder --->-+
-	//                      .                  .                          | FPSReduce
-	//                      .                  .                          +->---------> encoder --> BSF --> output
 	//                      .                  .                          |
+	//                      .                  .                          +->---------> encoder --> BSF --> output
+	//                      .       ReduceFPS  .                          |
 	// input (fallback) -> switch ->--------> MonotonicPTS + decoder --->-+
 	//
 
@@ -251,11 +252,13 @@ func main() {
 	decoderFallbackNode.AddPushPacketsTo(ctx, encoderNode)
 	decoderFallbackNode.AddPushFramesTo(ctx, encoderNode)
 
-	if *videoFPSScale >= 0 {
-		r := globaltypes.RationalFromApproxFloat64(*videoFPSScale)
-		encoderNode.SetInputFrameFilter(framefiltercondition.Frame{framecondition.Or{
+	if *videoMaxFPS >= 0 {
+		r := globaltypes.RationalFromApproxFloat64(*videoMaxFPS)
+		encoderNode.SetInputFrameFilter(ctx, framefiltercondition.Frame{framecondition.Or{
 			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-			framecondition.ReduceFramerateFraction(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+			framecondition.PacketOrFrame{
+				limitframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+			},
 		}})
 	}
 

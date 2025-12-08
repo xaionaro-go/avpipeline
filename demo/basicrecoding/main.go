@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/reduceframerate"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
@@ -114,9 +115,11 @@ func main() {
 		}
 		recodingNode.Processor.Kernel.Filter = framecondition.Or{
 			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-			framecondition.ReduceFramerateFraction(mathcondition.GetterStatic[globaltypes.Rational]{
-				StaticValue: fps,
-			}),
+			framecondition.PacketOrFrame{
+				reduceframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{
+					StaticValue: fps,
+				}),
+			},
 		}
 	}
 

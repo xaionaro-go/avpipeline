@@ -179,7 +179,7 @@ func pushFurther[
 	pushTos []PushTo[I, C],
 	serveConfig *ServeConfig,
 	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
-	getInputCondition func(Abstract) C,
+	getInputCondition func(context.Context, Abstract) C,
 	getPushChan func(processor.Abstract) (chan<- I, bool),
 	poolPutInput func(I),
 	poolPutOutput func(O),
@@ -271,7 +271,7 @@ func pushToDestination[
 	pushTo PushTo[I, C],
 	serveConfig *ServeConfig,
 	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
-	getInputCondition func(Abstract) C,
+	getInputCondition func(context.Context, Abstract) C,
 	getPushChan func(processor.Abstract) (chan<- I, bool),
 	poolPutInput func(I),
 	countersSubSectionID globaltypes.CountersSubSectionID,
@@ -308,7 +308,7 @@ func pushToDestination[
 		dstCounters.Addressed.Increment(countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 		defer incrementReceived(dstCounters, &isPushed, countersSubSectionID, globaltypes.MediaType(mediaType), objSize)
 
-		inputCond := getInputCondition(pushTo.Node)
+		inputCond := getInputCondition(ctx, pushTo.Node)
 		if any(inputCond) != nil && !inputCond.Match(ctx, filterArg) {
 			logger.Tracef(ctx, "input condition %s was not met", inputCond)
 			return
@@ -398,8 +398,8 @@ func buildFrameInput[
 	)}
 }
 
-func getInputPacketFilter(n Abstract) packetcondition.Condition {
-	return n.GetInputPacketFilter()
+func getInputPacketFilter(ctx context.Context, n Abstract) packetcondition.Condition {
+	return n.GetInputPacketFilter(ctx)
 }
 
 func getInputPacketChan(p processor.Abstract) (chan<- packet.Input, bool) {
@@ -407,8 +407,8 @@ func getInputPacketChan(p processor.Abstract) (chan<- packet.Input, bool) {
 	return ch, ch == processor.DiscardInputPacketChan
 }
 
-func getInputFrameFilter(n Abstract) framecondition.Condition {
-	return n.GetInputFrameFilter()
+func getInputFrameFilter(ctx context.Context, n Abstract) framecondition.Condition {
+	return n.GetInputFrameFilter(ctx)
 }
 
 func getInputFrameChan(p processor.Abstract) (chan<- frame.Input, bool) {

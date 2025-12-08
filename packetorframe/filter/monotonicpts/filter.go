@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -13,10 +14,15 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+type StreamKey struct {
+	Source packet.Source
+	Index  int
+}
+
 type Filter struct {
 	xsync.Mutex
 	LatestPTS      time.Duration
-	SourcePTSShift map[packet.Source]int64
+	SourcePTSShift map[StreamKey]int64
 	ShouldCorrect  bool
 }
 
@@ -25,7 +31,7 @@ func New(
 ) *Filter {
 	return &Filter{
 		ShouldCorrect:  shouldCorrect,
-		SourcePTSShift: make(map[packet.Source]int64),
+		SourcePTSShift: make(map[StreamKey]int64),
 	}
 }
 
@@ -46,15 +52,24 @@ func (f *Filter) match(
 	ctx context.Context,
 	in packetorframe.InputUnion,
 ) bool {
+	dtsIntOrg := in.GetDTS()
 	ptsIntOrig := in.GetPTS()
+	if ptsIntOrig < dtsIntOrg && dtsIntOrg != astiav.NoPtsValue {
+		logger.Tracef(ctx, "MonotonicPTS filter: frame PTS %d < DTS %d, skipping", ptsIntOrig, in.GetDTS())
+		return false
+	}
 	pts := avconv.Duration(in.GetPTS(), in.GetTimeBase())
 	var packetSource packet.Source
 	if in.Packet != nil {
 		packetSource = in.Packet.GetSource()
 	}
+	streamKey := StreamKey{
+		Source: packetSource,
+		Index:  in.GetStreamIndex(),
+	}
 	var shift time.Duration
 	ptsInt := ptsIntOrig
-	if shiftInt := f.SourcePTSShift[packetSource]; shiftInt != 0 {
+	if shiftInt := f.SourcePTSShift[streamKey]; shiftInt != 0 {
 		ptsInt += shiftInt
 		in.SetPTS(ptsInt)
 		if in.GetDTS() < ptsInt {
@@ -62,9 +77,9 @@ func (f *Filter) match(
 		}
 		shift = avconv.Duration(shiftInt, in.GetTimeBase())
 	}
-	logger.Tracef(ctx, "MonotonicPTS filter: current PTS=%v+%v, latest PTS=%v", pts, shift, f.LatestPTS)
+	logger.Tracef(ctx, "MonotonicPTS filter: curPTS=%v+%v, latestPTS=%v", pts, shift, f.LatestPTS)
 	pts += shift
-	if pts > f.LatestPTS {
+	if pts+100*time.Millisecond > f.LatestPTS {
 		f.LatestPTS = pts
 		return true
 	}
@@ -75,10 +90,10 @@ func (f *Filter) match(
 	nextPTSInt := latestPTSInt + 1
 	in.SetPTS(nextPTSInt)
 	shiftInt := nextPTSInt - ptsIntOrig
-	f.SourcePTSShift[packetSource] = shiftInt
+	f.SourcePTSShift[streamKey] = shiftInt
 	logger.Debugf(ctx,
-		"MonotonicPTS filter: new TS shift %v for source %+v",
-		avconv.Duration(shiftInt, in.GetTimeBase()), packetSource,
+		"MonotonicPTS filter: new TS shift %v for stream %+v (%s)",
+		avconv.Duration(shiftInt, in.GetTimeBase()), streamKey, in.GetMediaType(),
 	)
 	if in.GetDTS() < nextPTSInt {
 		in.SetDTS(nextPTSInt)
