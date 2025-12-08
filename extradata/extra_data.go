@@ -43,6 +43,10 @@ func (b Raw) Parse() Parsed {
 		return seq
 	}
 
+	if av1c, err := ParseAV1C(b); err == nil {
+		return av1c
+	}
+
 	return Unknown(b)
 }
 
