@@ -155,7 +155,7 @@ func main() {
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
 			recodingNode.SetInputPacketFilter(
 				packetfiltercondition.Packet{
-					Condition: condition.Function(sillyAlternationsJustForDemonstration(
+					condition.Function(sillyAlternationsJustForDemonstration(
 						sw,
 						*alternateBitrate,
 					)),

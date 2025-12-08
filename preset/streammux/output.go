@@ -286,7 +286,7 @@ func newOutput[C any](
 	o.InputFilter.AddPushPacketsTo(
 		ctx,
 		inputFixer,
-		packetfiltercondition.Packet{Condition: o.InputThrottler},
+		packetfiltercondition.Packet{o.InputThrottler},
 		packetfiltercondition.Function(func(
 			ctx context.Context,
 			_ packetfiltercondition.Input,
@@ -314,7 +314,7 @@ func newOutput[C any](
 		monotonicPTS = packetcondition.Static(true)
 	}
 	o.SendingSyncer.AddPushPacketsTo(ctx, o.SendingNode,
-		packetfiltercondition.Packet{Condition: packetcondition.And{
+		packetfiltercondition.Packet{
 			monotonicPTS,
 			o.SendingThrottler,
 			packetcondition.Or{
@@ -328,7 +328,7 @@ func newOutput[C any](
 					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
 				),
 			},
-		}},
+		},
 	)
 
 	// logging

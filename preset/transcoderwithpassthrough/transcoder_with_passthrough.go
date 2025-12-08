@@ -468,19 +468,15 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
 			s.NodeRecoder,
 			packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
+				s.SwitchPreFilter.PacketCondition(0),
+				s.SwitchPostFilter.PacketCondition(0),
 			},
 		)
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
 			nodeFilterThrottle,
 			packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
+				s.SwitchPreFilter.PacketCondition(1),
+				s.SwitchPostFilter.PacketCondition(1),
 			},
 		)
 
@@ -527,7 +523,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		if passthroughRescaleTS {
 			if !startWithPassthrough || notifyAboutPacketSources {
 				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
-					Condition: rescaletsbetweenpacketsources.New(
+					rescaletsbetweenpacketsources.New(
 						s.PacketSource,
 						s.NodeRecoder.Processor.Kernel.Encoder,
 					),
@@ -542,16 +538,12 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		switch passthroughMode {
 		case types.PassthroughModeSameTracks:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
+				s.SwitchPreFilter.PacketCondition(0),
+				s.SwitchPostFilter.PacketCondition(0),
 			})
 			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
+				s.SwitchPreFilter.PacketCondition(1),
+				s.SwitchPostFilter.PacketCondition(1),
 			})
 			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
@@ -570,16 +562,12 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		case types.PassthroughModeNextOutput:
 			condRecoder = append(condRecoder, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(0),
-					s.SwitchPostFilter.PacketCondition(0),
-				},
+				s.SwitchPreFilter.PacketCondition(0),
+				s.SwitchPostFilter.PacketCondition(0),
 			})
 			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				Condition: packetcondition.And{
-					s.SwitchPreFilter.PacketCondition(1),
-					s.SwitchPostFilter.PacketCondition(1),
-				},
+				s.SwitchPreFilter.PacketCondition(1),
+				s.SwitchPostFilter.PacketCondition(1),
 			})
 			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:

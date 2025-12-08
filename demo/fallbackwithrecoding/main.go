@@ -19,14 +19,18 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
+	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	"github.com/xaionaro-go/avpipeline/node/filter/packetfilter/preset/monotonicpts"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
-	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/observability/xlogger"
 	"github.com/xaionaro-go/secret"
@@ -55,6 +59,8 @@ func main() {
 	encoderVideoCodec := pflag.String("encoder-video-codec", "libx264", "encoding video codec")
 	encoderAudioCodec := pflag.String("encoder-audio-codec", "aac", "encoding audio codec")
 	encoderAudioChannels := pflag.Int("encoder-audio-channels", 2, "encoding audio channels")
+	videoFPSScale := pflag.Float64("video-fps-scale", 1, "video FPS scale factor; currently supported only values 0..1")
+	videoGOP := pflag.Int("video-gop", 60, "video GOP size in frames")
 
 	pflag.Parse()
 	if len(pflag.Args()) != 3 {
@@ -162,18 +168,32 @@ func main() {
 	)
 	decoderFallbackNode := node.NewFromKernel(ctx, decoderFallback, processor.DefaultOptionsRecoder()...)
 
+	sw.SetOnAfterSwitch(func(ctx context.Context, pkt packetorframe.InputUnion, from, to int32) {
+		logger.Debugf(ctx, "switched input from %d to %d", from, to)
+		switch to {
+		case 0:
+			decoderMain.ResetHard(ctx)
+		case 1:
+			decoderFallback.ResetHard(ctx)
+		}
+	})
+
 	// encoder
 
 	logger.Debugf(ctx, "initializing encoder...")
 	audioOptions := astiav.NewDictionary()
 	audioOptions.Set("ac", fmt.Sprintf("%d", *encoderAudioChannels), 0)
+	videoOptions := astiav.NewDictionary()
+	videoOptions.Set("g", fmt.Sprintf("%d", *videoGOP), 0)
 	encoder := kernel.NewEncoder(ctx,
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
 			HardwareDeviceType: encoderHardwareDeviceType,
 			VideoCodec:         codec.Name(*encoderVideoCodec),
 			VideoQuality:       encoderQuality,
 			VideoResolution:    encoderResolution,
+			VideoOptions:       videoOptions,
 			AudioCodec:         codec.Name(*encoderAudioCodec),
+			AudioOptions:       audioOptions,
 		}),
 		nil,
 	)
@@ -197,8 +217,8 @@ func main() {
 	//
 	//
 	// input (main) -----> switch ->--------> MonotonicPTS + decoder --->-+
-	//                      .                  .                          |
-	//                      .                  .                          +--> encoder (--> BSF) --> output
+	//                      .                  .                          | FPSReduce
+	//                      .                  .                          +->---------> encoder --> BSF --> output
 	//                      .                  .                          |
 	// input (fallback) -> switch ->--------> MonotonicPTS + decoder --->-+
 	//
@@ -230,6 +250,14 @@ func main() {
 	inputFallbackSwitchNode.AddPushPacketsTo(ctx, decoderFallbackNode)
 	decoderFallbackNode.AddPushPacketsTo(ctx, encoderNode)
 	decoderFallbackNode.AddPushFramesTo(ctx, encoderNode)
+
+	if *videoFPSScale >= 0 {
+		r := globaltypes.RationalFromApproxFloat64(*videoFPSScale)
+		encoderNode.SetInputFrameFilter(framefiltercondition.Frame{framecondition.Or{
+			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
+			framecondition.ReduceFramerateFraction(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+		}})
+	}
 
 	if outputBSFEnabled {
 		encoderBSF := autofix.New(ctx, encoder, output.Kernel)

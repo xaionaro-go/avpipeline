@@ -6,16 +6,14 @@ import (
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 )
 
-type Frame struct {
-	Condition framecondition.Condition
-}
+type Frame framecondition.And
 
 var _ Condition = Frame{}
 
 func (v Frame) String() string {
-	return v.Condition.String()
+	return framecondition.And(v).String()
 }
 
 func (v Frame) Match(ctx context.Context, in Input) bool {
-	return v.Condition.Match(ctx, in.Input)
+	return framecondition.And(v).Match(ctx, in.Input)
 }

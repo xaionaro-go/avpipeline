@@ -129,7 +129,7 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 		}
 	}
 	logger.Debugf(ctx, "closing the codec internals")
-	belt.Flush(ctx) // we want to flush the logs before a SEGFAULT-risky operation:
+	belt.Flush(ctx) // we want to flush the logs before a SEGFAULT/SIGTRAP-risky operation:
 	err := c.closer.Close()
 	return err
 }
@@ -158,6 +158,7 @@ func (c *codecInternals) reset(ctx context.Context) (_err error) {
 		return fmt.Errorf("codec is closed")
 	}
 	if !c.IsEncoder {
+		logger.Debugf(ctx, "is decoder, flushing buffers")
 		c.codecContext.FlushBuffers()
 		return
 	}
@@ -563,7 +564,7 @@ func newCodec(
 		}
 		c.codecContext.SetSampleRate(codecParameters.SampleRate())
 		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
-		logger.Tracef(ctx, "sample_rate: %d", c.codecContext.SampleRate())
+		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout())
 	}
 
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {

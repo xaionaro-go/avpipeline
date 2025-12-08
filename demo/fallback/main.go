@@ -158,45 +158,41 @@ func main() {
 	filteredInputMain.AddPushPacketsTo(ctx,
 		outputNode,
 		packetfiltercondition.Packet{
-			Condition: condition.And{
-				sw.PacketCondition(0),
-				tsShifter,
-				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
-						return true
-					}
-					if !pkt.Flags().Has(astiav.PacketFlagKey) {
-						return true
-					}
-					if pkt.Dts() > lastDTS {
-						lastDTS = pkt.Dts()
-					}
-					if pkt.Dts() < lastDTS {
-						tsShifter.Offset += lastDTS - pkt.Dts()
-					}
+			sw.PacketCondition(0),
+			tsShifter,
+			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
+				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
 					return true
-				}),
-			},
+				}
+				if !pkt.Flags().Has(astiav.PacketFlagKey) {
+					return true
+				}
+				if pkt.Dts() > lastDTS {
+					lastDTS = pkt.Dts()
+				}
+				if pkt.Dts() < lastDTS {
+					tsShifter.Offset += lastDTS - pkt.Dts()
+				}
+				return true
+			}),
 		},
 	)
 	filteredInputFallback.AddPushPacketsTo(ctx,
 		outputNode,
 		packetfiltercondition.Packet{
-			Condition: condition.And{
-				sw.PacketCondition(1),
-				condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-					if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
-						return true
-					}
-					if !pkt.Flags().Has(astiav.PacketFlagKey) {
-						return true
-					}
-					if pkt.Dts() > lastDTS {
-						lastDTS = pkt.Dts()
-					}
+			sw.PacketCondition(1),
+			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
+				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
 					return true
-				}),
-			},
+				}
+				if !pkt.Flags().Has(astiav.PacketFlagKey) {
+					return true
+				}
+				if pkt.Dts() > lastDTS {
+					lastDTS = pkt.Dts()
+				}
+				return true
+			}),
 		},
 	)
 	pipelineInputs := node.Nodes[node.Abstract]{

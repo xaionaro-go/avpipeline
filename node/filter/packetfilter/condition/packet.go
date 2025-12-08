@@ -6,16 +6,14 @@ import (
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
-type Packet struct {
-	Condition packetcondition.Condition
-}
+type Packet packetcondition.And
 
 var _ Condition = Packet{}
 
 func (v Packet) String() string {
-	return v.Condition.String()
+	return packetcondition.And(v).String()
 }
 
 func (v Packet) Match(ctx context.Context, in Input) bool {
-	return v.Condition.Match(ctx, in.Input)
+	return packetcondition.And(v).Match(ctx, in.Input)
 }
