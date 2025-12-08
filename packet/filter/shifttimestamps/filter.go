@@ -1,4 +1,4 @@
-package filter
+package shifttimestamps
 
 import (
 	"context"
@@ -9,28 +9,28 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
-type ShiftTimestamps struct {
+type Filter struct {
 	Condition condition.Condition
 	Offset    int64
 }
 
-var _ condition.Condition = (*ShiftTimestamps)(nil)
+var _ condition.Condition = (*Filter)(nil)
 
-func NewShiftTimestamps(
+func New(
 	offset int64,
 	cond condition.Condition,
-) *ShiftTimestamps {
-	return &ShiftTimestamps{
+) *Filter {
+	return &Filter{
 		Condition: cond,
 		Offset:    offset,
 	}
 }
 
-func (f *ShiftTimestamps) String() string {
+func (f *Filter) String() string {
 	return fmt.Sprintf("ShiftTimestamps(%#+v, if:%s)", f.Offset, f.Condition)
 }
 
-func (f *ShiftTimestamps) Match(
+func (f *Filter) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {

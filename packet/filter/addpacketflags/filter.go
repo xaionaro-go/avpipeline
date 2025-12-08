@@ -1,4 +1,4 @@
-package filter
+package addpacketflags
 
 import (
 	"context"
@@ -9,28 +9,28 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
-type AddPacketFlags struct {
+type Filter struct {
 	Condition condition.Condition
 	Flag      astiav.PacketFlag
 }
 
-var _ condition.Condition = (*AddPacketFlags)(nil)
+var _ condition.Condition = (*Filter)(nil)
 
-func NewAddPacketFlags(
+func New(
 	flag astiav.PacketFlag,
 	cond condition.Condition,
-) *AddPacketFlags {
-	return &AddPacketFlags{
+) *Filter {
+	return &Filter{
 		Condition: cond,
 		Flag:      flag,
 	}
 }
 
-func (f *AddPacketFlags) String() string {
+func (f *Filter) String() string {
 	return fmt.Sprintf("AddPacketFlags(%#+v, if:%s)", f.Flag, f.Condition)
 }
 
-func (f *AddPacketFlags) Match(
+func (f *Filter) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
@@ -38,7 +38,6 @@ func (f *AddPacketFlags) Match(
 		return true
 	}
 	flag := pkt.Flags()
-	flag.Add(f.Flag)
-	pkt.SetFlags(flag)
+	pkt.SetFlags(flag.Add(f.Flag))
 	return true
 }

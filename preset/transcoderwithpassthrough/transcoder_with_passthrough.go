@@ -22,7 +22,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
-	"github.com/xaionaro-go/avpipeline/packet/filter"
+	"github.com/xaionaro-go/avpipeline/packet/filter/rescaletsbetweenpacketsources"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -527,7 +527,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		if passthroughRescaleTS {
 			if !startWithPassthrough || notifyAboutPacketSources {
 				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
-					Condition: filter.NewRescaleTSBetweenKernels(
+					Condition: rescaletsbetweenpacketsources.New(
 						s.PacketSource,
 						s.NodeRecoder.Processor.Kernel.Encoder,
 					),

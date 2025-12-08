@@ -22,7 +22,7 @@ import (
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
-	"github.com/xaionaro-go/avpipeline/packet/filter"
+	"github.com/xaionaro-go/avpipeline/packet/filter/shifttimestamps"
 	"github.com/xaionaro-go/avpipeline/preset/autoheaders"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
@@ -76,7 +76,7 @@ func main() {
 
 	sw := condition.NewSwitch()
 	sw.SetValue(ctx, 1)
-	tsShifter := filter.NewShiftTimestamps(0, nil)
+	tsShifter := shifttimestamps.New(0, nil)
 	inputMain := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{})

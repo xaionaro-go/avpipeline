@@ -157,6 +157,13 @@ func (s *Switch) setNextValueNow(
 		if old == idx {
 			return
 		}
+		if s.CurrentValue.Load() == idx {
+			logger.Debugf(ctx, "the next value is equal to the current value")
+			if old == math.MinInt32 {
+				return
+			}
+			s.NextValue.Store(math.MinInt32)
+		}
 		s.rotateChangeChan()
 	})
 	return nil

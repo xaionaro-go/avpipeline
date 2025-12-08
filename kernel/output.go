@@ -260,6 +260,9 @@ func NewOutputFromURL(
 	switch url.Scheme {
 	case "rtmp", "rtmps":
 		if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
+			if cfg.WaitForOutputStreams.MinStreamsVideo == 0 {
+				cfg.WaitForOutputStreams.MinStreamsVideo = 1
+			}
 			cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(true)
 		}
 		if o.Dictionary == nil {
@@ -290,6 +293,7 @@ func NewOutputFromURL(
 	if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
 		cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(false)
 	}
+	logger.Debugf(ctx, "output.WaitForOutputStreams: %s", spew.Sdump(cfg.WaitForOutputStreams))
 
 	logger.Debugf(ctx, "isAsync: %t", cfg.AsyncOpen)
 	if cfg.AsyncOpen {
@@ -617,12 +621,12 @@ func (o *Output) SendInputPacket(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx,
-		"SendInputPacket (stream: %d, pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d)",
-		inputPkt.StreamIndex(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(),
+		"SendInputPacket (stream: %d:%s, pkt:%p, pos:%d, pts:%d, dts:%d, dur:%d, size: %d)",
+		inputPkt.StreamIndex(), inputPkt.GetMediaType(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), inputPkt.Packet.Size(),
 	)
 	defer func() {
-		logger.Tracef(ctx, "/SendInputPacket (stream: %d, pkt: %p, pos:%d, pts:%d, dts:%d, dur:%d): %v",
-			inputPkt.StreamIndex(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), _err)
+		logger.Tracef(ctx, "/SendInputPacket (stream: %d:%s, pkt:%p): %v",
+			inputPkt.StreamIndex(), inputPkt.GetMediaType(), inputPkt.Packet, _err)
 	}()
 
 	pkt := inputPkt.Packet
@@ -707,19 +711,22 @@ func (o *Output) send(
 	var expectedStreamsVideoCount uint
 	var expectedStreamsAudioCount uint
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		fmtStreams := fmtCtx.NbStreams()
-		if fmtStreams < 0 {
-			logger.Errorf(ctx, "invalid number of streams in the source format context: %d", fmtStreams)
-			return
+		for _, inputStream := range fmtCtx.Streams() {
+			switch inputStream.CodecParameters().MediaType() {
+			case astiav.MediaTypeVideo:
+				expectedStreamsVideoCount++
+			case astiav.MediaTypeAudio:
+				expectedStreamsAudioCount++
+			}
+			expectedStreamsCount++
 		}
-		expectedStreamsCount = uint(fmtStreams)
 	})
 	if o.Config.WaitForOutputStreams != nil {
 		if expectedStreamsCount < o.Config.WaitForOutputStreams.MinStreams {
 			expectedStreamsCount = o.Config.WaitForOutputStreams.MinStreams
 		}
-		expectedStreamsVideoCount = o.Config.WaitForOutputStreams.MinStreamsVideo
-		expectedStreamsAudioCount = o.Config.WaitForOutputStreams.MinStreamsAudio
+		expectedStreamsVideoCount = max(expectedStreamsVideoCount, o.Config.WaitForOutputStreams.MinStreamsVideo)
+		expectedStreamsAudioCount = max(expectedStreamsAudioCount, o.Config.WaitForOutputStreams.MinStreamsAudio)
 	}
 
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() uint {
@@ -727,7 +734,7 @@ func (o *Output) send(
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-	logger.Debugf(ctx, "isKeyFrame:%t", keyFrame)
+	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount)
 	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
 		if outputAcceptOnlyKeyFramesUntilStart {
 			logger.Debugf(ctx, "not a key frame; skipping")

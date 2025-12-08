@@ -25,8 +25,10 @@ import (
 
 const (
 	doFullCopyOfParameters   = false
-	setRoteControlParameters = false
+	setRateControlParameters = false
 	setSetPktTimeBase        = false
+	setEncoderExtraData      = true
+	setPipelinishFlags       = true
 )
 
 type hardwareContextType int
@@ -220,9 +222,9 @@ func findCodec(
 	codecID astiav.CodecID,
 	codecName Name,
 ) (_ret *astiav.Codec) {
-	logger.Tracef(ctx, "findCodec(ctx, %t, %s, '%s')", isEncoder, codecID, codecName)
+	logger.Debugf(ctx, "findCodec(ctx, %t, %s, '%s')", isEncoder, codecID, codecName)
 	defer func() {
-		logger.Tracef(ctx, "/findCodec(ctx, %t, %s, '%s'): %v", isEncoder, codecID, codecName, _ret)
+		logger.Debugf(ctx, "/findCodec(ctx, %t, %s, '%s'): %v", isEncoder, codecID, codecName, _ret)
 	}()
 	if isEncoder {
 		return findEncoderCodec(codecID, codecName)
@@ -497,7 +499,7 @@ func newCodec(
 		if bitRate := codecParameters.BitRate(); bitRate > 0 {
 			logger.Tracef(ctx, "bitrate: %d", bitRate)
 			c.codecContext.SetBitRate(bitRate)
-			if setRoteControlParameters {
+			if setRateControlParameters {
 				c.codecContext.SetRateControlMinRate(bitRate)
 				c.codecContext.SetRateControlMaxRate(bitRate)
 				c.codecContext.SetRateControlBufferSize(int(bitRate * 2))
@@ -573,9 +575,15 @@ func newCodec(
 	if setSetPktTimeBase {
 		c.codecContext.SetPktTimeBase(timeBase)
 	}
-	flags := 0 |
-		astiav.CodecContextFlags(astiav.CodecContextFlagLowDelay) | // this is a streaming focused library
-		astiav.CodecContextFlags(astiav.CodecContextFlagClosedGop) // to make sure we can route dynamically without issues
+	flags := astiav.CodecContextFlags(0)
+	if setPipelinishFlags {
+		flags |= 0 |
+			astiav.CodecContextFlags(astiav.CodecContextFlagLowDelay) // this is a streaming focused library
+	}
+	if setPipelinishFlags && isEncoder {
+		flags |= 0 |
+			astiav.CodecContextFlags(astiav.CodecContextFlagClosedGop) // to make sure we can route dynamically without issues
+	}
 	if c.codec.Capabilities()&astiav.CodecCapabilityDelay != 0 {
 		if isEncoder && c.codec.Capabilities()&astiav.CodecCapabilityEncoderReorderedOpaque == 0 {
 			logger.Warnf(ctx, "codec '%s' has 'delay' capability, but doesn't have 'encoder_reordered_opaque' capability, so it is not supported by avpipeline", c.codec.Name())
@@ -584,10 +592,13 @@ func newCodec(
 			flags |= astiav.CodecContextFlags(astiav.CodecContextFlagCopyOpaque)
 		}
 	}
-	flags2 := 0 |
-		astiav.CodecContextFlags2(astiav.CodecFlag2LocalHeader) | // to make sure we can route dynamically without issues
-		astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
+	flags2 := astiav.CodecContextFlags2(0)
+	if isEncoder && setPipelinishFlags {
+		flags2 |= 0 |
+			astiav.CodecContextFlags2(astiav.CodecFlag2LocalHeader) // to make sure we can route dynamically without issues
+		//astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
 		//astiav.CodecContextFlags2(astiav.CodecFlag2ShowAll) // to do not skip frames (pre the first key frame)
+	}
 	c.codecContext.SetFlags(flags)
 	c.codecContext.SetFlags2(flags2)
 	c.codecContext.SetErrorRecognitionFlags(input.Params.ErrorRecognitionFlags)
@@ -595,6 +606,9 @@ func newCodec(
 	if isEncoder {
 		if timeBase.Num() == 0 {
 			return nil, fmt.Errorf("TimeBase must be set")
+		}
+		if setEncoderExtraData {
+			c.codecContext.SetExtraData(codecParameters.ExtraData())
 		}
 	} else {
 		c.codecContext.SetExtraData(codecParameters.ExtraData())

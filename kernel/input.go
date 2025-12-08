@@ -31,13 +31,14 @@ const (
 )
 
 type InputConfig struct {
-	CustomOptions       globaltypes.DictionaryItems
-	RecvBufferSize      uint
-	AsyncOpen           bool
-	OnPostOpen          func(context.Context, *Input) error
-	OnPreClose          func(context.Context, *Input) error
-	KeepOpen            bool
-	CorrectZeroDuration bool
+	CustomOptions      globaltypes.DictionaryItems
+	RecvBufferSize     uint
+	AsyncOpen          bool
+	OnPostOpen         func(context.Context, *Input) error
+	OnPreClose         func(context.Context, *Input) error
+	KeepOpen           bool
+	IgnoreIncorrectDTS bool
+	IgnoreZeroDuration bool
 }
 
 type Input struct {
@@ -55,10 +56,10 @@ type Input struct {
 	DefaultHeight int
 	DefaultFPS    astiav.Rational
 
-	KeepOpen            bool
-	OnPreClose          func(context.Context, *Input) error
-	CorrectDTS          bool
-	CorrectZeroDuration bool
+	KeepOpen           bool
+	OnPreClose         func(context.Context, *Input) error
+	IgnoreIncorrectDTS bool
+	IgnoreZeroDuration bool
 
 	WaitGroup sync.WaitGroup
 }
@@ -92,9 +93,10 @@ func NewInputFromURL(
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
 
-		KeepOpen:            cfg.KeepOpen,
-		OnPreClose:          cfg.OnPreClose,
-		CorrectZeroDuration: cfg.CorrectZeroDuration,
+		KeepOpen:           cfg.KeepOpen,
+		OnPreClose:         cfg.OnPreClose,
+		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
+		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
 	}
 	defaultFPS := float64(inputDefaultFPS)
 
@@ -382,7 +384,7 @@ func (i *Input) Generate(
 				),
 			))
 
-			if i.CorrectZeroDuration && prevPkt != nil {
+			if !i.IgnoreZeroDuration && prevPkt != nil {
 				assert(ctx, prevPkt.Pts() != astiav.NoPtsValue, "previous packet PTS is not set")
 				assert(ctx, prevPkt.Pts() >= 0, "previous packet PTS is negative")
 				suggestedDuration := curPkt.Pts() - prevPkt.Pts()
@@ -403,12 +405,12 @@ func (i *Input) Generate(
 				}
 			}
 
-			if i.CorrectDTS && curPkt.Dts() == astiav.NoPtsValue {
+			if !i.IgnoreIncorrectDTS && curPkt.Dts() == astiav.NoPtsValue {
 				curPkt.Packet.SetDts(curPkt.Pts())
 				logger.Tracef(ctx, "the packet had no DTS set; setting DTS=PTS: %d", curPkt.Pts())
 			}
 
-			if i.CorrectZeroDuration {
+			if !i.IgnoreZeroDuration {
 				isDurationIncorrect := curPkt.Duration() <= 1
 				if isDurationIncorrect {
 					switch curPkt.GetMediaType() {

@@ -1,4 +1,4 @@
-package filter
+package rescaletsbetweenpacketsources
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type RescaleTSBetweenKernels struct {
+type Filter struct {
 	From packet.Source
 	To   packet.Source
 
@@ -19,13 +19,13 @@ type RescaleTSBetweenKernels struct {
 	ToStream   map[int]*astiav.Stream
 }
 
-var _ condition.Condition = (*RescaleTSBetweenKernels)(nil)
+var _ condition.Condition = (*Filter)(nil)
 
-func NewRescaleTSBetweenKernels(
+func New(
 	from packet.Source,
 	to packet.Source,
-) *RescaleTSBetweenKernels {
-	return &RescaleTSBetweenKernels{
+) *Filter {
+	return &Filter{
 		From:       from,
 		To:         to,
 		FromStream: make(map[int]*astiav.Stream),
@@ -33,7 +33,7 @@ func NewRescaleTSBetweenKernels(
 	}
 }
 
-func (f *RescaleTSBetweenKernels) getFromStream(
+func (f *Filter) getFromStream(
 	ctx context.Context,
 	streamIndex int,
 ) *astiav.Stream {
@@ -55,7 +55,7 @@ func (f *RescaleTSBetweenKernels) getFromStream(
 	})
 }
 
-func (f *RescaleTSBetweenKernels) getToStream(
+func (f *Filter) getToStream(
 	ctx context.Context,
 	streamIndex int,
 ) *astiav.Stream {
@@ -77,7 +77,7 @@ func (f *RescaleTSBetweenKernels) getToStream(
 	})
 }
 
-func (f *RescaleTSBetweenKernels) Match(
+func (f *Filter) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
@@ -87,6 +87,6 @@ func (f *RescaleTSBetweenKernels) Match(
 	return true
 }
 
-func (f *RescaleTSBetweenKernels) String() string {
+func (f *Filter) String() string {
 	return fmt.Sprintf("RescaleTSBetweenKernels(%s -> %s)", f.From, f.To)
 }
