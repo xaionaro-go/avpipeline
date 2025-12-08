@@ -220,3 +220,7 @@ func (c *DecoderLocked) Reset(ctx context.Context) (_err error) {
 	c.receivedKeyFrame = false
 	return c.Codec.reset(ctx)
 }
+
+func (c *DecoderLocked) Close(ctx context.Context) error {
+	return c.closeLocked(ctx)
+}

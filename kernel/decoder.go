@@ -524,17 +524,20 @@ func (d *Decoder[DF]) resetSoft(
 
 func (d *Decoder[DF]) ResetHard(
 	ctx context.Context,
+	opts ...CodecResetOption,
 ) (_err error) {
 	logger.Debugf(ctx, "ResetHard")
 	defer func() { logger.Debugf(ctx, "/ResetHard: %v", _err) }()
-	return xsync.DoA1R1(ctx, &d.Locker, d.resetHard, ctx)
+	return xsync.DoA2R1(ctx, &d.Locker, d.resetHard, ctx, opts)
 }
 
 func (d *Decoder[DF]) resetHard(
 	ctx context.Context,
+	opts CodecResetOptions,
 ) (_err error) {
-	logger.Tracef(ctx, "resetHard")
-	defer func() { logger.Tracef(ctx, "/resetHard: %v", _err) }()
+	cfg := opts.config()
+	logger.Tracef(ctx, "resetHard: cfg=%+v", cfg)
+	defer func() { logger.Tracef(ctx, "/resetHard: cfg=%#+v: %v", cfg, _err) }()
 
 	var errs []error
 	for streamIndex, decoder := range d.Decoders {

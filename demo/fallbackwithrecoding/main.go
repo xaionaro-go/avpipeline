@@ -122,7 +122,9 @@ func main() {
 
 	inputMain := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
-			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{})
+			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{
+				KeepOpen: true,
+			})
 		},
 		func(ctx context.Context, k *kernel.Input) error {
 			sw.SetValue(ctx, 0)
@@ -132,6 +134,7 @@ func main() {
 			logger.Debugf(ctx, "main input error: %v", err)
 			sw.SetValue(ctx, 1)
 			time.Sleep(*retryInterval)
+			observability.Go(ctx, func(ctx context.Context) { k.Close(ctx) })
 			return kernel.ErrRetry{Err: err}
 		},
 	)
@@ -149,7 +152,9 @@ func main() {
 	logger.Debugf(ctx, "opening '%s' as the fallback input...", fromURLFallback)
 	inputFallback := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
-			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{})
+			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{
+				KeepOpen: true,
+			})
 		},
 		func(ctx context.Context, k *kernel.Input) error {
 			return nil
@@ -157,6 +162,7 @@ func main() {
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			logger.Debugf(ctx, "fallback input error: %v", err)
 			time.Sleep(*retryInterval)
+			observability.Go(ctx, func(ctx context.Context) { k.Close(ctx) })
 			return kernel.ErrRetry{Err: err}
 		},
 	)
