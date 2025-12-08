@@ -172,7 +172,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 			if packetSideData := pkt.SideData(); packetSideData != nil {
 				if newExtraData, ok := packetSideData.NewExtraData().Get(); ok {
 					extraData := extradata.Raw(newExtraData)
-					logger.Debugf(ctx, "updating extra data for output stream #%d: %s", input.StreamIndex(), extraData)
+					logger.Tracef(ctx, "updating extra data for output stream #%d: %s", input.StreamIndex(), extraData)
 					outCodecParams.SetExtraData(newExtraData)
 					if idx < len(filterChain)-1 {
 						nextFilter := filterChain[idx+1]
