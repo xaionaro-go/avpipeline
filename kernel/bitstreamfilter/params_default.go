@@ -10,7 +10,7 @@ func ParamsMP4ToMP2(codecID astiav.CodecID) []Params {
 
 func ParamsMP2ToMP4(codecID astiav.CodecID) []Params {
 	switch codecID {
-	case astiav.CodecIDH264, astiav.CodecIDHevc:
+	case astiav.CodecIDAv1, astiav.CodecIDH264, astiav.CodecIDHevc:
 		return []Params{
 			{Name: NameExtractExtradata},
 		}

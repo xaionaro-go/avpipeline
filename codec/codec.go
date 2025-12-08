@@ -27,7 +27,7 @@ const (
 	doFullCopyOfParameters   = false
 	setRateControlParameters = false
 	setSetPktTimeBase        = false
-	setEncoderExtraData      = true
+	setEncoderExtraData      = false // <- this is wrong, don't use it unless you are temporary debugging something
 	setPipelinishFlags       = true
 )
 

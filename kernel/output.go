@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -542,7 +543,7 @@ func (o *Output) configureOutputStream(
 
 	logger.Debugf(
 		ctx,
-		"new output stream: %d->%d: %s: %s: %s: %s: %s",
+		"new output stream: %d->%d: %s: %s: %s: %s: %s; extraData: %s",
 		inputStream.Index(),
 		outputStream.Index(),
 		outputStream.CodecParameters().MediaType(),
@@ -550,6 +551,7 @@ func (o *Output) configureOutputStream(
 		outputStream.TimeBase(),
 		spew.Sdump(outputStream),
 		spew.Sdump(outputStream.CodecParameters()),
+		extradata.Raw(outputStream.CodecParameters().ExtraData()),
 	)
 	if outputCopyStreamIndex {
 		outputStream.SetIndex(inputStream.Index())
@@ -570,6 +572,44 @@ func (o *Output) configureOutputStream(
 			return fmt.Errorf("video stream has invalid dimensions: %dx%d", w, h)
 		}
 		logger.Debugf(ctx, "video stream dimensions: %dx%d", w, h)
+	}
+
+	return nil
+}
+
+func (o *Output) preallocateOutputStream(
+	ctx context.Context,
+	inputSource packet.Source,
+	inputStream *astiav.Stream,
+	fmtCtx *astiav.FormatContext,
+) (_err error) {
+	inputStreamIndex := inputStream.Index()
+	if _, ok := o.OutputStreams[inputStreamIndex]; ok {
+		logger.Tracef(ctx, "stream #%d already exists, not preallocating", inputStreamIndex)
+		return nil
+	}
+
+	logger.Debugf(ctx, "preallocating output stream for input stream #%d", inputStreamIndex)
+	switch inputStream.CodecParameters().MediaType() {
+	case astiav.MediaTypeAudio:
+		outputStream := &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
+		o.PreallocatedAudioStreams = append(o.PreallocatedAudioStreams, outputStream)
+
+		o.waitingKeyFrames[outputStream.Index()] = struct{}{}
+		logger.Debugf(ctx, "waiting for key frames from %d streams", len(o.waitingKeyFrames))
+		o.OutputStreams[inputStreamIndex] = nil
+	case astiav.MediaTypeVideo:
+		outputStream := &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
+		o.PreallocatedVideoStreams = append(o.PreallocatedVideoStreams, outputStream)
+		o.OutputStreams[inputStreamIndex] = nil
+	default:
+		logger.Tracef(ctx, "not preallocating output stream for input stream #%d: media type is %s", inputStreamIndex, inputStream.CodecParameters().MediaType())
 	}
 
 	return nil
@@ -641,13 +681,15 @@ func (o *Output) SendInputPacket(
 
 	var (
 		outputStream *OutputStream
-		err          error = ErrNoSourceFormatContext{}
+		err          error = ErrNoSourceFormatContext{
+			StreamIndex: inputPkt.StreamIndex(),
+		}
 	)
 	o.formatContextLocker.Do(ctx, func() {
 		inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.Stream, fmtCtx)
 		})
-		if err == (ErrNoSourceFormatContext{}) {
+		if errors.As(err, &ErrNoSourceFormatContext{}) {
 			outputStream = o.OutputStreams[inputPkt.StreamIndex()]
 			if outputStream != nil {
 				err = nil
@@ -670,10 +712,12 @@ func (o *Output) SendInputPacket(
 	return nil
 }
 
-type ErrNoSourceFormatContext struct{}
+type ErrNoSourceFormatContext struct {
+	StreamIndex int
+}
 
 func (e ErrNoSourceFormatContext) Error() string {
-	return "no source format context"
+	return fmt.Sprintf("no source format context (stream_index: %d)", e.StreamIndex)
 }
 
 func (o *Output) SendInputFrame(
@@ -1096,9 +1140,9 @@ func (o *Output) NotifyAboutPacketSource(
 		o.formatContextLocker.Do(ctx, func() {
 			for _, stream := range fmtCtx.Streams() {
 				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())
-				_, err := o.getOutputStream(ctx, source, stream, fmtCtx)
+				err := o.preallocateOutputStream(ctx, source, stream, fmtCtx)
 				if err != nil {
-					errs = append(errs, fmt.Errorf("unable to initialize an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
+					errs = append(errs, fmt.Errorf("unable to preallocate an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
 				}
 			}
 		})

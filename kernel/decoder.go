@@ -12,6 +12,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -382,10 +383,12 @@ func (d *Decoder[DF]) drain(
 				logger.Warnf(ctx, "frame duration is not set: %d (packetInfo: %#+v)", f.Duration(), packetInfo)
 			}
 		}
+
 		err := d.send(ctx, outputFramesCh, f, streamInfo)
 		if err != nil {
 			return fmt.Errorf("unable to send decoded frame: %w", err)
 		}
+
 		return nil
 	})
 }
@@ -452,6 +455,7 @@ func (d *Decoder[DF]) getOutputCodecParameters(
 		// TODO: figure out which PCM is used here and set it
 	}
 	d.OutputCodecParameters[streamIndex] = codecParams
+	logger.Debugf(ctx, "extraData: %s", extradata.Raw(codecParams.ExtraData()))
 	return codecParams
 }
 

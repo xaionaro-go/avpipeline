@@ -14,6 +14,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/avconv"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -364,14 +365,15 @@ func (i *Input) Generate(
 		case nil:
 			streamIndex := pkt.StreamIndex()
 			stream := avconv.FindStreamByIndex(ctx, i.FormatContext, streamIndex)
+			codecParams := stream.CodecParameters()
 			logger.Tracef(
 				ctx,
-				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d",
-				stream.CodecParameters().MediaType(),
+				"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d, extraData:%s",
+				codecParams.MediaType(),
 				streamIndex,
 				pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(),
 				pkt.Flags().Has(astiav.PacketFlagKey),
-				len(pkt.Data()),
+				len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
 			)
 
 			prevPkt := prevPkts[streamIndex]

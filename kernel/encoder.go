@@ -15,6 +15,7 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -203,7 +204,7 @@ func (e *Encoder[EF]) configureOutputStream(
 	}
 	logger.Debugf(
 		ctx,
-		"resulting output stream for input stream %d: %d: %s: %s: %s: %s: %s",
+		"resulting output stream for input stream %d: %d: %s: %s: %s: %s: %s; extraData: %s",
 		streamIndex,
 		outputStream.Index(),
 		outputStream.CodecParameters().MediaType(),
@@ -211,6 +212,7 @@ func (e *Encoder[EF]) configureOutputStream(
 		outputStream.TimeBase(),
 		spew.Sdump(outputStream),
 		spew.Sdump(outputStream.CodecParameters()),
+		extradata.Raw(outputStream.CodecParameters().ExtraData()),
 	)
 	e.outputStreams[streamIndex] = outputStream
 

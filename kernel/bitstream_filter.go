@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
@@ -24,23 +26,29 @@ type InternalBitstreamFilterInstance struct {
 type BitstreamFilter struct {
 	*closuresignaler.ClosureSignaler
 	xsync.Mutex
-	GetChainParamser bitstreamfilter.GetChainParamser
-	FilterChains     map[int][]*InternalBitstreamFilterInstance
+	GetChainParamser    bitstreamfilter.GetChainParamser
+	FilterChains        map[int][]*InternalBitstreamFilterInstance
+	OutputFormatContext *astiav.FormatContext
+	OutputStreams       map[int]*astiav.Stream
 
 	SentPacketsWithoutOutput uint64
 }
 
 var _ Abstract = (*BitstreamFilter)(nil)
+var _ packet.Source = (*BitstreamFilter)(nil)
 
 func NewBitstreamFilter(
 	ctx context.Context,
 	paramsGetter bitstreamfilter.GetChainParamser,
 ) (*BitstreamFilter, error) {
 	bsf := &BitstreamFilter{
-		ClosureSignaler:  closuresignaler.New(),
-		GetChainParamser: paramsGetter,
-		FilterChains:     make(map[int][]*InternalBitstreamFilterInstance),
+		ClosureSignaler:     closuresignaler.New(),
+		GetChainParamser:    paramsGetter,
+		FilterChains:        make(map[int][]*InternalBitstreamFilterInstance),
+		OutputFormatContext: astiav.AllocFormatContext(),
+		OutputStreams:       make(map[int]*astiav.Stream),
 	}
+	setFinalizerFree(ctx, bsf.OutputFormatContext)
 	return bsf, nil
 }
 
@@ -110,9 +118,21 @@ func (bsf *BitstreamFilter) sendInputPacket(
 	if err != nil {
 		return fmt.Errorf("unable to get a filter for stream #%d: %w", input.StreamIndex(), err)
 	}
+	if len(filterChain) == 0 {
+		bsf.Mutex.UDo(ctx, func() {
+			select {
+			case <-ctx.Done():
+			case outputPacketsCh <- packet.BuildOutput(
+				input.Packet,
+				input.StreamInfo,
+			):
+			}
+		})
+		return ctx.Err()
+	}
 
 	pkts := []*astiav.Packet{packet.CloneAsReferenced(input.Packet)}
-	for _, filter := range filterChain {
+	for idx, filter := range filterChain {
 		for _, pkt := range pkts {
 			bsf.SentPacketsWithoutOutput++
 			logger.Tracef(ctx, "sending a packet to %s", filter.Name())
@@ -147,8 +167,29 @@ func (bsf *BitstreamFilter) sendInputPacket(
 				return fmt.Errorf("unable receive the packet from the filter: %w", err)
 			}
 
+			outCodecParams := filter.BitStreamFilterContext.OutputCodecParameters()
+
+			if packetSideData := pkt.SideData(); packetSideData != nil {
+				if newExtraData, ok := packetSideData.NewExtraData().Get(); ok {
+					extraData := extradata.Raw(newExtraData)
+					logger.Debugf(ctx, "updating extra data for output stream #%d: %s", input.StreamIndex(), extraData)
+					outCodecParams.SetExtraData(newExtraData)
+					if idx < len(filterChain)-1 {
+						nextFilter := filterChain[idx+1]
+						if err := nextFilter.BitStreamFilterContext.InputCodecParameters().Copy(outCodecParams); err != nil {
+							return fmt.Errorf("unable to copy updated codec parameters to the next filter in the chain: %w", err)
+						}
+					}
+				}
+			}
+
 			bsf.SentPacketsWithoutOutput = 0
-			logger.Tracef(ctx, "received a packet from %s", filter.Name())
+			logger.Tracef(ctx,
+				"received a %s packet from %s (isKey:%v)",
+				outCodecParams.MediaType(),
+				filter.Name(),
+				pkt.Flags().Has(astiav.PacketFlagKey),
+			)
 			pkts = append(pkts, pkt)
 		}
 
@@ -158,6 +199,22 @@ func (bsf *BitstreamFilter) sendInputPacket(
 				bsf.FilterChains[input.StreamIndex()] = nil
 			}
 		}
+	}
+
+	latestFilter := filterChain[len(filterChain)-1]
+	codecParams := latestFilter.BitStreamFilterContext.OutputCodecParameters()
+	logger.Debugf(ctx,
+		"stream #%d: bitstream filter chain %s produced %d output packets",
+		input.StreamIndex(),
+		bsf.GetChainParamser,
+		len(pkts),
+	)
+
+	outputStream := bsf.getOutputStream(ctx, input.StreamIndex(), codecParams, input.Stream.TimeBase())
+	input.StreamInfo = &packet.StreamInfo{
+		Stream:           outputStream,
+		Source:           bsf,
+		PipelineSideData: input.PipelineSideData,
 	}
 
 	bsf.Mutex.UDo(ctx, func() {
@@ -174,6 +231,35 @@ func (bsf *BitstreamFilter) sendInputPacket(
 		}
 	})
 	return ctx.Err()
+}
+
+func (bsf *BitstreamFilter) getOutputStream(
+	ctx context.Context,
+	inputStreamIndex int,
+	codecParams *astiav.CodecParameters,
+	timeBase astiav.Rational,
+) *astiav.Stream {
+	if outputStream, ok := bsf.OutputStreams[inputStreamIndex]; ok {
+		return outputStream
+	}
+
+	outputStream := bsf.OutputFormatContext.NewStream(nil)
+	codecParams.Copy(outputStream.CodecParameters())
+	outputStream.SetTimeBase(timeBase)
+	outputStream.SetIndex(inputStreamIndex)
+	bsf.OutputStreams[inputStreamIndex] = outputStream
+
+	logger.Debugf(
+		ctx,
+		"new output stream %d: %s: %s: %s: %s: %s",
+		outputStream.Index(),
+		outputStream.CodecParameters().MediaType(),
+		outputStream.CodecParameters().CodecID(),
+		outputStream.TimeBase(),
+		spew.Sdump(outputStream),
+		spew.Sdump(outputStream.CodecParameters()),
+	)
+	return outputStream
 }
 
 func (bsf *BitstreamFilter) SendInputFrame(
@@ -204,4 +290,13 @@ func (bsf *BitstreamFilter) Generate(
 	chan<- frame.Output,
 ) error {
 	return nil
+}
+
+func (bsf *BitstreamFilter) WithOutputFormatContext(
+	ctx context.Context,
+	callback func(*astiav.FormatContext),
+) {
+	bsf.Do(ctx, func() {
+		callback(bsf.OutputFormatContext)
+	})
 }
