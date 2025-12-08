@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/url"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -156,14 +157,16 @@ type Output struct {
 var _ Abstract = (*Output)(nil)
 var _ packet.Sink = (*Output)(nil)
 
-func formatFromScheme(scheme string) string {
-	switch scheme {
+func formatFromURL(url *url.URL) string {
+	switch url.Scheme {
+	case "":
+		return filepath.Ext(url.Path)[1:]
 	case "rtmp", "rtmps":
 		return "flv"
 	case "srt":
 		return "mpegts"
 	default:
-		return scheme
+		return url.Scheme
 	}
 }
 
@@ -242,7 +245,7 @@ func NewOutputFromURL(
 		url.Host = proxyAddr.String()
 	}
 
-	formatNameRequest := formatFromScheme(url.Scheme)
+	formatNameRequest := formatFromURL(url)
 
 	if len(cfg.CustomOptions) > 0 {
 		o.Dictionary = astiav.NewDictionary()
@@ -258,14 +261,18 @@ func NewOutputFromURL(
 		}
 	}
 
-	switch url.Scheme {
-	case "rtmp", "rtmps":
+	switch formatNameRequest {
+	case "flv":
 		if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
 			if cfg.WaitForOutputStreams.MinStreamsVideo == 0 {
 				cfg.WaitForOutputStreams.MinStreamsVideo = 1
 			}
 			cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(true)
 		}
+	}
+
+	switch url.Scheme {
+	case "rtmp", "rtmps":
 		if o.Dictionary == nil {
 			o.Dictionary = astiav.NewDictionary()
 			setFinalizerFree(ctx, o.Dictionary)
