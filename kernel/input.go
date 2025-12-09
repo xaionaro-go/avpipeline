@@ -76,9 +76,6 @@ func NewInputFromURL(
 	authKey secret.String,
 	cfg InputConfig,
 ) (*Input, error) {
-	if urlString == "" {
-		return nil, fmt.Errorf("the provided URL is empty")
-	}
 	urlParsed, err := url.Parse(urlString)
 	if err == nil && strings.HasPrefix(urlParsed.Scheme, "rtmp") {
 		logger.Debugf(ctx, "URL: %#+v", urlParsed)
