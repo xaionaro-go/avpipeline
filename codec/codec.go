@@ -150,6 +150,27 @@ func (c *Codec) Reset(ctx context.Context) (_err error) {
 	return xsync.DoA1R1(ctx, &c.locker, c.reset, ctx)
 }
 
+func (c *codecInternals) IsOpen() bool {
+	if c.codecContext == nil {
+		return false
+	}
+	return c.codecContext.IsOpen()
+}
+
+func (c *codecInternals) IsDecoder() bool {
+	if c.codec == nil {
+		return false
+	}
+	return c.codec.IsDecoder()
+}
+
+func (c *codecInternals) IsEncoder() bool {
+	if c.codec == nil {
+		return false
+	}
+	return c.codec.IsEncoder()
+}
+
 func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "reset")
 	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
@@ -162,7 +183,7 @@ func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	if !c.codecContext.IsOpen() {
 		return fmt.Errorf("codec context is not opened")
 	}
-	if !c.codec.IsEncoder() {
+	if !c.IsEncoder() {
 		logger.Debugf(ctx, "is decoder, flushing buffers")
 		c.codecContext.FlushBuffers()
 		return

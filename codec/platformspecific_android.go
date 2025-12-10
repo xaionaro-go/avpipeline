@@ -44,7 +44,7 @@ func (c *Codec) platformSpecificHWSanityChecks(ctx context.Context) {
 
 		for _, codecInfo := range mediaCodecsInfo {
 			var codecs []androidetc.MediaCodec
-			if c.IsEncoder {
+			if c.IsEncoder() {
 				codecs = codecInfo.Encoders
 			} else {
 				codecs = codecInfo.Decoders
@@ -72,6 +72,6 @@ func (c *Codec) platformSpecificHWSanityChecks(ctx context.Context) {
 			}
 		}
 
-		logger.Warnf(ctx, "no fitting hardware codec found for mime types %q (isEncoder=%v)", mimeType, c.IsEncoder)
+		logger.Warnf(ctx, "no fitting hardware codec found for mime types %q (isEncoder=%v)", mimeType, c.IsEncoder())
 	})
 }
