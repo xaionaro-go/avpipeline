@@ -516,7 +516,12 @@ func newCodec(
 		case errors.As(err, &ErrNotImplemented{}):
 			logger.Warnf(ctx, "hardware initialization of this type is not implemented, yet: %v", err)
 		default:
-			return nil, fmt.Errorf("unable to init hardware device context: %w", err)
+			switch c.codec.Name() {
+			case "rawvideo":
+				logger.Errorf(ctx, "unable to init hardware device context for 'rawvideo' codec, ignoring the error: %v", err)
+			default:
+				return nil, fmt.Errorf("unable to init hardware device context: %w", err)
+			}
 		}
 	}
 
