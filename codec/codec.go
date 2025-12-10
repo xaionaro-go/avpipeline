@@ -42,7 +42,6 @@ const (
 
 type codecInternals struct {
 	InitParams            CodecParams
-	IsEncoder             bool
 	codec                 *astiav.Codec
 	codecContext          *astiav.CodecContext
 	hardwareDeviceContext *astiav.HardwareDeviceContext
@@ -157,7 +156,13 @@ func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	if c.codecContext == nil {
 		return fmt.Errorf("codec is closed")
 	}
-	if !c.IsEncoder {
+	if c.codec == nil {
+		return fmt.Errorf("internal error: c.codec == nil")
+	}
+	if !c.codecContext.IsOpen() {
+		return fmt.Errorf("codec context is not opened")
+	}
+	if !c.codec.IsEncoder() {
 		logger.Debugf(ctx, "is decoder, flushing buffers")
 		c.codecContext.FlushBuffers()
 		return
@@ -276,7 +281,6 @@ func newCodec(
 	c := &Codec{
 		codecInternals: &codecInternals{
 			InitParams: params,
-			IsEncoder:  isEncoder,
 			closer:     astikit.NewCloser(),
 		},
 	}

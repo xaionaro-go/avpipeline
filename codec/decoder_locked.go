@@ -221,6 +221,8 @@ func (c *DecoderLocked) Reset(ctx context.Context) (_err error) {
 	return c.Codec.reset(ctx)
 }
 
-func (c *DecoderLocked) Close(ctx context.Context) error {
+func (c *DecoderLocked) Close(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Close")
+	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
 	return c.closeLocked(ctx)
 }
