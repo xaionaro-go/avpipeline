@@ -77,7 +77,7 @@ func main() {
 	sw := condition.NewSwitch()
 	sw.SetValue(ctx, 1)
 	tsShifter := shifttimestamps.New(0, nil)
-	inputMain := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
+	inputMain := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{})
 		},

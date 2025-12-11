@@ -85,3 +85,8 @@ func (o *Output) GetStream(ctx context.Context) *astiav.Stream {
 func (o *Output) GetPipelineSideData() types.PipelineSideData {
 	return o.PipelineSideData
 }
+
+func (o *Output) AddPipelineSideData(obj any) types.PipelineSideData {
+	o.PipelineSideData = append(o.PipelineSideData, obj)
+	return o.PipelineSideData
+}

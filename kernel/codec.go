@@ -20,3 +20,5 @@ func (o CodecResetOptions) config() codecResetConfig {
 
 type codecResetConfig struct {
 }
+
+type SideFlagFlush struct{}

@@ -120,7 +120,7 @@ func main() {
 
 	logger.Debugf(ctx, "opening '%s' as the main input...", fromURLMain)
 
-	inputMain := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
+	inputMain := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{
 				KeepOpen: true,
@@ -150,7 +150,7 @@ func main() {
 	// input nodes: fallback
 
 	logger.Debugf(ctx, "opening '%s' as the fallback input...", fromURLFallback)
-	inputFallback := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
+	inputFallback := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{
 				KeepOpen: true,

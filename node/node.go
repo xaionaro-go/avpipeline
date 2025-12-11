@@ -160,21 +160,27 @@ func (n *MyFancyNodePlaceholder) GetProcessor() processor.Abstract {
 
 }
 
-func (n *MyFancyNodePlaceholder) GetInputPacketFilter() packetfiltercondition.Condition {
+func (n *MyFancyNodePlaceholder) GetInputPacketFilter(
+	ctx context.Context,
+) packetfiltercondition.Condition {
 
 }
 
 func (n *MyFancyNodePlaceholder) SetInputPacketFilter(
+	ctx context.Context,
 	cond packetfiltercondition.Condition,
 ) {
 
 }
 
-func (n *MyFancyNodePlaceholder) GetInputFrameFilter() framefiltercondition.Condition {
+func (n *MyFancyNodePlaceholder) GetInputFrameFilter(
+	ctx context.Context,
+) framefiltercondition.Condition {
 
 }
 
 func (n *MyFancyNodePlaceholder) SetInputFrameFilter(
+	ctx context.Context,
 	cond framefiltercondition.Condition,
 ) {
 

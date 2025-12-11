@@ -37,6 +37,7 @@ type Abstract interface {
 	SetPTS(v int64)
 	SetDTS(v int64)
 	GetPipelineSideData() types.PipelineSideData
+	AddPipelineSideData(any) types.PipelineSideData
 }
 
 type InputUnion struct {
@@ -91,6 +92,9 @@ func (u *InputUnion) SetDuration(v int64) {
 func (u *InputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()
 }
+func (u *InputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
+	return u.Get().AddPipelineSideData(obj)
+}
 
 type OutputUnion struct {
 	Frame  *frame.Output
@@ -143,4 +147,7 @@ func (u *OutputUnion) SetDuration(v int64) {
 }
 func (u *OutputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()
+}
+func (u *OutputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
+	return u.Get().AddPipelineSideData(obj)
 }

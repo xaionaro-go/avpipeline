@@ -82,6 +82,11 @@ func (f *Input) GetPipelineSideData() types.PipelineSideData {
 	return f.PipelineSideData
 }
 
+func (f *Input) AddPipelineSideData(obj any) types.PipelineSideData {
+	f.PipelineSideData = append(f.PipelineSideData, obj)
+	return f.PipelineSideData
+}
+
 func (f *Input) GetResolution() codectypes.Resolution {
 	return (*Commons)(f).GetResolution()
 }

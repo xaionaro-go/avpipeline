@@ -16,6 +16,9 @@ var _ packet.Source = (*AutoFixerWithCustomData[struct{}])(nil)
 var _ packet.Sink = (*AutoFixerWithCustomData[struct{}])(nil)
 
 func (a *AutoFixerWithCustomData[T]) Close(ctx context.Context) error {
+	if a == nil {
+		return nil
+	}
 	var errs []error
 	if a.AutoHeadersNode != nil {
 		if err := a.AutoHeadersNode.Processor.Close(ctx); err != nil {

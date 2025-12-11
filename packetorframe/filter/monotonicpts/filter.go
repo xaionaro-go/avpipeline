@@ -16,7 +16,6 @@ import (
 
 type StreamKey struct {
 	Source packet.Source
-	Index  int
 }
 
 type Filter struct {
@@ -65,7 +64,6 @@ func (f *Filter) match(
 	}
 	streamKey := StreamKey{
 		Source: packetSource,
-		Index:  in.GetStreamIndex(),
 	}
 	var shift time.Duration
 	ptsInt := ptsIntOrig

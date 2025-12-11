@@ -32,7 +32,7 @@ type NodeRouting[T any] = node.NodeWithCustomData[GoBug63285RouteInterface[T], *
 type Sender interface {
 	Close(context.Context) error
 }
-type NodeRetryOutput = node.NodeWithCustomData[Sender, *processor.FromKernel[*kernel.Retry[*kernel.Output]]]
+type NodeRetryOutput = node.NodeWithCustomData[Sender, *processor.FromKernel[*kernel.Retryable[*kernel.Output]]]
 
 func newRetryOutputNode(
 	ctx context.Context,
@@ -45,7 +45,7 @@ func newRetryOutputNode(
 	logger.Tracef(ctx, "newRetryOutputNode")
 	defer func() { logger.Tracef(ctx, "/newRetryOutputNode") }()
 
-	outputKernel := kernel.NewRetry(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
+	outputKernel := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Output, error) {
 			if waitForInputFunc != nil {
 				err := waitForInputFunc(ctx)

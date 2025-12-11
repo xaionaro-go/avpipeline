@@ -32,12 +32,37 @@ const (
 	enableAntiStucking     = false
 )
 
+type packetInfoFlags uint64
+
+const (
+	packetInfoFlagFlush packetInfoFlags = 1 << iota
+)
+
+// TODO: delete this function; just save the PipelineSideData in Decoder, and store only a packet ID
+// in packetInfo to recover all the actual info about the packet from Decoder.
+func packetInfoFlagsFromPipelineSideData(sideData globaltypes.PipelineSideData) packetInfoFlags {
+	var flags packetInfoFlags
+	if sideData.Contains(SideFlagFlush{}) {
+		flags |= packetInfoFlagFlush
+	}
+	return flags
+}
+
+func (p packetInfoFlags) PipelineSideData() globaltypes.PipelineSideData {
+	var sideData globaltypes.PipelineSideData
+	if p&packetInfoFlagFlush != 0 {
+		sideData = append(sideData, SideFlagFlush{})
+	}
+	return sideData
+}
+
 // TODO: remove this: encoder should calculate timestamps from scratch, instead of reusing these
 type packetInfo struct {
 	PTS         int64
 	DTS         int64
 	Duration    int64
 	StreamIndex int
+	Flags       packetInfoFlags
 }
 
 func (p *packetInfo) Bytes() []byte {
@@ -46,6 +71,7 @@ func (p *packetInfo) Bytes() []byte {
 	binary.NativeEndian.PutUint64(b[8:16], uint64(p.DTS))
 	binary.NativeEndian.PutUint64(b[24:32], uint64(p.Duration))
 	binary.NativeEndian.PutUint64(b[32:40], uint64(p.StreamIndex))
+	binary.NativeEndian.PutUint64(b[40:48], uint64(p.Flags))
 	return b
 }
 
@@ -58,6 +84,7 @@ func packetInfoFromBytes(b []byte) *packetInfo {
 		DTS:         int64(binary.NativeEndian.Uint64(b[8:16])),
 		Duration:    int64(binary.NativeEndian.Uint64(b[24:32])),
 		StreamIndex: int(binary.NativeEndian.Uint64(b[32:40])),
+		Flags:       packetInfoFlags(binary.NativeEndian.Uint64(b[40:48])),
 	}
 }
 
@@ -270,6 +297,7 @@ func (d *Decoder[DF]) SendInputPacket(
 			DTS:         input.Packet.Dts(),
 			Duration:    input.Packet.Duration(),
 			StreamIndex: streamIndex,
+			Flags:       packetInfoFlagsFromPipelineSideData(input.PipelineSideData),
 		}
 
 		input.Packet.SetOpaque(packetInfo.Bytes())
@@ -305,7 +333,13 @@ func (d *Decoder[DF]) SendInputPacket(
 			default:
 				return fmt.Errorf("unable to decode the packet: %w", err)
 			}
-			if err := d.drain(ctx, outputFramesCh, decoder.Drain, packetInfo); err != nil {
+
+			drainFn := decoder.Drain
+			if input.PipelineSideData.Contains(SideFlagFlush{}) {
+				logger.Debugf(ctx, "flushing the decoder after sending the packet due to SideFlagFlush")
+				drainFn = decoder.Flush
+			}
+			if err := d.drain(ctx, outputFramesCh, drainFn, packetInfo); err != nil {
 				return fmt.Errorf("unable to drain the decoder: %w", err)
 			}
 			if !shouldRetry {
@@ -382,6 +416,10 @@ func (d *Decoder[DF]) drain(
 			if f.Duration() <= 0 {
 				logger.Warnf(ctx, "frame duration is not set: %d (packetInfo: %#+v)", f.Duration(), packetInfo)
 			}
+		}
+
+		if packetInfo.Flags != 0 {
+			streamInfo = frame.BuildStreamInfo(streamInfo.Source, streamInfo.CodecParameters, streamInfo.StreamIndex, streamInfo.StreamsCount, streamInfo.TimeBase, streamInfo.Duration, packetInfo.Flags.PipelineSideData())
 		}
 
 		err := d.send(ctx, outputFramesCh, f, streamInfo)

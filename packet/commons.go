@@ -141,6 +141,11 @@ func (pkt *Commons) GetPipelineSideData() types.PipelineSideData {
 	return pkt.StreamInfo.PipelineSideData
 }
 
+func (pkt *Commons) AddPipelineSideData(obj any) types.PipelineSideData {
+	pkt.PipelineSideData = append(pkt.PipelineSideData, obj)
+	return pkt.PipelineSideData
+}
+
 func (pkt *Commons) GetSource() Source {
 	return pkt.StreamInfo.Source
 }
