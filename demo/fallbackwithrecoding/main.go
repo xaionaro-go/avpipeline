@@ -126,10 +126,6 @@ func main() {
 				KeepOpen: true,
 			})
 		},
-		func(ctx context.Context, k *kernel.Input) error {
-			sw.SetValue(ctx, 0)
-			return nil
-		},
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			logger.Debugf(ctx, "main input error: %v", err)
 			sw.SetValue(ctx, 1)
@@ -137,6 +133,10 @@ func main() {
 			observability.Go(ctx, func(ctx context.Context) { k.Close(ctx) })
 			return kernel.ErrRetry{Err: err}
 		},
+		kernel.RetryableOptionOnKernelOpen[*kernel.Input](func(ctx context.Context, k *kernel.Input) error {
+			sw.SetValue(ctx, 0)
+			return nil
+		}),
 	)
 	defer inputMain.Close(belt.WithFields(ctx, field.Map[string]{"reason": "program_end", "input": "main"}))
 	inputMainNode := node.NewFromKernel(ctx, inputMain)
@@ -155,9 +155,6 @@ func main() {
 			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{
 				KeepOpen: true,
 			})
-		},
-		func(ctx context.Context, k *kernel.Input) error {
-			return nil
 		},
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			logger.Debugf(ctx, "fallback input error: %v", err)

@@ -55,9 +55,6 @@ func newRetryOutputNode(
 			}
 			return kernel.NewOutputFromURL(ctx, dstURL, streamKey, cfg)
 		},
-		func(ctx context.Context, k *kernel.Output) error {
-			return nil
-		},
 		func(ctx context.Context, k *kernel.Output, err error) error {
 			logger.Debugf(ctx, "connection ended: %v", err)
 			time.Sleep(time.Second)

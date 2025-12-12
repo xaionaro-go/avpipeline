@@ -81,15 +81,15 @@ func main() {
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{})
 		},
-		func(ctx context.Context, k *kernel.Input) error {
-			sw.SetValue(ctx, 0)
-			return nil
-		},
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			sw.SetValue(ctx, 1)
 			time.Sleep(time.Second)
 			return kernel.ErrRetry{Err: err}
 		},
+		kernel.RetryableOptionOnKernelOpen[*kernel.Input](func(ctx context.Context, k *kernel.Input) error {
+			sw.SetValue(ctx, 0)
+			return nil
+		}),
 	)
 	defer inputMain.Close(belt.WithFields(ctx, field.Map[string]{"reason": "program_end", "input": "main"}))
 	inputMainNode := node.NewFromKernel(ctx, inputMain)
