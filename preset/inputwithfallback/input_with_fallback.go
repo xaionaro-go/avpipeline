@@ -65,7 +65,7 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 // C is the custom data type associated with each input node (generally it is struct{}).
 func New[K InputKernel, DF codec.DecoderFactory, C any](
 	ctx context.Context,
-	inputFactories []InputFactory[K],
+	inputFactories []InputFactory[K, DF],
 	opts ...Option,
 ) (_ret *InputWithFallback[K, DF, C], _err error) {
 	logger.Debugf(ctx, "New")
@@ -266,7 +266,7 @@ func (i *InputWithFallback[K, DF, C]) getInputChainByIDLocked(
 
 func (i *InputWithFallback[K, DF, C]) AddFactory(
 	ctx context.Context,
-	inputFactories ...InputFactory[K],
+	inputFactories ...InputFactory[K, DF],
 ) (_err error) {
 	logger.Debugf(ctx, "AddFactory")
 	defer func() { logger.Debugf(ctx, "/AddFactory: %v", _err) }()
@@ -275,7 +275,7 @@ func (i *InputWithFallback[K, DF, C]) AddFactory(
 
 func (i *InputWithFallback[K, DF, C]) addFactory(
 	ctx context.Context,
-	inputFactories []InputFactory[K],
+	inputFactories []InputFactory[K, DF],
 ) error {
 	for _, inputFactory := range inputFactories {
 		inputID := InputID(len(i.InputChains))
