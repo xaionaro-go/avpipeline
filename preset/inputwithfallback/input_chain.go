@@ -86,16 +86,9 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		kernel.RetryableOptionOnKernelOpen[K](func(
 			ctx context.Context,
 			k K,
-		) error {
-			if r.Autofix != nil {
-				return nil
-			}
-			var zeroCustomData C
-			r.Autofix = autofix.NewWithCustomData[C](ctx, k, r.Decoder.Processor.Kernel, zeroCustomData)
-			r.Autofix.AddPushPacketsTo(ctx, r.Decoder)
-			r.Autofix.AddPushFramesTo(ctx, r.Decoder)
-			r.Filter.AddPushPacketsTo(ctx, r.Autofix)
-			r.Filter.AddPushFramesTo(ctx, r.Autofix)
+		) (_err error) {
+			logger.Debugf(ctx, "RetryableOptionOnKernelOpen: %d", inputID)
+			defer func() { logger.Debugf(ctx, "/RetryableOptionOnKernelOpen: %d: %v", inputID, _err) }()
 			if onKernelOpen != nil {
 				onKernelOpen(ctx, r)
 			}
@@ -109,6 +102,12 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	)
 	r.Input.AddPushPacketsTo(ctx, r.Filter)
 	r.Input.AddPushFramesTo(ctx, r.Filter)
+	var zeroCustomData C
+	r.Autofix = autofix.NewWithCustomData[C](ctx, r.Input.Processor.Kernel, r.Decoder.Processor.Kernel, zeroCustomData)
+	r.Filter.AddPushPacketsTo(ctx, r.Autofix)
+	r.Filter.AddPushFramesTo(ctx, r.Autofix)
+	r.Autofix.AddPushPacketsTo(ctx, r.Decoder)
+	r.Autofix.AddPushFramesTo(ctx, r.Decoder)
 	r.Decoder.AddPushPacketsTo(ctx, r.SyncBarrier)
 	r.Decoder.AddPushFramesTo(ctx, r.SyncBarrier)
 
@@ -170,16 +169,16 @@ func (i *InputChain[K, DF, C]) Serve(
 func (i *InputChain[K, DF, C]) String() string {
 	ctx := context.TODO()
 	if !i.Input.Processor.Kernel.KernelLocker.ManualTryLock(ctx) {
-		return "InputChain(active:<unable to lock>)"
+		return fmt.Sprintf("InputChain(<unable to lock>; factory:%s)", i.InputFactory)
 	}
 	kernel := func() K {
 		defer i.Input.Processor.Kernel.KernelLocker.ManualUnlock()
 		return i.Input.Processor.Kernel.Kernel
-	}
+	}()
 	if i.Input.Processor.Kernel.KernelIsSet {
-		return fmt.Sprintf("InputChain(active:%v)", kernel)
+		return fmt.Sprintf("InputChain(%v:active)", kernel)
 	}
-	return fmt.Sprintf("InputChain(inactive:%s)", i.InputFactory)
+	return fmt.Sprintf("InputChain(%s:inactive)", i.InputFactory)
 }
 
 func (i *InputChain[K, DF, C]) Unpause(

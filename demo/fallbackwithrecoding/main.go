@@ -28,6 +28,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/inputwithfallback"
 	"github.com/xaionaro-go/avpipeline/processor"
+	goconvavp "github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipeline"
 	"github.com/xaionaro-go/avpipeline/quality"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -173,8 +174,6 @@ func main() {
 		encoderNode.AddPushPacketsTo(ctx, outputNode)
 	}
 
-	logger.Debugf(ctx, "resulting pipeline: %s", inputs.String())
-
 	defer logger.Infof(ctx, "finishing: routing")
 
 	// start
@@ -222,11 +221,22 @@ func main() {
 				return
 			}
 		case <-statusTicker.C:
-			outputStats := outputNode.GetCountersPtr()
-			outputStatsJSON, err := json.Marshal(outputStats.Received.Packets)
-			assert(ctx, err == nil, err)
 
-			fmt.Printf("output:%s\n", outputStatsJSON)
+			fmt.Printf(
+				"inputs: %s\ninput main: %s\ninput fallback: %s\noutput:%s\n",
+				inputs,
+				mustJSON(ctx, inputs.InputChains[0].Input.GetProcessor().CountersPtr().Generated.Packets),
+				mustJSON(ctx, inputs.InputChains[1].Input.GetProcessor().CountersPtr().Generated.Packets),
+				mustJSON(ctx, outputNode.GetCountersPtr().Received.Packets),
+			)
+			logger.Debugf(ctx, "main pipeline: %s", mustJSON(ctx, goconvavp.NodeToGRPC(ctx, inputs.InputChains[0].Input)))
+			logger.Debugf(ctx, "fallback pipeline: %s", mustJSON(ctx, goconvavp.NodeToGRPC(ctx, inputs.InputChains[1].Input)))
 		}
 	}
+}
+
+func mustJSON(ctx context.Context, v any) string {
+	b, err := json.Marshal(v)
+	assert(ctx, err == nil, err)
+	return string(b)
 }

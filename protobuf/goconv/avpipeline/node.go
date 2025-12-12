@@ -24,20 +24,23 @@ func NodeToGRPC(
 		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), n.GetProcessor().CountersPtr()),
 	}
 
-	var currentLayer []node.Abstract
 	for {
-		currentLayer = append(currentLayer, n)
 		origer, ok := n.(interface{ OriginalNodeAbstract() node.Abstract })
 		if !ok {
 			break
 		}
-		n = origer.OriginalNodeAbstract()
+		nextN := origer.OriginalNodeAbstract()
+		if nextN == nil {
+			break
+		}
+		n = nextN
 	}
 
-	nextLayer, err := avpipeline.NextLayer(ctx, currentLayer...)
+	nextLayer, err := avpipeline.NextLayer(ctx, n)
 	if err != nil {
 		panic(err)
 	}
+
 	for _, nextNode := range nextLayer {
 		result.ConsumingNodes = append(result.ConsumingNodes, NodeToGRPC(ctx, nextNode))
 	}

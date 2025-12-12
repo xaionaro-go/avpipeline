@@ -54,7 +54,7 @@ func nextLayer[T node.Abstract](
 			}
 			isSet[r] = struct{}{}
 			if pushTo.Node == nil {
-				errs = append(errs, fmt.Errorf("received a nil node"))
+				errs = append(errs, fmt.Errorf("received a nil node (PushPacketsTo)"))
 				continue
 			}
 			nextNodes = append(nextNodes, r)
@@ -69,7 +69,7 @@ func nextLayer[T node.Abstract](
 			}
 			isSet[r] = struct{}{}
 			if pushTo.Node == nil {
-				errs = append(errs, fmt.Errorf("received a nil node"))
+				errs = append(errs, fmt.Errorf("received a nil node (PushFramesTo)"))
 				continue
 			}
 			nextNodes = append(nextNodes, r)

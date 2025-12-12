@@ -180,9 +180,19 @@ func (r *Retryable[K]) retry(
 				return fmt.Errorf("unable to get kernel: %w", err)
 			}
 
-			err = callback(k)
+			isLocked := func() (isLocked bool) {
+				defer func() {
+					isLocked = r.KernelLocker.ManualLock(ctx)
+				}()
+				r.KernelLocker.ManualUnlock()
+				err = callback(k)
+				return
+			}()
 			if err == nil {
 				return nil
+			}
+			if !isLocked {
+				return ctx.Err()
 			}
 			if r.OnError != nil {
 				err = r.OnError(ctx, k, err)

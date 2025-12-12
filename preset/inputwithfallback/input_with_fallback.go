@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -80,7 +81,7 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 		MonotonicPTS:      monotonicpts.New(true),
 		newInputChainChan: make(chan *InputChain[K, DF, C], 100),
 	}
-	i.PreOutput.AddPushPacketsTo(ctx, nil, packetfiltercondition.PacketOrFrame{i.MonotonicPTS})
+	i.PreOutput.AddPushPacketsTo(ctx, i.Output, packetfiltercondition.PacketOrFrame{i.MonotonicPTS})
 	if err := i.initSwitches(ctx); err != nil {
 		return nil, fmt.Errorf("cannot init switches: %w", err)
 	}
@@ -94,7 +95,30 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 }
 
 func (i *InputWithFallback[K, DF, C]) String() string {
-	return "InputWithFallback"
+	cur := i.InputSwitch.CurrentValue.Load()
+	next := i.InputSwitch.NextValue.Load()
+	ctx := context.TODO()
+	if !i.InputChainsLocker.ManualTryLock(ctx) {
+		return fmt.Sprintf("InputWithFallback(<locked>; cur:%d, next:%d)", cur, next)
+	}
+	defer i.InputChainsLocker.ManualUnlock(ctx)
+	var inputChainStrs []string
+	for _, inputChain := range i.InputChains {
+		isPaused := inputChain.IsPaused(ctx)
+		var s []string
+		s = append(s, inputChain.String())
+		if int(inputChain.ID) == int(cur) {
+			s = append(s, "current")
+		}
+		if int(inputChain.ID) == int(next) {
+			s = append(s, "next")
+		}
+		if isPaused {
+			s = append(s, "paused")
+		}
+		inputChainStrs = append(inputChainStrs, strings.Join(s, ":"))
+	}
+	return fmt.Sprintf("InputWithFallback(%s)", strings.Join(inputChainStrs, ", "))
 }
 
 func (i *InputWithFallback[K, DF, C]) GetOutput() node.Abstract {
@@ -124,8 +148,9 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		ctx context.Context,
 		in packetorframe.InputUnion,
 		to int32,
-	) error {
+	) (_err error) {
 		logger.Debugf(ctx, "Switch.SetOnSwitchRequest: -> %d", to)
+		defer func() { logger.Debugf(ctx, "/Switch.SetOnSwitchRequest: -> %d: %v", to, _err) }()
 		if v := i.switchingProcN.Add(1); v != 1 {
 			i.switchingProcN.Add(-1)
 			return fmt.Errorf("another switch is in progress (procN: %d), cannot switch to %d", v-1, to)
@@ -147,6 +172,10 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		cur := i.InputSwitch.CurrentValue.Load()
 		if prevNext <= cur {
 			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: not pausing a higher priority input (than the currently active) %d <= %d", prevNext, cur)
+			return nil
+		}
+		if prevNext == to {
+			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: not pausing the same input %d", prevNext)
 			return nil
 		}
 
@@ -334,10 +363,13 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 	defer time.Sleep(i.Config.RetryInterval)
 
 	id := inputChain.ID
-	cur := int(i.InputSwitch.CurrentValue.Load())
-	logger.Debugf(ctx, "onInputChainError: input %d error: %v (current=%d)", int(id), err, cur)
+	active := int(i.InputSwitch.CurrentValue.Load())
+	next := int(i.InputSwitch.NextValue.Load())
+	current := max(active, next)
+	logger.Debugf(ctx, "onInputChainError: input %d error: %v (current=%d)", int(id), err, current)
+
 	// Only react to errors on the currently active input
-	if cur != int(id) {
+	if current != int(id) {
 		return
 	}
 
