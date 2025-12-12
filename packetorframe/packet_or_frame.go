@@ -38,6 +38,7 @@ type Abstract interface {
 	SetDTS(v int64)
 	GetPipelineSideData() types.PipelineSideData
 	AddPipelineSideData(any) types.PipelineSideData
+	IsKey() bool
 }
 
 type InputUnion struct {
@@ -95,6 +96,9 @@ func (u *InputUnion) GetPipelineSideData() types.PipelineSideData {
 func (u *InputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 	return u.Get().AddPipelineSideData(obj)
 }
+func (u *InputUnion) IsKey() bool {
+	return u.Get().IsKey()
+}
 
 type OutputUnion struct {
 	Frame  *frame.Output
@@ -150,4 +154,7 @@ func (u *OutputUnion) GetPipelineSideData() types.PipelineSideData {
 }
 func (u *OutputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 	return u.Get().AddPipelineSideData(obj)
+}
+func (u *OutputUnion) IsKey() bool {
+	return u.Get().IsKey()
 }

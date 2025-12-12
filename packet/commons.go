@@ -94,11 +94,25 @@ func (pkt *Commons) GetMediaType() astiav.MediaType {
 }
 
 func (pkt *Commons) GetStreamIndex() int {
-	return pkt.Stream.Index()
+	return pkt.Packet.StreamIndex()
 }
 
 func (pkt *Commons) GetStream() *astiav.Stream {
 	return pkt.Stream
+}
+
+func (pkt *Commons) GetStreamFromSource(ctx context.Context) *astiav.Stream {
+	streamIndex := pkt.GetStreamIndex()
+	var result *astiav.Stream
+	pkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+		for _, stream := range fmtCtx.Streams() {
+			if stream.Index() == streamIndex {
+				result = stream
+				return
+			}
+		}
+	})
+	return result
 }
 
 func (pkt *Commons) PtsAsDuration() time.Duration {
@@ -165,4 +179,11 @@ func (pkt *Commons) GetResolution() *codectypes.Resolution {
 		Width:  uint32(codecParams.Width()),
 		Height: uint32(codecParams.Height()),
 	}
+}
+
+func (pkt *Commons) IsKey() bool {
+	if pkt.Packet == nil {
+		return false
+	}
+	return pkt.Packet.Flags().Has(astiav.PacketFlagKey)
 }

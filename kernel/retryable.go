@@ -280,6 +280,15 @@ func (r *Retryable[K]) Close(ctx context.Context) (_err error) {
 	return nil
 }
 
+func (r *Retryable[K]) IsPaused(ctx context.Context) bool {
+	select {
+	case <-*r.KernelOpenBarrier.Load():
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Retryable[K]) Pause(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Stop()")
 	defer func() { logger.Debugf(ctx, "/Stop(): %v", _err) }()

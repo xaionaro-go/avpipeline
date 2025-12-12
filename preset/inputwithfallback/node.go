@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -38,6 +39,30 @@ func (i *InputWithFallback[K, DF, C]) Serve(
 
 	logger.Debugf(ctx, "inputwithfallback.Serve: started")
 	defer logger.Debugf(ctx, "inputwithfallback.Serve: ended")
+
+	if debugConsistencyCheckLoop {
+		observability.Go(ctx, func(ctx context.Context) {
+			t := time.NewTicker(10 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+				i.InputChainsLocker.Do(ctx, func() {
+					for inputID := InputID(0); inputID < InputID(len(i.InputChains)); inputID++ {
+						inputChain := i.InputChains[inputID]
+						isPaused := inputChain.IsPaused(ctx)
+						expectedIsPaused := (inputID > InputID(i.InputSwitch.CurrentValue.Load()))
+						if isPaused != expectedIsPaused {
+							logger.Errorf(ctx, "inputwithfallback.Serve: inconsistency detected: input chain %d paused=%v but should be %v", inputID, isPaused, expectedIsPaused)
+						}
+					}
+				})
+			}
+		})
+	}
 
 	i.serveWaitGroup.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {

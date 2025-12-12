@@ -49,6 +49,8 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	inputFactory InputFactory[K],
 	filterSwitch *barrierstategetter.SwitchOutput,
 	syncSwitch *barrierstategetter.SwitchOutput,
+	onKernelOpen func(context.Context, *InputChain[K, DF, C]),
+	onError func(context.Context, *InputChain[K, DF, C], error),
 ) (*InputChain[K, DF, C], error) {
 	r := &InputChain[K, DF, C]{
 		ID:           inputID,
@@ -65,6 +67,9 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		},
 		func(ctx context.Context, k K, err error) error {
 			logger.Errorf(ctx, "input %v error: %v", inputID, err)
+			if onError != nil {
+				onError(ctx, r, err)
+			}
 			return kernel.ErrRetry{}
 		},
 		kernel.RetryableOptionStartOnInit[K](false),
@@ -81,6 +86,9 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 			r.Autofix.AddPushFramesTo(ctx, r.Decoder)
 			r.Filter.AddPushPacketsTo(ctx, r.Autofix)
 			r.Filter.AddPushFramesTo(ctx, r.Autofix)
+			if onKernelOpen != nil {
+				onKernelOpen(ctx, r)
+			}
 			return nil
 		}),
 	)
@@ -207,4 +215,10 @@ func (i *InputChain[K, DF, C]) Close(
 		errs = append(errs, fmt.Errorf("unable to close sync barrier node: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+func (i *InputChain[K, DF, C]) IsPaused(
+	ctx context.Context,
+) bool {
+	return i.Input.Processor.Kernel.IsPaused(ctx)
 }

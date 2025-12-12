@@ -90,3 +90,10 @@ func (f *Input) AddPipelineSideData(obj any) types.PipelineSideData {
 func (f *Input) GetResolution() codectypes.Resolution {
 	return (*Commons)(f).GetResolution()
 }
+
+func (f *Input) IsKey() bool {
+	if f.Frame == nil {
+		return false
+	}
+	return f.Frame.Flags().Has(astiav.FrameFlagKey)
+}

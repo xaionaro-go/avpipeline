@@ -14,7 +14,9 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+type FuncOnSwitchRequest func(ctx context.Context, pkt packetorframe.InputUnion, to int32) error
 type FuncOnBeforeSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
+type FuncOnInterruptedSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
 type FuncOnAfterSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
 
 type SwitchFlags = types.SwitchFlags
@@ -41,7 +43,9 @@ type Switch struct {
 
 	ChangeSignal                  *chan struct{}
 	KeepUnlessPacketCond          *packetorframecondition.Condition
+	OnSwitchRequest               *FuncOnSwitchRequest
 	OnBeforeSwitch                *FuncOnBeforeSwitch
+	OnInterruptedSwitch           *FuncOnInterruptedSwitch
 	OnAfterSwitch                 *FuncOnAfterSwitch
 	Flags                         SwitchFlags
 	FirstPacketOrFrameAfterSwitch packetorframe.Abstract
@@ -72,6 +76,18 @@ func (s *Switch) SetKeepUnless(cond packetorframecondition.Condition) {
 	xatomic.StorePointer(&s.KeepUnlessPacketCond, ptr(cond))
 }
 
+func (s *Switch) GetOnSwitchRequest() FuncOnSwitchRequest {
+	ptr := xatomic.LoadPointer(&s.OnSwitchRequest)
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func (s *Switch) SetOnSwitchRequest(fn FuncOnSwitchRequest) {
+	xatomic.StorePointer(&s.OnSwitchRequest, ptr(fn))
+}
+
 func (s *Switch) GetOnBeforeSwitch() FuncOnBeforeSwitch {
 	ptr := xatomic.LoadPointer(&s.OnBeforeSwitch)
 	if ptr == nil {
@@ -82,6 +98,18 @@ func (s *Switch) GetOnBeforeSwitch() FuncOnBeforeSwitch {
 
 func (s *Switch) SetOnBeforeSwitch(fn FuncOnBeforeSwitch) {
 	xatomic.StorePointer(&s.OnBeforeSwitch, ptr(fn))
+}
+
+func (s *Switch) GetOnInterruptedSwitch() FuncOnInterruptedSwitch {
+	ptr := xatomic.LoadPointer(&s.OnInterruptedSwitch)
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func (s *Switch) SetOnInterruptedSwitch(fn FuncOnInterruptedSwitch) {
+	xatomic.StorePointer(&s.OnInterruptedSwitch, ptr(fn))
 }
 
 func (s *Switch) GetOnAfterSwitch() FuncOnAfterSwitch {
@@ -109,6 +137,13 @@ func (s *Switch) SetValue(
 	logger.Tracef(ctx, "Switch.SetValue(ctx, %d)", idx)
 	defer func() { logger.Tracef(ctx, "/Switch.SetValue(ctx, %d): %v", idx, _err) }()
 
+	if onSwitchRequest := s.GetOnSwitchRequest(); onSwitchRequest != nil {
+		err := xsync.DoA3R1(ctx, &s.CommitMutex, onSwitchRequest, ctx, packetorframe.InputUnion{}, idx)
+		if err != nil {
+			return fmt.Errorf("onSwitchRequest failed: %w", err)
+		}
+	}
+
 	if s.GetKeepUnless() == nil {
 		return s.setValueNow(ctx, idx)
 	}
@@ -121,14 +156,16 @@ func (s *Switch) setValueNow(
 	idx int32,
 ) (_err error) {
 	s.CommitMutex.Do(ctx, func() {
-		onBefore := s.GetOnBeforeSwitch()
-		if onBefore != nil {
+		if onBefore := s.GetOnBeforeSwitch(); onBefore != nil {
 			onBefore(ctx, packetorframe.InputUnion{}, s.CurrentValue.Load(), idx)
 		}
 
 		old := s.CurrentValue.Swap(int32(idx))
 		logger.Debugf(ctx, "switch to the current value: %d -> %d", old, idx)
 		if old == idx {
+			if onInterruption := s.GetOnInterruptedSwitch(); onInterruption != nil {
+				onInterruption(ctx, packetorframe.InputUnion{}, old, idx)
+			}
 			return
 		}
 
@@ -231,9 +268,15 @@ func (s *SwitchOutput) GetState(
 		commitToNextValue := func() (_ret bool) {
 			s.CommitMutex.Do(ctx, func() {
 				logger.Debugf(ctx, "found a good entrance and switched to the next value: %d -> %d", currentValue, nextValue)
-				onBefore := s.GetOnBeforeSwitch()
-				if onBefore != nil {
+				if onBefore := s.GetOnBeforeSwitch(); onBefore != nil {
 					onBefore(ctx, pkt, currentValue, nextValue)
+				}
+				if onInterruption := s.GetOnInterruptedSwitch(); onInterruption != nil {
+					defer func() {
+						if !_ret {
+							onInterruption(ctx, pkt, currentValue, nextValue)
+						}
+					}()
 				}
 				if !s.CurrentValue.CompareAndSwap(int32(currentValue), int32(nextValue)) {
 					logger.Debugf(ctx, "the current value changed concurrently; restarting the calculation")

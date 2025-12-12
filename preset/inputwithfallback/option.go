@@ -11,6 +11,7 @@ type Option interface {
 type Config struct {
 	RetryInterval              time.Duration
 	FailuresBeforeNextFallback uint
+	SwitchKeepUnlessTimeout    time.Duration
 }
 
 type Options []Option
@@ -22,7 +23,9 @@ func (o Options) apply(cfg *Config) {
 }
 
 func (o Options) Config() Config {
-	var cfg Config
+	cfg := Config{
+		SwitchKeepUnlessTimeout: time.Second,
+	}
 	if o != nil {
 		o.apply(&cfg)
 	}
@@ -39,4 +42,10 @@ type OptionFailuresBeforeNextFallback uint
 
 func (o OptionFailuresBeforeNextFallback) apply(cfg *Config) {
 	cfg.FailuresBeforeNextFallback = uint(o)
+}
+
+type OptionSwitchKeepUnlessTimeout time.Duration
+
+func (o OptionSwitchKeepUnlessTimeout) apply(cfg *Config) {
+	cfg.SwitchKeepUnlessTimeout = time.Duration(o)
 }

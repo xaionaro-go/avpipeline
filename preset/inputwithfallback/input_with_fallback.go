@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
@@ -21,7 +22,12 @@ import (
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
+)
+
+const (
+	debugConsistencyCheckLoop = true
 )
 
 type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
@@ -40,6 +46,8 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	newInputChainChan chan *InputChain[K, DF, C]
 	isServing         atomic.Bool
 	serveWaitGroup    sync.WaitGroup
+	syncingSince      xatomic.Value[time.Time]
+	switchingProcN    xatomic.Int64
 }
 
 // |  retryable:input0 -> inputSwitch (-> autofix -> decoder) -> inputSyncer ->-+
@@ -64,19 +72,18 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 	defer func() { logger.Debugf(ctx, "/New: %v", _err) }()
 
 	i := &InputWithFallback[K, DF, C]{
-		Config: Options(opts).Config(),
-		PreOutput: node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx,
-			&kernel.Passthrough{},
-		),
-		Output: node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx,
-			&kernel.Passthrough{},
-		),
+		Config:            Options(opts).Config(),
+		PreOutput:         node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx, &kernel.Passthrough{}),
+		Output:            node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx, &kernel.Passthrough{}),
 		InputSwitch:       barrierstategetter.NewSwitch(),
 		InputSyncer:       barrierstategetter.NewSwitch(),
 		MonotonicPTS:      monotonicpts.New(true),
 		newInputChainChan: make(chan *InputChain[K, DF, C], 100),
 	}
 	i.PreOutput.AddPushPacketsTo(ctx, nil, packetfiltercondition.PacketOrFrame{i.MonotonicPTS})
+	if err := i.initSwitches(ctx); err != nil {
+		return nil, fmt.Errorf("cannot init switches: %w", err)
+	}
 
 	err := i.AddFactory(ctx, inputFactories...)
 	if err != nil {
@@ -113,19 +120,64 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	logger.Debugf(ctx, "Switch: setting keep-unless conditions: %s", switchKeepUnlessConds)
 	i.InputSwitch.SetKeepUnless(switchKeepUnlessConds)
 
+	i.InputSwitch.SetOnSwitchRequest(func(
+		ctx context.Context,
+		in packetorframe.InputUnion,
+		to int32,
+	) error {
+		logger.Debugf(ctx, "Switch.SetOnSwitchRequest: -> %d", to)
+		if v := i.switchingProcN.Add(1); v != 1 {
+			i.switchingProcN.Add(-1)
+			return fmt.Errorf("another switch is in progress (procN: %d), cannot switch to %d", v-1, to)
+		}
+		observability.Go(ctx, func(ctx context.Context) {
+			defer i.switchingProcN.Add(-1)
+			inputNext := i.getInputChainByID(ctx, InputID(to))
+			if err := inputNext.Unpause(ctx); err != nil {
+				logger.Errorf(ctx, "Switch: unable to unpause the previous input %d: %v", to, err)
+			}
+		})
+
+		prevNext := i.InputSwitch.NextValue.Load()
+		if prevNext == math.MinInt32 {
+			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: no previous requested input")
+			return nil
+		}
+
+		cur := i.InputSwitch.CurrentValue.Load()
+		if prevNext <= cur {
+			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: not pausing a higher priority input (than the currently active) %d <= %d", prevNext, cur)
+			return nil
+		}
+
+		logger.Debugf(ctx, "Switch.SetOnSwitchRequest: pausing previous requested input %d", prevNext)
+		i.switchingProcN.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer i.switchingProcN.Add(-1)
+			inputPrev := i.getInputChainByID(ctx, InputID(prevNext))
+			if err := inputPrev.Pause(ctx); err != nil {
+				logger.Errorf(ctx, "Switch: unable to pause the previous requested input %d: %v", prevNext, err)
+			}
+		})
+		return nil
+	})
+
 	i.InputSwitch.SetOnBeforeSwitch(func(
 		ctx context.Context,
 		in packetorframe.InputUnion,
 		from, to int32,
 	) {
-		logger.Debugf(ctx,
-			"Switch.SetOnBeforeSwitch: %d -> %d",
-			from, to,
-		)
-		inputNext := i.getInputChainByID(ctx, InputID(to))
-		if err := inputNext.Unpause(ctx); err != nil {
-			logger.Errorf(ctx, "Switch: unable to pause the previous input %d: %v", from, err)
-		}
+		logger.Debugf(ctx, "Switch.SetOnBeforeSwitch: %d -> %d", from, to)
+		i.switchingProcN.Add(1)
+	})
+
+	i.InputSwitch.SetOnInterruptedSwitch(func(
+		ctx context.Context,
+		in packetorframe.InputUnion,
+		from, to int32,
+	) {
+		logger.Debugf(ctx, "Switch.SetOnInterruptedSwitch: %d -> %d", from, to)
+		i.switchingProcN.Add(-1)
 	})
 
 	i.InputSwitch.SetOnAfterSwitch(func(
@@ -138,22 +190,55 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		}
 		logger.Debugf(ctx, "Switch.SetOnAfterSwitch: %d -> %d", from, to)
 
+		assert(ctx, i.syncingSince.Load().IsZero(), "syncingSince must be zero")
+
+		i.syncingSince.Store(time.Now())
 		in.AddPipelineSideData(kernel.SideFlagFlush{})
+
+		for inputID := from; inputID > to; inputID-- {
+			inputID := inputID
+			i.switchingProcN.Add(1)
+			observability.Go(ctx, func(ctx context.Context) {
+				defer i.switchingProcN.Add(-1)
+				inputPrev := i.getInputChainByID(ctx, InputID(inputID))
+				if err := inputPrev.Pause(ctx); err != nil {
+					logger.Errorf(ctx, "Switch: unable to pause the previous input %d: %v", inputID, err)
+				}
+			})
+		}
 
 		logger.Debugf(ctx, "Syncer.SetValue(ctx, %d): from %d", to, from)
 		err := i.InputSyncer.SetValue(ctx, to)
 		logger.Debugf(ctx, "/Syncer.SetValue(ctx, %d): from %d: %v", to, from, err)
-
-		inputPrev := i.getInputChainByID(ctx, InputID(from))
-		if err := inputPrev.Pause(ctx); err != nil {
-			logger.Errorf(ctx, "Switch: unable to pause the previous input %d: %v", from, err)
-		}
 	})
 	i.InputSyncer.SetKeepUnless(packetorframecondition.Function(func(
 		ctx context.Context,
 		in packetorframe.InputUnion,
-	) bool {
-		return in.GetPipelineSideData().Contains(kernel.SideFlagFlush{})
+	) (_ret bool) {
+		defer func() {
+			if _ret {
+				i.syncingSince.Store(time.Time{})
+				i.switchingProcN.Add(-1)
+			}
+		}()
+		if in.GetPipelineSideData().Contains(kernel.SideFlagFlush{}) {
+			return true
+		}
+		if time.Since(i.syncingSince.Load()) <= i.Config.SwitchKeepUnlessTimeout {
+			return false
+		}
+		logger.Errorf(ctx, "Syncer: switching took too long")
+		if in.Frame != nil {
+			return true
+		}
+		// not decoded, we have to wait for a keyframe on the video track:
+		if in.GetMediaType() != astiav.MediaTypeVideo {
+			return false
+		}
+		if !in.IsKey() {
+			return false
+		}
+		return true
 	}))
 	i.InputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
 
@@ -198,6 +283,8 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 			inputID, inputFactory,
 			i.InputSwitch.Output(int32(inputID)),
 			i.InputSyncer.Output(int32(inputID)),
+			i.onInputChainKernelOpen,
+			i.onInputChainError,
 		)
 		if err != nil {
 			return fmt.Errorf("cannot create input chain for input %d: %w", inputID, err)
@@ -219,6 +306,51 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 		}
 	}
 	return nil
+}
+
+func (i *InputWithFallback[K, DF, C]) onInputChainKernelOpen(
+	ctx context.Context,
+	inputChain *InputChain[K, DF, C],
+) {
+	// When a kernel opens, prefer it if there is no active input or it has higher priority
+	id := int(inputChain.ID)
+	cur := int(i.InputSwitch.CurrentValue.Load())
+	logger.Debugf(ctx, "onInputChainKernelOpen: input %d opened, current=%d", id, cur)
+	if id >= cur {
+		return
+	}
+
+	// If this input has a higher priority (lower index), request a switch back
+	if err := i.InputSwitch.SetValue(ctx, int32(id)); err != nil {
+		logger.Errorf(ctx, "onInputChainKernelOpen: unable to recover to input %d: %v", id, err)
+	}
+}
+
+func (i *InputWithFallback[K, DF, C]) onInputChainError(
+	ctx context.Context,
+	inputChain *InputChain[K, DF, C],
+	err error,
+) {
+	id := inputChain.ID
+	cur := int(i.InputSwitch.CurrentValue.Load())
+	logger.Debugf(ctx, "onInputChainError: input %d error: %v (current=%d)", int(id), err, cur)
+	// Only react to errors on the currently active input
+	if cur != int(id) {
+		return
+	}
+
+	i.InputChainsLocker.Do(ctx, func() {
+		// choose next fallback (simple next index)
+		if id+1 >= InputID(len(i.InputChains)) {
+			logger.Debugf(ctx, "onInputChainError: no fallbacks available: %d+1 >= %d", int(id), len(i.InputChains))
+			return
+		}
+		nextID := id + 1
+		logger.Infof(ctx, "onInputChainError: switching from %d to %d due to error: %v", int(id), nextID, err)
+		if err := i.InputSwitch.SetValue(ctx, int32(nextID)); err != nil {
+			logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, err)
+		}
+	})
 }
 
 type asInputPacketFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]

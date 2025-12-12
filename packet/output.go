@@ -61,32 +61,29 @@ func (o *Output) SetDTS(v int64) {
 }
 
 func (o *Output) GetSize() int {
-	return o.Packet.Size()
+	return (*Commons)(o).GetSize()
 }
 
 func (o *Output) GetStreamIndex() int {
-	return o.Packet.StreamIndex()
+	return (*Commons)(o).GetStreamIndex()
 }
 
-func (o *Output) GetStream(ctx context.Context) *astiav.Stream {
-	streamIndex := o.GetStreamIndex()
-	var result *astiav.Stream
-	o.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-		for _, stream := range fmtCtx.Streams() {
-			if stream.Index() == streamIndex {
-				result = stream
-				return
-			}
-		}
-	})
-	return result
+func (o *Output) GetStream() *astiav.Stream {
+	return (*Commons)(o).GetStream()
+}
+
+func (o *Output) GetStreamFromSource(ctx context.Context) *astiav.Stream {
+	return (*Commons)(o).GetStreamFromSource(ctx)
 }
 
 func (o *Output) GetPipelineSideData() types.PipelineSideData {
-	return o.PipelineSideData
+	return (*Commons)(o).GetPipelineSideData()
 }
 
 func (o *Output) AddPipelineSideData(obj any) types.PipelineSideData {
-	o.PipelineSideData = append(o.PipelineSideData, obj)
-	return o.PipelineSideData
+	return (*Commons)(o).AddPipelineSideData(obj)
+}
+
+func (o *Output) IsKey() bool {
+	return (*Commons)(o).IsKey()
 }
