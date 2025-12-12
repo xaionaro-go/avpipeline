@@ -75,6 +75,10 @@ func (f *Filter) match(
 		}
 		shift = avconv.Duration(shiftInt, in.GetTimeBase())
 	}
+	if in.GetStreamIndex() != 0 {
+		logger.Tracef(ctx, "MonotonicPTS filter: non-first stream (index: %d), skipping the calculations", in.GetStreamIndex())
+		return true
+	}
 	logger.Tracef(ctx, "MonotonicPTS filter: curPTS=%v+%v, latestPTS=%v", pts, shift, f.LatestPTS)
 	pts += shift
 	if pts+100*time.Millisecond > f.LatestPTS {

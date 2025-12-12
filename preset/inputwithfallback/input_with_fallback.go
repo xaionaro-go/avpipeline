@@ -82,6 +82,7 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 		newInputChainChan: make(chan *InputChain[K, DF, C], 100),
 	}
 	i.PreOutput.AddPushPacketsTo(ctx, i.Output, packetfiltercondition.PacketOrFrame{i.MonotonicPTS})
+	i.PreOutput.AddPushFramesTo(ctx, i.Output, framefiltercondition.PacketOrFrame{i.MonotonicPTS})
 	if err := i.initSwitches(ctx); err != nil {
 		return nil, fmt.Errorf("cannot init switches: %w", err)
 	}

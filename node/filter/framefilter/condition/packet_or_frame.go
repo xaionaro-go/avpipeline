@@ -17,6 +17,6 @@ func (v PacketOrFrame) String() string {
 
 func (v PacketOrFrame) Match(ctx context.Context, in Input) bool {
 	return packetorframecondition.And(v).Match(ctx, packetorframe.InputUnion{
-		Packet: &in.Input,
+		Frame: &in.Input,
 	})
 }

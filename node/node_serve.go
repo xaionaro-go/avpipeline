@@ -41,7 +41,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", n.GetProcessor()))
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
 	ctx = xsync.WithLoggingEnabled(ctx, false)
-	nodeKey := fmt.Sprintf("%s:%p", n, n)
+	nodeKey := fmt.Sprintf("%s:%p:%d", n, n, n.GetObjectID())
 	logger.Tracef(ctx, "Serve[%s]: %s", nodeKey, debug.Stack())
 	defer func() { logger.Tracef(ctx, "/Serve[%s]", nodeKey) }()
 
