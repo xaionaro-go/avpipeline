@@ -46,11 +46,10 @@ func NewStreamForwarderCopy[CS any, PS processor.Abstract](
 		Input:  src,
 		Output: &nodewrapper.NoServe[node.Abstract]{Node: dst},
 	}
-	srcAsPacketSource := asPacketSource(src.GetProcessor())
 	dstAsPacketSink := asPacketSink(dst.GetProcessor())
-	if srcAsPacketSource != nil && dstAsPacketSink != nil {
+	if dstAsPacketSink != nil {
 		logger.Debugf(ctx, "adding an autoheaders node to handle Source->Sink conversion")
-		fwd.AutoFixer = autofix.NewWithCustomData(ctx, srcAsPacketSource, dstAsPacketSink, src.CustomData)
+		fwd.AutoFixer = autofix.NewWithCustomData(ctx, dstAsPacketSink, src.CustomData)
 		fwd.AutoFixerInput = &nodewrapper.NoServe[node.Abstract]{Node: fwd.AutoFixer.Input()}
 	}
 	return fwd, nil

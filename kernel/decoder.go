@@ -66,7 +66,7 @@ type packetInfo struct {
 }
 
 func (p *packetInfo) Bytes() []byte {
-	b := make([]byte, 40)
+	b := make([]byte, 48)
 	binary.NativeEndian.PutUint64(b[0:8], uint64(p.PTS))
 	binary.NativeEndian.PutUint64(b[8:16], uint64(p.DTS))
 	binary.NativeEndian.PutUint64(b[24:32], uint64(p.Duration))
@@ -76,7 +76,7 @@ func (p *packetInfo) Bytes() []byte {
 }
 
 func packetInfoFromBytes(b []byte) *packetInfo {
-	if len(b) < 40 {
+	if len(b) < 48 {
 		return nil
 	}
 	return &packetInfo{

@@ -494,7 +494,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	s.NodeStreamFixerMain = autofix.New(
 		belt.WithField(ctx, "branch", "output-main"),
-		s.Recoder.Encoder,
 		outputAsPacketSink,
 	)
 
@@ -505,7 +504,6 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 		s.NodeStreamFixerPassthrough = autofix.New(
 			belt.WithField(ctx, "branch", "passthrough"),
-			s.PacketSource,
 			passthroughOutputReference,
 		)
 		if s.NodeStreamFixerPassthrough != nil {

@@ -25,12 +25,10 @@ type DefaultCustomData struct{}
 
 func New(
 	ctx context.Context,
-	source packet.Source,
 	sink packet.Sink,
 ) *AutoFixer {
 	return NewWithCustomData[DefaultCustomData](
 		ctx,
-		source,
 		sink,
 		struct{}{},
 	)
@@ -38,12 +36,11 @@ func New(
 
 func NewWithCustomData[T any](
 	ctx context.Context,
-	source packet.Source,
 	sink packet.Sink,
 	customData T,
 ) *AutoFixerWithCustomData[T] {
 	var zeroT T
-	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, source, sink)
+	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, sink)
 
 	var outputFormatName string
 	sink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {

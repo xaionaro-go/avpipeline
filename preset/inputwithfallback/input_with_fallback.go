@@ -51,16 +51,16 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	switchingProcN    xatomic.Int64
 }
 
-// |  retryable:input0 -> inputSwitch (-> autofix -> decoder) -> inputSyncer ->-+
-// |  (main)                   :                                      :         |
-// |                           :                                      :         |               MonotonicPTS
-// |  retryable:input1 -> inputSwitch (-> autofix -> decoder) -> inputSyncer ->-+-> Passthrough--------------> Passthrough -->--
-// |  (fallback)               :                                      :         |                                          (one output)
-// |                           :                                      :         |
-// |  retryable:input2 -> inputSwitch (-> autofix -> decoder) -> inputSyncer ->-+
-// |  (second fallback)        :                                      :         |
-// |                           :                                      :         |
-// |  ...                     ...          ...         ...           ...     ->-+
+// |  retryable:input0 -> inputSwitch (-> autoheaders -> decoder) -> inputSyncer ->-+
+// |  (main)                   :                                          :         |
+// |                           :                                          :         |               MonotonicPTS
+// |  retryable:input1 -> inputSwitch (-> autoheaders -> decoder) -> inputSyncer ->-+-> Passthrough--------------> Passthrough -->--
+// |  (fallback)               :                                          :         |                                          (one output)
+// |                           :                                          :         |
+// |  retryable:input2 -> inputSwitch (-> autoheaders -> decoder) -> inputSyncer ->-+
+// |  (second fallback)        :                                          :         |
+// |                           :                                          :         |
+// |  ...                     ...          ...             ...           ...     ->-+
 //
 // K is the input kernel type (generally it is *kernel.Input).
 // C is the custom data type associated with each input node (generally it is struct{}).

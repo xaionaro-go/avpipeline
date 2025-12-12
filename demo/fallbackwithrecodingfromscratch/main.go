@@ -266,7 +266,7 @@ func main() {
 	}
 
 	if outputBSFEnabled {
-		encoderBSF := autofix.New(ctx, encoder, output.Kernel)
+		encoderBSF := autofix.New(ctx, output.Kernel)
 		encoderNode.AddPushPacketsTo(ctx, encoderBSF)
 		encoderBSF.AddPushPacketsTo(ctx, outputNode)
 	} else {

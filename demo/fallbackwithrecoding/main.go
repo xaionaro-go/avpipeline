@@ -25,7 +25,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitframerate"
-	"github.com/xaionaro-go/avpipeline/preset/autofix"
+	"github.com/xaionaro-go/avpipeline/preset/autoheaders"
 	"github.com/xaionaro-go/avpipeline/preset/inputwithfallback"
 	"github.com/xaionaro-go/avpipeline/processor"
 	goconvavp "github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipeline"
@@ -167,7 +167,7 @@ func main() {
 	}
 
 	if outputBSFEnabled {
-		encoderBSF := autofix.New(ctx, encoder, output.Kernel)
+		encoderBSF := autoheaders.NewNode(ctx, output.Kernel)
 		encoderNode.AddPushPacketsTo(ctx, encoderBSF)
 		encoderBSF.AddPushPacketsTo(ctx, outputNode)
 	} else {

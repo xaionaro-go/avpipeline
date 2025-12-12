@@ -231,7 +231,6 @@ func newOutput[C any](
 		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
 		InputFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
-			inputNode.Processor.Kernel,
 			recoderKernel.Decoder,
 			OutputCustomData[C]{},
 		),
@@ -244,7 +243,6 @@ func newOutput[C any](
 		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
 		SendingFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
-			recoderKernel.Encoder,
 			packetSinker.GetPacketSink(),
 			OutputCustomData[C]{},
 		),

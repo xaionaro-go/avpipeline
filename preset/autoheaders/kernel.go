@@ -56,7 +56,7 @@ func (h *AutoHeaders) SendInputPacket(
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "SendInputPacket: %s", input.Source)
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
+	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input.Source, _err) }()
 	return xsync.DoA4R1(ctx, &h.Locker, h.sendInputPacketLocked, ctx, input, outputPacketsCh, outputFramesCh)
 }
 

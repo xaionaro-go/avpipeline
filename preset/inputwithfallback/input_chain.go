@@ -13,7 +13,7 @@ import (
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
-	"github.com/xaionaro-go/avpipeline/preset/autofix"
+	"github.com/xaionaro-go/avpipeline/preset/autoheaders"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
 )
@@ -29,14 +29,14 @@ type InputKernel interface {
 
 var _ InputKernel = (*kernel.Input)(nil)
 
-// retryable:input -> filter (-> autofix -> decoder) -> syncBarrier
+// retryable:input -> filter (-> autoheaders -> decoder) -> syncBarrier
 type InputChain[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	ID           InputID
 	InputFactory InputFactory[K, DF]
 	Input        *InputNode[K, C]
 	FilterSwitch *barrierstategetter.SwitchOutput
 	Filter       *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
-	Autofix      *autofix.AutoFixerWithCustomData[C]
+	AutoHeaders  *autoheaders.NodeWithCustomData[C]
 	Decoder      *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Decoder[DF]]]
 	SyncSwitch   *barrierstategetter.SwitchOutput
 	SyncBarrier  *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -102,12 +102,11 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	)
 	r.Input.AddPushPacketsTo(ctx, r.Filter)
 	r.Input.AddPushFramesTo(ctx, r.Filter)
-	var zeroCustomData C
-	r.Autofix = autofix.NewWithCustomData[C](ctx, r.Input.Processor.Kernel, r.Decoder.Processor.Kernel, zeroCustomData)
-	r.Filter.AddPushPacketsTo(ctx, r.Autofix)
-	r.Filter.AddPushFramesTo(ctx, r.Autofix)
-	r.Autofix.AddPushPacketsTo(ctx, r.Decoder)
-	r.Autofix.AddPushFramesTo(ctx, r.Decoder)
+	r.AutoHeaders = autoheaders.NewNodeWithCustomData[C](ctx, r.Decoder.Processor.Kernel)
+	r.Filter.AddPushPacketsTo(ctx, r.AutoHeaders)
+	r.Filter.AddPushFramesTo(ctx, r.AutoHeaders)
+	r.AutoHeaders.AddPushPacketsTo(ctx, r.Decoder)
+	r.AutoHeaders.AddPushFramesTo(ctx, r.Decoder)
 	r.Decoder.AddPushPacketsTo(ctx, r.SyncBarrier)
 	r.Decoder.AddPushFramesTo(ctx, r.SyncBarrier)
 
@@ -145,6 +144,14 @@ func (i *InputChain[K, DF, C]) Serve(
 		defer logger.Debugf(ctx, "InputChain[%d].Serve: filter node serving ended", i.ID)
 		logger.Debugf(ctx, "InputChain[%d].Serve: filter node serving started", i.ID)
 		i.Filter.Serve(ctx, cfg, errCh)
+	})
+
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		defer logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving ended", i.ID)
+		logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving started", i.ID)
+		i.AutoHeaders.Serve(ctx, cfg, errCh)
 	})
 
 	wg.Add(1)
@@ -214,8 +221,8 @@ func (i *InputChain[K, DF, C]) Close(
 	if err := i.Filter.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close filter node: %w", err))
 	}
-	if err := i.Autofix.Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to close autofix node: %w", err))
+	if err := i.AutoHeaders.Processor.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close autoheaders node: %w", err))
 	}
 	if err := i.Decoder.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close decoder node: %w", err))
