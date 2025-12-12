@@ -107,8 +107,8 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	logger.Debugf(ctx, "initSwitches")
 	defer func() { logger.Debugf(ctx, "/initSwitches: %v", _err) }()
 
-	i.InputSwitch.CurrentValue.Store(math.MinInt32)
-	i.InputSyncer.CurrentValue.Store(math.MinInt32)
+	i.InputSwitch.CurrentValue.Store(0)
+	i.InputSyncer.CurrentValue.Store(0)
 
 	switchKeepUnlessConds := packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
@@ -331,6 +331,8 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 	inputChain *InputChain[K, DF, C],
 	err error,
 ) {
+	defer time.Sleep(i.Config.RetryInterval)
+
 	id := inputChain.ID
 	cur := int(i.InputSwitch.CurrentValue.Load())
 	logger.Debugf(ctx, "onInputChainError: input %d error: %v (current=%d)", int(id), err, cur)

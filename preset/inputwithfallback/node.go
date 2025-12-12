@@ -92,6 +92,15 @@ func (i *InputWithFallback[K, DF, C]) Serve(
 					defer i.serveWaitGroup.Done()
 					inputChain.Serve(ctx, cfg, errCh)
 				})
+				if inputChain.ID == 0 {
+					logger.Debugf(ctx, "inputwithfallback.Serve: first input chain added, unpausing it")
+					if err := inputChain.Unpause(ctx); err != nil {
+						errCh <- node.Error{
+							Node: i,
+							Err:  fmt.Errorf("unable to unpause first input chain: %w", err),
+						}
+					}
+				}
 			}
 		}
 	})

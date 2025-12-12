@@ -49,7 +49,9 @@ func NewRetryable[K Abstract](
 	r.KernelOpenBarrier.Pointer = ptr(make(chan struct{}))
 	if r.Config.StartOnInit {
 		r.unpauseKernelOpening(ctx)
-		r.Config.OnInit(ctx, r)
+		if r.Config.OnInit != nil {
+			r.Config.OnInit(ctx, r)
+		}
 		observability.Go(ctx, func(ctx context.Context) {
 			r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
 				r.openKernelIfNeeded(ctx)
@@ -57,7 +59,9 @@ func NewRetryable[K Abstract](
 		})
 	} else {
 		r.pauseKernelOpening(ctx)
-		r.Config.OnInit(ctx, r)
+		if r.Config.OnInit != nil {
+			r.Config.OnInit(ctx, r)
+		}
 	}
 	return r
 }
@@ -283,9 +287,9 @@ func (r *Retryable[K]) Close(ctx context.Context) (_err error) {
 func (r *Retryable[K]) IsPaused(ctx context.Context) bool {
 	select {
 	case <-*r.KernelOpenBarrier.Load():
-		return true
-	default:
 		return false
+	default:
+		return true
 	}
 }
 
