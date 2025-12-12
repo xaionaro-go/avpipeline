@@ -225,9 +225,9 @@ func main() {
 			fmt.Printf(
 				"inputs: %s\ninput main: %s\ninput fallback: %s\noutput:%s\n",
 				inputs,
-				mustJSON(ctx, inputs.InputChains[0].Input.GetProcessor().CountersPtr().Generated.Packets),
-				mustJSON(ctx, inputs.InputChains[1].Input.GetProcessor().CountersPtr().Generated.Packets),
-				mustJSON(ctx, outputNode.GetCountersPtr().Received.Packets),
+				mustJSON(ctx, inputs.InputChains[0].Input.GetProcessor().CountersPtr().Generated.Packets.ToStats()),
+				mustJSON(ctx, inputs.InputChains[1].Input.GetProcessor().CountersPtr().Generated.Packets.ToStats()),
+				mustJSON(ctx, outputNode.GetCountersPtr().Received.Packets.ToStats()),
 			)
 			logger.Debugf(ctx, "main pipeline: %s", mustJSON(ctx, goconvavp.NodeToGRPC(ctx, inputs.InputChains[0].Input)))
 			logger.Debugf(ctx, "fallback pipeline: %s", mustJSON(ctx, goconvavp.NodeToGRPC(ctx, inputs.InputChains[1].Input)))
