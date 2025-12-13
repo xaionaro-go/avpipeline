@@ -22,7 +22,9 @@ func (f *inputFactory) String() string {
 func (f *inputFactory) NewInput(
 	ctx context.Context,
 ) (*kernel.Input, error) {
-	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{})
+	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{
+		KeepOpen: true,
+	})
 }
 
 func (f *inputFactory) NewDecoderFactory(

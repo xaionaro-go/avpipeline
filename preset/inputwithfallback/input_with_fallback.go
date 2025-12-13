@@ -270,7 +270,9 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		}
 		return true
 	}))
-	i.InputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
+	i.InputSyncer.Flags.Set(0 |
+		barrierstategetter.SwitchFlagNextOutputStateBlock,
+	)
 
 	logger.Tracef(ctx, "Switch: %p", i.InputSwitch)
 	logger.Tracef(ctx, "Syncer: %p", i.InputSyncer)
