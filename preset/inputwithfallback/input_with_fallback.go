@@ -74,8 +74,8 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 
 	i := &InputWithFallback[K, DF, C]{
 		Config:            Options(opts).Config(),
-		PreOutput:         node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx, &kernel.Passthrough{}),
-		Output:            node.NewWithCustomDataFromKernel[C, *kernel.Passthrough](ctx, &kernel.Passthrough{}),
+		PreOutput:         node.NewWithCustomDataFromKernel[C](ctx, &kernel.Passthrough{}),
+		Output:            node.NewWithCustomDataFromKernel[C](ctx, &kernel.Passthrough{}),
 		InputSwitch:       barrierstategetter.NewSwitch(),
 		InputSyncer:       barrierstategetter.NewSwitch(),
 		MonotonicPTS:      monotonicpts.New(true),
@@ -287,7 +287,7 @@ func (i *InputWithFallback[K, DF, C]) getInputChainByID(
 }
 
 func (i *InputWithFallback[K, DF, C]) getInputChainByIDLocked(
-	ctx context.Context,
+	_ context.Context,
 	id InputID,
 ) *InputChain[K, DF, C] {
 	if int(id) < 0 || int(id) >= len(i.InputChains) {
@@ -311,7 +311,7 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 ) error {
 	for _, inputFactory := range inputFactories {
 		inputID := InputID(len(i.InputChains))
-		inputChain, err := newInputChain[K, DF, C](ctx,
+		inputChain, err := newInputChain(ctx,
 			inputID, inputFactory,
 			i.InputSwitch.Output(int32(inputID)),
 			i.InputSyncer.Output(int32(inputID)),
