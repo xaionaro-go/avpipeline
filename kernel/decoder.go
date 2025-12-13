@@ -222,7 +222,9 @@ func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
 	f.SetPktDts(packetInfo.DTS)
 	f.SetDuration(packetInfo.Duration)
 	f.SetFlags(f.Flags().Add(astiav.FrameFlagCorrupt))
-	f.SetKeyFrame(isKeyFrame)
+	if isKeyFrame {
+		f.SetFlags(f.Flags().Add(astiav.FrameFlagKey))
+	}
 	err = d.send(ctx, outputFramesCh, f, streamInfo)
 	if err != nil {
 		return fmt.Errorf("unable to send a blank frame: %w", err)

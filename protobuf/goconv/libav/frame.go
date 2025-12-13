@@ -16,10 +16,6 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 	if input == nil {
 		return nil
 	}
-	var keyFrame int32
-	if input.KeyFrame() {
-		keyFrame = 1
-	}
 	data, _ := input.Data().Bytes(0)
 	f := &Frame{
 		DataSize:          uint32(len(data)),
@@ -28,7 +24,6 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 		Height:            int32(input.Height()),
 		NbSamples:         int32(input.NbSamples()),
 		Format:            int32(input.SampleFormat()),
-		KeyFrame:          keyFrame,
 		PictType:          uint32(input.PictureType()),
 		SampleAspectRatio: RationalFromGo(ptr(input.SampleAspectRatio())).Protobuf(),
 		Pts:               input.Pts(),
