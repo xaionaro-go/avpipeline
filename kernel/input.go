@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
@@ -32,12 +35,17 @@ const (
 )
 
 type InputConfig struct {
-	CustomOptions      globaltypes.DictionaryItems
-	RecvBufferSize     uint
-	AsyncOpen          bool
-	OnPostOpen         func(context.Context, *Input) error
-	OnPreClose         func(context.Context, *Input) error
-	KeepOpen           bool
+	CustomOptions  globaltypes.DictionaryItems
+	RecvBufferSize uint
+	AsyncOpen      bool
+	OnPostOpen     func(context.Context, *Input) error
+	OnPreClose     func(context.Context, *Input) error
+	KeepOpen       bool
+
+	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
+	// alternative to option "-re" in ffmpeg.
+	ForceRealTime bool
+
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
 }
@@ -58,9 +66,14 @@ type Input struct {
 	DefaultFPS    astiav.Rational
 
 	KeepOpen           bool
+	ForceRealTime      bool
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
+
+	SyncStreamIndex   atomic.Int64
+	SyncStartPTS      atomic.Int64
+	SyncStartUnixNano atomic.Int64
 
 	WaitGroup sync.WaitGroup
 }
@@ -92,10 +105,14 @@ func NewInputFromURL(
 		ClosureSignaler: closuresignaler.New(),
 
 		KeepOpen:           cfg.KeepOpen,
+		ForceRealTime:      cfg.ForceRealTime,
 		OnPreClose:         cfg.OnPreClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
 	}
+	i.SyncStreamIndex.Store(math.MinInt64)
+	i.SyncStartPTS.Store(math.MinInt64)
+	i.SyncStartUnixNano.Store(math.MinInt64)
 	defaultFPS := float64(inputDefaultFPS)
 
 	var formatName string
@@ -230,13 +247,17 @@ func (i *Input) Close(
 	}
 	i.ClosureSignaler.Close(ctx)
 	i.WaitGroup.Wait()
+
+	var errs []error
 	if i.KeepOpen { // it means it won't be closed automatically, thus we should close it here, since this was a manual Close()
 		if fn := i.OnPreClose; fn != nil {
-			fn(ctx, i)
+			if err := fn(ctx, i); err != nil {
+				errs = append(errs, fmt.Errorf("input OnPreClose error: %w", err))
+			}
 		}
 		i.FormatContext.CloseInput()
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (i *Input) readIntoPacket(
@@ -253,6 +274,104 @@ func (i *Input) readIntoPacket(
 		return io.EOF
 	default:
 		return fmt.Errorf("unable to read a frame: %T:%w", err, err)
+	}
+}
+
+func (i *Input) autoDetectSyncStreamIndexIfNeeded(
+	ctx context.Context,
+	outPkt *packet.Output,
+) bool {
+	if i.SyncStreamIndex.Load() >= 0 {
+		return true
+	}
+
+	switch outPkt.CodecParameters().MediaType() {
+	case astiav.MediaTypeAudio:
+		if i.SyncStreamIndex.CompareAndSwap(math.MinInt64, int64(outPkt.StreamIndex())) {
+			logger.Debugf(ctx, "auto-detected sync stream index: %d (video)", outPkt.StreamIndex())
+		}
+		return i.SyncStreamIndex.Load() >= 0
+	default:
+		return false
+	}
+}
+
+func (i *Input) slowdownIfNeeded(
+	ctx context.Context,
+	outPkt *packet.Output,
+) {
+	if !i.ForceRealTime {
+		return
+	}
+
+	if !i.autoDetectSyncStreamIndexIfNeeded(ctx, outPkt) {
+		logger.Debugf(ctx, "unable to auto-detect sync stream index, skipping slowdown")
+		return
+	}
+
+	if int64(outPkt.GetStreamIndex()) != i.SyncStreamIndex.Load() {
+		return
+	}
+
+	pts := outPkt.Pts()
+	if pts == astiav.NoPtsValue {
+		return
+	}
+
+	timeBase := outPkt.GetTimeBase()
+	if timeBase.Num() == 0 || timeBase.Den() == 0 {
+		return
+	}
+	wantSeconds := timeBase.Float64() * float64(pts)
+
+	assert(ctx, pts >= 0, "PTS is negative")
+	nowUnixNano := time.Now().UnixNano()
+	startUnixNano := i.SyncStartUnixNano.Load()
+
+	// Initialize base reference on the first sync packet.
+	startPTS := i.SyncStartPTS.Load()
+	if startUnixNano == math.MinInt64 {
+		if startPTS == math.MinInt64 {
+			for {
+				i.SyncStartPTS.CompareAndSwap(math.MinInt64, pts)
+				startPTS = i.SyncStartPTS.Load()
+				if startPTS >= 0 {
+					break
+				}
+				runtime.Gosched()
+			}
+		}
+		i.SyncStartUnixNano.Store(nowUnixNano)
+		startUnixNano = nowUnixNano
+	}
+
+	currentSeconds := float64(nowUnixNano-startUnixNano) / float64(time.Second.Nanoseconds())
+	diffSeconds := wantSeconds - float64(startPTS)*timeBase.Float64()
+	if diffSeconds <= 0 {
+		return
+	}
+
+	sleepSeconds := diffSeconds - currentSeconds
+	if sleepSeconds <= 0 {
+		return
+	}
+
+	if sleepSeconds > 10 {
+		logger.Errorf(ctx, "sleepSeconds too large (%f), capping to 10 seconds (wantSeconds:%f currentSeconds:%f startPTS:%d)", sleepSeconds, wantSeconds, currentSeconds, startPTS)
+		sleepSeconds = 10
+	}
+
+	logger.Tracef(ctx, "slowing down input by sleeping for %f seconds (wantSeconds:%f currentSeconds:%f startPTS:%d)", sleepSeconds, wantSeconds, currentSeconds, startPTS)
+	sleepDur := time.Duration(sleepSeconds * float64(time.Second))
+	timer := time.NewTimer(sleepDur)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-i.CloseChan():
+		return
+	case <-timer.C:
 	}
 }
 
@@ -282,7 +401,13 @@ func (i *Input) Generate(
 	if !i.KeepOpen {
 		defer func() {
 			if fn := i.OnPreClose; fn != nil {
-				fn(ctx, i)
+				if err := fn(ctx, i); err != nil {
+					if _err == nil {
+						_err = fmt.Errorf("input OnPreClose error: %w", err)
+					} else {
+						logger.Errorf(ctx, "input OnPreClose error: %v", err)
+					}
+				}
 			}
 			i.FormatContext.CloseInput()
 		}()
@@ -296,6 +421,8 @@ func (i *Input) Generate(
 
 	lastDuration := map[int]int64{}
 	sendPkt := func(outPkt *packet.Output) error {
+		i.slowdownIfNeeded(ctx, outPkt)
+
 		codecParams := outPkt.Stream.CodecParameters()
 		switch codecParams.MediaType() {
 		case astiav.MediaTypeVideo:
