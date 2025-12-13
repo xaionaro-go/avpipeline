@@ -61,15 +61,17 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		SyncBarrier:  node.NewWithCustomDataFromKernel[C, *kernel.Barrier](ctx, kernel.NewBarrier(ctx, syncSwitch)),
 	}
 
-	decoder, err := inputFactory.NewDecoderFactory(ctx)
+	decoderFactory, err := inputFactory.NewDecoderFactory(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create decoder factory for input %v: %w", inputID, err)
 	}
-	r.Decoder = node.NewWithCustomDataFromKernel[C, *kernel.Decoder[DF]](
-		ctx,
-		kernel.NewDecoder(ctx, decoder),
-		processor.DefaultOptionsRecoder()...,
-	)
+	if any(decoderFactory) != codec.DecoderFactory(nil) {
+		r.Decoder = node.NewWithCustomDataFromKernel[C, *kernel.Decoder[DF]](
+			ctx,
+			kernel.NewDecoder(ctx, decoderFactory),
+			processor.DefaultOptionsRecoder()...,
+		)
+	}
 
 	inputKernel := kernel.NewRetryable[K](ctx,
 		func(ctx context.Context) (K, error) {
@@ -102,13 +104,18 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	)
 	r.Input.AddPushPacketsTo(ctx, r.Filter)
 	r.Input.AddPushFramesTo(ctx, r.Filter)
-	r.AutoHeaders = autoheaders.NewNodeWithCustomData[C](ctx, r.Decoder.Processor.Kernel)
-	r.Filter.AddPushPacketsTo(ctx, r.AutoHeaders)
-	r.Filter.AddPushFramesTo(ctx, r.AutoHeaders)
-	r.AutoHeaders.AddPushPacketsTo(ctx, r.Decoder)
-	r.AutoHeaders.AddPushFramesTo(ctx, r.Decoder)
-	r.Decoder.AddPushPacketsTo(ctx, r.SyncBarrier)
-	r.Decoder.AddPushFramesTo(ctx, r.SyncBarrier)
+	if r.Decoder == nil {
+		r.Filter.AddPushPacketsTo(ctx, r.SyncBarrier)
+		r.Filter.AddPushFramesTo(ctx, r.SyncBarrier)
+	} else {
+		r.AutoHeaders = autoheaders.NewNodeWithCustomData[C](ctx, r.Decoder.Processor.Kernel)
+		r.Filter.AddPushPacketsTo(ctx, r.AutoHeaders)
+		r.Filter.AddPushFramesTo(ctx, r.AutoHeaders)
+		r.AutoHeaders.AddPushPacketsTo(ctx, r.Decoder)
+		r.AutoHeaders.AddPushFramesTo(ctx, r.Decoder)
+		r.Decoder.AddPushPacketsTo(ctx, r.SyncBarrier)
+		r.Decoder.AddPushFramesTo(ctx, r.SyncBarrier)
+	}
 
 	return r, nil
 }
@@ -146,21 +153,25 @@ func (i *InputChain[K, DF, C]) Serve(
 		i.Filter.Serve(ctx, cfg, errCh)
 	})
 
-	wg.Add(1)
-	observability.Go(ctx, func(ctx context.Context) {
-		defer wg.Done()
-		defer logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving ended", i.ID)
-		logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving started", i.ID)
-		i.AutoHeaders.Serve(ctx, cfg, errCh)
-	})
+	if i.AutoHeaders != nil {
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			defer logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving ended", i.ID)
+			logger.Debugf(ctx, "InputChain[%d].Serve: autoheaders node serving started", i.ID)
+			i.AutoHeaders.Serve(ctx, cfg, errCh)
+		})
+	}
 
-	wg.Add(1)
-	observability.Go(ctx, func(ctx context.Context) {
-		defer wg.Done()
-		defer logger.Debugf(ctx, "InputChain[%d].Serve: decoder node serving ended", i.ID)
-		logger.Debugf(ctx, "InputChain[%d].Serve: decoder node serving started", i.ID)
-		i.Decoder.Serve(ctx, cfg, errCh)
-	})
+	if i.Decoder != nil {
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			defer logger.Debugf(ctx, "InputChain[%d].Serve: decoder node serving ended", i.ID)
+			logger.Debugf(ctx, "InputChain[%d].Serve: decoder node serving started", i.ID)
+			i.Decoder.Serve(ctx, cfg, errCh)
+		})
+	}
 
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
