@@ -2,6 +2,7 @@ package packet
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -11,6 +12,7 @@ import (
 )
 
 type Source interface {
+	fmt.Stringer
 	WithOutputFormatContext(context.Context, func(*astiav.FormatContext))
 }
 
@@ -186,4 +188,8 @@ func (pkt *Commons) IsKey() bool {
 		return false
 	}
 	return pkt.Packet.Flags().Has(astiav.PacketFlagKey)
+}
+
+func (pkt *Commons) GetPacketSource() Source {
+	return pkt.StreamInfo.Source
 }

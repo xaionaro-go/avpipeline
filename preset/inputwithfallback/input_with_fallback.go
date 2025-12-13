@@ -126,6 +126,14 @@ func (i *InputWithFallback[K, DF, C]) GetOutput() node.Abstract {
 	return i.Output
 }
 
+func (i *InputWithFallback[K, DF, C]) GetInputChainsCount(
+	ctx context.Context,
+) int {
+	return xsync.DoR1(ctx, &i.InputChainsLocker, func() int {
+		return len(i.InputChains)
+	})
+}
+
 func (i *InputWithFallback[K, DF, C]) initSwitches(
 	ctx context.Context,
 ) (_err error) {

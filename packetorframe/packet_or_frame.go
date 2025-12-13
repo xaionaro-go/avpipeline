@@ -99,6 +99,16 @@ func (u *InputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 func (u *InputUnion) IsKey() bool {
 	return u.Get().IsKey()
 }
+func (u *InputUnion) GetSource() AbstractSource {
+	switch {
+	case u.Packet != nil:
+		return u.Packet.StreamInfo.Source
+	case u.Frame != nil:
+		return u.Frame.StreamInfo.Source
+	default:
+		return nil
+	}
+}
 
 type OutputUnion struct {
 	Frame  *frame.Output
