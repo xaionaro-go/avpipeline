@@ -808,7 +808,7 @@ func (e *streamEncoder) getResampledFrames(
 		return nil, fmt.Errorf("unable to prepare the resampler: %w", err)
 	}
 
-	logger.Tracef(ctx, "sending the frame (%d, %s, %s) to the resampler", inputFrame.SampleRate(), inputFrame.SampleFormat(), inputFrame.ChannelLayout())
+	logger.Tracef(ctx, "sending the frame (%d, %s, %s) to the resampler; samples: %d", inputFrame.SampleRate(), inputFrame.SampleFormat(), inputFrame.ChannelLayout(), inputFrame.NbSamples())
 	err = e.Resampler.SendFrame(ctx, inputFrame)
 	if err != nil {
 		return nil, fmt.Errorf("unable to send the frame: %w", err)
@@ -838,6 +838,7 @@ func (e *streamEncoder) getResampledFrames(
 			}
 			return nil, fmt.Errorf("unable to receive the frame from the resampler: %w", err)
 		}
+		logger.Tracef(ctx, "got the %dth resampled frame: samples: %d", idx, outputFrame.NbSamples())
 		resampledFrames = append(resampledFrames, outputFrame)
 	}
 
