@@ -79,7 +79,7 @@ func (f *Filter) match(
 		logger.Tracef(ctx, "MonotonicPTS filter: non-first stream (index: %d), skipping the calculations", in.GetStreamIndex())
 		return true
 	}
-	logger.Tracef(ctx, "MonotonicPTS filter: curPTS=%v+%v, latestPTS=%v", pts, shift, f.LatestPTS)
+	logger.Tracef(ctx, "MonotonicPTS filter: curPTS=%v+%v (int: %v+?), latestPTS=%v", pts, shift, ptsInt, f.LatestPTS)
 	pts += shift
 	if pts+100*time.Millisecond > f.LatestPTS {
 		f.LatestPTS = pts

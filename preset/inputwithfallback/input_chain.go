@@ -22,6 +22,18 @@ type InputID int
 
 type InputNode[K InputKernel, C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Retryable[K]]]
 
+type InputNodes[K InputKernel, C any] []*InputNode[K, C]
+
+func (in InputNodes[K, C]) NonNil() InputNodes[K, C] {
+	var r InputNodes[K, C]
+	for _, n := range in {
+		if n != nil {
+			r = append(r, n)
+		}
+	}
+	return r
+}
+
 type InputKernel interface {
 	kernel.Abstract
 	packet.Source

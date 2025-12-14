@@ -449,3 +449,17 @@ func (f *asInputFrameFilter[K, DF, C]) Match(
 func (i *InputWithFallback[K, DF, C]) inputFrameFilter() framefiltercondition.Condition {
 	return (*asInputFrameFilter[K, DF, C])(i)
 }
+
+func (i *InputWithFallback[K, DF, C]) GetInputs(
+	ctx context.Context,
+) InputNodes[K, C] {
+	return xsync.DoR1(ctx, &i.InputChainsLocker, i.getInputsLocked)
+}
+
+func (i *InputWithFallback[K, DF, C]) getInputsLocked() InputNodes[K, C] {
+	inputs := make([]*InputNode[K, C], 0, len(i.InputChains))
+	for _, inputChain := range i.InputChains {
+		inputs = append(inputs, inputChain.Input)
+	}
+	return inputs
+}
