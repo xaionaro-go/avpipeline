@@ -169,6 +169,29 @@ func TestResamplerUnspecifiedChannelOrder(t *testing.T) {
 	require.ErrorIs(t, err, astiav.ErrInputChanged)
 }
 
+func TestResamplerSendFrameHandlesLargeInput(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	fmtOut := defaultPCMFormat()
+	r, err := New(ctx, fmtOut)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, r.Close(ctx)) })
+
+	largeSamples := fmtOut.ChunkSize * 4
+	inputFmt := codec.PCMAudioFormat{
+		SampleFormat:  fmtOut.SampleFormat,
+		SampleRate:    fmtOut.SampleRate,
+		ChannelLayout: fmtOut.ChannelLayout,
+		ChunkSize:     largeSamples,
+	}
+	frameLarge := buildPCMFrame(t, inputFmt)
+	defer frame.Pool.Put(frameLarge)
+
+	require.NoError(t, r.SendFrame(ctx, frameLarge))
+	require.GreaterOrEqual(t, r.AudioFifo.Size(), largeSamples)
+}
+
 func writeSamples(t *testing.T, r *Resampler, samples int) {
 	t.Helper()
 	pcmFrame := buildPCMFrame(t, codec.PCMAudioFormat{

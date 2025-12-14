@@ -3,11 +3,13 @@ package resampler
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/xsync"
 )
 
 type Resampler struct {
@@ -16,6 +18,7 @@ type Resampler struct {
 	FormatInput             *codec.PCMAudioFormat
 	FormatOutput            codec.PCMAudioFormat
 	ResampledFrame          *astiav.Frame
+	Locker                  xsync.Mutex
 }
 
 func New(
@@ -104,6 +107,13 @@ func (r *Resampler) SendFrame(
 	ctx context.Context,
 	in *astiav.Frame,
 ) (_err error) {
+	return xsync.DoA2R1(ctx, &r.Locker, r.sendFrameLocked, ctx, in)
+}
+
+func (r *Resampler) sendFrameLocked(
+	ctx context.Context,
+	in *astiav.Frame,
+) (_err error) {
 	logger.Tracef(ctx, "SendFrame: %d", in.NbSamples())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %d: %v", in.NbSamples(), _err) }()
 
@@ -121,7 +131,10 @@ func (r *Resampler) SendFrame(
 	}
 	r.FormatInput = inFormat
 	r.FormatInput.ChunkSize = 0
-
+	outputSamples := r.expectedOutputSamples(in.NbSamples())
+	if err := r.ensureResampledFrameCapacity(ctx, outputSamples); err != nil {
+		return err
+	}
 	if err := r.SoftwareResampleContext.ConvertFrame(in, r.ResampledFrame); err != nil {
 		return fmt.Errorf("cannot convert frame: %w", err)
 	}
@@ -153,7 +166,7 @@ func getPCMFormatFromFrame(
 	}
 }
 
-func (r *Resampler) receiveFrame(
+func (r *Resampler) receiveFrameLocked(
 	ctx context.Context,
 	outputFrame *astiav.Frame,
 	minSize int,
@@ -184,12 +197,46 @@ func (r *Resampler) ReceiveFrame(
 	ctx context.Context,
 	frame *astiav.Frame,
 ) error {
-	return r.receiveFrame(ctx, frame, r.FormatOutput.ChunkSize)
+	return xsync.DoA3R1(ctx, &r.Locker, r.receiveFrameLocked, ctx, frame, r.FormatOutput.ChunkSize)
 }
 
 func (r *Resampler) Flush(
 	ctx context.Context,
 	frame *astiav.Frame,
 ) error {
-	return r.receiveFrame(ctx, frame, 0)
+	return xsync.DoA3R1(ctx, &r.Locker, r.receiveFrameLocked, ctx, frame, 0)
+}
+
+func (r *Resampler) expectedOutputSamples(inputSamples int) int {
+	if inputSamples <= 0 {
+		return r.FormatOutput.ChunkSize
+	}
+	inRate := r.FormatOutput.SampleRate
+	if r.FormatInput != nil && r.FormatInput.SampleRate > 0 {
+		inRate = r.FormatInput.SampleRate
+	}
+	if inRate == 0 {
+		return inputSamples
+	}
+	outSamples := int(math.Ceil(float64(inputSamples) * float64(r.FormatOutput.SampleRate) / float64(inRate)))
+	if outSamples < r.FormatOutput.ChunkSize {
+		outSamples = r.FormatOutput.ChunkSize
+	}
+	return outSamples + r.FormatOutput.ChunkSize
+}
+
+func (r *Resampler) ensureResampledFrameCapacity(ctx context.Context, samples int) error {
+	if samples <= r.ResampledFrame.NbSamples() {
+		return nil
+	}
+	r.ResampledFrame.Unref()
+	r.ResampledFrame.SetSampleFormat(r.FormatOutput.SampleFormat)
+	r.ResampledFrame.SetChannelLayout(r.FormatOutput.ChannelLayout)
+	r.ResampledFrame.SetSampleRate(r.FormatOutput.SampleRate)
+	r.ResampledFrame.SetNbSamples(samples)
+	if err := r.ResampledFrame.AllocBuffer(0); err != nil {
+		return fmt.Errorf("cannot grow resampled frame buffer: %w", err)
+	}
+	logger.Debugf(ctx, "resampler resized output buffer to %d samples", samples)
+	return nil
 }
