@@ -113,7 +113,7 @@ func (c *ChainOfTwo[A, B]) sendInput(
 			err := c.Kernel1.SendInputPacket(ctx, packet.Input(pkt), outputPacketsCh, outputFramesCh)
 			if err != nil {
 				select {
-				case errCh <- err:
+				case errCh <- fmt.Errorf("unable to send packet to kernel1:%s: %w", c.Kernel1, err):
 				case <-ctx.Done():
 					return
 				default:
@@ -130,7 +130,7 @@ func (c *ChainOfTwo[A, B]) sendInput(
 			err := c.Kernel1.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
 			if err != nil {
 				select {
-				case errCh <- err:
+				case errCh <- fmt.Errorf("unable to send frame to kernel1:%s: %w", c.Kernel1, err):
 				case <-ctx.Done():
 					return
 				default:
@@ -196,50 +196,74 @@ func (c *ChainOfTwo[A, B]) Close(ctx context.Context) error {
 
 func (c *ChainOfTwo[A, B]) Generate(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) error {
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer func() {
 		logger.Debugf(ctx, "cancelling context...")
 		cancelFn()
 	}()
-	outputPacketsCh := make(chan packet.Output, 1)
-	outputFramesCh := make(chan frame.Output, 1)
 
-	errCh := make(chan error, 1)
+	kernel0OutPacketCh := make(chan packet.Output)
+	kernel0OutFrameCh := make(chan frame.Output)
+	errCh := make(chan error, 8)
 
-	var kernelWG sync.WaitGroup
-	for _, k := range []Abstract{c.Kernel0, c.Kernel1} {
-		kernelWG.Add(1)
-		observability.Go(ctx, func(ctx context.Context) {
-			defer kernelWG.Done()
-			errCh <- k.Generate(ctx, outputPacketsCh, outputFramesCh)
-		})
-	}
-	observability.Go(ctx, func(ctx context.Context) {
-		kernelWG.Wait()
-		close(outputPacketsCh)
-		close(outputFramesCh)
-	})
+	var wg sync.WaitGroup
 
-	var readerWG sync.WaitGroup
-	readerWG.Add(1)
+	// Forward kernel0 outputs into kernel1.
+	var fwdWG sync.WaitGroup
+	fwdWG.Add(2)
 	observability.Go(ctx, func(ctx context.Context) {
-		defer readerWG.Done()
-		for range outputPacketsCh {
-			errCh <- fmt.Errorf("generators are not supported in ChainOfTwo, yet")
-		}
-	})
-	readerWG.Add(1)
-	observability.Go(ctx, func(ctx context.Context) {
-		defer readerWG.Done()
-		for range outputFramesCh {
-			errCh <- fmt.Errorf("generators are not supported in ChainOfTwo, yet")
+		defer fwdWG.Done()
+		for pkt := range kernel0OutPacketCh {
+			err := c.Kernel1.SendInputPacket(ctx, packet.Input(pkt), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				errCh <- fmt.Errorf("unable to send packet to kernel1:%s (%v): %w", c.Kernel1, c.Kernel1.GetObjectID(), err)
+				cancelFn()
+				return
+			}
 		}
 	})
 	observability.Go(ctx, func(ctx context.Context) {
-		readerWG.Wait()
+		defer fwdWG.Done()
+		for f := range kernel0OutFrameCh {
+			err := c.Kernel1.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				errCh <- fmt.Errorf("unable to send frame to kernel1:%s (%v): %w", c.Kernel1, c.Kernel1.GetObjectID(), err)
+				cancelFn()
+				return
+			}
+		}
+	})
+
+	// kernel1 may generate by itself.
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		err := c.Kernel1.Generate(ctx, outputPacketsCh, outputFramesCh)
+		if err != nil {
+			errCh <- fmt.Errorf("unable to generate from kernel1:%s (%v): %w", c.Kernel1, c.Kernel1.GetObjectID(), err)
+			cancelFn()
+		}
+	})
+
+	// kernel0 generator feeds kernel1.
+	wg.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		err := c.Kernel0.Generate(ctx, kernel0OutPacketCh, kernel0OutFrameCh)
+		if err != nil {
+			errCh <- fmt.Errorf("unable to generate from kernel0:%s (%v): %w", c.Kernel0, c.Kernel0.GetObjectID(), err)
+			cancelFn()
+		}
+		close(kernel0OutPacketCh)
+		close(kernel0OutFrameCh)
+	})
+
+	observability.Go(ctx, func(ctx context.Context) {
+		fwdWG.Wait()
+		wg.Wait()
 		close(errCh)
 	})
 
@@ -248,10 +272,8 @@ func (c *ChainOfTwo[A, B]) Generate(
 		if err == nil {
 			continue
 		}
-		cancelFn()
 		errs = append(errs, err)
 	}
-
 	return errors.Join(errs...)
 }
 

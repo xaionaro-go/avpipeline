@@ -160,7 +160,11 @@ var _ packet.Sink = (*Output)(nil)
 func formatFromURL(url *url.URL) string {
 	switch url.Scheme {
 	case "":
-		return filepath.Ext(url.Path)[1:]
+		ext := filepath.Ext(url.Path)
+		if ext == "" {
+			return ""
+		}
+		return ext[1:]
 	case "rtmp", "rtmps":
 		return "flv"
 	case "srt":

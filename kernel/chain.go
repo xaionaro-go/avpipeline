@@ -221,50 +221,158 @@ func (c *Chain[T]) Close(ctx context.Context) error {
 
 func (c *Chain[T]) Generate(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
+	outputPacketsCh chan<- packet.Output,
+	outputFramesCh chan<- frame.Output,
 ) error {
+	if len(c.Kernels) == 0 {
+		return nil
+	}
+	if len(c.Kernels) == 1 {
+		return c.Kernels[0].Generate(ctx, outputPacketsCh, outputFramesCh)
+	}
+
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer func() {
 		logger.Debugf(ctx, "cancelling context...")
 		cancelFn()
 	}()
-	outputPacketsCh := make(chan packet.Output, 1)
-	outputFramesCh := make(chan frame.Output, 1)
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, len(c.Kernels)*4)
+	observability.Go(ctx, func(ctx context.Context) {
+		<-ctx.Done()
+	})
 
-	var kernelWG sync.WaitGroup
-	for _, k := range c.Kernels {
-		kernelWG.Add(1)
+	var wg sync.WaitGroup
+
+	// Per-kernel output stages. stagePktCh[i]/stageFrameCh[i] is where kernel i writes its outputs.
+	stagePktCh := make([]chan packet.Output, len(c.Kernels)-1)
+	stageFrameCh := make([]chan frame.Output, len(c.Kernels)-1)
+	for i := 0; i < len(c.Kernels)-1; i++ {
+		stagePktCh[i] = make(chan packet.Output)
+		stageFrameCh[i] = make(chan frame.Output)
+	}
+
+	// kernel[0].Generate -> stage0
+	{
+		k := c.Kernels[0]
+		outPktCh := stagePktCh[0]
+		outFrameCh := stageFrameCh[0]
+		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
-			defer kernelWG.Done()
-			errCh <- k.Generate(ctx, outputPacketsCh, outputFramesCh)
+			defer wg.Done()
+			if err := k.Generate(ctx, outPktCh, outFrameCh); err != nil {
+				errCh <- fmt.Errorf("unable to generate from kernel #0:%s (%v): %w", k, k.GetObjectID(), err)
+				cancelFn()
+			}
+			close(outPktCh)
+			close(outFrameCh)
 		})
 	}
+
+	// For each intermediate kernel i (1..last-1):
+	// - forward stage(i-1) into kernel i via SendInput* producing into stage i
+	// - also run kernel i.Generate producing into stage i
+	// - close stage i when both are done
+	for i := 1; i < len(c.Kernels)-1; i++ {
+		i, k := i, c.Kernels[i]
+		inPktCh := stagePktCh[i-1]
+		inFrameCh := stageFrameCh[i-1]
+		outPktCh := stagePktCh[i]
+		outFrameCh := stageFrameCh[i]
+
+		var stageWG sync.WaitGroup
+		stageWG.Add(2)
+
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			defer stageWG.Done()
+			for pkt := range inPktCh {
+				err := k.SendInputPacket(ctx, packet.Input(pkt), outPktCh, outFrameCh)
+				if err != nil {
+					errCh <- fmt.Errorf("unable to send packet to kernel #%d:%s (%v): %w", i, k, k.GetObjectID(), err)
+					cancelFn()
+					return
+				}
+			}
+		})
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			defer stageWG.Done()
+			for f := range inFrameCh {
+				err := k.SendInputFrame(ctx, frame.Input(f), outPktCh, outFrameCh)
+				if err != nil {
+					errCh <- fmt.Errorf("unable to send frame to kernel #%d:%s (%v): %w", i, k, k.GetObjectID(), err)
+					cancelFn()
+					return
+				}
+			}
+		})
+
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			defer stageWG.Done()
+			if err := k.Generate(ctx, outPktCh, outFrameCh); err != nil {
+				errCh <- fmt.Errorf("unable to generate from kernel #%d:%s (%v): %w", i, k, k.GetObjectID(), err)
+				cancelFn()
+			}
+		})
+
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			stageWG.Wait()
+			close(outPktCh)
+			close(outFrameCh)
+		})
+	}
+
+	// Last kernel: consumes stage(last-1) and may also Generate to final outputs.
+	lastIdx := len(c.Kernels) - 1
+	lastKernel := c.Kernels[lastIdx]
+	lastInPktCh := stagePktCh[lastIdx-1]
+	lastInFrameCh := stageFrameCh[lastIdx-1]
+	var lastWG sync.WaitGroup
+	lastWG.Add(1)
+
 	observability.Go(ctx, func(ctx context.Context) {
-		kernelWG.Wait()
-		close(outputPacketsCh)
-		close(outputFramesCh)
+		defer lastWG.Done()
+		for pkt := range lastInPktCh {
+			err := lastKernel.SendInputPacket(ctx, packet.Input(pkt), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				errCh <- fmt.Errorf("unable to send packet to last kernel:%s (%v): %w", lastKernel, lastKernel.GetObjectID(), err)
+				cancelFn()
+				return
+			}
+		}
+	})
+	lastWG.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer lastWG.Done()
+		for f := range lastInFrameCh {
+			err := lastKernel.SendInputFrame(ctx, frame.Input(f), outputPacketsCh, outputFramesCh)
+			if err != nil {
+				errCh <- fmt.Errorf("unable to send frame to last kernel:%s (%v): %w", lastKernel, lastKernel.GetObjectID(), err)
+				cancelFn()
+				return
+			}
+		}
+	})
+	lastWG.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer lastWG.Done()
+		if err := lastKernel.Generate(ctx, outputPacketsCh, outputFramesCh); err != nil {
+			errCh <- fmt.Errorf("unable to generate from last kernel:%s (%v): %w", lastKernel, lastKernel.GetObjectID(), err)
+			cancelFn()
+		}
 	})
 
-	var readerWG sync.WaitGroup
-	readerWG.Add(1)
+	// Close errors after everything is done.
 	observability.Go(ctx, func(ctx context.Context) {
-		defer readerWG.Done()
-		for range outputPacketsCh {
-			errCh <- fmt.Errorf("generators are not supported in Chain, yet")
-		}
-	})
-	readerWG.Add(1)
-	observability.Go(ctx, func(ctx context.Context) {
-		defer readerWG.Done()
-		for range outputFramesCh {
-			errCh <- fmt.Errorf("generators are not supported in Chain, yet")
-		}
-	})
-	observability.Go(ctx, func(ctx context.Context) {
-		readerWG.Wait()
+		lastWG.Wait()
+		wg.Wait()
 		close(errCh)
 	})
 
@@ -273,10 +381,11 @@ func (c *Chain[T]) Generate(
 		if err == nil {
 			continue
 		}
-		cancelFn()
 		errs = append(errs, err)
 	}
-
+	if len(errs) == 0 {
+		return nil
+	}
 	return errors.Join(errs...)
 }
 

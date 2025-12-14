@@ -51,16 +51,10 @@ func TestChain(t *testing.T) {
 		},
 	}
 	s := NewChain(d0, d1, d2)
-	err := s.Generate(ctx, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, 1, d0.GenerateCallCount)
-	require.Equal(t, 1, d1.GenerateCallCount)
-	require.Equal(t, 1, d2.GenerateCallCount)
-
 	outPktCh := make(chan packet.Output, 10)
 	outFrameCh := make(chan frame.Output, 10)
 
-	err = s.SendInputPacket(ctx, packet.Input{
+	err := s.SendInputPacket(ctx, packet.Input{
 		Packet: &astiav.Packet{},
 	}, outPktCh, outFrameCh)
 	require.NoError(t, err)
@@ -90,4 +84,48 @@ func TestChain(t *testing.T) {
 	assertT.Equal(t, 1, d0.SendInputFrameCallCount)
 	assertT.Equal(t, 1, d1.SendInputFrameCallCount)
 	assertT.Equal(t, 1, d2.SendInputFrameCallCount)
+}
+
+func TestChain_GenerateForwarding(t *testing.T) {
+	ctx := context.Background()
+
+	d0 := &Dummy{
+		GenerateFn: func(ctx context.Context, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
+			outputPacketsCh <- packet.Output(packet.Input{Packet: &astiav.Packet{}})
+			outputFramesCh <- frame.Output(frame.Input{Frame: &astiav.Frame{}})
+			return nil
+		},
+	}
+	d1 := &Dummy{
+		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
+			outputPacketsCh <- packet.Output(input)
+			return nil
+		},
+		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
+			outputFramesCh <- frame.Output(input)
+			return nil
+		},
+	}
+
+	s := NewChain(d0, d1)
+	outPktCh := make(chan packet.Output, 10)
+	outFrameCh := make(chan frame.Output, 10)
+
+	err := s.Generate(ctx, outPktCh, outFrameCh)
+	require.NoError(t, err)
+
+	select {
+	case <-outPktCh:
+	default:
+		t.Fatal("expected at least one output packet")
+	}
+	select {
+	case <-outFrameCh:
+	default:
+		t.Fatal("expected at least one output frame")
+	}
+
+	require.Equal(t, 1, d0.GenerateCallCount)
+	require.Equal(t, 1, d1.SendInputPacketCallCount)
+	require.Equal(t, 1, d1.SendInputFrameCallCount)
 }
