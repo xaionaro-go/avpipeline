@@ -73,10 +73,11 @@ func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 		logger.Errorf(context.TODO(), "unable to compare channel layouts: %v", err)
 		return false
 	}
+	chunkSizeEqual := pcmFmt.ChunkSize == other.ChunkSize || pcmFmt.ChunkSize == 0 || other.ChunkSize == 0
 	return pcmFmt.SampleFormat == other.SampleFormat &&
 		pcmFmt.SampleRate == other.SampleRate &&
 		channelLayoutEqual &&
-		(pcmFmt.ChunkSize == other.ChunkSize && pcmFmt.ChunkSize == 0 && other.ChunkSize == 0)
+		chunkSizeEqual
 }
 
 type ErrNotDummy struct{}
