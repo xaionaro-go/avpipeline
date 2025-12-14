@@ -22,7 +22,7 @@ func New(
 	out codec.PCMAudioFormat,
 ) (_ret *Resampler, _err error) {
 	logger.Tracef(ctx, "New: %+v", out)
-	defer func() { logger.Tracef(ctx, "/New: %v %v", out, _ret, _err) }()
+	defer func() { logger.Tracef(ctx, "/New: %#+v: %v %v", out, _ret, _err) }()
 
 	fifo := astiav.AllocAudioFifo(
 		out.SampleFormat,

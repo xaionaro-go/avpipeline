@@ -771,7 +771,7 @@ func (e *streamEncoder) fitFrameForEncoding(
 }
 
 func getPCMAudioFormatFromFrame(
-	ctx context.Context,
+	_ context.Context,
 	frame *astiav.Frame,
 ) *codec.PCMAudioFormat {
 	if frame == nil {
@@ -801,6 +801,7 @@ func (e *streamEncoder) getResampledFrames(
 		return nil, fmt.Errorf("unable to prepare the resampler: %w", err)
 	}
 
+	logger.Tracef(ctx, "sending the frame (%d, %s, %s) to the resampler", inputFrame.SampleRate(), inputFrame.SampleFormat(), inputFrame.ChannelLayout())
 	err = e.Resampler.SendFrame(ctx, inputFrame)
 	if err != nil {
 		return nil, fmt.Errorf("unable to send the frame: %w", err)
@@ -816,6 +817,10 @@ func (e *streamEncoder) getResampledFrames(
 		}
 
 		outputFrame := e.ResampledFrames[idx]
+		outputFrame.SetSampleRate(outPCMFmt.SampleRate)
+		outputFrame.SetChannelLayout(outPCMFmt.ChannelLayout)
+		outputFrame.SetSampleFormat(outPCMFmt.SampleFormat)
+		logger.Tracef(ctx, "receiving the %dth resampled frame (%d, %s, %s)", idx, outputFrame.SampleRate(), outputFrame.SampleFormat(), outputFrame.ChannelLayout())
 		err := e.Resampler.ReceiveFrame(ctx, outputFrame)
 		if err != nil {
 			isEOF := errors.Is(err, astiav.ErrEof)
