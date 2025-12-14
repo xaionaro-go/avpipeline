@@ -617,7 +617,7 @@ func newCodec(
 				c.codecContext.SetSampleRate(int(sampleRate))
 			}
 		}
-		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout())
+		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s; sample_format: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout(), c.codecContext.SampleRate())
 	}
 
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
