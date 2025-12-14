@@ -583,6 +583,7 @@ func newCodec(
 	case astiav.MediaTypeAudio:
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
 		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
+		c.codecContext.SetSampleRate(codecParameters.SampleRate())
 		if customOptions != nil {
 			if v := customOptions.Get("ac", nil, 0); v != nil {
 				logger.Debugf(ctx, "ac option is set to '%s'", v.Value())
@@ -607,8 +608,15 @@ func newCodec(
 				}
 				c.codecContext.SetSampleFormat(sampleFmt)
 			}
+			if v := customOptions.Get("ar", nil, 0); v != nil {
+				logger.Debugf(ctx, "ar option is set to '%s'", v.Value())
+				sampleRate, err := strconv.ParseInt(v.Value(), 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse ar option value '%s' as int: %w", v.Value(), err)
+				}
+				c.codecContext.SetSampleRate(int(sampleRate))
+			}
 		}
-		c.codecContext.SetSampleRate(codecParameters.SampleRate())
 		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout())
 	}
 
