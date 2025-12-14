@@ -13,6 +13,7 @@ import (
 type Resampler struct {
 	AudioFifo               *astiav.AudioFifo
 	SoftwareResampleContext *astiav.SoftwareResampleContext
+	FormatInput             *codec.PCMAudioFormat
 	FormatOutput            codec.PCMAudioFormat
 	ResampledFrame          *astiav.Frame
 }
@@ -106,6 +107,21 @@ func (r *Resampler) SendFrame(
 	logger.Tracef(ctx, "SendFrame: %d", in.NbSamples())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %d: %v", in.NbSamples(), _err) }()
 
+	if in == nil {
+		return fmt.Errorf("input frame is nil")
+	}
+
+	inFormat := getPCMFormatFromFrame(ctx, in)
+	if r.FormatInput != nil {
+		if !r.FormatInput.Equal(*inFormat) {
+			return fmt.Errorf("input frame format changed: was %s, now %s", r.FormatInput, inFormat)
+		}
+	} else {
+		logger.Debugf(ctx, "input frame format: %s", inFormat)
+	}
+	r.FormatInput = inFormat
+	r.FormatInput.ChunkSize = 0
+
 	if err := r.SoftwareResampleContext.ConvertFrame(in, r.ResampledFrame); err != nil {
 		return fmt.Errorf("cannot convert frame: %w", err)
 	}
@@ -119,6 +135,21 @@ func (r *Resampler) SendFrame(
 	}
 
 	return nil
+}
+
+func getPCMFormatFromFrame(
+	_ context.Context,
+	frame *astiav.Frame,
+) *codec.PCMAudioFormat {
+	if frame == nil {
+		return nil
+	}
+	return &codec.PCMAudioFormat{
+		SampleFormat:  frame.SampleFormat(),
+		SampleRate:    frame.SampleRate(),
+		ChannelLayout: frame.ChannelLayout(),
+		ChunkSize:     frame.NbSamples(),
+	}
 }
 
 func (r *Resampler) receiveFrame(

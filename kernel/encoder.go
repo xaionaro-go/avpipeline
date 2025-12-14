@@ -759,7 +759,7 @@ func (e *streamEncoder) fitFrameForEncoding(
 		if encPCMFmt.Equal(*inPCMFmt) {
 			return []*astiav.Frame{input.Frame}, nil
 		}
-		resampledFrames, err := e.getResampledFrames(ctx, input.Frame, *inPCMFmt, *encPCMFmt)
+		resampledFrames, err := e.getResampledFrames(ctx, input.Frame, *encPCMFmt)
 		if err != nil {
 			return nil, fmt.Errorf("unable to resample the audio frame: %w", err)
 		}
@@ -788,15 +788,22 @@ func getPCMAudioFormatFromFrame(
 func (e *streamEncoder) getResampledFrames(
 	ctx context.Context,
 	inputFrame *astiav.Frame,
-	inPCMFmt codec.PCMAudioFormat,
 	outPCMFmt codec.PCMAudioFormat,
 ) (resampledFrames []*astiav.Frame, _err error) {
+	// making channels ordered, otherwise resampler may fail
+	switch inputFrame.ChannelLayout().Channels() {
+	case 1:
+		inputFrame.SetChannelLayout(astiav.ChannelLayoutMono)
+	case 2:
+		inputFrame.SetChannelLayout(astiav.ChannelLayoutStereo)
+	}
+	inPCMFmt := getPCMAudioFormatFromFrame(ctx, inputFrame)
 	logger.Tracef(ctx, "getResampledFrames: in:%v; out:%v", inPCMFmt, outPCMFmt)
 	defer func() {
 		logger.Tracef(ctx, "/getResampledFrames: in:%v; out:%v: %v %v", inPCMFmt, outPCMFmt, resampledFrames, _err)
 	}()
 
-	err := e.prepareResampler(ctx, inPCMFmt, outPCMFmt)
+	err := e.prepareResampler(ctx, *inPCMFmt, outPCMFmt)
 	if err != nil {
 		return nil, fmt.Errorf("unable to prepare the resampler: %w", err)
 	}

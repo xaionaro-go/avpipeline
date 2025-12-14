@@ -63,6 +63,10 @@ type PCMAudioFormat struct {
 	ChunkSize     int
 }
 
+func (pcmFmt PCMAudioFormat) String() string {
+	return fmt.Sprintf("(%s, %d Hz, %s, chunk %d)", pcmFmt.SampleFormat, pcmFmt.SampleRate, pcmFmt.ChannelLayout, pcmFmt.ChunkSize)
+}
+
 func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 	channelLayoutEqual, err := pcmFmt.ChannelLayout.Compare(other.ChannelLayout)
 	if err != nil {
@@ -72,7 +76,7 @@ func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 	return pcmFmt.SampleFormat == other.SampleFormat &&
 		pcmFmt.SampleRate == other.SampleRate &&
 		channelLayoutEqual &&
-		pcmFmt.ChunkSize == other.ChunkSize
+		(pcmFmt.ChunkSize == other.ChunkSize && pcmFmt.ChunkSize == 0 && other.ChunkSize == 0)
 }
 
 type ErrNotDummy struct{}
