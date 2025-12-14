@@ -1,4 +1,4 @@
-package condition
+package limitvideobitrate
 
 import (
 	"context"
@@ -7,47 +7,48 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	"github.com/xaionaro-go/avpipeline/packetorframe/condition"
 )
 
-type VideoAverageBitrateLower struct {
+type Filter struct {
 	AverageBitRate         uint64
 	BitrateAveragingPeriod time.Duration
 
 	skippedVideoFrame           bool
 	videoAveragerBufferConsumed int64
 	prevEncodeTS                time.Time
-	lastSeenFormatAccessor      packet.Source
+	lastSeenFormatAccessor      packetorframe.AbstractSource
 }
 
-var _ Condition = (*VideoAverageBitrateLower)(nil)
+var _ condition.Condition = (*Filter)(nil)
 
-func NewVideoAverageBitrateLower(
+func New(
 	ctx context.Context,
 	averageBitRate uint64,
 	bitrateAveragingPeriod time.Duration,
-) *VideoAverageBitrateLower {
+) *Filter {
 	if averageBitRate != 0 && bitrateAveragingPeriod == 0 {
 		bitrateAveragingPeriod = time.Second * 10
 		logger.Warnf(ctx, "AveragingPeriod is not set, defaulting to %v", bitrateAveragingPeriod)
 	}
 
-	return &VideoAverageBitrateLower{
+	return &Filter{
 		AverageBitRate:         averageBitRate,
 		BitrateAveragingPeriod: bitrateAveragingPeriod,
 	}
 }
 
-func (f *VideoAverageBitrateLower) Match(
+func (f *Filter) Match(
 	ctx context.Context,
-	input packet.Input,
+	input packetorframe.InputUnion,
 ) bool {
 	if f.AverageBitRate == 0 {
 		return true
 	}
-	f.lastSeenFormatAccessor = input.Source
+	f.lastSeenFormatAccessor = input.GetSource()
 
-	mediaType := input.Stream.CodecParameters().MediaType()
+	mediaType := input.GetMediaType()
 	switch mediaType {
 	case astiav.MediaTypeVideo:
 		return f.sendInputVideo(ctx, input)
@@ -58,9 +59,9 @@ func (f *VideoAverageBitrateLower) Match(
 	}
 }
 
-func (f *VideoAverageBitrateLower) sendInputVideo(
+func (f *Filter) sendInputVideo(
 	ctx context.Context,
-	input packet.Input,
+	input packetorframe.InputUnion,
 ) bool {
 	now := time.Now()
 	prevTS := f.prevEncodeTS
@@ -95,9 +96,9 @@ func (f *VideoAverageBitrateLower) sendInputVideo(
 	return true
 }
 
-func (f *VideoAverageBitrateLower) String() string {
+func (f *Filter) String() string {
 	return fmt.Sprintf(
-		"VideoAverageBitrateLower(%v, %v)",
+		"LimitVideoBitrate(%v, %v)",
 		f.AverageBitRate,
 		f.BitrateAveragingPeriod,
 	)

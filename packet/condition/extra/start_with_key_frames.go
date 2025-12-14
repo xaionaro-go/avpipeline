@@ -66,7 +66,7 @@ func (c *StartWithKeyFrames) match(
 func (c *StartWithKeyFrames) String() string {
 	ctx := context.TODO()
 	if !c.Locker.ManualTryRLock(ctx) {
-		return fmt.Sprintf("StartWithKeyFrames")
+		return "StartWithKeyFrames"
 	}
 	defer c.Locker.ManualRUnlock(ctx)
 	b, _ := json.Marshal(c.WaitingKeyFrames)

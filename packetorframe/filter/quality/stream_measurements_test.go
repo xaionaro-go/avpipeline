@@ -7,6 +7,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 func TestStreamMeasurementGetStreamQuality(t *testing.T) {
@@ -29,7 +30,9 @@ func TestStreamMeasurementGetStreamQuality(t *testing.T) {
 	observePacket := func(dts, dur int64) {
 		pkt.SetDts(dts)
 		pkt.SetDuration(dur)
-		sm.observePacketLocked(ctx, pkt)
+		sm.observePacketOrFrameLocked(ctx, packetorframe.InputUnion{
+			Packet: &pkt,
+		})
 	}
 
 	t.Run("basic", func(t *testing.T) {

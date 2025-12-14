@@ -3,7 +3,7 @@ package quality
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"tailscale.com/util/ringbuffer"
 )
 
@@ -16,12 +16,12 @@ type DTSAndDuration struct {
 	Duration int64
 }
 
-func (s *DTSAndDurations) observePacketLocked(
+func (s *DTSAndDurations) observePacketOrFrameLocked(
 	_ context.Context,
-	packet packet.Input,
+	input packetorframe.InputUnion,
 ) {
 	s.Latest.Add(DTSAndDuration{
-		DTS:      packet.GetDTS(),
-		Duration: packet.GetDuration(),
+		DTS:      input.GetDTS(),
+		Duration: input.GetDuration(),
 	})
 }

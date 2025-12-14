@@ -2,7 +2,7 @@ package quality
 
 import (
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/packet/condition/extra/quality/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/quality/types"
 )
 
 type Quality []*StreamQualityWithMediaType

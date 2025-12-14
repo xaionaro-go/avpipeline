@@ -676,9 +676,7 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 				Width:  uint32(encVCtx.Width()),
 				Height: uint32(encVCtx.Height()),
 			}
-			if encV != nil {
-				curVCodecName = codec.Name(encV.Codec().Name())
-			}
+			curVCodecName = codec.Name(encV.Codec().Name())
 		}
 	}
 	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)

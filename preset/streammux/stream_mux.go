@@ -25,6 +25,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
+	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -126,7 +127,9 @@ func NewWithCustomData[C any](
 		s.InputAudioOnly = newInput[C](ctx, s, InputTypeAudioOnly)
 		s.InputVideoOnly = newInput[C](ctx, s, InputTypeVideoOnly)
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
+		s.InputAll.Node.AddPushFramesTo(ctx, s.InputAudioOnly.Node, framefiltercondition.MediaType(astiav.MediaTypeAudio))
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
+		s.InputAll.Node.AddPushFramesTo(ctx, s.InputVideoOnly.Node, framefiltercondition.MediaType(astiav.MediaTypeVideo))
 		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames (this is applicable not only to MuxModeDifferentOutputsSameTracksSplitAV, but we tested it only here for now)
 	}
 	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
@@ -606,7 +609,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		input.OutputSwitch.Output(int32(outputID)),
 		input.OutputSyncer.Output(int32(outputID)),
 		&s.allowCorruptPackets,
-		input.MonotonicPTSCondition,
+		input.MonotonicPTSFilter,
 		newStreamIndexAssigner(s.MuxMode, outputID, input.Node.Processor.Kernel),
 		s,
 		s.asCodecResourceManager(),
@@ -619,6 +622,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	s.OutputsMap.Store(outputKey, output)
 
 	input.Node.AddPushPacketsTo(ctx, output.Input())
+	input.Node.AddPushFramesTo(ctx, output.Input())
 	logger.Debugf(ctx, "initialized new output %d:%s", output.ID, outputKey)
 	return output, true, nil
 }

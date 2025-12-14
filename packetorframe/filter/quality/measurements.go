@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/xsync"
 )
 
 type StreamKey struct {
-	Source packet.Source
+	Source packetorframe.AbstractSource
 	Index  int
 }
 
@@ -24,26 +24,26 @@ func NewMeasurements() *Measurements {
 	}
 }
 
-func (m *Measurements) ObservePacket(
+func (m *Measurements) ObservePacketOrFrame(
 	ctx context.Context,
-	packet packet.Input,
+	input packetorframe.InputUnion,
 ) {
 	sm := xsync.DoR1(ctx, &m.Locker, func() (_ret *StreamMeasurements) {
 		defer func() { _ret.Locker.ManualLock(ctx) }()
 		streamKey := StreamKey{
-			Source: packet.GetSource(),
-			Index:  packet.GetStreamIndex(),
+			Source: input.GetSource(),
+			Index:  input.GetStreamIndex(),
 		}
 		sm, ok := m.StreamQualityInfo[streamKey]
 		if ok {
 			return sm
 		}
-		sm = newStreamMeasurements(packet.GetMediaType(), packet.Stream.TimeBase())
+		sm = newStreamMeasurements(input.GetMediaType(), input.GetTimeBase())
 		m.StreamQualityInfo[streamKey] = sm
 		return sm
 	})
 	defer sm.Locker.ManualUnlock(ctx)
-	sm.observePacketLocked(ctx, packet)
+	sm.observePacketOrFrameLocked(ctx, input)
 }
 
 func (m *Measurements) GetQuality(

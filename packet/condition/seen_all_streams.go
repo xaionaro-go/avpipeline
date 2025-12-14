@@ -2,7 +2,6 @@ package condition
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -39,7 +38,7 @@ func (c *SeenAllStreamsT) match(
 }
 
 func (c *SeenAllStreamsT) String() string {
-	return fmt.Sprintf("StreamAllStreams")
+	return "StreamAllStreams"
 }
 
 func (c *SeenAllStreamsT) acknowledgeInput(

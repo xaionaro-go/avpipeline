@@ -7,19 +7,17 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
-type Not struct {
-	Condition Condition
-}
+type Not []Condition
 
 var _ Condition = (*Not)(nil)
 
 func (n Not) String() string {
-	return fmt.Sprintf("Not(%s)", n.Condition)
+	return fmt.Sprintf("!(%s)", And(n))
 }
 
 func (n Not) Match(
 	ctx context.Context,
 	in packetorframe.InputUnion,
 ) bool {
-	return !n.Condition.Match(ctx, in)
+	return !And(n).Match(ctx, in)
 }

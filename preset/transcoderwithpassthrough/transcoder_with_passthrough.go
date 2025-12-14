@@ -23,6 +23,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter/rescaletsbetweenpacketsources"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitvideobitrate"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -43,7 +44,7 @@ const (
 type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	PacketSource              packet.Source
 	Outputs                   []node.Abstract
-	FilterThrottle            *packetcondition.VideoAverageBitrateLower
+	FilterThrottle            *limitvideobitrate.Filter
 	SwitchPreFilter           *packetcondition.Switch
 	SwitchPostFilter          *packetcondition.Switch
 	Recoder                   *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
@@ -86,7 +87,7 @@ func New[C any, P processor.Abstract](
 	s := &TranscoderWithPassthrough[C, P]{
 		PacketSource:     input,
 		Outputs:          outputs,
-		FilterThrottle:   packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		FilterThrottle:   limitvideobitrate.New(ctx, 0, 0),
 		SwitchPreFilter:  packetcondition.NewSwitch(),
 		SwitchPostFilter: packetcondition.NewSwitch(),
 	}
@@ -460,7 +461,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	)
 	nodeFilterThrottle := node.NewFromKernel(
 		ctx,
-		kernel.NewPacketFilter(s.FilterThrottle, nil),
+		kernel.NewPacketFilter(packetcondition.PacketOrFrame{s.FilterThrottle}, nil),
 		processor.DefaultOptionsOutput()...,
 	)
 

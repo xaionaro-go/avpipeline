@@ -7,7 +7,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/xsync"
 	"tailscale.com/util/ringbuffer"
 )
@@ -43,11 +43,11 @@ func newStreamMeasurements(
 	}
 }
 
-func (sm *StreamMeasurements) observePacketLocked(
+func (sm *StreamMeasurements) observePacketOrFrameLocked(
 	ctx context.Context,
-	packet packet.Input,
+	input packetorframe.InputUnion,
 ) {
-	sm.DTSAndDurations.observePacketLocked(ctx, packet)
+	sm.DTSAndDurations.observePacketOrFrameLocked(ctx, input)
 }
 
 func (sm *StreamMeasurements) getStreamQuality(

@@ -10,7 +10,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -53,10 +54,10 @@ func (t InputType) IncludesMediaType(mediaType astiav.MediaType) bool {
 }
 
 type Input[C any] struct {
-	Node                  *NodeInput[C]
-	MonotonicPTSCondition packetcondition.Condition
-	OutputSwitch          *barrierstategetter.Switch
-	OutputSyncer          *barrierstategetter.Switch
+	Node               *NodeInput[C]
+	MonotonicPTSFilter packetorframecondition.Condition
+	OutputSwitch       *barrierstategetter.Switch
+	OutputSyncer       *barrierstategetter.Switch
 }
 
 func newInput[C any](
@@ -71,10 +72,10 @@ func newInput[C any](
 	k := kernelboilerplate.NewKernelWithFormatContext(ctx, h)
 	h.Kernel = k
 	return &Input[C]{
-		Node:                  node.NewWithCustomDataFromKernel[C](ctx, k),
-		MonotonicPTSCondition: packetcondition.MonotonicPTSConverted(),
-		OutputSwitch:          barrierstategetter.NewSwitch(),
-		OutputSyncer:          barrierstategetter.NewSwitch(),
+		Node:               node.NewWithCustomDataFromKernel[C](ctx, k),
+		MonotonicPTSFilter: monotonicpts.New(false),
+		OutputSwitch:       barrierstategetter.NewSwitch(),
+		OutputSyncer:       barrierstategetter.NewSwitch(),
 	}
 }
 

@@ -22,9 +22,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
-	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
-	extrapacketcondition "github.com/xaionaro-go/avpipeline/packet/condition/extra"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
+	extrapacketorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition/extra"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitvideobitrate"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/reduceframerate"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
@@ -79,10 +80,10 @@ type Output[C any] struct {
 	ID                    OutputID
 	InputFrom             *NodeInput[C]
 	InputFilter           *NodeBarrier[OutputCustomData[C]]
-	InputThrottler        *packetcondition.VideoAverageBitrateLower
+	InputThrottler        *limitvideobitrate.Filter
 	InputFixer            *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
 	RecoderNode           *NodeRecoder[OutputCustomData[C]]
-	SendingThrottler      *packetcondition.VideoAverageBitrateLower
+	SendingThrottler      *limitvideobitrate.Filter
 	MapIndices            *NodeMapStreamIndexes[OutputCustomData[C]]
 	SendingFixer          *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
 	SendingSyncer         *NodeBarrier[OutputCustomData[C]]
@@ -162,7 +163,7 @@ func newOutput[C any](
 	outputSwitch barrierstategetter.StateGetter,
 	sendingSyncer barrierstategetter.StateGetter,
 	allowCorrupt *atomic.Bool,
-	monotonicPTS packetcondition.Condition,
+	monotonicPTS packetorframecondition.Condition,
 	streamIndexAssigner kernel.StreamIndexAssigner,
 	streamsIniter OutputStreamsIniter,
 	resourceManager ResourceManager,
@@ -228,7 +229,7 @@ func newOutput[C any](
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),
 			outputSwitch,
 		)),
-		InputThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		InputThrottler: limitvideobitrate.New(ctx, 0, 0),
 		InputFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
 			recoderKernel.Decoder,
@@ -239,7 +240,7 @@ func newOutput[C any](
 			recoderKernel,
 			processor.DefaultOptionsRecoder()...,
 		),
-		SendingThrottler: packetcondition.NewVideoAverageBitrateLower(ctx, 0, 0),
+		SendingThrottler: limitvideobitrate.New(ctx, 0, 0),
 		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
 		SendingFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "OutputFixer"),
@@ -282,13 +283,11 @@ func newOutput[C any](
 		inputFixer, outputFixer = o.RecoderNode, o.SendingSyncer
 	}
 
-	o.InputFilter.AddPushPacketsTo(
-		ctx,
-		inputFixer,
-		packetfiltercondition.Packet{o.InputThrottler},
-		packetfiltercondition.Function(func(
+	pushToFixerConds := packetorframecondition.And{
+		o.InputThrottler,
+		packetorframecondition.Function(func(
 			ctx context.Context,
-			_ packetfiltercondition.Input,
+			_ packetorframe.InputUnion,
 		) bool {
 			if streamsIniter == nil {
 				return true
@@ -301,34 +300,43 @@ func newOutput[C any](
 			})
 			return true
 		}),
-	)
-	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode, packetfiltercondition.Function(o.onRecoderInput))
-	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.Function(o.onRecoderOutput))
+	}
+	o.InputFilter.AddPushPacketsTo(ctx, inputFixer, packetfiltercondition.PacketOrFrame{pushToFixerConds})
+	o.InputFilter.AddPushFramesTo(ctx, inputFixer, framefiltercondition.PacketOrFrame{pushToFixerConds})
+	pushToRecoderConds := packetorframecondition.Function(o.onRecoderInput)
+	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode, packetfiltercondition.PacketOrFrame{pushToRecoderConds})
+	o.InputFixer.AddPushFramesTo(ctx, o.RecoderNode, framefiltercondition.PacketOrFrame{pushToRecoderConds})
+	pushToMapIndicesConds := packetorframecondition.Function(o.onRecoderOutput)
+	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.PacketOrFrame{pushToMapIndicesConds})
+	o.RecoderNode.AddPushFramesTo(ctx, o.MapIndices, framefiltercondition.PacketOrFrame{pushToMapIndicesConds})
 	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
-	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer, packetfiltercondition.Function(o.onSenderInput))
+	o.MapIndices.AddPushFramesTo(ctx, outputFixer)
+	pushToSenderConds := packetorframecondition.Function(o.onSenderInput)
+	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer, packetfiltercondition.PacketOrFrame{pushToSenderConds})
+	o.SendingFixer.AddPushFramesTo(ctx, o.SendingSyncer, framefiltercondition.PacketOrFrame{pushToSenderConds})
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func(context.Context) uint64 {
 		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
 	if monotonicPTS == nil {
-		monotonicPTS = packetcondition.Static(true)
+		monotonicPTS = packetorframecondition.Static(true)
 	}
-	o.SendingSyncer.AddPushPacketsTo(ctx, o.SendingNode,
-		packetfiltercondition.Packet{
-			monotonicPTS,
-			o.SendingThrottler,
-			packetcondition.Or{
-				packetcondition.Function(func(ctx context.Context, input packet.Input) bool {
-					return sendingCfg.OutputThrottlerMaxQueueSizeBytes <= 0
-				}),
-				packetcondition.Not{packetcondition.MediaType(astiav.MediaTypeVideo)},
-				packetcondition.IsKeyFrame(true),
-				extrapacketcondition.PushQueueSize(
-					o.SendingNode,
-					mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
-				),
-			},
+	pushToSendingNodeConds := packetorframecondition.And{
+		monotonicPTS,
+		o.SendingThrottler,
+		packetorframecondition.Or{
+			packetorframecondition.Function(func(ctx context.Context, input packetorframe.InputUnion) bool {
+				return sendingCfg.OutputThrottlerMaxQueueSizeBytes <= 0
+			}),
+			packetorframecondition.Not{packetorframecondition.MediaType(astiav.MediaTypeVideo)},
+			packetorframecondition.IsKeyFrame(true),
+			extrapacketorframecondition.PushQueueSize(
+				o.SendingNode,
+				mathcondition.LessOrEqualVariable(maxQueueSizeGetter),
+			),
 		},
-	)
+	}
+	o.SendingSyncer.AddPushPacketsTo(ctx, o.SendingNode, packetfiltercondition.PacketOrFrame{pushToSendingNodeConds})
+	o.SendingSyncer.AddPushFramesTo(ctx, o.SendingNode, framefiltercondition.PacketOrFrame{pushToSendingNodeConds})
 
 	// logging
 
@@ -347,14 +355,14 @@ func logIfError(ctx context.Context, err error) {
 
 func (o *Output[C]) onRecoderInput(
 	_ context.Context,
-	i packetfiltercondition.Input,
+	i packetorframe.InputUnion,
 ) bool {
-	dtsRaw := i.Input.GetDTS()
+	dtsRaw := i.GetDTS()
 	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
-		dtsRaw = i.Input.GetPTS()
+		dtsRaw = i.GetPTS()
 	}
-	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
-	switch i.Input.GetMediaType() {
+	dts := avconv.Duration(dtsRaw, i.GetTimeBase())
+	switch i.GetMediaType() {
 	case astiav.MediaTypeVideo:
 		o.Measurements.RecodingStartVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
@@ -365,14 +373,14 @@ func (o *Output[C]) onRecoderInput(
 
 func (o *Output[C]) onRecoderOutput(
 	_ context.Context,
-	i packetfiltercondition.Input,
+	i packetorframe.InputUnion,
 ) bool {
-	dtsRaw := i.Input.GetDTS()
+	dtsRaw := i.GetDTS()
 	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
-		dtsRaw = i.Input.GetPTS()
+		dtsRaw = i.GetPTS()
 	}
-	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
-	switch i.Input.GetMediaType() {
+	dts := avconv.Duration(dtsRaw, i.GetTimeBase())
+	switch i.GetMediaType() {
 	case astiav.MediaTypeVideo:
 		o.Measurements.RecodingEndVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
@@ -383,14 +391,14 @@ func (o *Output[C]) onRecoderOutput(
 
 func (o *Output[C]) onSenderInput(
 	_ context.Context,
-	i packetfiltercondition.Input,
+	i packetorframe.InputUnion,
 ) bool {
-	dtsRaw := i.Input.GetDTS()
+	dtsRaw := i.GetDTS()
 	if dtsRaw == astiav.NoPtsValue || dtsRaw == 0 {
-		dtsRaw = i.Input.GetPTS()
+		dtsRaw = i.GetPTS()
 	}
-	dts := avconv.Duration(dtsRaw, i.Input.Stream.TimeBase())
-	switch i.Input.GetMediaType() {
+	dts := avconv.Duration(dtsRaw, i.GetTimeBase())
+	switch i.GetMediaType() {
 	case astiav.MediaTypeVideo:
 		o.Measurements.LastSendingVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:

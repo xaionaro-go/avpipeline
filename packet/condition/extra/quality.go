@@ -5,7 +5,8 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
-	"github.com/xaionaro-go/avpipeline/packet/condition/extra/quality"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	"github.com/xaionaro-go/avpipeline/packetorframe/filter/quality"
 )
 
 type QualityT struct {
@@ -32,6 +33,8 @@ func (f *QualityT) Match(
 	ctx context.Context,
 	in packet.Input,
 ) bool {
-	f.Measurements.ObservePacket(ctx, in)
+	f.Measurements.ObservePacketOrFrame(ctx, packetorframe.InputUnion{
+		Packet: &in,
+	})
 	return true
 }

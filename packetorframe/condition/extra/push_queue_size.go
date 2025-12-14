@@ -1,4 +1,4 @@
-package extra
+package condition
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	"github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -17,7 +17,7 @@ type PushQueueSizeCond struct {
 	QueueSizeCond mathcondition.Condition[uint64]
 }
 
-var _ packetcondition.Condition = (*PushQueueSizeCond)(nil)
+var _ condition.Condition = (*PushQueueSizeCond)(nil)
 
 func PushQueueSize(
 	nodeSink node.Abstract,
@@ -31,7 +31,7 @@ func PushQueueSize(
 
 func (c *PushQueueSizeCond) Match(
 	ctx context.Context,
-	pkt packet.Input,
+	_ packetorframe.InputUnion,
 ) bool {
 	nodeStats := c.NodeSink.GetCountersPtr()
 	procStats := c.NodeSink.GetProcessor().CountersPtr()
