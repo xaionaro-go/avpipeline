@@ -192,8 +192,8 @@ func (i *Input) doOpen(
 	inputFormat *astiav.InputFormat,
 	cfg InputConfig,
 ) (_err error) {
-	logger.Debugf(ctx, "doOpen(%q, <HIDDEN>, %s, %+#v)", urlString, inputFormat, cfg)
-	defer func() { logger.Debugf(ctx, "/doOpen(%q, <HIDDEN>, %s, %+#v): %v", urlString, inputFormat, cfg, _err) }()
+	logger.Debugf(ctx, "doOpen(%q, <HIDDEN>, %q, %+#v)", urlString, inputFormat, cfg)
+	defer func() { logger.Debugf(ctx, "/doOpen(%q, <HIDDEN>, %q, %+#v): %v", urlString, inputFormat, cfg, _err) }()
 	urlWithSecret := urlString
 	if authKey.Get() != "" {
 		urlWithSecret += authKey.Get()
@@ -206,9 +206,9 @@ func (i *Input) doOpen(
 	if err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary); err != nil {
 		i.FormatContext.Free()
 		if authKey.Get() != "" {
-			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>': %w", urlString, err)
+			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>' (format: %q): %w", urlString, inputFormat, err)
 		} else {
-			return fmt.Errorf("unable to open input by URL '%s': %w", urlString, err)
+			return fmt.Errorf("unable to open input by URL %q (format: %q): %w", urlString, inputFormat, err)
 		}
 	}
 	setFinalizer(ctx, i, func(i *Input) {

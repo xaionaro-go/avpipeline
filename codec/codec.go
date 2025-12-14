@@ -480,6 +480,13 @@ func newCodec(
 					logIfError(customOptions.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
 					forcePixelFormat = defaultMediaCodecPixelFormat
 				}
+
+				if customOptions.Get("sample_fmt", nil, 0) == nil {
+					if strings.HasPrefix(c.codec.Name(), "aac") {
+						logger.Warnf(ctx, "is AAC, but sample format is not set; forcing 'fltp' sample format", defaultMediaCodecPixelFormat)
+						logIfError(customOptions.Set("sample_fmt", "fltp", 0))
+					}
+				}
 			}
 		} else {
 			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
@@ -590,6 +597,14 @@ func newCodec(
 				default:
 					return nil, fmt.Errorf("unsupported ac option value '%s'", v.Value())
 				}
+			}
+			if v := customOptions.Get("sample_fmt", nil, 0); v != nil {
+				logger.Debugf(ctx, "sample_fmt option is set to '%s'", v.Value())
+				sampleFmt, err := sampleFormatFromString(v.Value())
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse sample_fmt option value '%s': %w", v.Value(), err)
+				}
+				c.codecContext.SetSampleFormat(sampleFmt)
 			}
 		}
 		c.codecContext.SetSampleRate(codecParameters.SampleRate())
