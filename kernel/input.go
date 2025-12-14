@@ -45,6 +45,8 @@ type InputConfig struct {
 	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
 	// alternative to option "-re" in ffmpeg.
 	ForceRealTime bool
+	ForceStartPTS *int64
+	ForceStartDTS *int64
 
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
@@ -67,6 +69,8 @@ type Input struct {
 
 	AutoClose          bool
 	ForceRealTime      bool
+	ForceStartPTS      *int64
+	ForceStartDTS      *int64
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
@@ -74,6 +78,8 @@ type Input struct {
 	SyncStreamIndex   atomic.Int64
 	SyncStartPTS      atomic.Int64
 	SyncStartUnixNano atomic.Int64
+	PTSShift          atomic.Int64
+	DTSShift          atomic.Int64
 
 	WaitGroup sync.WaitGroup
 }
@@ -106,6 +112,8 @@ func NewInputFromURL(
 
 		AutoClose:          cfg.AutoClose,
 		ForceRealTime:      cfg.ForceRealTime,
+		ForceStartPTS:      cfg.ForceStartPTS,
+		ForceStartDTS:      cfg.ForceStartDTS,
 		OnPreClose:         cfg.OnPreClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
@@ -113,6 +121,8 @@ func NewInputFromURL(
 	i.SyncStreamIndex.Store(math.MinInt64)
 	i.SyncStartPTS.Store(math.MinInt64)
 	i.SyncStartUnixNano.Store(math.MinInt64)
+	i.PTSShift.Store(math.MinInt64)
+	i.DTSShift.Store(math.MinInt64)
 	defaultFPS := float64(inputDefaultFPS)
 
 	var formatName string
@@ -160,6 +170,22 @@ func NewInputFromURL(
 			logger.Errorf(ctx, "unable to find input format by name '%s'", formatName)
 		} else {
 			logger.Debugf(ctx, "using format '%s'", inputFormat.Name())
+		}
+	}
+	switch formatName {
+	case "pulse":
+		if i.ForceStartPTS == nil {
+			i.ForceStartPTS = ptr(int64(0))
+		}
+		if i.ForceStartDTS == nil {
+			i.ForceStartDTS = ptr(int64(0))
+		}
+	case "android_camera":
+		if i.ForceStartPTS == nil {
+			i.ForceStartPTS = ptr(int64(0))
+		}
+		if i.ForceStartDTS == nil {
+			i.ForceStartDTS = ptr(int64(0))
 		}
 	}
 
@@ -510,6 +536,22 @@ func (i *Input) Generate(
 			pkt.Flags().Has(astiav.PacketFlagKey),
 			len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
 		)
+		if i.ForceStartPTS != nil && *i.ForceStartPTS != globaltypes.PTSKeep && pkt.Pts() != astiav.NoPtsValue {
+			if i.PTSShift.Load() == math.MinInt64 {
+				ptsShift := *i.ForceStartPTS - pkt.Pts()
+				i.PTSShift.Store(ptsShift)
+				logger.Infof(ctx, "applying PTS shift of %d to input packets", ptsShift)
+			}
+			pkt.SetPts(pkt.Pts() + i.PTSShift.Load())
+		}
+		if i.ForceStartDTS != nil && *i.ForceStartDTS != globaltypes.PTSKeep && pkt.Dts() != astiav.NoPtsValue {
+			if i.DTSShift.Load() == math.MinInt64 {
+				dtsShift := *i.ForceStartDTS - pkt.Dts()
+				i.DTSShift.Store(dtsShift)
+				logger.Infof(ctx, "applying DTS shift of %d to input packets", dtsShift)
+			}
+			pkt.SetDts(pkt.Dts() + i.DTSShift.Load())
+		}
 
 		prevPkt := prevPkts[streamIndex]
 		curPkt := ptr(packet.BuildOutput(
