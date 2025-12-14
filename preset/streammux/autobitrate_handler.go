@@ -379,6 +379,10 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 		logger.Debugf(ctx, "/enableByPass: %v, %t, %t: %v", enable, force, allowTrafficLoss, _err)
 	}()
 
+	if !h.StreamMux.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+	}
+
 	if enable {
 		return h.setVideoOutput(
 			ctx,
@@ -404,7 +408,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	ctx context.Context,
 	oldBitRate types.Ubps,
 	req BitRateChangeRequest,
-	actualOutputBitrate types.Ubps,
+	_ types.Ubps,
 ) (_err error) {
 	logger.Tracef(ctx, "trySetVideoBitrate: %v->%v (isCritical:%t)", oldBitRate, req.BitRate, req.IsCritical)
 	defer func() {
@@ -435,6 +439,9 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 
 	videoInputBitRate := types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
+		if !h.StreamMux.IsAllowedDifferentOutputs() {
+			logger.Errorf(ctx, "AutoByPass is enabled, but changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+		}
 		byPassEnabled := h.isBypassEnabled(ctx)
 		logger.Tracef(ctx, "AutoByPass is enabled: oldBitRate:%v reqBitRate:%v inputBitRate:%v; byPass:%t", types.Ubps(oldBitRate), req.BitRate, types.Ubps(videoInputBitRate), byPassEnabled)
 		if byPassEnabled {
@@ -577,6 +584,10 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		logger.Tracef(ctx, "/changeResolutionIfNeeded(bitrate=%v, force=%t, allowTrafficLoss=%t): %v", bitrate, force, allowTrafficLoss, _err)
 	}()
 
+	if !h.StreamMux.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+	}
+
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
 		logger.Warnf(ctx, "unable to get encoder")
@@ -657,6 +668,10 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	defer func() {
 		logger.Tracef(ctx, "/setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
 	}()
+
+	if !h.StreamMux.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+	}
 
 	encV, encA := h.StreamMux.GetEncoders(ctx)
 	var curACodecName codec.Name

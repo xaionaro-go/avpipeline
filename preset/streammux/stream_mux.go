@@ -492,6 +492,10 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 	logger.Debugf(ctx, "setPreferredOutputForInput(ctx, %s, %s)", inputType, outputKey)
 	defer func() { logger.Debugf(ctx, "/setPreferredOutputForInput(ctx, %s, %s): %v", inputType, outputKey, _err) }()
 
+	if !s.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("setting preferred output is not allowed in mux mode %s", s.MuxMode)
+	}
+
 	output, _ := s.OutputsMap.Load(outputKey)
 	if output == nil {
 		return fmt.Errorf("output with key %s not found", outputKey)
@@ -567,6 +571,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		if c := s.countOutputs(); c > 0 {
 			return nil, false, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, c)
 		}
+		input = &s.InputAll
 	case types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
 		count := 0
 		var output *Output[C]
@@ -581,6 +586,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		if count == 1 {
 			return output, false, nil
 		}
+		input = &s.InputAll
 	case types.MuxModeDifferentOutputsSameTracks:
 		input = &s.InputAll
 	case types.MuxModeDifferentOutputsSameTracksSplitAV:
@@ -594,6 +600,8 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		default:
 			return nil, false, fmt.Errorf("in mux mode '%s', you must specify either audio or video codec in output key", s.MuxMode)
 		}
+	default:
+		return nil, false, fmt.Errorf("unknown mux mode: %s", s.MuxMode)
 	}
 
 	cfg := InitOutputOptions(opts).config()
@@ -638,6 +646,10 @@ func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
 ) (_err error) {
 	logger.Tracef(ctx, "enableVideoRecodingBypassLocked")
 	defer func() { logger.Tracef(ctx, "/enableVideoRecodingBypassLocked: %v: %v", _err) }()
+
+	if !s.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("video recoding bypass is only allowed in mux modes with different outputs, but current mux mode is %s", s.MuxMode)
+	}
 
 	prevVideoOutput := s.GetActiveVideoOutput(ctx)
 
@@ -737,6 +749,18 @@ func (s *StreamMux[C]) switchToOutputByProps(
 	}()
 	senderKey := PartialSenderKeyFromRecoderConfig(ctx, &props.RecoderConfig)
 
+	if !s.IsAllowedDifferentOutputs() {
+		if s.countOutputs() != 0 {
+			return fmt.Errorf("mux mode %s forbids having more than one output", s.MuxMode)
+		}
+		if err := s.createAndConfigureOutput(ctx, &s.InputAll, senderKey, props.RecoderConfig); err != nil {
+			return fmt.Errorf("unable to create default output: %w", err)
+		}
+		s.InputAll.OutputSwitch.CurrentValue.Store(1)
+		s.InputAll.OutputSyncer.CurrentValue.Store(1)
+		return nil
+	}
+
 	err := s.createAndConfigureOutputs(ctx, senderKey, props.RecoderConfig)
 	if err != nil {
 		return fmt.Errorf("unable to initialize and prepare outputs for key %s: %w", senderKey, err)
@@ -777,7 +801,10 @@ func (s *StreamMux[C]) getInputsForSenderKey(
 
 	var inputsAndKeys []inputAndKey[C]
 	switch s.MuxMode {
-	case types.MuxModeDifferentOutputsSameTracks:
+	case types.MuxModeForbid,
+		types.MuxModeSameOutputSameTracks,
+		types.MuxModeSameOutputDifferentTracks,
+		types.MuxModeDifferentOutputsSameTracks:
 		inputsAndKeys = []inputAndKey[C]{{
 			Input: &s.InputAll,
 			Key:   senderKey,
@@ -814,38 +841,53 @@ func (s *StreamMux[C]) createAndConfigureOutputs(
 	senderKey SenderKey,
 	recoderConfig types.RecoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "createAndConfigureOutputs(ctx, %s)", senderKey)
-	defer func() { logger.Tracef(ctx, "/createAndConfigureOutputs(ctx, %s): %v", senderKey, _err) }()
+	logger.Tracef(ctx, "createAndConfigureOutputs(ctx, %s, %s)", senderKey, recoderConfig)
+	defer func() {
+		logger.Tracef(ctx, "/createAndConfigureOutputs(ctx, %s, %s): %v", senderKey, recoderConfig, _err)
+	}()
 
 	inputsAndKeys, err := s.getInputsForSenderKey(ctx, senderKey)
 	if err != nil {
 		return fmt.Errorf("unable to get inputs for sender key %s: %w", senderKey, err)
 	}
 
-	for _, ik := range inputsAndKeys {
-		input := ik.Input
-		outputKey := ik.Key
-
-		output, isNew, err := s.getOrCreateOutputLocked(ctx, outputKey, nil)
-		if err != nil {
-			return fmt.Errorf("unable to get-or-create the output %s: %w", outputKey, err)
-		}
-
-		logger.Debugf(ctx, "reconfiguring the output %d:%s (isNew: %v)", output.ID, outputKey, isNew)
-		err = output.reconfigureRecoder(ctx, recoderConfig)
-		if err != nil {
-			return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, outputKey, err)
-		}
-
-		logger.Debugf(ctx, "notifying about the sources")
-		err = avpipeline.NotifyAboutPacketSources(ctx,
-			input.Node.Processor.Kernel,
-			output.InputFilter,
-		)
-		if err != nil {
-			return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", input.Node.Processor.Kernel, output.InputFilter, err)
+	for idx, ik := range inputsAndKeys {
+		if err := s.createAndConfigureOutput(ctx, ik.Input, ik.Key, recoderConfig); err != nil {
+			return fmt.Errorf("unable to create and configure output for input %d (%s) with key %s: %w", idx, ik.Input.GetType(), ik.Key, err)
 		}
 	}
+	return nil
+}
+
+func (s *StreamMux[C]) createAndConfigureOutput(
+	ctx context.Context,
+	input *Input[C],
+	senderKey SenderKey,
+	recoderConfig types.RecoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "createAndConfigureOutput(ctx, %s)", senderKey)
+	defer func() { logger.Tracef(ctx, "/createAndConfigureOutput(ctx, %s): %v", senderKey, _err) }()
+
+	output, isNew, err := s.getOrCreateOutputLocked(ctx, senderKey, nil)
+	if err != nil {
+		return fmt.Errorf("unable to get-or-create the output %s: %w", senderKey, err)
+	}
+
+	logger.Debugf(ctx, "reconfiguring the output %d:%s (isNew: %v)", output.ID, senderKey, isNew)
+	err = output.reconfigureRecoder(ctx, recoderConfig)
+	if err != nil {
+		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, senderKey, err)
+	}
+
+	logger.Debugf(ctx, "notifying about the sources")
+	err = avpipeline.NotifyAboutPacketSources(ctx,
+		input.Node.Processor.Kernel,
+		output.InputFilter,
+	)
+	if err != nil {
+		return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", input.Node.Processor.Kernel, output.InputFilter, err)
+	}
+
 	return nil
 }
 
@@ -1656,4 +1698,15 @@ func (s *StreamMux[C]) GetLatencies(
 			Sending:        nanosecondsToDuration(s.SendingLatencyVideo.Load()),
 		},
 	}, nil
+}
+
+func (s *StreamMux[C]) IsAllowedDifferentOutputs() bool {
+	switch s.MuxMode {
+	case types.MuxModeForbid, types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
+		return false
+	case types.MuxModeDifferentOutputsSameTracks, types.MuxModeDifferentOutputsSameTracksSplitAV:
+		return true
+	default:
+		panic(fmt.Sprintf("unknown MuxMode: %v", s.MuxMode))
+	}
 }

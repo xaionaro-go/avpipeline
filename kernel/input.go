@@ -191,7 +191,9 @@ func (i *Input) doOpen(
 	authKey secret.String,
 	inputFormat *astiav.InputFormat,
 	cfg InputConfig,
-) error {
+) (_err error) {
+	logger.Debugf(ctx, "doOpen(%q, <HIDDEN>, %s, %+#v)", urlString, inputFormat, cfg)
+	defer func() { logger.Debugf(ctx, "/doOpen(%q, <HIDDEN>, %s, %+#v): %v", urlString, inputFormat, cfg, _err) }()
 	urlWithSecret := urlString
 	if authKey.Get() != "" {
 		urlWithSecret += authKey.Get()

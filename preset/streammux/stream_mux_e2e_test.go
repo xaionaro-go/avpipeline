@@ -273,7 +273,7 @@ func runTest(
 					},
 				)
 				if errors.As(err, &streammux.ErrSwitchAlreadyInProgress{}) {
-					logger.Warnf(ctx, "SetRecoderConfig: switch in progress: %v; retrying in 1 second", err)
+					logger.Warnf(ctx, "SwitchToOutputByProps: switch in progress: %v; retrying in 1 second", err)
 					time.Sleep(time.Second)
 					continue
 				}
