@@ -582,6 +582,7 @@ func newCodec(
 		)
 	case astiav.MediaTypeAudio:
 		c.codecContext.SetChannelLayout(codecParameters.ChannelLayout())
+		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
 		if customOptions != nil {
 			if v := customOptions.Get("ac", nil, 0); v != nil {
 				logger.Debugf(ctx, "ac option is set to '%s'", v.Value())
@@ -608,7 +609,6 @@ func newCodec(
 			}
 		}
 		c.codecContext.SetSampleRate(codecParameters.SampleRate())
-		c.codecContext.SetSampleFormat(codecParameters.SampleFormat())
 		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout())
 	}
 
