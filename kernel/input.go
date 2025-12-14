@@ -23,6 +23,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
@@ -44,7 +45,7 @@ type InputConfig struct {
 
 	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
 	// alternative to option "-re" in ffmpeg.
-	ForceRealTime bool
+	ForceRealTime *bool
 	ForceStartPTS *int64
 	ForceStartDTS *int64
 
@@ -69,8 +70,8 @@ type Input struct {
 
 	AutoClose          bool
 	ForceRealTime      bool
-	ForceStartPTS      *int64
-	ForceStartDTS      *int64
+	ForceStartPTS      int64
+	ForceStartDTS      int64
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
@@ -111,9 +112,6 @@ func NewInputFromURL(
 		ClosureSignaler: closuresignaler.New(),
 
 		AutoClose:          cfg.AutoClose,
-		ForceRealTime:      cfg.ForceRealTime,
-		ForceStartPTS:      cfg.ForceStartPTS,
-		ForceStartDTS:      cfg.ForceStartDTS,
 		OnPreClose:         cfg.OnPreClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
@@ -172,22 +170,6 @@ func NewInputFromURL(
 			logger.Debugf(ctx, "using format '%s'", inputFormat.Name())
 		}
 	}
-	switch formatName {
-	case "pulse":
-		if i.ForceStartPTS == nil {
-			i.ForceStartPTS = ptr(int64(0))
-		}
-		if i.ForceStartDTS == nil {
-			i.ForceStartDTS = ptr(int64(0))
-		}
-	case "android_camera":
-		if i.ForceStartPTS == nil {
-			i.ForceStartPTS = ptr(int64(0))
-		}
-		if i.ForceStartDTS == nil {
-			i.ForceStartDTS = ptr(int64(0))
-		}
-	}
 
 	i.FormatContext = astiav.AllocFormatContext()
 	if i.FormatContext == nil {
@@ -241,6 +223,48 @@ func (i *Input) doOpen(
 		i.FormatContext.CloseInput()
 		i.FormatContext.Free()
 	})
+
+	formatName := i.FormatContext.InputFormat().Name()
+	logger.Debugf(ctx, "resulting format: %q", formatName)
+
+	if cfg.ForceRealTime != nil {
+		i.ForceRealTime = *cfg.ForceRealTime
+	} else {
+		i.ForceRealTime = false
+	}
+	if cfg.ForceStartPTS != nil {
+		i.ForceStartPTS = *cfg.ForceStartPTS
+	} else {
+		i.ForceStartPTS = globaltypes.PTSKeep
+	}
+	if cfg.ForceStartDTS != nil {
+		i.ForceStartDTS = *cfg.ForceStartDTS
+	} else {
+		i.ForceStartDTS = globaltypes.PTSKeep
+	}
+	switch formatName {
+	case "pulse":
+		if cfg.ForceStartPTS == nil {
+			i.ForceStartPTS = 0
+		}
+		if cfg.ForceStartDTS == nil {
+			i.ForceStartDTS = 0
+		}
+	case "android_camera":
+		if cfg.ForceStartPTS == nil {
+			i.ForceStartPTS = int64(0)
+		}
+		if cfg.ForceStartDTS == nil {
+			i.ForceStartDTS = int64(0)
+		}
+	default:
+		if cfg.ForceRealTime == nil {
+			if urltools.IsFileURL(urlString) {
+				i.ForceRealTime = true
+			}
+		}
+	}
+	logger.Debugf(ctx, "Input ForceRealTime=%t ForceStartPTS=%d ForceStartDTS=%d", i.ForceRealTime, i.ForceStartPTS, i.ForceStartDTS)
 
 	if cfg.RecvBufferSize != 0 {
 		if err := i.UnsafeSetRecvBufferSize(ctx, cfg.RecvBufferSize); err != nil {
@@ -536,17 +560,17 @@ func (i *Input) Generate(
 			pkt.Flags().Has(astiav.PacketFlagKey),
 			len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
 		)
-		if i.ForceStartPTS != nil && *i.ForceStartPTS != globaltypes.PTSKeep && pkt.Pts() != astiav.NoPtsValue {
+		if i.ForceStartPTS != globaltypes.PTSKeep && pkt.Pts() != astiav.NoPtsValue {
 			if i.PTSShift.Load() == math.MinInt64 {
-				ptsShift := *i.ForceStartPTS - pkt.Pts()
+				ptsShift := i.ForceStartPTS - pkt.Pts()
 				i.PTSShift.Store(ptsShift)
 				logger.Infof(ctx, "applying PTS shift of %d to input packets", ptsShift)
 			}
 			pkt.SetPts(pkt.Pts() + i.PTSShift.Load())
 		}
-		if i.ForceStartDTS != nil && *i.ForceStartDTS != globaltypes.PTSKeep && pkt.Dts() != astiav.NoPtsValue {
+		if i.ForceStartDTS != globaltypes.PTSKeep && pkt.Dts() != astiav.NoPtsValue {
 			if i.DTSShift.Load() == math.MinInt64 {
-				dtsShift := *i.ForceStartDTS - pkt.Dts()
+				dtsShift := i.ForceStartDTS - pkt.Dts()
 				i.DTSShift.Store(dtsShift)
 				logger.Infof(ctx, "applying DTS shift of %d to input packets", dtsShift)
 			}

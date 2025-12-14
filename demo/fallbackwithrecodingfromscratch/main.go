@@ -32,7 +32,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/avpipeline/quality"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/observability/xlogger"
 	"github.com/xaionaro-go/secret"
@@ -123,9 +122,7 @@ func main() {
 
 	inputMain := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
-			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{
-				ForceRealTime: urltools.IsFileURL(fromURLMain),
-			})
+			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{})
 		},
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			logger.Debugf(ctx, "main input error: %v", err)

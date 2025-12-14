@@ -6,7 +6,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/preset/inputwithfallback"
-	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/secret"
 )
 
@@ -23,9 +22,7 @@ func (f *inputFactory) String() string {
 func (f *inputFactory) NewInput(
 	ctx context.Context,
 ) (*kernel.Input, error) {
-	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{
-		ForceRealTime: urltools.IsFileURL(f.URL),
-	})
+	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{})
 }
 
 func (f *inputFactory) NewDecoderFactory(
