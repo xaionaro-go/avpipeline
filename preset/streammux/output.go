@@ -39,8 +39,6 @@ import (
 
 const (
 	outputReuseDecoderResources = false
-	outputDebug                 = true
-	enableFPSFractioner         = true
 )
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]

@@ -41,7 +41,6 @@ import (
 
 const (
 	switchTimeout = time.Hour
-	switchDebug   = false
 )
 
 var (
@@ -103,7 +102,7 @@ func New(
 	muxMode types.MuxMode,
 	senderFactory SenderFactory[struct{}],
 ) (*StreamMux[struct{}], error) {
-	return NewWithCustomData[struct{}](
+	return NewWithCustomData(
 		ctx,
 		muxMode,
 		senderFactory,
@@ -122,10 +121,10 @@ func NewWithCustomData[C any](
 		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packet.Input]{},
 		startedCh:     ptr(make(chan struct{})),
 	}
-	s.InputAll = *newInput[C](ctx, s, InputTypeAll)
+	s.InputAll = *newInput(ctx, s, InputTypeAll)
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
-		s.InputAudioOnly = newInput[C](ctx, s, InputTypeAudioOnly)
-		s.InputVideoOnly = newInput[C](ctx, s, InputTypeVideoOnly)
+		s.InputAudioOnly = newInput(ctx, s, InputTypeAudioOnly)
+		s.InputVideoOnly = newInput(ctx, s, InputTypeVideoOnly)
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
 		s.InputAll.Node.AddPushFramesTo(ctx, s.InputAudioOnly.Node, framefiltercondition.MediaType(astiav.MediaTypeAudio))
 		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
@@ -202,14 +201,13 @@ func (s *StreamMux[C]) ForEachInput(
 		s.InputAudioOnly,
 		s.InputVideoOnly,
 	} {
-		input := input
 		if input == nil {
 			continue
 		}
 		err := fn(ctx, input)
-		switch {
-		case err == nil:
-		case err == ErrStop{}:
+		switch err {
+		case nil:
+		case ErrStop{}:
 			return nil
 		default:
 			return fmt.Errorf("unable to process input %s: %w", input.GetType(), err)
@@ -601,7 +599,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	cfg := InitOutputOptions(opts).config()
 	_ = cfg // currently unused
 
-	output, err := newOutput[C](
+	output, err := newOutput(
 		ctx,
 		outputID,
 		input.Node,
@@ -713,7 +711,7 @@ func (s *StreamMux[C]) GetRecoderConfig(
 }
 
 func (s *StreamMux[C]) getCurrentOutputPropsLocked(
-	ctx context.Context,
+	_ context.Context,
 ) (_ret types.SenderProps) {
 	assertNoError(json.Unmarshal(must(json.Marshal(s.CurrentOutputProps)), &_ret)) // deep copy of a poor man
 	return
@@ -767,7 +765,7 @@ type inputAndKey[C any] struct {
 }
 
 func (s *StreamMux[C]) getInputsForSenderKey(
-	ctx context.Context,
+	_ context.Context,
 	senderKey SenderKey,
 ) (_ret []inputAndKey[C], _err error) {
 	if senderKey.VideoResolution == (codec.Resolution{}) && senderKey.VideoCodec != "" && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
@@ -1336,7 +1334,7 @@ func (s *StreamMux[C]) GetBestNotBypassOutput(
 }
 
 func (s *StreamMux[C]) getBestNotBypassOutputLocked(
-	ctx context.Context,
+	_ context.Context,
 ) (_ret *Output[C]) {
 	var outputKeys SenderKeys
 	s.OutputsMap.Range(func(outputKey SenderKey, _ *Output[C]) bool {

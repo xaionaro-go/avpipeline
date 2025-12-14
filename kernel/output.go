@@ -590,9 +590,7 @@ func (o *Output) configureOutputStream(
 
 func (o *Output) preallocateOutputStream(
 	ctx context.Context,
-	inputSource packet.Source,
 	inputStream *astiav.Stream,
-	fmtCtx *astiav.FormatContext,
 ) (_err error) {
 	inputStreamIndex := inputStream.Index()
 	if _, ok := o.OutputStreams[inputStreamIndex]; ok {
@@ -1151,7 +1149,7 @@ func (o *Output) NotifyAboutPacketSource(
 		o.formatContextLocker.Do(ctx, func() {
 			for _, stream := range fmtCtx.Streams() {
 				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())
-				err := o.preallocateOutputStream(ctx, source, stream, fmtCtx)
+				err := o.preallocateOutputStream(ctx, stream)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("unable to preallocate an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
 				}
