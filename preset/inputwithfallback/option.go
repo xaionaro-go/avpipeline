@@ -9,9 +9,8 @@ type Option interface {
 }
 
 type Config struct {
-	RetryInterval              time.Duration
-	FailuresBeforeNextFallback uint
-	SwitchKeepUnlessTimeout    time.Duration
+	RetryInterval           time.Duration
+	SwitchKeepUnlessTimeout time.Duration
 }
 
 type Options []Option
@@ -36,12 +35,6 @@ type OptionRetryInterval time.Duration
 
 func (o OptionRetryInterval) apply(cfg *Config) {
 	cfg.RetryInterval = time.Duration(o)
-}
-
-type OptionFailuresBeforeNextFallback uint
-
-func (o OptionFailuresBeforeNextFallback) apply(cfg *Config) {
-	cfg.FailuresBeforeNextFallback = uint(o)
 }
 
 type OptionSwitchKeepUnlessTimeout time.Duration

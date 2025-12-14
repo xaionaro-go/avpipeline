@@ -370,18 +370,27 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 	ctx context.Context,
 	inputChain *InputChain[K, DF, C],
 	err error,
-) {
+) (_err error) {
+	logger.Debugf(ctx, "onInputChainError: input %d error: %v", int(inputChain.ID), err)
+	defer func() {
+		logger.Debugf(ctx, "/onInputChainError: input %d error: %v: %v", int(inputChain.ID), err, _err)
+	}()
+
+	if i.Config.RetryInterval < 0 {
+		return fmt.Errorf("retries are disabled, and input %d errored: %w", int(inputChain.ID), err)
+	}
+
 	defer time.Sleep(i.Config.RetryInterval)
 
 	id := inputChain.ID
 	active := int(i.InputSwitch.CurrentValue.Load())
 	next := int(i.InputSwitch.NextValue.Load())
 	current := max(active, next)
-	logger.Debugf(ctx, "onInputChainError: input %d error: %v (current=%d)", int(id), err, current)
+	logger.Debugf(ctx, "onInputChainError: current:%d", current)
 
 	// Only react to errors on the currently active input
 	if current != int(id) {
-		return
+		return nil
 	}
 
 	i.InputChainsLocker.Do(ctx, func() {
@@ -396,6 +405,7 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 			logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, err)
 		}
 	})
+	return nil
 }
 
 type asInputPacketFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]

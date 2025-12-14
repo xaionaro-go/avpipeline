@@ -50,15 +50,15 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	filterSwitch *barrierstategetter.SwitchOutput,
 	syncSwitch *barrierstategetter.SwitchOutput,
 	onKernelOpen func(context.Context, *InputChain[K, DF, C]),
-	onError func(context.Context, *InputChain[K, DF, C], error),
+	onError func(context.Context, *InputChain[K, DF, C], error) error,
 ) (*InputChain[K, DF, C], error) {
 	r := &InputChain[K, DF, C]{
 		ID:           inputID,
 		InputFactory: inputFactory,
 		FilterSwitch: filterSwitch,
-		Filter:       node.NewWithCustomDataFromKernel[C, *kernel.Barrier](ctx, kernel.NewBarrier(ctx, filterSwitch)),
+		Filter:       node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, filterSwitch)),
 		SyncSwitch:   syncSwitch,
-		SyncBarrier:  node.NewWithCustomDataFromKernel[C, *kernel.Barrier](ctx, kernel.NewBarrier(ctx, syncSwitch)),
+		SyncBarrier:  node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, syncSwitch)),
 	}
 
 	decoderFactory, err := inputFactory.NewDecoderFactory(ctx)
@@ -66,21 +66,23 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		return nil, fmt.Errorf("unable to create decoder factory for input %v: %w", inputID, err)
 	}
 	if any(decoderFactory) != codec.DecoderFactory(nil) {
-		r.Decoder = node.NewWithCustomDataFromKernel[C, *kernel.Decoder[DF]](
+		r.Decoder = node.NewWithCustomDataFromKernel[C](
 			ctx,
 			kernel.NewDecoder(ctx, decoderFactory),
 			processor.DefaultOptionsRecoder()...,
 		)
 	}
 
-	inputKernel := kernel.NewRetryable[K](ctx,
+	inputKernel := kernel.NewRetryable(ctx,
 		func(ctx context.Context) (K, error) {
 			return inputFactory.NewInput(ctx)
 		},
 		func(ctx context.Context, k K, err error) error {
 			logger.Errorf(ctx, "input %v error: %v", inputID, err)
 			if onError != nil {
-				onError(ctx, r, err)
+				if err := onError(ctx, r, err); err != nil {
+					return err
+				}
 			}
 			return kernel.ErrRetry{}
 		},
@@ -97,7 +99,7 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 			return nil
 		}),
 	)
-	r.Input = node.NewWithCustomDataFromKernel[C, *kernel.Retryable[K]](
+	r.Input = node.NewWithCustomDataFromKernel[C](
 		ctx,
 		inputKernel,
 		processor.DefaultOptionsInput()...,
