@@ -133,6 +133,7 @@ func (r *Resampler) SendFrame(
 	if _, err := r.AudioFifo.Write(r.ResampledFrame); err != nil {
 		return fmt.Errorf("cannot write to AudioFifo: %w", err)
 	}
+	logger.Tracef(ctx, "wrote %d samples to AudioFifo; new size: %d", r.ResampledFrame.NbSamples(), r.AudioFifo.Size())
 
 	return nil
 }
@@ -157,8 +158,8 @@ func (r *Resampler) receiveFrame(
 	outputFrame *astiav.Frame,
 	minSize int,
 ) (_err error) {
-	logger.Tracef(ctx, "receiveFrames: %d", minSize)
-	defer func() { logger.Tracef(ctx, "/receiveFrames: %d: %v", minSize, _err) }()
+	logger.Tracef(ctx, "receiveFrames: %d; fifoSize:%d", minSize, r.AudioFifo.Size())
+	defer func() { logger.Tracef(ctx, "/receiveFrames: %d; fifoSize:%d: %v", minSize, r.AudioFifo.Size(), _err) }()
 
 	if r.AudioFifo.Size() == 0 {
 		return astiav.ErrEof
