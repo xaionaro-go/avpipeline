@@ -114,7 +114,7 @@ func (r *Resampler) SendFrame(
 	inFormat := getPCMFormatFromFrame(ctx, in)
 	if r.FormatInput != nil {
 		if !r.FormatInput.Equal(*inFormat) {
-			return fmt.Errorf("input frame format changed: was %s, now %s", r.FormatInput, inFormat)
+			return fmt.Errorf("%w: input frame format changed: was %s, now %s", astiav.ErrInputChanged, r.FormatInput, inFormat)
 		}
 	} else {
 		logger.Debugf(ctx, "input frame format: %s", inFormat)
