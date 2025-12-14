@@ -124,7 +124,6 @@ func main() {
 	inputMain := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
 			return kernel.NewInputFromURL(ctx, fromURLMain, secret.New(""), kernel.InputConfig{
-				KeepOpen:      true,
 				ForceRealTime: urltools.IsFileURL(fromURLMain),
 			})
 		},
@@ -154,9 +153,7 @@ func main() {
 	logger.Debugf(ctx, "opening '%s' as the fallback input...", fromURLFallback)
 	inputFallback := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Input, error) {
-			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{
-				KeepOpen: true,
-			})
+			return kernel.NewInputFromURL(ctx, fromURLFallback, secret.New(""), kernel.InputConfig{})
 		},
 		func(ctx context.Context, k *kernel.Input, err error) error {
 			logger.Debugf(ctx, "fallback input error: %v", err)

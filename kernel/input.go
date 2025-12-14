@@ -40,7 +40,7 @@ type InputConfig struct {
 	AsyncOpen      bool
 	OnPostOpen     func(context.Context, *Input) error
 	OnPreClose     func(context.Context, *Input) error
-	KeepOpen       bool
+	AutoClose      bool
 
 	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
 	// alternative to option "-re" in ffmpeg.
@@ -65,7 +65,7 @@ type Input struct {
 	DefaultHeight int
 	DefaultFPS    astiav.Rational
 
-	KeepOpen           bool
+	AutoClose          bool
 	ForceRealTime      bool
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
@@ -104,7 +104,7 @@ func NewInputFromURL(
 		initialized:     make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
 
-		KeepOpen:           cfg.KeepOpen,
+		AutoClose:          cfg.AutoClose,
 		ForceRealTime:      cfg.ForceRealTime,
 		OnPreClose:         cfg.OnPreClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
@@ -249,7 +249,7 @@ func (i *Input) Close(
 	i.WaitGroup.Wait()
 
 	var errs []error
-	if i.KeepOpen { // it means it won't be closed automatically, thus we should close it here, since this was a manual Close()
+	if !i.AutoClose { // it means it won't be closed automatically, thus we should close it here, since this was a manual Close()
 		if fn := i.OnPreClose; fn != nil {
 			if err := fn(ctx, i); err != nil {
 				errs = append(errs, fmt.Errorf("input OnPreClose error: %w", err))
@@ -398,7 +398,7 @@ func (i *Input) Generate(
 	case <-i.initialized:
 	}
 
-	if !i.KeepOpen {
+	if i.AutoClose {
 		defer func() {
 			if fn := i.OnPreClose; fn != nil {
 				if err := fn(ctx, i); err != nil {

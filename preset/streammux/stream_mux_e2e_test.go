@@ -100,9 +100,7 @@ func readInputFromFile(ctx context.Context, t *testing.T, fileName string) ([]pa
 		ctx,
 		path.Join("testdata", fileName),
 		secret.New(""),
-		kernel.InputConfig{
-			KeepOpen: true,
-		},
+		kernel.InputConfig{},
 	))
 
 	var input []packet.Input

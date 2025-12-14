@@ -24,7 +24,6 @@ func (f *inputFactory) NewInput(
 	ctx context.Context,
 ) (*kernel.Input, error) {
 	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{
-		KeepOpen:      true,
 		ForceRealTime: urltools.IsFileURL(f.URL),
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
@@ -63,7 +64,12 @@ func TestRecoderNoFailure(t *testing.T) {
 			input, err := kernel.NewInputFromURL(
 				ctx,
 				fromURL, secret.New(""),
-				kernel.InputConfig{},
+				kernel.InputConfig{
+					OnPreClose: func(ctx context.Context, i *kernel.Input) error {
+						time.Sleep(time.Second) // TODO: remove this ugly hack
+						return nil
+					},
+				},
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -71,8 +77,7 @@ func TestRecoderNoFailure(t *testing.T) {
 			defer input.Close(ctx)
 
 			l.Debugf("opening '%s' as the output...", toURL)
-			output, err := kernel.NewOutputFromURL(
-				ctx,
+			output, err := kernel.NewOutputFromURL(ctx,
 				toURL, secret.New(""),
 				kernel.OutputConfig{
 					CustomOptions: types.DictionaryItems{{

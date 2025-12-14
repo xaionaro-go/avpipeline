@@ -65,8 +65,9 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	err = k.NotifyAboutPacketSource(ctx, packetSource)
 	require.NoError(t, err)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		pkt := packet.Pool.Get()
+		pkt.SetStreamIndex(stream0.Index())
 		pkt.SetDts(5 + int64(i))
 		err = k.SendInputPacket(ctx,
 			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream0, Source: packetSource}),
@@ -75,8 +76,9 @@ func TestReorderMonotonicDTS(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		pkt := packet.Pool.Get()
+		pkt.SetStreamIndex(stream1.Index())
 		pkt.SetDts(0 + int64(i))
 		err = k.SendInputPacket(ctx,
 			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream1, Source: packetSource}),
