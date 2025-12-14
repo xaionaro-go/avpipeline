@@ -264,7 +264,7 @@ func (i *Input) doOpen(
 			}
 		}
 	}
-	logger.Debugf(ctx, "Input ForceRealTime=%t ForceStartPTS=%d ForceStartDTS=%d", i.ForceRealTime, i.ForceStartPTS, i.ForceStartDTS)
+	logger.Debugf(ctx, "ForceRealTime=%t ForceStartPTS=%d ForceStartDTS=%d", i.ForceRealTime, i.ForceStartPTS, i.ForceStartDTS)
 
 	if cfg.RecvBufferSize != 0 {
 		if err := i.UnsafeSetRecvBufferSize(ctx, cfg.RecvBufferSize); err != nil {
@@ -499,10 +499,11 @@ func (i *Input) Generate(
 		}
 		logger.Tracef(
 			ctx,
-			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, isKey:%t), dataLen:%d, res:%dx%d",
+			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, res:%dx%d",
 			codecParams.MediaType(),
 			outPkt.StreamIndex(),
 			outPkt.Pos(), outPkt.Pts(), outPkt.Dts(), outPkt.Packet.Duration(),
+			outPkt.GetTimeBase(),
 			outPkt.Flags().Has(astiav.PacketFlagKey),
 			len(outPkt.Data()),
 			codecParams.Width(), codecParams.Height(),
