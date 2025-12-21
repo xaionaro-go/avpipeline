@@ -18,3 +18,9 @@ type Flusher interface {
 		outputFramesCh chan<- frame.Output,
 	) error
 }
+
+type HookFunc func(ctx context.Context, input Abstract) error
+
+func (f HookFunc) FireHook(ctx context.Context, input Abstract) error {
+	return f(ctx, input)
+}

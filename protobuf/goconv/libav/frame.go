@@ -35,7 +35,7 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 		//TopFieldFirst:     input.TopFieldFirst(),
 		//PaletteHasChanged: input.PaletteHasChanged(),
 		SampleRate: int32(input.SampleRate()),
-		SideData:   FrameSideDataFromGo(input.SideData()).Protobuf(),
+		//SideData:   FrameSideDataFromGo(input.SideData()).Protobuf(),
 		Flags:      int32(input.Flags()),
 		ColorRange: uint32(input.ColorRange()),
 		//ColorTRC:          input.ColorTRC(),

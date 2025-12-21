@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -35,23 +36,7 @@ const (
 	inputDefaultFPS    = 30
 )
 
-type InputConfig struct {
-	CustomOptions  globaltypes.DictionaryItems
-	RecvBufferSize uint
-	AsyncOpen      bool
-	OnPostOpen     func(context.Context, *Input) error
-	OnPreClose     func(context.Context, *Input) error
-	AutoClose      bool
-
-	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
-	// alternative to option "-re" in ffmpeg.
-	ForceRealTime *bool
-	ForceStartPTS *int64
-	ForceStartDTS *int64
-
-	IgnoreIncorrectDTS bool
-	IgnoreZeroDuration bool
-}
+type InputConfig = types.InputConfig
 
 type Input struct {
 	*closuresignaler.ClosureSignaler
@@ -112,9 +97,13 @@ func NewInputFromURL(
 		ClosureSignaler: closuresignaler.New(),
 
 		AutoClose:          cfg.AutoClose,
-		OnPreClose:         cfg.OnPreClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
+	}
+	if cfg.OnPreClose != nil {
+		i.OnPreClose = func(ctx context.Context, i *Input) error {
+			return cfg.OnPreClose.FireHook(ctx, i)
+		}
 	}
 	i.SyncStreamIndex.Store(math.MinInt64)
 	i.SyncStartPTS.Store(math.MinInt64)
@@ -281,7 +270,7 @@ func (i *Input) doOpen(
 	}
 
 	if cfg.OnPostOpen != nil {
-		cfg.OnPostOpen(ctx, i)
+		cfg.OnPostOpen.FireHook(ctx, i)
 	}
 	close(i.initialized)
 

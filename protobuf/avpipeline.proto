@@ -189,15 +189,14 @@ message CustomOption {
 }
 
 message InputConfig {
-  string         url                  = 1;
-  bool           async_open           = 2;
-  bool           auto_close           = 3;
-  uint32         recv_buffer_size     = 4;
-  optional bool  force_real_time      = 5;
-  optional int64 force_start_pts      = 6;
-  optional int64 force_start_dts      = 7;
-  bool           ignore_incorrect_dts = 8;
-  bool           ignore_zero_duration = 9;
+  bool           async_open           = 1;
+  bool           auto_close           = 2;
+  uint32         recv_buffer_size     = 3;
+  optional bool  force_real_time      = 4;
+  optional int64 force_start_pts      = 5;
+  optional int64 force_start_dts      = 6;
+  bool           ignore_incorrect_dts = 7;
+  bool           ignore_zero_duration = 8;
 
-  repeated avpipeline.CustomOption custom_options = 10;
+  repeated avpipeline.CustomOption custom_options = 9;
 }

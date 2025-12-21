@@ -65,10 +65,10 @@ func TestRecoderNoFailure(t *testing.T) {
 				ctx,
 				fromURL, secret.New(""),
 				kernel.InputConfig{
-					OnPreClose: func(ctx context.Context, i *kernel.Input) error {
+					OnPreClose: kernel.HookFunc(func(ctx context.Context, i kernel.Abstract) error {
 						time.Sleep(time.Second) // TODO: remove this ugly hack
 						return nil
-					},
+					}),
 				},
 			)
 			if err != nil {
