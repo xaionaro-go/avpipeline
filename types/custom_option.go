@@ -26,3 +26,22 @@ func (s DictionaryItems) Deduplicate() DictionaryItems {
 	slices.Reverse(result)
 	return result
 }
+
+func (s *DictionaryItems) SetFirst(input DictionaryItem) {
+	for i, item := range *s {
+		if item.Key == input.Key {
+			(*s)[i].Value = input.Value
+			return
+		}
+	}
+	*s = append(*s, input)
+}
+
+func (s DictionaryItems) GetFirst(key string) *string {
+	for _, item := range s {
+		if item.Key == key {
+			return &item.Value
+		}
+	}
+	return nil
+}

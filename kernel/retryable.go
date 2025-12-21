@@ -76,6 +76,8 @@ func (r *Retryable[K]) unpauseKernelOpening(
 	oldCh := r.KernelOpenBarrier.Load()
 	// close the channel if opened:
 	select {
+	case <-ctx.Done():
+		return
 	case <-*oldCh:
 	default:
 		close(*oldCh)
@@ -90,6 +92,8 @@ func (r *Retryable[K]) pauseKernelOpening(
 	for {
 		oldCh := r.KernelOpenBarrier.Load()
 		select {
+		case <-ctx.Done():
+			return
 		case <-*oldCh:
 			if r.KernelOpenBarrier.CompareAndSwap(oldCh, &newCh) {
 				return
