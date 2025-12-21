@@ -4,91 +4,92 @@ option go_package = "github.com/xaionaro-go/avpipeline/protobuf/avpipeline;avpip
 import "libav.proto";
 
 message Node {
-    uint64 id = 1;
-    string type = 2;
-    string description = 3;
-    bool is_serving = 4;
-    NodeCounters counters = 5;
-    repeated Node todo_publishing_nodes = 6; // is not currently reported
-    repeated Node consuming_nodes = 7;
+  uint64        id                    = 1;
+  string        type                  = 2;
+  string        description           = 3;
+  bool          is_serving            = 4;
+  NodeCounters  counters              = 5;
+  repeated Node todo_publishing_nodes = 6; // is not currently reported
+  repeated Node consuming_nodes       = 7;
 }
 
 message NodeCounters {
-    NodeCountersSection received = 1;
-    NodeCountersSection processed = 2;
-    NodeCountersSection missed = 3;
-    NodeCountersSection generated = 4;
-    NodeCountersSection omitted = 5;
-    NodeCountersSection sent = 6;
+  NodeCountersSection received  = 1;
+  NodeCountersSection processed = 2;
+  NodeCountersSection missed    = 3;
+  NodeCountersSection generated = 4;
+  NodeCountersSection omitted   = 5;
+  NodeCountersSection sent      = 6;
 }
 
 message NodeCountersSection {
-    NodeCountersSubSection packets = 1;
-    NodeCountersSubSection frames = 2;
+  NodeCountersSubSection packets = 1;
+  NodeCountersSubSection frames  = 2;
 }
 
 message NodeCountersSubSection {
-    NodeCountersItem unknown = 1;
-    NodeCountersItem other = 2;
-    NodeCountersItem video = 3;
-    NodeCountersItem audio = 4;
+  NodeCountersItem unknown = 1;
+  NodeCountersItem other   = 2;
+  NodeCountersItem video   = 3;
+  NodeCountersItem audio   = 4;
 }
 
 message NodeCountersItem {
-    uint64 count = 1;
-    uint64 bytes = 2;
+  uint64 count = 1;
+  uint64 bytes = 2;
 }
 
 message Object {
   uint32 type = 1;
-  bytes data = 2;
+  bytes  data = 2;
 }
 
 /*
-type Commons struct {
-	*astiav.Frame
-	*astiav.CodecContext
-	StreamIndex    int
-	StreamsCount   int
-	StreamDuration int64
-	TimeBase       astiav.Rational
-	Pos            int64
-	Duration       int64
-}
-*/
+ type Commons struct {
+ *astiav.Frame
+ *astiav.CodecContext
+ StreamIndex    int
+ StreamsCount   int
+ StreamDuration int64
+ TimeBase       astiav.Rational
+ Pos            int64
+ Duration       int64
+ }
+ */
 
 message Frame {
-  libav.Frame frame = 1;
-  libav.CodecContext codec_context = 2;
-  int32 stream_index = 3;
-  int32 streams_count = 4;
-  int64 stream_duration = 5;
-  libav.Rational time_base = 6;
-  int64 pos = 7;
-  int64 duration = 8;
+  libav.Frame        frame           = 1;
+  libav.CodecContext codec_context   = 2;
+  int32              stream_index    = 3;
+  int32              streams_count   = 4;
+  int64              stream_duration = 5;
+  libav.Rational     time_base       = 6;
+  int64              pos             = 7;
+  int64              duration        = 8;
 }
 
 message AutoBitrateCalculator {
   oneof auto_bitrate_calculator {
-    AutoBitRateCalculatorThresholds thresholds = 1;
-    AutoBitrateCalculatorLogK log_k = 2;
-    uint64 static = 3;
+    AutoBitRateCalculatorThresholds        thresholds           = 1;
+    AutoBitrateCalculatorLogK              log_k                = 2;
+    uint64                                 static               = 3;
     AutoBitrateCalculatorQueueSizeGapDecay queue_size_gap_decay = 4;
   }
 }
 
 message AutoBitRateCalculatorThresholds {
   uint64 output_extremely_high_queue_size_duration_ms = 1;
-  uint64 output_very_high_queue_size_duration_ms = 2;
-  uint64 output_high_queue_size_duration_ms = 3;
-  uint64 output_low_queue_size_duration_ms = 4;
-  uint64 output_very_low_queue_size_duration_ms = 5;
-  double increase_k = 6;
-  double decrease_k = 7;
-  double quick_increase_k = 8;
-  double quick_decrease_k = 9;
-  double extreme_decrease_k = 10;
+  uint64 output_very_high_queue_size_duration_ms      = 2;
+  uint64 output_high_queue_size_duration_ms           = 3;
+  uint64 output_low_queue_size_duration_ms            = 4;
+  uint64 output_very_low_queue_size_duration_ms       = 5;
+  double increase_k                                   = 6;
+  double decrease_k                                   = 7;
+  double quick_increase_k                             = 8;
+  double quick_decrease_k                             = 9;
+  double extreme_decrease_k                           = 10;
 }
+
 message MovingAverageConfigMAMA {
   double fast_limit = 1;
   double slow_limit = 2;
@@ -100,21 +101,21 @@ message MovingAverageConfigOther {
 
 message MovingAverageConfig {
   oneof moving_average_config {
-    MovingAverageConfigMAMA mama = 1;
+    MovingAverageConfigMAMA  mama  = 1;
     MovingAverageConfigOther other = 65535;
   }
 }
 
 message Resolution {
-  uint32 width = 1;
+  uint32 width  = 1;
   uint32 height = 2;
 }
 
 message FPSReductionRange {
   uint64 bitrate_min_bps = 1;
   uint64 bitrate_max_bps = 2;
-  uint32 fraction_num = 3;
-  uint32 fraction_den = 4;
+  uint32 fraction_num    = 3;
+  uint32 fraction_den    = 4;
 }
 
 message FPSReducerConfig {
@@ -122,9 +123,9 @@ message FPSReducerConfig {
 }
 
 message AutoBitRateResolutionAndBitRateConfig {
-  Resolution resolution = 1;
-  uint64 bitrate_high_bps = 2;
-  uint64 bitrate_low_bps = 3;
+  Resolution resolution       = 1;
+  uint64     bitrate_high_bps = 2;
+  uint64     bitrate_low_bps  = 3;
 }
 
 message AutoBitRateResolutionAndBitRateConfigs {
@@ -132,57 +133,71 @@ message AutoBitRateResolutionAndBitRateConfigs {
 }
 
 message AutoBitRateVideoConfig {
-  AutoBitRateResolutionAndBitRateConfigs resolutions_and_bit_rates = 1;
-  AutoBitrateCalculator calculator = 2;
-  FPSReducerConfig fps_reducer = 3;
-  uint64 check_interval_ms = 4;
-  bool auto_by_pass = 5;
-  uint64 max_bit_rate_bps = 6;
-  uint64 min_bit_rate_bps = 7;
-  uint64 bit_rate_increase_slowdown_ms = 8;
-  uint64 resolution_slowdown_duration_upgrade_ms = 9;
-  uint64 resolution_slowdown_duration_downgrade_ms = 10;
+  AutoBitRateResolutionAndBitRateConfigs resolutions_and_bit_rates                 = 1;
+  AutoBitrateCalculator                  calculator                                = 2;
+  FPSReducerConfig                       fps_reducer                               = 3;
+  uint64                                 check_interval_ms                         = 4;
+  bool                                   auto_by_pass                              = 5;
+  uint64                                 max_bit_rate_bps                          = 6;
+  uint64                                 min_bit_rate_bps                          = 7;
+  uint64                                 bit_rate_increase_slowdown_ms             = 8;
+  uint64                                 resolution_slowdown_duration_upgrade_ms   = 9;
+  uint64                                 resolution_slowdown_duration_downgrade_ms = 10;
 }
 
 message AutoBitrateCalculatorLogK {
-  uint64 queue_optimal_ms = 1;
-  double inertia = 2; // [0.0..1.0]
-  MovingAverageConfig moving_average = 3;
+  uint64              queue_optimal_ms = 1;
+  double              inertia          = 2; // [0.0..1.0]
+  MovingAverageConfig moving_average   = 3;
 }
 
 message AutoBitrateCalculatorQueueSizeGapDecay {
-  uint64 queue_optimal_ms = 1;
-  uint64 queue_size_min = 2;
-  uint64 gap_decay_ms = 3;
-  uint64 increase_inertia_ms = 4;
+  uint64              queue_optimal_ms    = 1;
+  uint64              queue_size_min      = 2;
+  uint64              gap_decay_ms        = 3;
+  uint64              increase_inertia_ms = 4;
   MovingAverageConfig derivative_smoothed = 5;
 }
 
 enum MonitorEventType {
-  UNDEFINED_EVENT_TYPE = 0;
-  EVENT_TYPE_RECEIVE = 1;
-  EVENT_TYPE_SEND = 2;
+  UNDEFINED_EVENT_TYPE          = 0;
+  EVENT_TYPE_RECEIVE            = 1;
+  EVENT_TYPE_SEND               = 2;
   EVENT_TYPE_KERNEL_OUTPUT_SEND = 128;
 }
 
 message MonitorRequest {
-  uint64 node_id = 1;
-  MonitorEventType event_type = 2;
-  bool include_packet_payload = 3;
-  bool include_frame_payload = 4;
-  bool do_decode = 5;
+  uint64           node_id                = 1;
+  MonitorEventType event_type             = 2;
+  bool             include_packet_payload = 3;
+  bool             include_frame_payload  = 4;
+  bool             do_decode              = 5;
 }
 
 message MonitorEvent {
-  uint64 timestamp_ns = 1;
-  uint64 source_kernel_id = 2;
-  libav.Stream stream = 3;
-  optional libav.Packet packet = 4;
-  repeated libav.Frame frames = 5;
-  bytes pipeline_side_data = 6;
+  uint64                timestamp_ns       = 1;
+  uint64                source_kernel_id   = 2;
+  libav.Stream          stream             = 3;
+  optional libav.Packet packet             = 4;
+  repeated libav.Frame  frames             = 5;
+  bytes                 pipeline_side_data = 6;
 }
 
 message CustomOption {
-  string key = 1;
+  string key   = 1;
   string value = 2;
+}
+
+message InputConfig {
+  string         url                  = 1;
+  bool           async_open           = 2;
+  bool           auto_close           = 3;
+  uint32         recv_buffer_size     = 4;
+  optional bool  force_real_time      = 5;
+  optional int64 force_start_pts      = 6;
+  optional int64 force_start_dts      = 7;
+  bool           ignore_incorrect_dts = 8;
+  bool           ignore_zero_duration = 9;
+
+  repeated avpipeline.CustomOption custom_options = 10;
 }
