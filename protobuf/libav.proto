@@ -4,7 +4,7 @@ option go_package = "github.com/xaionaro-go/avpipeline/protobuf/libav;libav";
 
 message PacketSideDataElement {
   uint32 type = 1;
-  bytes data = 2;
+  bytes  data = 2;
 }
 
 message PacketSideData {
@@ -17,57 +17,57 @@ message Rational {
 }
 
 message Packet {
-  int64 pts = 1;
-  int64 dts = 2;
-  uint32 data_size = 3;
-  bytes data = 4;
-  int32 stream_index = 5;
-  uint32 flags = 6;
-  PacketSideData side_data = 7;
-  int64 duration = 8;
-  int64 pos = 9;
-  Rational time_base = 10;
+  int64          pts          = 1;
+  int64          dts          = 2;
+  uint32         data_size    = 3;
+  bytes          data         = 4;
+  int32          stream_index = 5;
+  uint32         flags        = 6;
+  PacketSideData side_data    = 7;
+  int64          duration     = 8;
+  int64          pos          = 9;
+  Rational       time_base    = 10;
 }
 
 message ChannelLayout {
-  uint32 order = 1;
-  int32 nb_channels = 2;
-  uint64 u = 3;
+  uint32 order       = 1;
+  int32  nb_channels = 2;
+  uint64 u           = 3;
 }
 
 message CodecParameters {
-  int32 codec_type = 1;
-  uint32 codec_id = 2;
-  uint32 codec_tag = 3;
-  bytes extra_data = 4;
-  PacketSideData coded_side_data = 5;
-  int32 format = 6;
-  int64 bit_rate = 7;
-  int32 bits_per_codec_sample = 8;
-  int32 bits_per_raw_sample = 9;
-  int32 profile = 10;
-  int32 level = 11;
-  int32 width = 12;
-  int32 height = 13;
-  Rational sample_aspect_ratio = 14;
-  Rational framerate = 15;
-  uint32 field_order = 16;
-  uint32 color_range = 17;
-  uint32 color_trc = 18;
-  uint32 color_space = 19;
-  uint32 chroma_location = 20;
-  int32 video_delay = 21;
-  ChannelLayout ch_layout = 22;
-  int32 sample_rate = 23;
-  int32 block_align = 24;
-  int32 frame_size = 25;
-  int32 initial_padding = 26;
-  int32 trailing_padding = 27;
-  int32 seek_preroll = 28;
+  int32          codec_type            = 1;
+  uint32         codec_id              = 2;
+  uint32         codec_tag             = 3;
+  bytes          extra_data            = 4;
+  PacketSideData coded_side_data       = 5;
+  int32          format                = 6;
+  int64          bit_rate              = 7;
+  int32          bits_per_codec_sample = 8;
+  int32          bits_per_raw_sample   = 9;
+  int32          profile               = 10;
+  int32          level                 = 11;
+  int32          width                 = 12;
+  int32          height                = 13;
+  Rational       sample_aspect_ratio   = 14;
+  Rational       framerate             = 15;
+  uint32         field_order           = 16;
+  uint32         color_range           = 17;
+  uint32         color_trc             = 18;
+  uint32         color_space           = 19;
+  uint32         chroma_location       = 20;
+  int32          video_delay           = 21;
+  ChannelLayout  ch_layout             = 22;
+  int32          sample_rate           = 23;
+  int32          block_align           = 24;
+  int32          frame_size            = 25;
+  int32          initial_padding       = 26;
+  int32          trailing_padding      = 27;
+  int32          seek_preroll          = 28;
 }
 
 message DictionaryItem {
-  string key = 1;
+  string key   = 1;
   string value = 2;
 }
 
@@ -76,70 +76,70 @@ message Dictionary {
 }
 
 message Stream {
-  int32 index = 1;
-  CodecParameters codec_parameters = 2;
-  Rational time_base = 3;
-  int64 start_time = 4;
-  int64 duration = 5;
-  int64 nb_frames = 6;
-  int32 disposition = 7;
-  int32 discard = 8;
-  Rational sample_aspect_ratio = 9;
-  Dictionary metadata = 10;
-  Rational avg_frame_rate = 11;
-  Packet attached_pic = 12;
-  PacketSideData side_data = 13;
-  int32 event_flags = 14;
-  Rational r_frame_rate = 15;
-  int32 pts_wrap_bits = 16;
+  int32           index               = 1;
+  CodecParameters codec_parameters    = 2;
+  Rational        time_base           = 3;
+  int64           start_time          = 4;
+  int64           duration            = 5;
+  int64           nb_frames           = 6;
+  int32           disposition         = 7;
+  int32           discard             = 8;
+  Rational        sample_aspect_ratio = 9;
+  Dictionary      metadata            = 10;
+  Rational        avg_frame_rate      = 11;
+  Packet          attached_pic        = 12;
+  PacketSideData  side_data           = 13;
+  int32           event_flags         = 14;
+  Rational        r_frame_rate        = 15;
+  int32           pts_wrap_bits       = 16;
 }
 
 message FrameSideData {
-  uint32 type = 1;
-  bytes data = 2;
-  uint64 size = 3;
+  uint32     type     = 1;
+  bytes      data     = 2;
+  uint64     size     = 3;
   Dictionary metadata = 4;
-  bytes buf = 5;
+  bytes      buf      = 5;
 }
 
 message Frame {
-  uint32 data_size = 1;
-  bytes data = 2;
-  repeated uint32 linesize = 3;
-  bytes extended_data = 4;
-  int32 width = 5;
-  int32 height = 6;
-  int32 nb_samples = 7;
-  int32 format = 8;
-  int32 key_frame = 9;
-  uint32 pict_type = 10;
-  Rational sample_aspect_ratio = 11;
-  int64 pts = 12;
-  int64 pkt_dts = 13;
-  Rational time_base = 14;
-  int32 quality = 15;
-  int32 repeat_pict = 16;
-  int32 interlaced_frame = 17;
-  int32 top_field_first = 18;
-  int32 palette_has_changed = 19;
-  int32 sample_rate = 20;
-  FrameSideData side_data = 21;
-  int32 flags = 22;
-  uint32 color_range = 23;
-  uint32 color_trc = 24;
-  uint32 color_space = 25;
-  uint32 chroma_location = 26;
-  int64 best_effort_timestamp = 27;
-  int64 pkt_pos = 28;
-  Dictionary metadata = 29;
-  int32 decode_error_flags = 30;
-  int32 pkt_size = 31;
-  uint64 crop_top = 32;
-  uint64 crop_bottom = 33;
-  uint64 crop_left = 34;
-  uint64 crop_right = 35;
-  ChannelLayout ch_layout = 36;
-  int64 duration = 37;
+  uint32          data_size             = 1;
+  bytes           data                  = 2;
+  repeated uint32 linesize              = 3;
+  bytes           extended_data         = 4;
+  int32           width                 = 5;
+  int32           height                = 6;
+  int32           nb_samples            = 7;
+  int32           format                = 8;
+  int32           key_frame             = 9;
+  uint32          pict_type             = 10;
+  Rational        sample_aspect_ratio   = 11;
+  int64           pts                   = 12;
+  int64           pkt_dts               = 13;
+  Rational        time_base             = 14;
+  int32           quality               = 15;
+  int32           repeat_pict           = 16;
+  int32           interlaced_frame      = 17;
+  int32           top_field_first       = 18;
+  int32           palette_has_changed   = 19;
+  int32           sample_rate           = 20;
+  FrameSideData   side_data             = 21;
+  int32           flags                 = 22;
+  uint32          color_range           = 23;
+  uint32          color_trc             = 24;
+  uint32          color_space           = 25;
+  uint32          chroma_location       = 26;
+  int64           best_effort_timestamp = 27;
+  int64           pkt_pos               = 28;
+  Dictionary      metadata              = 29;
+  int32           decode_error_flags    = 30;
+  int32           pkt_size              = 31;
+  uint64          crop_top              = 32;
+  uint64          crop_bottom           = 33;
+  uint64          crop_left             = 34;
+  uint64          crop_right            = 35;
+  ChannelLayout   ch_layout             = 36;
+  int64           duration              = 37;
 }
 
 message Class {
@@ -147,286 +147,286 @@ message Class {
 }
 
 message CodecContext {
-  Class av_class = 1;
-  int32 log_level_offset = 2;
-  int32 codec_type = 3;
-  uint32 codec_id = 4;
-  uint32 codec_tag = 5;
-  
+  Class  av_class         = 1;
+  int32  log_level_offset = 2;
+  int32  codec_type       = 3;
+  uint32 codec_id         = 4;
+  uint32 codec_tag        = 5;
+
 }
 
 /*
-type _Ctype_struct_AVCodecContext struct {
-	av_class			*_Ctype_struct_AVClass
-	log_level_offset		_Ctype_int
-	codec_type			int32
-	codec				*_Ctype_struct_AVCodec
-	codec_id			uint32
-	codec_tag			_Ctype_uint
-	priv_data			unsafe.Pointer
-	internal			*_Ctype_struct_AVCodecInternal
-	opaque				unsafe.Pointer
-	bit_rate			_Ctype_int64_t
-	flags				_Ctype_int
-	flags2				_Ctype_int
-	extradata			*_Ctype_uint8_t
-	extradata_size			_Ctype_int
-	time_base			_Ctype_struct_AVRational
-	pkt_timebase			_Ctype_struct_AVRational
-	framerate			_Ctype_struct_AVRational
-	ticks_per_frame			_Ctype_int
-	delay				_Ctype_int
-	width				_Ctype_int
-	height				_Ctype_int
-	coded_width			_Ctype_int
-	coded_height			_Ctype_int
-	sample_aspect_ratio		_Ctype_struct_AVRational
-	pix_fmt				int32
-	sw_pix_fmt			int32
-	color_primaries			uint32
-	color_trc			uint32
-	colorspace			uint32
-	color_range			uint32
-	chroma_sample_location		uint32
-	field_order			uint32
-	refs				_Ctype_int
-	has_b_frames			_Ctype_int
-	slice_flags			_Ctype_int
-	draw_horiz_band			*[0]byte
-	get_format			*[0]byte
-	max_b_frames			_Ctype_int
-	b_quant_factor			_Ctype_float
-	b_quant_offset			_Ctype_float
-	i_quant_factor			_Ctype_float
-	i_quant_offset			_Ctype_float
-	lumi_masking			_Ctype_float
-	temporal_cplx_masking		_Ctype_float
-	spatial_cplx_masking		_Ctype_float
-	p_masking			_Ctype_float
-	dark_masking			_Ctype_float
-	nsse_weight			_Ctype_int
-	me_cmp				_Ctype_int
-	me_sub_cmp			_Ctype_int
-	mb_cmp				_Ctype_int
-	ildct_cmp			_Ctype_int
-	dia_size			_Ctype_int
-	last_predictor_count		_Ctype_int
-	me_pre_cmp			_Ctype_int
-	pre_dia_size			_Ctype_int
-	me_subpel_quality		_Ctype_int
-	me_range			_Ctype_int
-	mb_decision			_Ctype_int
-	intra_matrix			*_Ctype_uint16_t
-	inter_matrix			*_Ctype_uint16_t
-	chroma_intra_matrix		*_Ctype_uint16_t
-	intra_dc_precision		_Ctype_int
-	mb_lmin				_Ctype_int
-	mb_lmax				_Ctype_int
-	bidir_refine			_Ctype_int
-	keyint_min			_Ctype_int
-	gop_size			_Ctype_int
-	mv0_threshold			_Ctype_int
-	slices				_Ctype_int
-	sample_rate			_Ctype_int
-	sample_fmt			int32
-	ch_layout			_Ctype_struct_AVChannelLayout
-	frame_size			_Ctype_int
-	block_align			_Ctype_int
-	cutoff				_Ctype_int
-	audio_service_type		uint32
-	request_sample_fmt		int32
-	initial_padding			_Ctype_int
-	trailing_padding		_Ctype_int
-	seek_preroll			_Ctype_int
-	get_buffer2			*[0]byte
-	bit_rate_tolerance		_Ctype_int
-	global_quality			_Ctype_int
-	compression_level		_Ctype_int
-	qcompress			_Ctype_float
-	qblur				_Ctype_float
-	qmin				_Ctype_int
-	qmax				_Ctype_int
-	max_qdiff			_Ctype_int
-	rc_buffer_size			_Ctype_int
-	rc_override_count		_Ctype_int
-	rc_override			*_Ctype_struct_RcOverride
-	rc_max_rate			_Ctype_int64_t
-	rc_min_rate			_Ctype_int64_t
-	rc_max_available_vbv_use	_Ctype_float
-	rc_min_vbv_overflow_use		_Ctype_float
-	rc_initial_buffer_occupancy	_Ctype_int
-	trellis				_Ctype_int
-	stats_out			*_Ctype_char
-	stats_in			*_Ctype_char
-	workaround_bugs			_Ctype_int
-	strict_std_compliance		_Ctype_int
-	error_concealment		_Ctype_int
-	debug				_Ctype_int
-	err_recognition			_Ctype_int
-	hwaccel				*_Ctype_struct_AVHWAccel
-	hwaccel_context			unsafe.Pointer
-	hw_frames_ctx			*_Ctype_struct_AVBufferRef
-	hw_device_ctx			*_Ctype_struct_AVBufferRef
-	hwaccel_flags			_Ctype_int
-	extra_hw_frames			_Ctype_int
-	error				[8]_Ctype_uint64_t
-	dct_algo			_Ctype_int
-	idct_algo			_Ctype_int
-	bits_per_coded_sample		_Ctype_int
-	bits_per_raw_sample		_Ctype_int
-	thread_count			_Ctype_int
-	thread_type			_Ctype_int
-	active_thread_type		_Ctype_int
-	execute				*[0]byte
-	execute2			*[0]byte
-	profile				_Ctype_int
-	level				_Ctype_int
-	properties			_Ctype_uint
-	skip_loop_filter		int32
-	skip_idct			int32
-	skip_frame			int32
-	skip_alpha			_Ctype_int
-	skip_top			_Ctype_int
-	skip_bottom			_Ctype_int
-	lowres				_Ctype_int
-	codec_descriptor		*_Ctype_struct_AVCodecDescriptor
-	sub_charenc			*_Ctype_char
-	sub_charenc_mode		_Ctype_int
-	subtitle_header_size		_Ctype_int
-	subtitle_header			*_Ctype_uint8_t
-	dump_separator			*_Ctype_uint8_t
-	codec_whitelist			*_Ctype_char
-	coded_side_data			*_Ctype_struct_AVPacketSideData
-	nb_coded_side_data		_Ctype_int
-	export_side_data		_Ctype_int
-	max_pixels			_Ctype_int64_t
-	apply_cropping			_Ctype_int
-	discard_damaged_percentage	_Ctype_int
-	max_samples			_Ctype_int64_t
-	get_encode_buffer		*[0]byte
-	frame_num			_Ctype_int64_t
-	side_data_prefer_packet		*_Ctype_int
-	nb_side_data_prefer_packet	_Ctype_uint
-	decoded_side_data		**_Ctype_struct_AVFrameSideData
-	nb_decoded_side_data		_Ctype_int
-	_				[4]byte
-}
-  */
+ type _Ctype_struct_AVCodecContext struct {
+ av_class			*_Ctype_struct_AVClass
+ log_level_offset		_Ctype_int
+ codec_type			int32
+ codec				*_Ctype_struct_AVCodec
+ codec_id			uint32
+ codec_tag			_Ctype_uint
+ priv_data			unsafe.Pointer
+ internal			*_Ctype_struct_AVCodecInternal
+ opaque				unsafe.Pointer
+ bit_rate			_Ctype_int64_t
+ flags				_Ctype_int
+ flags2				_Ctype_int
+ extradata			*_Ctype_uint8_t
+ extradata_size			_Ctype_int
+ time_base			_Ctype_struct_AVRational
+ pkt_timebase			_Ctype_struct_AVRational
+ framerate			_Ctype_struct_AVRational
+ ticks_per_frame			_Ctype_int
+ delay				_Ctype_int
+ width				_Ctype_int
+ height				_Ctype_int
+ coded_width			_Ctype_int
+ coded_height			_Ctype_int
+ sample_aspect_ratio		_Ctype_struct_AVRational
+ pix_fmt				int32
+ sw_pix_fmt			int32
+ color_primaries			uint32
+ color_trc			uint32
+ colorspace			uint32
+ color_range			uint32
+ chroma_sample_location		uint32
+ field_order			uint32
+ refs				_Ctype_int
+ has_b_frames			_Ctype_int
+ slice_flags			_Ctype_int
+ draw_horiz_band			*[0]byte
+ get_format			*[0]byte
+ max_b_frames			_Ctype_int
+ b_quant_factor			_Ctype_float
+ b_quant_offset			_Ctype_float
+ i_quant_factor			_Ctype_float
+ i_quant_offset			_Ctype_float
+ lumi_masking			_Ctype_float
+ temporal_cplx_masking		_Ctype_float
+ spatial_cplx_masking		_Ctype_float
+ p_masking			_Ctype_float
+ dark_masking			_Ctype_float
+ nsse_weight			_Ctype_int
+ me_cmp				_Ctype_int
+ me_sub_cmp			_Ctype_int
+ mb_cmp				_Ctype_int
+ ildct_cmp			_Ctype_int
+ dia_size			_Ctype_int
+ last_predictor_count		_Ctype_int
+ me_pre_cmp			_Ctype_int
+ pre_dia_size			_Ctype_int
+ me_subpel_quality		_Ctype_int
+ me_range			_Ctype_int
+ mb_decision			_Ctype_int
+ intra_matrix			*_Ctype_uint16_t
+ inter_matrix			*_Ctype_uint16_t
+ chroma_intra_matrix		*_Ctype_uint16_t
+ intra_dc_precision		_Ctype_int
+ mb_lmin				_Ctype_int
+ mb_lmax				_Ctype_int
+ bidir_refine			_Ctype_int
+ keyint_min			_Ctype_int
+ gop_size			_Ctype_int
+ mv0_threshold			_Ctype_int
+ slices				_Ctype_int
+ sample_rate			_Ctype_int
+ sample_fmt			int32
+ ch_layout			_Ctype_struct_AVChannelLayout
+ frame_size			_Ctype_int
+ block_align			_Ctype_int
+ cutoff				_Ctype_int
+ audio_service_type		uint32
+ request_sample_fmt		int32
+ initial_padding			_Ctype_int
+ trailing_padding		_Ctype_int
+ seek_preroll			_Ctype_int
+ get_buffer2			*[0]byte
+ bit_rate_tolerance		_Ctype_int
+ global_quality			_Ctype_int
+ compression_level		_Ctype_int
+ qcompress			_Ctype_float
+ qblur				_Ctype_float
+ qmin				_Ctype_int
+ qmax				_Ctype_int
+ max_qdiff			_Ctype_int
+ rc_buffer_size			_Ctype_int
+ rc_override_count		_Ctype_int
+ rc_override			*_Ctype_struct_RcOverride
+ rc_max_rate			_Ctype_int64_t
+ rc_min_rate			_Ctype_int64_t
+ rc_max_available_vbv_use	_Ctype_float
+ rc_min_vbv_overflow_use		_Ctype_float
+ rc_initial_buffer_occupancy	_Ctype_int
+ trellis				_Ctype_int
+ stats_out			*_Ctype_char
+ stats_in			*_Ctype_char
+ workaround_bugs			_Ctype_int
+ strict_std_compliance		_Ctype_int
+ error_concealment		_Ctype_int
+ debug				_Ctype_int
+ err_recognition			_Ctype_int
+ hwaccel				*_Ctype_struct_AVHWAccel
+ hwaccel_context			unsafe.Pointer
+ hw_frames_ctx			*_Ctype_struct_AVBufferRef
+ hw_device_ctx			*_Ctype_struct_AVBufferRef
+ hwaccel_flags			_Ctype_int
+ extra_hw_frames			_Ctype_int
+ error				[8]_Ctype_uint64_t
+ dct_algo			_Ctype_int
+ idct_algo			_Ctype_int
+ bits_per_coded_sample		_Ctype_int
+ bits_per_raw_sample		_Ctype_int
+ thread_count			_Ctype_int
+ thread_type			_Ctype_int
+ active_thread_type		_Ctype_int
+ execute				*[0]byte
+ execute2			*[0]byte
+ profile				_Ctype_int
+ level				_Ctype_int
+ properties			_Ctype_uint
+ skip_loop_filter		int32
+ skip_idct			int32
+ skip_frame			int32
+ skip_alpha			_Ctype_int
+ skip_top			_Ctype_int
+ skip_bottom			_Ctype_int
+ lowres				_Ctype_int
+ codec_descriptor		*_Ctype_struct_AVCodecDescriptor
+ sub_charenc			*_Ctype_char
+ sub_charenc_mode		_Ctype_int
+ subtitle_header_size		_Ctype_int
+ subtitle_header			*_Ctype_uint8_t
+ dump_separator			*_Ctype_uint8_t
+ codec_whitelist			*_Ctype_char
+ coded_side_data			*_Ctype_struct_AVPacketSideData
+ nb_coded_side_data		_Ctype_int
+ export_side_data		_Ctype_int
+ max_pixels			_Ctype_int64_t
+ apply_cropping			_Ctype_int
+ discard_damaged_percentage	_Ctype_int
+ max_samples			_Ctype_int64_t
+ get_encode_buffer		*[0]byte
+ frame_num			_Ctype_int64_t
+ side_data_prefer_packet		*_Ctype_int
+ nb_side_data_prefer_packet	_Ctype_uint
+ decoded_side_data		**_Ctype_struct_AVFrameSideData
+ nb_decoded_side_data		_Ctype_int
+ _				[4]byte
+ }
+ */
 
 message CodecInternal {
 
 }
 
 /*
-typedef struct AVCodecInternal {
-     int is_copy;
-     int is_frame_mt;
-     int pad_samples;
-     struct FramePool *pool;
-     struct AVRefStructPool *progress_frame_pool;
-     void *thread_ctx;
-     AVPacket *in_pkt;
-     struct AVBSFContext *bsf;
-     AVPacket *last_pkt_props;
-     uint8_t *byte_buffer;
-     unsigned int byte_buffer_size;
-     void *frame_thread_encoder;
-     AVFrame *in_frame;
-     AVFrame *recon_frame;
-     int needs_close;
-     int skip_samples;
-     void *hwaccel_priv_data;
-     int draining;
-     AVPacket *buffer_pkt;
-     AVFrame *buffer_frame;
-     int draining_done;
+ typedef struct AVCodecInternal {
+ int is_copy;
+ int is_frame_mt;
+ int pad_samples;
+ struct FramePool *pool;
+ struct AVRefStructPool *progress_frame_pool;
+ void *thread_ctx;
+ AVPacket *in_pkt;
+ struct AVBSFContext *bsf;
+ AVPacket *last_pkt_props;
+ uint8_t *byte_buffer;
+ unsigned int byte_buffer_size;
+ void *frame_thread_encoder;
+ AVFrame *in_frame;
+ AVFrame *recon_frame;
+ int needs_close;
+ int skip_samples;
+ void *hwaccel_priv_data;
+ int draining;
+ AVPacket *buffer_pkt;
+ AVFrame *buffer_frame;
+ int draining_done;
  #if CONFIG_LCMS2
-     FFIccContext icc; 
+ FFIccContext icc;
  #endif
-     int warned_on_failed_allocation_from_fixed_pool;
+ int warned_on_failed_allocation_from_fixed_pool;
  } AVCodecInternal;
-*/ 
+ */
 
 message FormatContext {
-	repeated Stream streams = 7;
+  repeated Stream streams = 7;
 }
 
 /*
-typedef struct AVFormatContext {
-	 const AVClass *av_class;
-	 const struct AVInputFormat *iformat;
-	 const struct AVOutputFormat *oformat;
-	 void *priv_data;
-	 AVIOContext *pb;
-	 int ctx_flags;
-	 unsigned int nb_streams;
-	 AVStream **streams;
-	 unsigned int nb_stream_groups;
-	 AVStreamGroup **stream_groups;
-	 unsigned int nb_chapters;
-	 AVChapter **chapters;
-	 char *url;
-	 int64_t start_time;
-	 int64_t duration;
-	 int64_t bit_rate;
-	 unsigned int packet_size;
-	 int max_delay;
- 	 int flags;
- 	 int64_t probesize;
- 	 int64_t max_analyze_duration;
-	 const uint8_t *key;
-	 int keylen;
-	 unsigned int nb_programs;
-	 AVProgram **programs;
- 	 enum AVCodecID video_codec_id;
- 	 enum AVCodecID audio_codec_id;
- 	 enum AVCodecID subtitle_codec_id;
- 	 enum AVCodecID data_codec_id;
- 	 AVDictionary *metadata;
- 	 int64_t start_time_realtime;
- 	 int fps_probe_size;
- 	 int error_recognition;
- 	 AVIOInterruptCB interrupt_callback;
- 	 int debug;
- 	 int max_streams;
-	 unsigned int max_index_size;
-	 unsigned int max_picture_buffer;
-	 int64_t max_interleave_delta;
-	 int max_ts_probe;
-	 int max_chunk_duration;
-	 int max_chunk_size;
-	 int max_probe_packets;
-	 int strict_std_compliance;
-	 int event_flags;
-	 int avoid_negative_ts;
-	 int audio_preload;
-	 int use_wallclock_as_timestamps;
-	 int skip_estimate_duration_from_pts;
-	 int avio_flags;
-	 enum AVDurationEstimationMethod duration_estimation_method;
-	 int64_t skip_initial_bytes;
-	 unsigned int correct_ts_overflow;
-	 int seek2any;
-	 int flush_packets;
-	 int probe_score;
-	 int format_probesize;
-	 char *codec_whitelist;
-	 char *format_whitelist;
-	 char *protocol_whitelist;
-	 char *protocol_blacklist;
-	 int io_repositioned;
-	 const struct AVCodec *video_codec;
-	 const struct AVCodec *audio_codec;
-	 const struct AVCodec *subtitle_codec;
-	 const struct AVCodec *data_codec;
-	 int metadata_header_padding;
-	 void *opaque;
-	 av_format_control_message control_message_cb;
-	 int64_t output_ts_offset;
-	 uint8_t *dump_separator;
-	 int (*io_open)(struct AVFormatContext *s, AVIOContext **pb, const char *url,
-					int flags, AVDictionary **options);
-	 int (*io_close2)(struct AVFormatContext *s, AVIOContext *pb);
-	 int64_t duration_probesize;
+ typedef struct AVFormatContext {
+ const AVClass *av_class;
+ const struct AVInputFormat *iformat;
+ const struct AVOutputFormat *oformat;
+ void *priv_data;
+ AVIOContext *pb;
+ int ctx_flags;
+ unsigned int nb_streams;
+ AVStream **streams;
+ unsigned int nb_stream_groups;
+ AVStreamGroup **stream_groups;
+ unsigned int nb_chapters;
+ AVChapter **chapters;
+ char *url;
+ int64_t start_time;
+ int64_t duration;
+ int64_t bit_rate;
+ unsigned int packet_size;
+ int max_delay;
+ int flags;
+ int64_t probesize;
+ int64_t max_analyze_duration;
+ const uint8_t *key;
+ int keylen;
+ unsigned int nb_programs;
+ AVProgram **programs;
+ enum AVCodecID video_codec_id;
+ enum AVCodecID audio_codec_id;
+ enum AVCodecID subtitle_codec_id;
+ enum AVCodecID data_codec_id;
+ AVDictionary *metadata;
+ int64_t start_time_realtime;
+ int fps_probe_size;
+ int error_recognition;
+ AVIOInterruptCB interrupt_callback;
+ int debug;
+ int max_streams;
+ unsigned int max_index_size;
+ unsigned int max_picture_buffer;
+ int64_t max_interleave_delta;
+ int max_ts_probe;
+ int max_chunk_duration;
+ int max_chunk_size;
+ int max_probe_packets;
+ int strict_std_compliance;
+ int event_flags;
+ int avoid_negative_ts;
+ int audio_preload;
+ int use_wallclock_as_timestamps;
+ int skip_estimate_duration_from_pts;
+ int avio_flags;
+ enum AVDurationEstimationMethod duration_estimation_method;
+ int64_t skip_initial_bytes;
+ unsigned int correct_ts_overflow;
+ int seek2any;
+ int flush_packets;
+ int probe_score;
+ int format_probesize;
+ char *codec_whitelist;
+ char *format_whitelist;
+ char *protocol_whitelist;
+ char *protocol_blacklist;
+ int io_repositioned;
+ const struct AVCodec *video_codec;
+ const struct AVCodec *audio_codec;
+ const struct AVCodec *subtitle_codec;
+ const struct AVCodec *data_codec;
+ int metadata_header_padding;
+ void *opaque;
+ av_format_control_message control_message_cb;
+ int64_t output_ts_offset;
+ uint8_t *dump_separator;
+ int (*io_open)(struct AVFormatContext *s, AVIOContext **pb, const char *url,
+ int flags, AVDictionary **options);
+ int (*io_close2)(struct AVFormatContext *s, AVIOContext *pb);
+ int64_t duration_probesize;
  } AVFormatContext;
  */
