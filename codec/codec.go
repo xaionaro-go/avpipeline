@@ -500,7 +500,7 @@ func newCodec(
 				alignedHeight := (height + 15) &^ 15
 				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
 				if alignedHeight != height && customOptions.Get("create_window", nil, 0) == nil {
-					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp); to handle you may want to use create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
+					logger.Warnf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during transcoding H264->AV1 (due to %dp != %dp); to handle you may want to use create_window=1 (and please use pixel_format 'mediacodec')", codecParameters.Height(), (codecParameters.Height()+15)&^15)
 				}
 			}
 		}
@@ -709,7 +709,7 @@ func (c *Codec) logHints(ctx context.Context) {
 		height := c.codecContext.Height()
 		suggestedHeight := (height + 15) &^ 15
 		if suggestedHeight != height {
-			logger.Debugf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during recoding H264->AV1 (due to %dp != %dp)", height, suggestedHeight)
+			logger.Debugf(ctx, "in MediaCodec H264/HEVC heights are aligned with 16, while AV1 is not, so there could be is a green strip at the bottom during transcoding H264->AV1 (due to %dp != %dp)", height, suggestedHeight)
 		}
 	}
 }

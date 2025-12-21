@@ -29,10 +29,10 @@ For example:
 	defer output.Close(ctx)
 	outputNode := node.New(output)
 
-	// recoder node
+	// transcoder node
 
 	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
-	recoder, err := processor.NewRecoder(
+	transcoder, err := processor.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, &codec.NaiveDecoderFactoryParams{
 			HardwareDeviceName: hwDeviceName,
@@ -47,14 +47,14 @@ For example:
 		nil,
 	)
 	assert(ctx, err == nil, err)
-	defer recoder.Close(ctx)
-	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-	recodingNode := node.New(recoder)
+	defer transcoder.Close(ctx)
+	logger.Debugf(ctx, "initialized a transcoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
+	transcodingNode := node.New(transcoder)
 
-	// route nodes: input -> recoder -> output
+	// route nodes: input -> transcoder -> output
 
-	inputNode.AddPushPacketsTo(recodingNode)
-	recodingNode.AddPushPacketsTo(outputNode)
+	inputNode.AddPushPacketsTo(transcodingNode)
+	transcodingNode.AddPushPacketsTo(outputNode)
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
@@ -110,4 +110,4 @@ For example:
 # Examples
 
 * [`avd`](https://github.com/xaionaro-go/avd) users `avpipeline` to implement a streaming server (as an alternative to [`mediamtx`](https://github.com/bluenviron/mediamtx)).
-* [`ffstream`](https://github.com/xaionaro-go/ffstream) uses `avpipeline` to implement a CLI that could be used as a kick-in replacement to `ffmpeg` in some livestreaming use cases. It allows for dynamic change of bitrate and for enabling a passthrough mode (to disable recoding).
+* [`ffstream`](https://github.com/xaionaro-go/ffstream) uses `avpipeline` to implement a CLI that could be used as a kick-in replacement to `ffmpeg` in some livestreaming use cases. It allows for dynamic change of bitrate and for enabling a passthrough mode (to disable transcoding).

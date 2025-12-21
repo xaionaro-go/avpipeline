@@ -40,7 +40,7 @@ func NewWithCustomData[T any](
 	customData T,
 ) *AutoFixerWithCustomData[T] {
 	var zeroT T
-	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, sink)
+	logger.Debugf(ctx, "New[%T]: %s %s", zeroT, sink, customData)
 
 	var outputFormatName string
 	sink.WithInputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
@@ -69,7 +69,7 @@ func NewWithCustomData[T any](
 			processor.NewFromKernel(
 				ctx,
 				kernel.NewMapStreamIndices(ctx, streamIndexAssigner),
-				processor.DefaultOptionsRecoder()...,
+				processor.DefaultOptionsTranscoder()...,
 			),
 		),
 	}

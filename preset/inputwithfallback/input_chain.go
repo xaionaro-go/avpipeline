@@ -81,7 +81,7 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		r.Decoder = node.NewWithCustomDataFromKernel[C](
 			ctx,
 			kernel.NewDecoder(ctx, decoderFactory),
-			processor.DefaultOptionsRecoder()...,
+			processor.DefaultOptionsTranscoder()...,
 		)
 	}
 

@@ -47,15 +47,15 @@ type TranscoderWithPassthrough[C any, P processor.Abstract] struct {
 	FilterThrottle            *limitvideobitrate.Filter
 	SwitchPreFilter           *packetcondition.Switch
 	SwitchPostFilter          *packetcondition.Switch
-	Recoder                   *kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
+	Transcoder                *kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	MapInputStreamIndicesNode *node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
 	MapOutputStreamIndices    *kernel.MapStreamIndices
-	NodeRecoder               *node.Node[*processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+	NodeTranscoder            *node.Node[*processor.FromKernel[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 
 	NodeStreamFixerMain        *autofix.AutoFixer
 	NodeStreamFixerPassthrough *autofix.AutoFixer
 
-	RecodingConfig types.RecoderConfig
+	TranscodingConfig types.TranscoderConfig
 
 	inputStreamMapIndicesAsPacketSource packet.Source
 
@@ -122,94 +122,94 @@ func (s *TranscoderWithPassthrough[C, P]) Input() *node.Node[*processor.FromKern
 	return s.MapInputStreamIndicesNode
 }
 
-func (s *TranscoderWithPassthrough[C, P]) GetRecoderConfig(
+func (s *TranscoderWithPassthrough[C, P]) GetTranscoderConfig(
 	ctx context.Context,
-) (_ret types.RecoderConfig) {
-	logger.Tracef(ctx, "GetRecoderConfig")
-	defer func() { logger.Tracef(ctx, "/GetRecoderConfig: %v", _ret) }()
+) (_ret types.TranscoderConfig) {
+	logger.Tracef(ctx, "GetTranscoderConfig")
+	defer func() { logger.Tracef(ctx, "/GetTranscoderConfig: %v", _ret) }()
 	if s == nil {
-		return types.RecoderConfig{}
+		return types.TranscoderConfig{}
 	}
-	return xsync.DoA1R1(ctx, &s.locker, s.getRecoderConfigLocked, ctx)
+	return xsync.DoA1R1(ctx, &s.locker, s.getTranscoderConfigLocked, ctx)
 }
 
-func (s *TranscoderWithPassthrough[C, P]) getRecoderConfigLocked(
+func (s *TranscoderWithPassthrough[C, P]) getTranscoderConfigLocked(
 	ctx context.Context,
-) (_ret types.RecoderConfig) {
+) (_ret types.TranscoderConfig) {
 	switchValue := s.SwitchPreFilter.GetValue(ctx)
 	logger.Tracef(ctx, "switchValue: %v", switchValue)
 	if switchValue == 0 {
-		return s.RecodingConfig
+		return s.TranscodingConfig
 	}
-	cpy := s.RecodingConfig
+	cpy := s.TranscodingConfig
 	cpy.Output.VideoTrackConfigs = slices.Clone(cpy.Output.VideoTrackConfigs)
 	cpy.Output.VideoTrackConfigs[0].CodecName = codectypes.Name(codec.NameCopy)
 	return cpy
 }
 
-func (s *TranscoderWithPassthrough[C, P]) SetRecoderConfig(
+func (s *TranscoderWithPassthrough[C, P]) SetTranscoderConfig(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "SetRecoderConfig(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/SetRecoderConfig(ctx, %#+v): %v", cfg, _err) }()
-	return xsync.DoA2R1(ctx, &s.locker, s.setRecoderConfigLocked, ctx, cfg)
+	logger.Tracef(ctx, "SetTranscoderConfig(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/SetTranscoderConfig(ctx, %#+v): %v", cfg, _err) }()
+	return xsync.DoA2R1(ctx, &s.locker, s.setTranscoderConfigLocked, ctx, cfg)
 }
 
-func (s *TranscoderWithPassthrough[C, P]) setRecoderConfigLocked(
+func (s *TranscoderWithPassthrough[C, P]) setTranscoderConfigLocked(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	err := s.configureRecoder(ctx, cfg)
+	err := s.configureTranscoder(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("unable to configure the recoder: %w", err)
+		return fmt.Errorf("unable to configure the transcoder: %w", err)
 	}
-	s.RecodingConfig = cfg
+	s.TranscodingConfig = cfg
 	s.MapInputStreamIndicesNode.Processor.Kernel.Assigner.(*streamIndexAssignerInput[C, P]).reload(ctx)
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) configureRecoder(
+func (s *TranscoderWithPassthrough[C, P]) configureTranscoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "configureRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/configureRecoder(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "configureTranscoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/configureTranscoder(ctx, %#+v): %v", cfg, _err) }()
 	if len(cfg.Output.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
 	if len(cfg.Output.AudioTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output audio track config (received a request for %d track configs)", len(cfg.Output.AudioTrackConfigs))
 	}
-	if s.Recoder == nil {
-		if err := s.initRecoder(ctx, cfg); err != nil {
-			return fmt.Errorf("unable to initialize the recoder: %w", err)
+	if s.Transcoder == nil {
+		if err := s.initTranscoder(ctx, cfg); err != nil {
+			return fmt.Errorf("unable to initialize the transcoder: %w", err)
 		}
 		return nil
 	}
 	if codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName) != codec.NameCopy {
-		return fmt.Errorf("we currently do not support reconfiguring audio recoding with codec '%s' (!= 'copy')", cfg.Output.AudioTrackConfigs[0].CodecName)
+		return fmt.Errorf("we currently do not support reconfiguring audio transcoding with codec '%s' (!= 'copy')", cfg.Output.AudioTrackConfigs[0].CodecName)
 	}
 	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) == codec.NameCopy {
-		if err := s.reconfigureRecoderCopy(ctx, cfg); err != nil {
+		if err := s.reconfigureTranscoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
 		return nil
 	}
-	if err := s.reconfigureRecoder(ctx, cfg); err != nil {
-		return fmt.Errorf("unable to reconfigure the recoder: %w", err)
+	if err := s.reconfigureTranscoder(ctx, cfg); err != nil {
+		return fmt.Errorf("unable to reconfigure the transcoder: %w", err)
 	}
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) initRecoder(
+func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "initRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/initRecoder(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "initTranscoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/initTranscoder(ctx, %#+v): %v", cfg, _err) }()
 
-	if s.Recoder != nil {
+	if s.Transcoder != nil {
 		return fmt.Errorf("internal error: an encoder is already initialized")
 	}
 
@@ -227,7 +227,7 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	}
 
 	var err error
-	s.Recoder, err = kernel.NewRecoder(
+	s.Transcoder, err = kernel.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
@@ -259,50 +259,50 @@ func (s *TranscoderWithPassthrough[C, P]) initRecoder(
 	)
 
 	if err != nil {
-		return fmt.Errorf("unable to initialize a recoder: %w", err)
+		return fmt.Errorf("unable to initialize a transcoder: %w", err)
 	}
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
+func (s *TranscoderWithPassthrough[C, P]) reconfigureTranscoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "reconfigureTranscoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureTranscoder(ctx, %#+v): %v", cfg, _err) }()
 
-	encoderFactory := s.Recoder.EncoderFactory
+	encoderFactory := s.Transcoder.EncoderFactory
 	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) != encoderFactory.VideoCodec {
 		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.Output.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
 	}
 
-	err := xsync.DoR1(ctx, &s.Recoder.EncoderFactory.Locker, func() error {
+	err := xsync.DoR1(ctx, &s.Transcoder.EncoderFactory.Locker, func() error {
 		videoCfg := cfg.Output.VideoTrackConfigs[0]
-		if len(s.Recoder.EncoderFactory.VideoEncoders) == 0 {
+		if len(s.Transcoder.EncoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
-			if s.Recoder.EncoderFactory.VideoOptions == nil {
-				s.Recoder.EncoderFactory.VideoOptions = astiav.NewDictionary()
-				setFinalizerFree(ctx, s.Recoder.EncoderFactory.VideoOptions)
+			if s.Transcoder.EncoderFactory.VideoOptions == nil {
+				s.Transcoder.EncoderFactory.VideoOptions = astiav.NewDictionary()
+				setFinalizerFree(ctx, s.Transcoder.EncoderFactory.VideoOptions)
 			}
 
 			if videoCfg.AverageBitRate == 0 {
-				s.Recoder.EncoderFactory.VideoOptions.Unset("b")
-				s.Recoder.EncoderFactory.VideoQuality = nil
+				s.Transcoder.EncoderFactory.VideoOptions.Unset("b")
+				s.Transcoder.EncoderFactory.VideoQuality = nil
 			} else {
-				s.Recoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", videoCfg.AverageBitRate), 0)
-				s.Recoder.EncoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
+				s.Transcoder.EncoderFactory.VideoOptions.Set("b", fmt.Sprintf("%d", videoCfg.AverageBitRate), 0)
+				s.Transcoder.EncoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
 			}
 
 			if videoCfg.AverageFrameRate > 0 {
-				s.Recoder.EncoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
-				s.Recoder.EncoderFactory.VideoAverageFrameRate.SetDen(1000)
+				s.Transcoder.EncoderFactory.VideoAverageFrameRate.SetNum(int(videoCfg.AverageFrameRate * 1000))
+				s.Transcoder.EncoderFactory.VideoAverageFrameRate.SetDen(1000)
 			}
 			return nil
 		}
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
-		encoder := s.Recoder.EncoderFactory.VideoEncoders[0]
+		encoder := s.Transcoder.EncoderFactory.VideoEncoders[0]
 
 		{
 			q := encoder.GetQuality(ctx)
@@ -350,18 +350,18 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoder(
 
 	err = s.SwitchPreFilter.SetValue(ctx, 0)
 	if err != nil {
-		return fmt.Errorf("unable to switch the pre-filter to recoding: %w", err)
+		return fmt.Errorf("unable to switch the pre-filter to transcoding: %w", err)
 	}
 
 	return nil
 }
 
-func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
+func (s *TranscoderWithPassthrough[C, P]) reconfigureTranscoderCopy(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "reconfigureRecoderCopy(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureRecoderCopy(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "reconfigureTranscoderCopy(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureTranscoderCopy(ctx, %#+v): %v", cfg, _err) }()
 
 	switchState := s.SwitchPreFilter.CurrentValue.Load()
 
@@ -372,10 +372,10 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureRecoderCopy(
 	s.FilterThrottle.BitrateAveragingPeriod = cfg.Output.VideoTrackConfigs[0].AveragingPeriod
 	s.FilterThrottle.AverageBitRate = cfg.Output.VideoTrackConfigs[0].AverageBitRate // if AverageBitRate != 0 then here we also enable the throttler (if it was disabled)
 
-	if switchState == 0 { // was in the recoding state
-		// to avoid the recoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.
-		if err := s.Recoder.ResetSoft(ctx); err != nil {
-			logger.Errorf(ctx, "unable to reset the recoder: %v", err)
+	if switchState == 0 { // was in the transcoding state
+		// to avoid the transcoder sending some packets from an obsolete state (when we are going to reuse it), we just reset it.
+		if err := s.Transcoder.ResetSoft(ctx); err != nil {
+			logger.Errorf(ctx, "unable to reset the transcoder: %v", err)
 		}
 	}
 
@@ -386,7 +386,7 @@ func (s *TranscoderWithPassthrough[C, P]) GetAllStats(
 	ctx context.Context,
 ) map[string]globaltypes.Statistics {
 	m := map[string]globaltypes.Statistics{
-		"Recoder": nodetypes.ToStatistics(s.NodeRecoder.GetCountersPtr(), s.NodeRecoder.GetProcessor().CountersPtr()),
+		"Transcoder": nodetypes.ToStatistics(s.NodeTranscoder.GetCountersPtr(), s.NodeTranscoder.GetProcessor().CountersPtr()),
 	}
 	tryGetStats := func(key string, n node.Abstract) {
 		m[key] = nodetypes.ToStatistics(n.GetCountersPtr(), n.GetProcessor().CountersPtr())
@@ -428,8 +428,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 ) (_err error) {
 	logger.Debugf(ctx, "Start(ctx, %s): %p", passthroughMode, s)
 	defer logger.Debugf(ctx, "/Start(ctx, %s): %p: %v", passthroughMode, s, _err)
-	if s.Recoder == nil {
-		return fmt.Errorf("s.Recoder is not configured")
+	if s.Transcoder == nil {
+		return fmt.Errorf("s.Transcoder is not configured")
 	}
 
 	serveCfg.EachNode.DebugData = DebugData{
@@ -454,10 +454,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		cancelFnOrig()
 	}
 
-	s.NodeRecoder = node.NewFromKernel(
+	s.NodeTranscoder = node.NewFromKernel(
 		ctx,
-		s.Recoder,
-		processor.DefaultOptionsRecoder()...,
+		s.Transcoder,
+		processor.DefaultOptionsTranscoder()...,
 	)
 	nodeFilterThrottle := node.NewFromKernel(
 		ctx,
@@ -467,7 +467,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 	if passthroughMode != types.PassthroughModeNever {
 		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
-			s.NodeRecoder,
+			s.NodeTranscoder,
 			packetfiltercondition.Packet{
 				s.SwitchPreFilter.PacketCondition(0),
 				s.SwitchPostFilter.PacketCondition(0),
@@ -489,8 +489,8 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}
 	} else {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx, s.NodeRecoder)
-		s.MapInputStreamIndicesNode.AddPushFramesTo(ctx, s.NodeRecoder)
+		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx, s.NodeTranscoder)
+		s.MapInputStreamIndicesNode.AddPushFramesTo(ctx, s.NodeTranscoder)
 	}
 
 	s.NodeStreamFixerMain = autofix.New(
@@ -499,7 +499,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	)
 
 	if passthroughMode != types.PassthroughModeNever {
-		var passthroughOutputReference packet.Sink = s.Recoder.Decoder
+		var passthroughOutputReference packet.Sink = s.Transcoder.Decoder
 		if passthroughMode == types.PassthroughModeNextOutput {
 			passthroughOutputReference = asPacketSink(s.Outputs[1].GetProcessor())
 		}
@@ -524,7 +524,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
 					rescaletsbetweenpacketsources.New(
 						s.PacketSource,
-						s.NodeRecoder.Processor.Kernel.Encoder,
+						s.NodeTranscoder.Processor.Kernel.Encoder,
 					),
 				}
 			} else {
@@ -532,11 +532,11 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}
 
-		var condRecoder, condPassthrough packetfiltercondition.And
+		var condTranscoder, condPassthrough packetfiltercondition.And
 		var sinkMain, sinkPassthrough node.Abstract
 		switch passthroughMode {
 		case types.PassthroughModeSameTracks:
-			condRecoder = append(condRecoder, packetfiltercondition.Packet{
+			condTranscoder = append(condTranscoder, packetfiltercondition.Packet{
 				s.SwitchPreFilter.PacketCondition(0),
 				s.SwitchPostFilter.PacketCondition(0),
 			})
@@ -560,7 +560,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				sinkPassthrough = nodeMapStreamIndices
 			}
 		case types.PassthroughModeNextOutput:
-			condRecoder = append(condRecoder, packetfiltercondition.Packet{
+			condTranscoder = append(condTranscoder, packetfiltercondition.Packet{
 				s.SwitchPreFilter.PacketCondition(0),
 				s.SwitchPostFilter.PacketCondition(0),
 			})
@@ -573,10 +573,10 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
 		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain, condRecoder...)
+			s.NodeTranscoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain, condTranscoder...)
 			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, sinkMain)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(ctx, sinkMain, condRecoder...)
+			s.NodeTranscoder.AddPushPacketsTo(ctx, sinkMain, condTranscoder...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
 			s.NodeStreamFixerPassthrough.AddPushPacketsTo(ctx, sinkPassthrough, condPassthrough...)
@@ -585,13 +585,13 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 	} else {
 		if s.NodeStreamFixerMain != nil {
-			s.NodeRecoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain)
-			s.NodeRecoder.AddPushFramesTo(ctx, s.NodeStreamFixerMain)
+			s.NodeTranscoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain)
+			s.NodeTranscoder.AddPushFramesTo(ctx, s.NodeStreamFixerMain)
 			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, outputMain)
 			s.NodeStreamFixerMain.AddPushFramesTo(ctx, outputMain)
 		} else {
-			s.NodeRecoder.AddPushPacketsTo(ctx, outputMain)
-			s.NodeRecoder.AddPushFramesTo(ctx, outputMain)
+			s.NodeTranscoder.AddPushPacketsTo(ctx, outputMain)
+			s.NodeTranscoder.AddPushFramesTo(ctx, outputMain)
 		}
 	}
 

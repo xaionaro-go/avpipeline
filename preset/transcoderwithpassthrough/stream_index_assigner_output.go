@@ -41,7 +41,7 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource, s.StreamForward.MapInputStreamIndicesNode.Processor.Kernel, s.StreamForward.PacketSource, s.StreamForward.NodeStreamFixerPassthrough.MapStreamIndicesNode.Processor.Kernel:
 		logger.Tracef(ctx, "passing through index %d as is", input.GetStreamIndex())
 		return []int{input.GetStreamIndex()}, nil
-	case s.StreamForward.Recoder, s.StreamForward.Recoder.Encoder, s.StreamForward.NodeStreamFixerMain.MapStreamIndicesNode.Processor.Kernel:
+	case s.StreamForward.Transcoder, s.StreamForward.Transcoder.Encoder, s.StreamForward.NodeStreamFixerMain.MapStreamIndicesNode.Processor.Kernel:
 		inputStreamIndex := input.GetStreamIndex()
 		if v, ok := s.PreviousResultsMap[inputStreamIndex]; ok {
 			logger.Debugf(ctx, "reassigning %d as %d (cache)", inputStreamIndex, v)

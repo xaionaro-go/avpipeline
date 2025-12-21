@@ -54,17 +54,17 @@ func (cfg *OutputVideoTrackConfig) GetDecoderHardwareDeviceName() HardwareDevice
 	return cfg.HardwareDeviceName
 }
 
-type RecoderConfig struct {
-	Input  *RecoderInputConfig `yaml:"input"`
-	Output RecoderOutputConfig `yaml:"output"`
+type TranscoderConfig struct {
+	Input  *TranscoderInputConfig `yaml:"input"`
+	Output TranscoderOutputConfig `yaml:"output"`
 }
 
-type RecoderInputConfig struct {
+type TranscoderInputConfig struct {
 	AudioTrackConfigs []InputAudioTrackConfig `yaml:"audio_track_configs"`
 	VideoTrackConfigs []InputVideoTrackConfig `yaml:"video_track_configs"`
 }
 
-type RecoderOutputConfig struct {
+type TranscoderOutputConfig struct {
 	AudioTrackConfigs []OutputAudioTrackConfig `yaml:"audio_track_configs"`
 	VideoTrackConfigs []OutputVideoTrackConfig `yaml:"video_track_configs"`
 }

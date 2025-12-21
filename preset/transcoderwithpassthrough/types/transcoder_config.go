@@ -7,9 +7,9 @@ import (
 
 type AudioTrackConfig = streammuxtypes.OutputAudioTrackConfig
 type VideoTrackConfig = streammuxtypes.OutputVideoTrackConfig
-type RecoderConfig = streammuxtypes.RecoderConfig
-type RecoderInputConfig = streammuxtypes.RecoderInputConfig
-type RecoderOutputConfig = streammuxtypes.RecoderOutputConfig
+type TranscoderConfig = streammuxtypes.TranscoderConfig
+type TranscoderInputConfig = streammuxtypes.TranscoderInputConfig
+type TranscoderOutputConfig = streammuxtypes.TranscoderOutputConfig
 type DictionaryItem = types.DictionaryItem
 type DictionaryItems = types.DictionaryItems
 type HardwareDeviceName = types.HardwareDeviceName

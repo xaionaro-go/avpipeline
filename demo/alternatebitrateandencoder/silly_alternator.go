@@ -14,10 +14,10 @@ import (
 )
 
 func sillyAlternationsJustForDemonstration(
-	sw *kernel.Switch[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]],
+	sw *kernel.Switch[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]],
 	alternateBitrate []int,
 ) func(ctx context.Context, pkt packet.Input) bool {
-	recoderIdx := uint(0)
+	transcoderIdx := uint(0)
 	bitrateIdx := 0
 	pastSwitchPts := time.Duration(0)
 	return func(ctx context.Context, pkt packet.Input) bool {
@@ -32,17 +32,17 @@ func sillyAlternationsJustForDemonstration(
 				bitrateIdx = bitrateIdx % len(alternateBitrate)
 			}
 
-			// switch recoder
+			// switch transcoder
 
-			recoderIdx++
-			if recoderIdx >= uint(len(sw.Kernels)) {
-				recoderIdx = 0
+			transcoderIdx++
+			if transcoderIdx >= uint(len(sw.Kernels)) {
+				transcoderIdx = 0
 			}
 			if sw != nil {
-				err := sw.SetKernelIndex(ctx, recoderIdx)
+				err := sw.SetKernelIndex(ctx, transcoderIdx)
 				assert(ctx, err == nil)
 			}
-			logger.Debugf(ctx, "switch encoder to #%d", recoderIdx)
+			logger.Debugf(ctx, "switch encoder to #%d", transcoderIdx)
 		}
 
 		if len(alternateBitrate) == 0 {
@@ -54,7 +54,7 @@ func sillyAlternationsJustForDemonstration(
 
 		nextBitrate := alternateBitrate[bitrateIdx]
 		bitrateIdx++
-		encoderFactory := sw.Kernels[recoderIdx].EncoderFactory
+		encoderFactory := sw.Kernels[transcoderIdx].EncoderFactory
 		encoderFactory.Locker.Do(ctx, func() {
 			for _, encoder := range encoderFactory.VideoEncoders {
 				err := encoder.SetQuality(

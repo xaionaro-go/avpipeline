@@ -3,6 +3,6 @@ package types
 type SenderNodeProps struct{}
 
 type SenderProps struct {
-	RecoderConfig
+	TranscoderConfig
 	SenderNodeProps
 }

@@ -43,7 +43,7 @@ const (
 
 type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
 type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
-type NodeRecoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+type NodeTranscoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
 type SenderKey = types.SenderKey
 type SenderKeys = types.SenderKeys
 
@@ -66,12 +66,12 @@ type OutputStreamsIniter interface {
 }
 
 type OutputMeasurements struct {
-	RecodingStartAudioDTS atomic.Uint64
-	RecodingStartVideoDTS atomic.Uint64
-	RecodingEndAudioDTS   atomic.Uint64
-	RecodingEndVideoDTS   atomic.Uint64
-	LastSendingAudioDTS   atomic.Uint64
-	LastSendingVideoDTS   atomic.Uint64
+	TranscodingStartAudioDTS atomic.Uint64
+	TranscodingStartVideoDTS atomic.Uint64
+	TranscodingEndAudioDTS   atomic.Uint64
+	TranscodingEndVideoDTS   atomic.Uint64
+	LastSendingAudioDTS      atomic.Uint64
+	LastSendingVideoDTS      atomic.Uint64
 }
 
 type Output[C any] struct {
@@ -80,7 +80,7 @@ type Output[C any] struct {
 	InputFilter           *NodeBarrier[OutputCustomData[C]]
 	InputThrottler        *limitvideobitrate.Filter
 	InputFixer            *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
-	RecoderNode           *NodeRecoder[OutputCustomData[C]]
+	TranscoderNode        *NodeTranscoder[OutputCustomData[C]]
 	SendingThrottler      *limitvideobitrate.Filter
 	MapIndices            *NodeMapStreamIndexes[OutputCustomData[C]]
 	SendingFixer          *autofix.AutoFixerWithCustomData[OutputCustomData[C]]
@@ -135,7 +135,7 @@ type ResourceManager interface {
 //	InputFixer                   InputFixer
 //	  |                              |
 //	  v                              v
-//	dyn(RecoderNode)             dyn(RecoderNode)
+//	dyn(TranscoderNode)             dyn(TranscoderNode)
 //	  |                              |
 //	  v SendingThrottler             v SendingThrottler
 //	  |                              |
@@ -199,7 +199,7 @@ func newOutput[C any](
 		return nil, fmt.Errorf("unable to connect sending node: %w", err)
 	}
 
-	recoderKernel, err := kernel.NewRecoder(
+	transcoderKernel, err := kernel.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, nil),
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
@@ -211,9 +211,9 @@ func newOutput[C any](
 		nil,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create recoder kernel: %w", err)
+		return nil, fmt.Errorf("failed to create transcoder kernel: %w", err)
 	}
-	recoderKernel.Decoder.AllowBlankFrames = allowCorrupt
+	transcoderKernel.Decoder.AllowBlankFrames = allowCorrupt
 
 	packetSinker, ok := senderNode.GetProcessor().(processor.GetPacketSinker)
 	if !ok {
@@ -230,13 +230,13 @@ func newOutput[C any](
 		InputThrottler: limitvideobitrate.New(ctx, 0, 0),
 		InputFixer: autofix.NewWithCustomData(
 			belt.WithField(ctx, "output_chain_step", "InputFixer"),
-			recoderKernel.Decoder,
+			transcoderKernel.Decoder,
 			OutputCustomData[C]{},
 		),
-		RecoderNode: node.NewWithCustomDataFromKernel[OutputCustomData[C]](
+		TranscoderNode: node.NewWithCustomDataFromKernel[OutputCustomData[C]](
 			ctx,
-			recoderKernel,
-			processor.DefaultOptionsRecoder()...,
+			transcoderKernel,
+			processor.DefaultOptionsTranscoder()...,
 		),
 		SendingThrottler: limitvideobitrate.New(ctx, 0, 0),
 		MapIndices:       node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewMapStreamIndices(ctx, streamIndexAssigner)),
@@ -256,13 +256,13 @@ func newOutput[C any](
 	customData := OutputCustomData[C]{Output: o}
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
-	o.RecoderNode.CustomData = customData
-	o.RecoderNode.SetInputPacketFilter(ctx, packetfiltercondition.Panic("the recoder is not configured, yet!"))
+	o.TranscoderNode.CustomData = customData
+	o.TranscoderNode.SetInputPacketFilter(ctx, packetfiltercondition.Panic("the transcoder is not configured, yet!"))
 	codecOpts := []codec.Option{CodecOptionOutputID{OutputID: o.ID}}
-	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
-	o.RecoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
-	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourceManager = o.asCodecResourceManager()
-	o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.Options = codecOpts
+	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
+	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
+	o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.ResourceManager = o.asCodecResourceManager()
+	o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.Options = codecOpts
 	o.MapIndices.CustomData = customData
 	o.SendingFixer.SetCustomData(customData)
 	o.SendingSyncer.CustomData = customData
@@ -278,7 +278,7 @@ func newOutput[C any](
 	var inputFixer, outputFixer node.Abstract
 	inputFixer, outputFixer = o.InputFixer, o.SendingFixer
 	if senderKey.VideoCodec == codectypes.Name(codec.NameCopy) {
-		inputFixer, outputFixer = o.RecoderNode, o.SendingSyncer
+		inputFixer, outputFixer = o.TranscoderNode, o.SendingSyncer
 	}
 
 	pushToFixerConds := packetorframecondition.And{
@@ -301,12 +301,12 @@ func newOutput[C any](
 	}
 	o.InputFilter.AddPushPacketsTo(ctx, inputFixer, packetfiltercondition.PacketOrFrame{pushToFixerConds})
 	o.InputFilter.AddPushFramesTo(ctx, inputFixer, framefiltercondition.PacketOrFrame{pushToFixerConds})
-	pushToRecoderConds := packetorframecondition.Function(o.onRecoderInput)
-	o.InputFixer.AddPushPacketsTo(ctx, o.RecoderNode, packetfiltercondition.PacketOrFrame{pushToRecoderConds})
-	o.InputFixer.AddPushFramesTo(ctx, o.RecoderNode, framefiltercondition.PacketOrFrame{pushToRecoderConds})
-	pushToMapIndicesConds := packetorframecondition.Function(o.onRecoderOutput)
-	o.RecoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.PacketOrFrame{pushToMapIndicesConds})
-	o.RecoderNode.AddPushFramesTo(ctx, o.MapIndices, framefiltercondition.PacketOrFrame{pushToMapIndicesConds})
+	pushToTranscoderConds := packetorframecondition.Function(o.onTranscoderInput)
+	o.InputFixer.AddPushPacketsTo(ctx, o.TranscoderNode, packetfiltercondition.PacketOrFrame{pushToTranscoderConds})
+	o.InputFixer.AddPushFramesTo(ctx, o.TranscoderNode, framefiltercondition.PacketOrFrame{pushToTranscoderConds})
+	pushToMapIndicesConds := packetorframecondition.Function(o.onTranscoderOutput)
+	o.TranscoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.PacketOrFrame{pushToMapIndicesConds})
+	o.TranscoderNode.AddPushFramesTo(ctx, o.MapIndices, framefiltercondition.PacketOrFrame{pushToMapIndicesConds})
 	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
 	o.MapIndices.AddPushFramesTo(ctx, outputFixer)
 	pushToSenderConds := packetorframecondition.Function(o.onSenderInput)
@@ -351,7 +351,7 @@ func logIfError(ctx context.Context, err error) {
 	logger.Errorf(ctx, "got an error: %v", err)
 }
 
-func (o *Output[C]) onRecoderInput(
+func (o *Output[C]) onTranscoderInput(
 	_ context.Context,
 	i packetorframe.InputUnion,
 ) bool {
@@ -362,14 +362,14 @@ func (o *Output[C]) onRecoderInput(
 	dts := avconv.Duration(dtsRaw, i.GetTimeBase())
 	switch i.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		o.Measurements.RecodingStartVideoDTS.Store(uint64(dts))
+		o.Measurements.TranscodingStartVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
-		o.Measurements.RecodingStartAudioDTS.Store(uint64(dts))
+		o.Measurements.TranscodingStartAudioDTS.Store(uint64(dts))
 	}
 	return true
 }
 
-func (o *Output[C]) onRecoderOutput(
+func (o *Output[C]) onTranscoderOutput(
 	_ context.Context,
 	i packetorframe.InputUnion,
 ) bool {
@@ -380,9 +380,9 @@ func (o *Output[C]) onRecoderOutput(
 	dts := avconv.Duration(dtsRaw, i.GetTimeBase())
 	switch i.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		o.Measurements.RecodingEndVideoDTS.Store(uint64(dts))
+		o.Measurements.TranscodingEndVideoDTS.Store(uint64(dts))
 	case astiav.MediaTypeAudio:
-		o.Measurements.RecodingEndAudioDTS.Store(uint64(dts))
+		o.Measurements.TranscodingEndAudioDTS.Store(uint64(dts))
 	}
 	return true
 }
@@ -416,7 +416,7 @@ func (o *Output[C]) FirstNodeAfterFilter() node.Abstract {
 	if o.InputFixer != nil {
 		return o.InputFixer
 	}
-	return o.RecoderNode
+	return o.TranscoderNode
 }
 
 func (o *Output[C]) initFPSFractioner(ctx context.Context) {
@@ -427,7 +427,7 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 		return
 	}
 
-	o.RecoderNode.Processor.Kernel.Filter = framecondition.Or{
+	o.TranscoderNode.Processor.Kernel.Filter = framecondition.Or{
 		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
 		framecondition.PacketOrFrame{
 			reduceframerate.New(mathcondition.GetterFunction[globaltypes.Rational](
@@ -443,10 +443,10 @@ func (o *Output[C]) initReuseDecoderResources(
 	logger.Tracef(ctx, "initReuseDecoderResources()")
 	defer func() { logger.Tracef(ctx, "/initReuseDecoderResources()") }()
 
-	encRes := *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	encRes := *o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 
 	// use reusable (by encoder) pixel_format without offloading to CPU
-	o.RecoderNode.Processor.Kernel.DecoderFactory.PreInitFunc = func(
+	o.TranscoderNode.Processor.Kernel.DecoderFactory.PreInitFunc = func(
 		ctx context.Context,
 		stream *astiav.Stream,
 		input *codec.DecoderInput,
@@ -509,8 +509,8 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 	if err := o.InputFixer.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close input fixer for output %d: %w", o.ID, err))
 	}
-	if err := o.RecoderNode.Processor.Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to close recoder node for output %d: %w", o.ID, err))
+	if err := o.TranscoderNode.Processor.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close transcoder node for output %d: %w", o.ID, err))
 	}
 	if err := o.MapIndices.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close map indices for output %d: %w", o.ID, err))
@@ -605,20 +605,20 @@ func (o *Output[C]) Deinit(
 	defer func() { logger.Tracef(ctx, "/Output[%d].Deinit(): %v", o.ID, _err) }()
 	var errs []error
 
-	if err := o.RecoderNode.Processor.Kernel.ResetHard(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to reset recoder node for output %d: %w", o.ID, err))
+	if err := o.TranscoderNode.Processor.Kernel.ResetHard(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to reset transcoder node for output %d: %w", o.ID, err))
 	}
 
 	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to deinit recoder node for output %d: %w", o.ID, err))
+		errs = append(errs, fmt.Errorf("unable to deinit transcoder node for output %d: %w", o.ID, err))
 	}
 
 	return errors.Join(errs...)
 }
 
-func PartialSenderKeyFromRecoderConfig(
+func PartialSenderKeyFromTranscoderConfig(
 	ctx context.Context,
-	c *types.RecoderConfig,
+	c *types.TranscoderConfig,
 ) SenderKey {
 	if c == nil {
 		return SenderKey{}
@@ -644,12 +644,12 @@ func PartialSenderKeyFromRecoderConfig(
 	}
 }
 
-func (o *Output[C]) reconfigureRecoder(
+func (o *Output[C]) reconfigureTranscoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "reconfigureRecoder(ctx, %#+v)", cfg)
-	defer func() { logger.Tracef(ctx, "/reconfigureRecoder(ctx, %#+v): %v", cfg, _err) }()
+	logger.Tracef(ctx, "reconfigureTranscoder(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureTranscoder(ctx, %#+v): %v", cfg, _err) }()
 
 	isCopyEncoder, err := o.reconfigureEncoder(ctx, cfg)
 	if err != nil {
@@ -665,13 +665,13 @@ func (o *Output[C]) reconfigureRecoder(
 		}
 	}
 
-	o.RecoderNode.SetInputPacketFilter(ctx, nil)
+	o.TranscoderNode.SetInputPacketFilter(ctx, nil)
 	return nil
 }
 
 func (o *Output[C]) reconfigureDecoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_err error) {
 	logger.Tracef(ctx, "reconfigureDecoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureDecoder: %#+v: %v", cfg, _err) }()
@@ -690,7 +690,7 @@ func (o *Output[C]) reconfigureDecoder(
 		}
 	}
 
-	decoder := o.RecoderNode.Processor.Kernel.Decoder
+	decoder := o.TranscoderNode.Processor.Kernel.Decoder
 	decoderFactory := decoder.DecoderFactory
 
 	err := xsync.DoR1(ctx, &decoder.Locker, func() error {
@@ -718,7 +718,7 @@ func (o *Output[C]) reconfigureDecoder(
 
 func (o *Output[C]) reconfigureEncoder(
 	ctx context.Context,
-	cfg types.RecoderConfig,
+	cfg types.TranscoderConfig,
 ) (_isCopyEncoder bool, _err error) {
 	logger.Tracef(ctx, "reconfigureEncoder: %#+v", cfg)
 	defer func() { logger.Tracef(ctx, "/reconfigureEncoder: %#+v: %v", cfg, _err) }()
@@ -739,7 +739,7 @@ func (o *Output[C]) reconfigureEncoder(
 		audioCfg = cfg.Output.AudioTrackConfigs[0]
 	}
 
-	encoderFactory := o.RecoderNode.Processor.Kernel.EncoderFactory
+	encoderFactory := o.TranscoderNode.Processor.Kernel.EncoderFactory
 
 	var videoOptions globaltypes.DictionaryItems
 	videoOptions = append(videoOptions, globaltypes.DictionaryItems{
@@ -849,14 +849,14 @@ func canonicalizeCodecName(ctx context.Context, name codec.Name) codectypes.Name
 
 func (o *Output[C]) GetKey() SenderKey {
 	var videoResolution codec.Resolution
-	if o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
-		videoResolution = *o.RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	if o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
+		videoResolution = *o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 	}
 	ctx := context.Background()
 	return SenderKey{
-		AudioCodec:      canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
-		AudioSampleRate: o.RecoderNode.Processor.Kernel.EncoderFactory.AudioSampleRate,
-		VideoCodec:      canonicalizeCodecName(ctx, o.RecoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
+		AudioCodec:      canonicalizeCodecName(ctx, o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
+		AudioSampleRate: o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioSampleRate,
+		VideoCodec:      canonicalizeCodecName(ctx, o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
 		VideoResolution: videoResolution,
 	}
 }
@@ -871,7 +871,7 @@ func (o *Output[C]) Nodes() []node.Abstract {
 		result = append(result, o.InputFixer)
 	}
 	result = append(result,
-		o.RecoderNode,
+		o.TranscoderNode,
 		o.MapIndices,
 		o.SendingFixer,
 		o.SendingSyncer,
@@ -895,6 +895,6 @@ func (o *Output[C]) SetForceNextFrameKey(
 	logger.Tracef(ctx, "Output[%d].SetForceNextFrameKey(%v)", o.ID, forceNextFrameKey)
 	defer func() { logger.Tracef(ctx, "/Output[%d].SetForceNextFrameKey(%v): %v", o.ID, forceNextFrameKey, _err) }()
 
-	o.RecoderNode.Processor.Kernel.Encoder.SetForceNextKeyFrame(ctx, forceNextFrameKey)
+	o.TranscoderNode.Processor.Kernel.Encoder.SetForceNextKeyFrame(ctx, forceNextFrameKey)
 	return nil
 }

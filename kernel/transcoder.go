@@ -23,13 +23,13 @@ import (
 
 const (
 	enableStreamCodecParametersUpdates = false
-	recoderWaitForStreamsStart         = true
+	transcoderWaitForStreamsStart      = true
 )
 
 // See also https://github.com/namndev/FFmpegTutorial/blob/master/learn-ffmpeg-libav-the-hard-way.md
-// Note: Recoder is a somewhat hacky thing, try to not use it. Pipelining
+// Note: Transcoder is a somewhat hacky thing, try to not use it. Pipelining
 // should be handled by pipeline, not by a Kernel. Use separately Decoder and Encoder, instead.
-type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
+type Transcoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
 	*closuresignaler.ClosureSignaler
@@ -43,21 +43,21 @@ type Recoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	pendingPacketsAndFrames []packetorframe.Abstract
 }
 
-var _ Abstract = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
-var _ packet.Source = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
-var _ packet.Sink = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ Abstract = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ packet.Source = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ packet.Sink = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
-func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
+func NewTranscoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
 	decoderFactory DF,
 	encoderFactory EF,
 	streamConfigurer StreamConfigurer,
-) (_ret *Recoder[DF, EF], _err error) {
-	logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v)", decoderFactory, encoderFactory, streamConfigurer)
+) (_ret *Transcoder[DF, EF], _err error) {
+	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v)", decoderFactory, encoderFactory, streamConfigurer)
 	defer func() {
-		logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v): %s, %v", decoderFactory, encoderFactory, streamConfigurer, _ret, _err)
+		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v): %s, %v", decoderFactory, encoderFactory, streamConfigurer, _ret, _err)
 	}()
-	r := &Recoder[DF, EF]{
+	r := &Transcoder[DF, EF]{
 		ClosureSignaler: closuresignaler.New(),
 		Decoder:         NewDecoder(ctx, decoderFactory),
 		Encoder:         NewEncoder(ctx, encoderFactory, streamConfigurer),
@@ -67,7 +67,7 @@ func NewRecoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	return r, nil
 }
 
-func (r *Recoder[DF, EF]) Close(ctx context.Context) (_err error) {
+func (r *Transcoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Close")
 	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
 	r.ClosureSignaler.Close(ctx)
@@ -81,7 +81,7 @@ func (r *Recoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	return errors.Join(errs...)
 }
 
-func (r *Recoder[DF, EF]) Generate(
+func (r *Transcoder[DF, EF]) Generate(
 	ctx context.Context,
 	_ chan<- packet.Output,
 	_ chan<- frame.Output,
@@ -91,7 +91,7 @@ func (r *Recoder[DF, EF]) Generate(
 	return nil
 }
 
-func (r *Recoder[DF, EF]) SendInputPacket(
+func (r *Transcoder[DF, EF]) SendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -109,7 +109,7 @@ func (r *Recoder[DF, EF]) SendInputPacket(
 	)
 }
 
-func (r *Recoder[DF, EF]) sendInputPacket(
+func (r *Transcoder[DF, EF]) sendInputPacket(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketCh chan<- packet.Output,
@@ -123,7 +123,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 		return io.ErrClosedPipe
 	}
 
-	if r.started || !recoderWaitForStreamsStart {
+	if r.started || !transcoderWaitForStreamsStart {
 		return r.process(ctx, input, outputPacketCh, outputFramesCh)
 	}
 
@@ -213,7 +213,7 @@ func (r *Recoder[DF, EF]) sendInputPacket(
 	return err
 }
 
-func (r *Recoder[DF, EF]) process(
+func (r *Transcoder[DF, EF]) process(
 	ctx context.Context,
 	input packet.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -243,7 +243,7 @@ func (r *Recoder[DF, EF]) process(
 	}, outputPacketsCh, outputFramesCh)
 }
 
-func (r *Recoder[DF, EF]) decoderToEncoder(
+func (r *Transcoder[DF, EF]) decoderToEncoder(
 	ctx context.Context,
 	decodeFn func(ctx context.Context, outputFramesCh chan<- frame.Output) error,
 	outputPacketsCh chan<- packet.Output,
@@ -309,7 +309,7 @@ func (r *Recoder[DF, EF]) decoderToEncoder(
 
 }
 
-func (r *Recoder[DF, EF]) SendInputFrame(
+func (r *Transcoder[DF, EF]) SendInputFrame(
 	ctx context.Context,
 	input frame.Input,
 	outputPacketsCh chan<- packet.Output,
@@ -335,29 +335,29 @@ func (r *Recoder[DF, EF]) SendInputFrame(
 	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
 }
 
-func (r *Recoder[DF, EF]) GetObjectID() globaltypes.ObjectID {
+func (r *Transcoder[DF, EF]) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(r)
 }
 
-func (r *Recoder[DF, EF]) String() string {
-	return fmt.Sprintf("Recoder(%s->%s)", r.DecoderFactory, r.EncoderFactory)
+func (r *Transcoder[DF, EF]) String() string {
+	return fmt.Sprintf("Transcoder(%s->%s)", r.DecoderFactory, r.EncoderFactory)
 }
 
-func (r *Recoder[DF, EF]) WithOutputFormatContext(
+func (r *Transcoder[DF, EF]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	r.Encoder.WithOutputFormatContext(ctx, callback)
 }
 
-func (r *Recoder[DF, EF]) WithInputFormatContext(
+func (r *Transcoder[DF, EF]) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
 	r.Decoder.WithInputFormatContext(ctx, callback)
 }
 
-func (r *Recoder[DF, EF]) NotifyAboutPacketSource(
+func (r *Transcoder[DF, EF]) NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
 ) error {
@@ -371,7 +371,7 @@ func (r *Recoder[DF, EF]) NotifyAboutPacketSource(
 	return errors.Join(errs...)
 }
 
-func (r *Recoder[DF, EF]) ResetSoft(
+func (r *Transcoder[DF, EF]) ResetSoft(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "ResetSoft")
@@ -387,7 +387,7 @@ func (r *Recoder[DF, EF]) ResetSoft(
 	return errors.Join(errs...)
 }
 
-func (r *Recoder[DF, EF]) ResetHard(
+func (r *Transcoder[DF, EF]) ResetHard(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "ResetHard")
@@ -403,14 +403,14 @@ func (r *Recoder[DF, EF]) ResetHard(
 	return errors.Join(errs...)
 }
 
-func (r *Recoder[DF, EF]) SetForceNextKeyFrame(
+func (r *Transcoder[DF, EF]) SetForceNextKeyFrame(
 	ctx context.Context,
 	v bool,
 ) {
 	r.Encoder.SetForceNextKeyFrame(ctx, v)
 }
 
-func (r *Recoder[DF, EF]) IsDirty(
+func (r *Transcoder[DF, EF]) IsDirty(
 	ctx context.Context,
 ) (_ret bool) {
 	logger.Tracef(ctx, "IsDirty")
@@ -431,9 +431,9 @@ func (r *Recoder[DF, EF]) IsDirty(
 	return r0 || r1
 }
 
-var _ Flusher = (*Recoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var _ Flusher = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
-func (r *Recoder[DF, EF]) Flush(
+func (r *Transcoder[DF, EF]) Flush(
 	ctx context.Context,
 	outputPacketCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,

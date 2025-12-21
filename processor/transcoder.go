@@ -8,7 +8,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
-var DefaultOptionsRecoder = func() []Option {
+var DefaultOptionsTranscoder = func() []Option {
 	return []Option{
 		OptionQueueSizeInputPacket(600),
 		OptionQueueSizeInputFrame(600),
@@ -18,18 +18,18 @@ var DefaultOptionsRecoder = func() []Option {
 	}
 }
 
-func NewRecoder(
+func NewTranscoder(
 	ctx context.Context,
 	decoderFactory codec.DecoderFactory,
 	encoderFactory codec.EncoderFactory,
 	streamConfigurer kernel.StreamConfigurer,
 	processorOpts ...Option,
-) (_ret *FromKernel[*kernel.Recoder[codec.DecoderFactory, codec.EncoderFactory]], _err error) {
-	logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v, %#+v)", decoderFactory, encoderFactory, streamConfigurer, processorOpts)
+) (_ret *FromKernel[*kernel.Transcoder[codec.DecoderFactory, codec.EncoderFactory]], _err error) {
+	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v)", decoderFactory, encoderFactory, streamConfigurer, processorOpts)
 	defer func() {
-		logger.Debugf(ctx, "NewRecoder(ctx, %s, %s, %#+v, %#+v): %#+v, %v", decoderFactory, encoderFactory, streamConfigurer, processorOpts, _ret, _err)
+		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v): %#+v, %v", decoderFactory, encoderFactory, streamConfigurer, processorOpts, _ret, _err)
 	}()
-	k, err := kernel.NewRecoder(
+	k, err := kernel.NewTranscoder(
 		ctx,
 		decoderFactory,
 		encoderFactory,
@@ -41,6 +41,6 @@ func NewRecoder(
 	return NewFromKernel(
 		ctx,
 		k,
-		append(DefaultOptionsRecoder(), processorOpts...)...,
+		append(DefaultOptionsTranscoder(), processorOpts...)...,
 	), nil
 }

@@ -15,18 +15,18 @@ import (
 )
 
 type RouteSource[T any, C any, P processor.Abstract] struct {
-	Router        *Router[T]
-	DstPath       RoutePath
-	PublishMode   PublishMode
-	RecoderConfig *transcodertypes.RecoderConfig
-	OnPostStart   func(context.Context, *RouteSource[T, C, P])
-	OnPreStop     func(context.Context, *RouteSource[T, C, P])
-	OnPostStop    func(context.Context, *RouteSource[T, C, P])
-	Locker        xsync.Mutex
-	CancelFunc    context.CancelFunc
-	Input         *node.NodeWithCustomData[C, P]
-	Output        *Route[T]
-	WaitGroup     sync.WaitGroup
+	Router           *Router[T]
+	DstPath          RoutePath
+	PublishMode      PublishMode
+	TranscoderConfig *transcodertypes.TranscoderConfig
+	OnPostStart      func(context.Context, *RouteSource[T, C, P])
+	OnPreStop        func(context.Context, *RouteSource[T, C, P])
+	OnPostStop       func(context.Context, *RouteSource[T, C, P])
+	Locker           xsync.Mutex
+	CancelFunc       context.CancelFunc
+	Input            *node.NodeWithCustomData[C, P]
+	Output           *Route[T]
+	WaitGroup        sync.WaitGroup
 	StreamForwarder[C, P]
 }
 
@@ -36,7 +36,7 @@ func AddRouteSource[T any, C any, P processor.Abstract](
 	srcNode *node.NodeWithCustomData[C, P],
 	dstPath RoutePath,
 	publishMode PublishMode,
-	recoderConfig *transcodertypes.RecoderConfig,
+	transcoderConfig *transcodertypes.TranscoderConfig,
 	onPostStart func(context.Context, *RouteSource[T, C, P]),
 	onPreStop func(context.Context, *RouteSource[T, C, P]),
 	onPostStop func(context.Context, *RouteSource[T, C, P]),
@@ -48,14 +48,14 @@ func AddRouteSource[T any, C any, P processor.Abstract](
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
 
 	fwd := &RouteSource[T, C, P]{
-		Router:        r,
-		Input:         srcNode,
-		DstPath:       dstPath,
-		PublishMode:   publishMode,
-		RecoderConfig: recoderConfig,
-		OnPostStart:   onPostStart,
-		OnPreStop:     onPreStop,
-		OnPostStop:    onPostStop,
+		Router:           r,
+		Input:            srcNode,
+		DstPath:          dstPath,
+		PublishMode:      publishMode,
+		TranscoderConfig: transcoderConfig,
+		OnPostStart:      onPostStart,
+		OnPreStop:        onPreStop,
+		OnPostStop:       onPostStop,
 	}
 	if err := fwd.open(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize: %w", err)
@@ -135,9 +135,9 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 		return fmt.Errorf("unable to add the RouteSource as a publisher to Route '%s': %w", dst.Path, err)
 	}
 
-	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.RecoderConfig)
+	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.TranscoderConfig)
 	if err != nil {
-		return fmt.Errorf("unable to initialize a forwarder from %T to '%s' (%#+v): %w", fwd.Input, dst.Path, fwd.RecoderConfig, err)
+		return fmt.Errorf("unable to initialize a forwarder from %T to '%s' (%#+v): %w", fwd.Input, dst.Path, fwd.TranscoderConfig, err)
 	}
 	if err := f.Start(ctx); err != nil {
 		return fmt.Errorf("unable to start stream forwarding: %w", err)

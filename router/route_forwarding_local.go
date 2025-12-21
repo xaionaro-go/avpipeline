@@ -39,32 +39,32 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	srcPath RoutePath,
 	dstPath RoutePath,
 	publishMode PublishMode,
-	recoderConfig *transcodertypes.RecoderConfig,
+	transcoderConfig *transcodertypes.TranscoderConfig,
 ) (_ret *RouteForwarding[T], _err error) {
-	logger.Debugf(ctx, "AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v)", srcPath, dstPath, publishMode, recoderConfig)
+	logger.Debugf(ctx, "AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v)", srcPath, dstPath, publishMode, transcoderConfig)
 	defer func() {
-		logger.Debugf(ctx, "/AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v): %p %v", srcPath, dstPath, publishMode, recoderConfig, _ret, _err)
+		logger.Debugf(ctx, "/AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v): %p %v", srcPath, dstPath, publishMode, transcoderConfig, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
 
 	// Overall what will happen is:
 	//
-	// In case of recoderConfig != nil:
+	// In case of transcoderConfig != nil:
 	// * `RouteForwarding` will wait for a publisher on the source route;
 	// * and it will get the source and destination routes.
 	// * `RouteForwarding` will add itself as the publisher in the destination route.
-	// * `RouteForwarding` will create and start a `StreamForwarderRecoding`.
-	// * `StreamForwarderRecoding` will create a `TranscoderWithPassthrough`.
-	// * `StreamForwarderRecoding` will subscribe `TranscoderWithPassthrough`'s input to source route node traffic.
-	// * `StreamForwarderRecoding` will use the `TranscoderWithPassthrough` to push it to the Output.
+	// * `RouteForwarding` will create and start a `StreamForwarderTranscoding`.
+	// * `StreamForwarderTranscoding` will create a `TranscoderWithPassthrough`.
+	// * `StreamForwarderTranscoding` will subscribe `TranscoderWithPassthrough`'s input to source route node traffic.
+	// * `StreamForwarderTranscoding` will use the `TranscoderWithPassthrough` to push it to the Output.
 	return r.AddRouteForwarding(
 		ctx,
 		srcPath,
 		GetRouteModeCreateTemporaryIfNotFound,
 		newForwardOutputFactoryLocalPath(r, dstPath),
 		publishMode,
-		recoderConfig,
+		transcoderConfig,
 	)
 }
 

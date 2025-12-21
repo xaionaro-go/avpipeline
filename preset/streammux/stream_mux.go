@@ -331,7 +331,7 @@ func (s *StreamMux[C]) initSwitches(
 
 				observability.Go(ctx, func(ctx context.Context) {
 					s.Locker.Do(ctx, func() {
-						err := s.createAndConfigureOutputs(ctx, outputPrev.GetKey(), s.CurrentOutputProps.RecoderConfig)
+						err := s.createAndConfigureOutputs(ctx, outputPrev.GetKey(), s.CurrentOutputProps.TranscoderConfig)
 						if err != nil {
 							logger.Errorf(ctx, "Switch[%s]: unable to re-initialize the output %d:%s: %v", inputType, outputPrev.ID, outputPrev.GetKey(), err)
 						}
@@ -633,36 +633,36 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	return output, true, nil
 }
 
-func (s *StreamMux[C]) EnableVideoRecodingBypass(
+func (s *StreamMux[C]) EnableVideoTranscodingBypass(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "EnableVideoRecodingBypass")
-	defer func() { logger.Tracef(ctx, "/EnableVideoRecodingBypass: %v", _err) }()
-	return xsync.DoA1R1(ctx, &s.Locker, s.enableVideoRecodingBypassLocked, ctx)
+	logger.Tracef(ctx, "EnableVideoTranscodingBypass")
+	defer func() { logger.Tracef(ctx, "/EnableVideoTranscodingBypass: %v", _err) }()
+	return xsync.DoA1R1(ctx, &s.Locker, s.enableVideoTranscodingBypassLocked, ctx)
 }
 
-func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
+func (s *StreamMux[C]) enableVideoTranscodingBypassLocked(
 	ctx context.Context,
 ) (_err error) {
-	logger.Tracef(ctx, "enableVideoRecodingBypassLocked")
-	defer func() { logger.Tracef(ctx, "/enableVideoRecodingBypassLocked: %v: %v", _err) }()
+	logger.Tracef(ctx, "enableVideoTranscodingBypassLocked")
+	defer func() { logger.Tracef(ctx, "/enableVideoTranscodingBypassLocked: %v: %v", _err) }()
 
 	if !s.IsAllowedDifferentOutputs() {
-		return fmt.Errorf("video recoding bypass is only allowed in mux modes with different outputs, but current mux mode is %s", s.MuxMode)
+		return fmt.Errorf("video transcoding bypass is only allowed in mux modes with different outputs, but current mux mode is %s", s.MuxMode)
 	}
 
 	prevVideoOutput := s.GetActiveVideoOutput(ctx)
 
 	var senderKey SenderKey
-	var recoderCfg types.RecoderConfig
+	var transcoderCfg types.TranscoderConfig
 	switch s.MuxMode {
 	case types.MuxModeDifferentOutputsSameTracks:
 		senderKey = SenderKey{
 			AudioCodec: codectypes.Name(codec.NameCopy),
 			VideoCodec: codectypes.Name(codec.NameCopy),
 		}
-		recoderCfg = types.RecoderConfig{
-			Output: types.RecoderOutputConfig{
+		transcoderCfg = types.TranscoderConfig{
+			Output: types.TranscoderOutputConfig{
 				VideoTrackConfigs: []types.OutputVideoTrackConfig{{
 					CodecName: codectypes.Name(codec.NameCopy),
 				}},
@@ -675,18 +675,18 @@ func (s *StreamMux[C]) enableVideoRecodingBypassLocked(
 		senderKey = SenderKey{
 			VideoCodec: codectypes.Name(codec.NameCopy),
 		}
-		recoderCfg = types.RecoderConfig{
-			Output: types.RecoderOutputConfig{
+		transcoderCfg = types.TranscoderConfig{
+			Output: types.TranscoderOutputConfig{
 				VideoTrackConfigs: []types.OutputVideoTrackConfig{{
 					CodecName: codectypes.Name(codec.NameCopy),
 				}},
 			},
 		}
 	default:
-		return fmt.Errorf("unable to enable video recoding bypass in mux mode %s", s.MuxMode)
+		return fmt.Errorf("unable to enable video transcoding bypass in mux mode %s", s.MuxMode)
 	}
 
-	err := s.createAndConfigureOutputs(ctx, senderKey, recoderCfg)
+	err := s.createAndConfigureOutputs(ctx, senderKey, transcoderCfg)
 	if err != nil {
 		return fmt.Errorf("unable to initialize and prepare outputs for bypass key %s: %w", senderKey, err)
 	}
@@ -710,16 +710,16 @@ func (s *StreamMux[C]) Input() *NodeInput[C] {
 	return s.InputAll.Node
 }
 
-func (s *StreamMux[C]) GetRecoderConfig(
+func (s *StreamMux[C]) GetTranscoderConfig(
 	ctx context.Context,
-) (_ret types.RecoderConfig) {
-	logger.Tracef(ctx, "GetRecoderConfig")
-	defer func() { logger.Tracef(ctx, "/GetRecoderConfig: %v", _ret) }()
+) (_ret types.TranscoderConfig) {
+	logger.Tracef(ctx, "GetTranscoderConfig")
+	defer func() { logger.Tracef(ctx, "/GetTranscoderConfig: %v", _ret) }()
 	if s == nil {
-		return types.RecoderConfig{}
+		return types.TranscoderConfig{}
 	}
 	outputConfig := xsync.DoA1R1(ctx, &s.Locker, s.getCurrentOutputPropsLocked, ctx)
-	return outputConfig.RecoderConfig
+	return outputConfig.TranscoderConfig
 }
 
 func (s *StreamMux[C]) getCurrentOutputPropsLocked(
@@ -747,13 +747,13 @@ func (s *StreamMux[C]) switchToOutputByProps(
 	defer func() {
 		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v, %v: %v", props, persistent, _err)
 	}()
-	senderKey := PartialSenderKeyFromRecoderConfig(ctx, &props.RecoderConfig)
+	senderKey := PartialSenderKeyFromTranscoderConfig(ctx, &props.TranscoderConfig)
 
 	if !s.IsAllowedDifferentOutputs() {
 		if s.countOutputs() != 0 {
 			return fmt.Errorf("mux mode %s forbids having more than one output", s.MuxMode)
 		}
-		if err := s.createAndConfigureOutput(ctx, &s.InputAll, senderKey, props.RecoderConfig); err != nil {
+		if err := s.createAndConfigureOutput(ctx, &s.InputAll, senderKey, props.TranscoderConfig); err != nil {
 			return fmt.Errorf("unable to create default output: %w", err)
 		}
 		s.InputAll.OutputSwitch.CurrentValue.Store(1)
@@ -761,7 +761,7 @@ func (s *StreamMux[C]) switchToOutputByProps(
 		return nil
 	}
 
-	err := s.createAndConfigureOutputs(ctx, senderKey, props.RecoderConfig)
+	err := s.createAndConfigureOutputs(ctx, senderKey, props.TranscoderConfig)
 	if err != nil {
 		return fmt.Errorf("unable to initialize and prepare outputs for key %s: %w", senderKey, err)
 	}
@@ -839,11 +839,11 @@ func (s *StreamMux[C]) getInputsForSenderKey(
 func (s *StreamMux[C]) createAndConfigureOutputs(
 	ctx context.Context,
 	senderKey SenderKey,
-	recoderConfig types.RecoderConfig,
+	transcoderConfig types.TranscoderConfig,
 ) (_err error) {
-	logger.Tracef(ctx, "createAndConfigureOutputs(ctx, %s, %s)", senderKey, recoderConfig)
+	logger.Tracef(ctx, "createAndConfigureOutputs(ctx, %s, %s)", senderKey, transcoderConfig)
 	defer func() {
-		logger.Tracef(ctx, "/createAndConfigureOutputs(ctx, %s, %s): %v", senderKey, recoderConfig, _err)
+		logger.Tracef(ctx, "/createAndConfigureOutputs(ctx, %s, %s): %v", senderKey, transcoderConfig, _err)
 	}()
 
 	inputsAndKeys, err := s.getInputsForSenderKey(ctx, senderKey)
@@ -852,7 +852,7 @@ func (s *StreamMux[C]) createAndConfigureOutputs(
 	}
 
 	for idx, ik := range inputsAndKeys {
-		if err := s.createAndConfigureOutput(ctx, ik.Input, ik.Key, recoderConfig); err != nil {
+		if err := s.createAndConfigureOutput(ctx, ik.Input, ik.Key, transcoderConfig); err != nil {
 			return fmt.Errorf("unable to create and configure output for input %d (%s) with key %s: %w", idx, ik.Input.GetType(), ik.Key, err)
 		}
 	}
@@ -863,7 +863,7 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 	ctx context.Context,
 	input *Input[C],
 	senderKey SenderKey,
-	recoderConfig types.RecoderConfig,
+	transcoderConfig types.TranscoderConfig,
 ) (_err error) {
 	logger.Tracef(ctx, "createAndConfigureOutput(ctx, %s)", senderKey)
 	defer func() { logger.Tracef(ctx, "/createAndConfigureOutput(ctx, %s): %v", senderKey, _err) }()
@@ -874,7 +874,7 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s (isNew: %v)", output.ID, senderKey, isNew)
-	err = output.reconfigureRecoder(ctx, recoderConfig)
+	err = output.reconfigureTranscoder(ctx, transcoderConfig)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, senderKey, err)
 	}
@@ -908,7 +908,7 @@ func (s *StreamMux[C]) getAllStatsLocked(
 	s.OutputsMap.Range(func(outputKey SenderKey, output *Output[C]) bool {
 		tryGetStats(fmt.Sprintf("Output(%s):InputFilter", outputKey), output.InputFilter)
 		tryGetStats(fmt.Sprintf("Output(%s):InputFixer", outputKey), output.InputFixer)
-		tryGetStats(fmt.Sprintf("Output(%s):RecoderNode", outputKey), output.RecoderNode)
+		tryGetStats(fmt.Sprintf("Output(%s):TranscoderNode", outputKey), output.TranscoderNode)
 		tryGetStats(fmt.Sprintf("Output(%s):MapIndexes", outputKey), output.MapIndices)
 		tryGetStats(fmt.Sprintf("Output(%s):OutputFixer", outputKey), output.SendingFixer)
 		tryGetStats(fmt.Sprintf("Output(%s):OutputSyncFilter", outputKey), output.SendingSyncer)
@@ -1157,7 +1157,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 	cfg.Output.VideoTrackConfigs[0] = videoCfg
 
 	err := s.switchToOutputByProps(ctx, types.SenderProps{
-		RecoderConfig: cfg.RecoderConfig,
+		TranscoderConfig: cfg.TranscoderConfig,
 	}, false)
 	if err != nil {
 		return fmt.Errorf("unable to switch to the new output props: %w", err)
@@ -1233,7 +1233,7 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			var bytesOtherEncodedGenNext uint64
 			var bytesOtherOutputReadNext uint64
 			s.OutputsMap.Range(func(outputKey SenderKey, output *Output[C]) bool {
-				encoderCounters := output.RecoderNode.Processor.CountersPtr()
+				encoderCounters := output.TranscoderNode.Processor.CountersPtr()
 				bytesVideoEncodedGenNext += encoderCounters.Generated.Packets.Video.Bytes.Load() - encoderCounters.Omitted.Packets.Video.Bytes.Load()
 				bytesAudioEncodedGenNext += encoderCounters.Generated.Packets.Audio.Bytes.Load() - encoderCounters.Omitted.Packets.Audio.Bytes.Load()
 				bytesOtherEncodedGenNext += encoderCounters.Generated.Packets.Other.Bytes.Load() - encoderCounters.Omitted.Packets.Other.Bytes.Load()
@@ -1413,12 +1413,12 @@ func (s *StreamMux[C]) getVideoEncoderLocked(
 		aEnc codec.Encoder
 	)
 
-	vEncoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
+	vEncoders := o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
 	if len(vEncoders) == 1 {
 		vEnc = vEncoders[0]
 	}
 
-	aEncoders := o.RecoderNode.Processor.Kernel.Encoder.EncoderFactory.AudioEncoders
+	aEncoders := o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.AudioEncoders
 	if len(aEncoders) == 1 {
 		aEnc = aEncoders[0]
 	}
@@ -1666,36 +1666,36 @@ func (s *StreamMux[C]) GetLatencies(
 
 	lastSendingAudioDTS, lastSendingVideoDTS := outputAudio.Measurements.LastSendingAudioDTS.Load(), outputVideo.Measurements.LastSendingVideoDTS.Load()
 
-	recodingEndAudioDTS, recodingEndVideoDTS := outputAudio.Measurements.RecodingEndAudioDTS.Load(), outputVideo.Measurements.RecodingEndVideoDTS.Load()
+	transcodingEndAudioDTS, transcodingEndVideoDTS := outputAudio.Measurements.TranscodingEndAudioDTS.Load(), outputVideo.Measurements.TranscodingEndVideoDTS.Load()
 
-	recodingStartAudioDTS, recodingStartVideoDTS := outputAudio.Measurements.RecodingStartAudioDTS.Load(), outputVideo.Measurements.RecodingStartVideoDTS.Load()
+	transcodingStartAudioDTS, transcodingStartVideoDTS := outputAudio.Measurements.TranscodingStartAudioDTS.Load(), outputVideo.Measurements.TranscodingStartVideoDTS.Load()
 
 	inputAudioDts, inputVideoDTS := s.InputAudioDTS.Load(), s.InputVideoDTS.Load()
 
-	audioPreRecodingLatency := nanosecondsToDuration(inputAudioDts - recodingStartAudioDTS)
-	videoPreRecodingLatency := nanosecondsToDuration(inputVideoDTS - recodingStartVideoDTS)
+	audioPreTranscodingLatency := nanosecondsToDuration(inputAudioDts - transcodingStartAudioDTS)
+	videoPreTranscodingLatency := nanosecondsToDuration(inputVideoDTS - transcodingStartVideoDTS)
 
-	audioRecodingLatency := nanosecondsToDuration(recodingStartAudioDTS - recodingEndAudioDTS)
-	videoRecodingLatency := nanosecondsToDuration(recodingStartVideoDTS - recodingEndVideoDTS)
+	audioTranscodingLatency := nanosecondsToDuration(transcodingStartAudioDTS - transcodingEndAudioDTS)
+	videoTranscodingLatency := nanosecondsToDuration(transcodingStartVideoDTS - transcodingEndVideoDTS)
 
-	audioRecodedPreSendLatency := nanosecondsToDuration(recodingEndAudioDTS - lastSendingAudioDTS)
-	videoRecodedPreSendLatency := nanosecondsToDuration(recodingEndVideoDTS - lastSendingVideoDTS)
+	audioTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndAudioDTS - lastSendingAudioDTS)
+	videoTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndVideoDTS - lastSendingVideoDTS)
 
-	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v recoding=%v recoded-pre-send=%v sending=%v", audioPreRecodingLatency, audioRecodingLatency, audioRecodedPreSendLatency, nanosecondsToDuration(s.SendingLatencyAudio.Load()))
-	logger.Debugf(ctx, "latencies: video: pre-encoding=%v recoding=%v recoded-pre-send=%v (%v-%v) sending=%v", videoPreRecodingLatency, videoRecodingLatency, videoRecodedPreSendLatency, recodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(s.SendingLatencyVideo.Load()))
+	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v transcoding=%v transcoded-pre-send=%v sending=%v", audioPreTranscodingLatency, audioTranscodingLatency, audioTranscodedPreSendLatency, nanosecondsToDuration(s.SendingLatencyAudio.Load()))
+	logger.Debugf(ctx, "latencies: video: pre-encoding=%v transcoding=%v transcoded-pre-send=%v (%v-%v) sending=%v", videoPreTranscodingLatency, videoTranscodingLatency, videoTranscodedPreSendLatency, transcodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(s.SendingLatencyVideo.Load()))
 
 	return &types.Latencies{
 		Audio: types.TrackLatencies{
-			PreRecoding:    audioPreRecodingLatency,
-			Recoding:       audioRecodingLatency,
-			RecodedPreSend: audioRecodedPreSendLatency,
-			Sending:        nanosecondsToDuration(s.SendingLatencyAudio.Load()),
+			PreTranscoding:    audioPreTranscodingLatency,
+			Transcoding:       audioTranscodingLatency,
+			TranscodedPreSend: audioTranscodedPreSendLatency,
+			Sending:           nanosecondsToDuration(s.SendingLatencyAudio.Load()),
 		},
 		Video: types.TrackLatencies{
-			PreRecoding:    videoPreRecodingLatency,
-			Recoding:       videoRecodingLatency,
-			RecodedPreSend: videoRecodedPreSendLatency,
-			Sending:        nanosecondsToDuration(s.SendingLatencyVideo.Load()),
+			PreTranscoding:    videoPreTranscodingLatency,
+			Transcoding:       videoTranscodingLatency,
+			TranscodedPreSend: videoTranscodedPreSendLatency,
+			Sending:           nanosecondsToDuration(s.SendingLatencyVideo.Load()),
 		},
 	}, nil
 }

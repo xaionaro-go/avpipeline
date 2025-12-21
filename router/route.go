@@ -77,7 +77,7 @@ func newRoute[T any](
 	processor := processor.NewFromKernel(
 		ctx,
 		must(NewNodeKernel(ctx)),
-		processor.DefaultOptionsRecoder()...,
+		processor.DefaultOptionsTranscoder()...,
 	)
 	var opts node.Options
 	logger.Tracef(ctx, "Creating node for route %s with options %v", path, opts)
@@ -112,7 +112,7 @@ func (r *Route[T]) openNodeLocked(
 		r.Node.Processor = processor.NewFromKernel(
 			ctx,
 			must(NewNodeKernel(ctx)),
-			processor.DefaultOptionsRecoder()...,
+			processor.DefaultOptionsTranscoder()...,
 		)
 	}
 	if r.IsNodeOpen {

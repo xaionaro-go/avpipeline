@@ -25,7 +25,7 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
-func TestRecoderNoFailure(t *testing.T) {
+func TestTranscoderNoFailure(t *testing.T) {
 	const vcodec = "libx264"
 	const acodec = codec.NameCopy
 	loggerLevel := logger.LevelTrace
@@ -106,7 +106,7 @@ func TestRecoderNoFailure(t *testing.T) {
 				VideoCodec: vcodec,
 				AudioCodec: acodec,
 			})
-			recoder, err := kernel.NewRecoder(
+			transcoder, err := kernel.NewTranscoder(
 				ctx,
 				codec.NewNaiveDecoderFactory(ctx, nil),
 				encoderFactory,
@@ -115,17 +115,17 @@ func TestRecoderNoFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer recoder.Close(ctx)
-			l.Debugf("initialized a recoder to %s (hwdev:%s)...", vcodec, "")
-			recodingNode := node.NewFromKernel(
+			defer transcoder.Close(ctx)
+			l.Debugf("initialized a transcoder to %s (hwdev:%s)...", vcodec, "")
+			transcodingNode := node.NewFromKernel(
 				ctx,
-				recoder,
+				transcoder,
 				processor.OptionQueueSizeInputPacket(100),
 				processor.OptionQueueSizeOutputPacket(1),
 				processor.OptionQueueSizeError(2),
 			)
-			inputNode.PushPacketsTos.Add(recodingNode)
-			finalNode = recodingNode
+			inputNode.PushPacketsTos.Add(transcodingNode)
+			finalNode = transcodingNode
 			finalNode.AddPushPacketsTo(ctx, node.NewFromKernel(
 				ctx,
 				output,

@@ -22,56 +22,56 @@ import (
 )
 
 // TODO: remove StreamForwarder from package `router`
-type StreamForwarderRecoding[CS any, PS processor.Abstract] struct {
+type StreamForwarderTranscoding[CS any, PS processor.Abstract] struct {
 	Input               *node.NodeWithCustomData[CS, PS]
 	InputAsPacketSource packet.Source
 	DestinationNode     node.Abstract
-	RecoderConfig       transcodertypes.RecoderConfig
+	TranscoderConfig    transcodertypes.TranscoderConfig
 	Chain               *transcoder.TranscoderWithPassthrough[CS, PS]
 	ChainInput          *nodewrapper.NoServe[*node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]]
 	CancelFunc          context.CancelFunc
 	Mutex               xsync.Mutex
 }
 
-var _ StreamForwarder[*Route[any], *ProcessorRouting] = (*StreamForwarderRecoding[*Route[any], *ProcessorRouting])(nil)
+var _ StreamForwarder[*Route[any], *ProcessorRouting] = (*StreamForwarderTranscoding[*Route[any], *ProcessorRouting])(nil)
 
 // TODO: remove StreamForwarder from package `router`
-func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
+func NewStreamForwarderTranscoding[CS any, PS processor.Abstract](
 	ctx context.Context,
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
-	recoderConfig *transcodertypes.RecoderConfig,
-) (_ret *StreamForwarderRecoding[CS, PS], _err error) {
-	logger.Debugf(ctx, "NewStreamForwarderRecoding(%s, %s)", src, dst)
-	defer func() { logger.Debugf(ctx, "/NewStreamForwarderRecoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
+	transcoderConfig *transcodertypes.TranscoderConfig,
+) (_ret *StreamForwarderTranscoding[CS, PS], _err error) {
+	logger.Debugf(ctx, "NewStreamForwarderTranscoding(%s, %s)", src, dst)
+	defer func() { logger.Debugf(ctx, "/NewStreamForwarderTranscoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
 
 	packetSource := asPacketSource(src.Processor)
 	if packetSource == nil {
 		return nil, fmt.Errorf("the source is expected to provide packet.Source")
 	}
 
-	fwd := &StreamForwarderRecoding[CS, PS]{
+	fwd := &StreamForwarderTranscoding[CS, PS]{
 		Input:               src,
 		InputAsPacketSource: packetSource,
 		DestinationNode:     dst,
 	}
 
-	if recoderConfig == nil {
+	if transcoderConfig == nil {
 		logger.Debugf(ctx, "just copy as is")
-		recoderConfig = &transcodertypes.RecoderConfig{}
+		transcoderConfig = &transcodertypes.TranscoderConfig{}
 		if getPacketSourcer, ok := any(src.Processor).(interface{ GetPacketSource() packet.Source }); ok {
 			if packetSource := getPacketSourcer.GetPacketSource(); packetSource != nil {
 				packetSource.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 					for _, stream := range fmtCtx.Streams() {
 						switch stream.CodecParameters().MediaType() {
 						case astiav.MediaTypeVideo:
-							recoderConfig.Output.VideoTrackConfigs = append(recoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
+							transcoderConfig.Output.VideoTrackConfigs = append(transcoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      codectypes.Name(codec.NameCopy),
 							})
 						case astiav.MediaTypeAudio:
-							recoderConfig.Output.AudioTrackConfigs = append(recoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
+							transcoderConfig.Output.AudioTrackConfigs = append(transcoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 								InputTrackIDs:  []int{stream.Index()},
 								OutputTrackIDs: []int{stream.Index()},
 								CodecName:      codectypes.Name(codec.NameCopy),
@@ -81,27 +81,27 @@ func NewStreamForwarderRecoding[CS any, PS processor.Abstract](
 				})
 			}
 		}
-		if len(recoderConfig.Output.AudioTrackConfigs) == 0 && len(recoderConfig.Output.VideoTrackConfigs) == 0 {
+		if len(transcoderConfig.Output.AudioTrackConfigs) == 0 && len(transcoderConfig.Output.VideoTrackConfigs) == 0 {
 			logger.Errorf(ctx, "no audio/video tracks defined, adding one of each just to make it work")
-			recoderConfig.Output.VideoTrackConfigs = append(recoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
+			transcoderConfig.Output.VideoTrackConfigs = append(transcoderConfig.Output.VideoTrackConfigs, transcodertypes.VideoTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{0},
 				CodecName:      codectypes.Name(codec.NameCopy),
 			})
-			recoderConfig.Output.AudioTrackConfigs = append(recoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
+			transcoderConfig.Output.AudioTrackConfigs = append(transcoderConfig.Output.AudioTrackConfigs, transcodertypes.AudioTrackConfig{
 				InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
 				OutputTrackIDs: []int{1},
 				CodecName:      codectypes.Name(codec.NameCopy),
 			})
 		}
 	}
-	logger.Debugf(ctx, "resulting config: %#+v", recoderConfig)
-	fwd.RecoderConfig = *recoderConfig
+	logger.Debugf(ctx, "resulting config: %#+v", transcoderConfig)
+	fwd.TranscoderConfig = *transcoderConfig
 
 	return fwd, nil
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) Start(ctx context.Context) (_err error) {
+func (fwd *StreamForwarderTranscoding[CS, PS]) Start(ctx context.Context) (_err error) {
 	ctx = belt.WithField(ctx, "input", fwd.Input.String())
 	ctx = belt.WithField(ctx, "output", fwd.DestinationNode)
 	logger.Debugf(ctx, "Start")
@@ -109,7 +109,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) Start(ctx context.Context) (_err err
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.start, ctx)
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err error) {
+func (fwd *StreamForwarderTranscoding[CS, PS]) start(origCtx context.Context) (_err error) {
 	logger.Debugf(origCtx, "start: %p", fwd)
 	defer func() { logger.Debugf(origCtx, "/start: %p: %v", fwd, _err) }()
 	if fwd.CancelFunc != nil {
@@ -129,8 +129,8 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 	}
 	fwd.Chain = chain
 	type chainInputNode = node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
-	if err := chain.SetRecoderConfig(ctx, fwd.RecoderConfig); err != nil {
-		return fmt.Errorf("unable to set the RecoderConfig to %#+v: %w", fwd.RecoderConfig, err)
+	if err := chain.SetTranscoderConfig(ctx, fwd.TranscoderConfig); err != nil {
+		return fmt.Errorf("unable to set the TranscoderConfig to %#+v: %w", fwd.TranscoderConfig, err)
 	}
 
 	if err := chain.Start(ctx, transcodertypes.PassthroughModeNever, avpipeline.ServeConfig{
@@ -155,7 +155,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 			return
 		default:
 		}
-		logger.Errorf(ctx, "the recoder was unexpectedly closed, restarting it")
+		logger.Errorf(ctx, "the transcoder was unexpectedly closed, restarting it")
 		err = xsync.DoR1(ctx, &fwd.Mutex, func() error {
 			if fwd.CancelFunc == nil || fwd.Chain != chain {
 				return nil // somebody else already closed between select above and DoR1 here
@@ -166,22 +166,22 @@ func (fwd *StreamForwarderRecoding[CS, PS]) start(origCtx context.Context) (_err
 			return fwd.start(origCtx)
 		})
 		if err != nil {
-			logger.Errorf(ctx, "unable to restart the recoder: %v", err)
+			logger.Errorf(ctx, "unable to restart the transcoder: %v", err)
 		}
 	})
 
 	return nil
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
+func (fwd *StreamForwarderTranscoding[CS, PS]) Source() *node.NodeWithCustomData[CS, PS] {
 	return fwd.Input
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) Destination() node.Abstract {
+func (fwd *StreamForwarderTranscoding[CS, PS]) Destination() node.Abstract {
 	return fwd.DestinationNode
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) Stop(
+func (fwd *StreamForwarderTranscoding[CS, PS]) Stop(
 	ctx context.Context,
 ) (_err error) {
 	ctx = belt.WithField(ctx, "input", fwd.Input.String())
@@ -191,7 +191,7 @@ func (fwd *StreamForwarderRecoding[CS, PS]) Stop(
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.stop, ctx)
 }
 
-func (fwd *StreamForwarderRecoding[CS, PS]) stop(
+func (fwd *StreamForwarderTranscoding[CS, PS]) stop(
 	ctx context.Context,
 ) (_err error) {
 	logger.Debugf(ctx, "stop")

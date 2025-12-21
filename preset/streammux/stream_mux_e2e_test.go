@@ -134,7 +134,7 @@ func (decoderOutputFactory[C]) NewSender(
 	n := node.NewWithCustomDataFromKernel[streammux.OutputCustomData[C]](
 		ctx,
 		kernel.NewDecoder(ctx, &codec.NaiveDecoderFactory{}),
-		processor.DefaultOptionsRecoder()...,
+		processor.DefaultOptionsTranscoder()...,
 	)
 	return n, streammuxtypes.SenderConfig{}, nil
 }
@@ -170,8 +170,8 @@ func runTest(
 	require.NoError(t, streamMux.SwitchToOutputByProps(
 		ctx,
 		streammuxtypes.SenderProps{
-			RecoderConfig: streammuxtypes.RecoderConfig{
-				Output: streammuxtypes.RecoderOutputConfig{
+			TranscoderConfig: streammuxtypes.TranscoderConfig{
+				Output: streammuxtypes.TranscoderOutputConfig{
 					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
 						InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
 						OutputTrackIDs:     []int{0},
@@ -254,8 +254,8 @@ func runTest(
 				err := streamMux.SwitchToOutputByProps(
 					ctx,
 					streammuxtypes.SenderProps{
-						RecoderConfig: streammuxtypes.RecoderConfig{
-							Output: streammuxtypes.RecoderOutputConfig{
+						TranscoderConfig: streammuxtypes.TranscoderConfig{
+							Output: streammuxtypes.TranscoderOutputConfig{
 								VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
 									InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
 									OutputTrackIDs:     []int{0},

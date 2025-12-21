@@ -29,7 +29,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 	sourcePath RoutePath,
 	dstURL string,
 	streamKey secret.String,
-	recoderConfig *transcodertypes.RecoderConfig,
+	transcoderConfig *transcodertypes.TranscoderConfig,
 ) (_ret *RouteForwardingToRemote[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwardingToRemote(ctx, '%s', '%s')", sourcePath, dstURL)
 	defer func() {
@@ -73,7 +73,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 		return err
 	}, dstURL, streamKey, kernel.OutputConfig{})
 
-	fwd.StreamForwarder, err = NewStreamForwarder(ctx, fwd.Input.Node, fwd.Output, recoderConfig)
+	fwd.StreamForwarder, err = NewStreamForwarder(ctx, fwd.Input.Node, fwd.Output, transcoderConfig)
 	if err != nil {
 		return nil, fmt.Errorf("unable to build a stream forwarder from '%s' to '%s': %w", fwd.Input, fwd.Output, err)
 	}

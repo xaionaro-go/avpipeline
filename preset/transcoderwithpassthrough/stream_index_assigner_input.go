@@ -52,7 +52,7 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 	defer func() { logger.Tracef(ctx, "/reloadLocked") }()
 
 	if logger.FromCtx(ctx).Level() >= logger.LevelDebug {
-		logger.Debugf(ctx, "%#+v", spew.Sdump(s.StreamForward.RecodingConfig))
+		logger.Debugf(ctx, "%#+v", spew.Sdump(s.StreamForward.TranscodingConfig))
 	}
 
 	for k := range s.VideoIndexMap {
@@ -62,13 +62,13 @@ func (s *streamIndexAssignerInput[C, P]) reloadLocked(
 		delete(s.AudioIndexMap, k)
 	}
 
-	for _, cfg := range s.StreamForward.RecodingConfig.Output.VideoTrackConfigs {
+	for _, cfg := range s.StreamForward.TranscodingConfig.Output.VideoTrackConfigs {
 		for _, inputVideoTrackID := range cfg.InputTrackIDs {
 			s.VideoIndexMap[inputVideoTrackID] = cfg.OutputTrackIDs
 		}
 	}
 
-	for _, cfg := range s.StreamForward.RecodingConfig.Output.AudioTrackConfigs {
+	for _, cfg := range s.StreamForward.TranscodingConfig.Output.AudioTrackConfigs {
 		for _, inputAudioTrackID := range cfg.InputTrackIDs {
 			s.AudioIndexMap[inputAudioTrackID] = cfg.OutputTrackIDs
 		}

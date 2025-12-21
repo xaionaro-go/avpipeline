@@ -55,7 +55,7 @@ func (rm *outputAsResourceManager[C]) GetReusable(
 		return nil
 	}
 
-	return rm.asOutput().RecoderNode.Processor.Kernel.DecoderFactory.GetResources(
+	return rm.asOutput().TranscoderNode.Processor.Kernel.DecoderFactory.GetResources(
 		ctx,
 		isEncoder,
 		params,
@@ -75,7 +75,7 @@ func (rm *outputAsResourceManager[C]) canReuse(
 	logger.Debugf(ctx, "canReuse")
 	defer func() { logger.Debugf(ctx, "/canReuse: %v", _ret) }()
 
-	encRes := rm.asOutput().RecoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	encRes := rm.asOutput().TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution
 
 	getDecoderer, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionGetDecoderer](opts)
 	if !ok {
@@ -172,14 +172,14 @@ func (s *StreamMux[C]) closeUnusedOutputsLocked(
 		if key == activeVideoOutput.ID || key == activeAudioOutput.ID {
 			return true
 		}
-		err := output.ResetRecoder(ctx)
+		err := output.ResetTranscoder(ctx)
 		switch {
 		case err == nil:
 		case errors.As(err, &ErrNothingToReset{}):
 			logger.Tracef(ctx, "nothing to reset for output %v", key)
 			return true
 		default:
-			logger.Errorf(ctx, "unable to reset recoder of output %v: %v", key, err)
+			logger.Errorf(ctx, "unable to reset transcoder of output %v: %v", key, err)
 			return true
 		}
 		_ret++
@@ -188,20 +188,20 @@ func (s *StreamMux[C]) closeUnusedOutputsLocked(
 	return
 }
 
-func (o *Output[C]) ResetRecoder(
+func (o *Output[C]) ResetTranscoder(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "ResetRecoder")
-	defer func() { logger.Debugf(ctx, "/ResetRecoder: %v", _err) }()
-	if len(o.RecoderNode.Processor.Kernel.DecoderFactory.VideoDecoders) == 0 &&
-		len(o.RecoderNode.Processor.Kernel.DecoderFactory.AudioDecoders) == 0 &&
-		len(o.RecoderNode.Processor.Kernel.EncoderFactory.VideoEncoders) == 0 &&
-		len(o.RecoderNode.Processor.Kernel.EncoderFactory.AudioEncoders) == 0 {
+	logger.Debugf(ctx, "ResetTranscoder")
+	defer func() { logger.Debugf(ctx, "/ResetTranscoder: %v", _err) }()
+	if len(o.TranscoderNode.Processor.Kernel.DecoderFactory.VideoDecoders) == 0 &&
+		len(o.TranscoderNode.Processor.Kernel.DecoderFactory.AudioDecoders) == 0 &&
+		len(o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoEncoders) == 0 &&
+		len(o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioEncoders) == 0 {
 		return ErrNothingToReset{}
 	}
-	err := o.RecoderNode.Processor.Kernel.ResetHard(ctx)
+	err := o.TranscoderNode.Processor.Kernel.ResetHard(ctx)
 	if err != nil {
-		return fmt.Errorf("unable to reset recoder kernel: %w", err)
+		return fmt.Errorf("unable to reset transcoder kernel: %w", err)
 	}
 	return nil
 }

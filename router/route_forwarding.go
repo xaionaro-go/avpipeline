@@ -27,17 +27,17 @@ type ForwardOutputFactory[T any] interface {
 }
 
 type RouteForwarding[T any] struct {
-	Router          *Router[T]
-	SrcPath         RoutePath
-	GetSrcRouteMode GetRouteMode
-	OutputFactory   ForwardOutputFactory[T]
-	PublishMode     PublishMode
-	RecoderConfig   *transcodertypes.RecoderConfig
-	Locker          xsync.Mutex
-	CancelFunc      context.CancelFunc
-	Input           *Route[T]
-	Output          NodeForwardingOutput[T]
-	WaitGroup       sync.WaitGroup
+	Router           *Router[T]
+	SrcPath          RoutePath
+	GetSrcRouteMode  GetRouteMode
+	OutputFactory    ForwardOutputFactory[T]
+	PublishMode      PublishMode
+	TranscoderConfig *transcodertypes.TranscoderConfig
+	Locker           xsync.Mutex
+	CancelFunc       context.CancelFunc
+	Input            *Route[T]
+	Output           NodeForwardingOutput[T]
+	WaitGroup        sync.WaitGroup
 	StreamForwarder[GoBug63285RouteInterface[T], *ProcessorRouting]
 }
 
@@ -47,7 +47,7 @@ func (r *Router[T]) AddRouteForwarding(
 	getSrcRouteMode GetRouteMode,
 	outputFactory ForwardOutputFactory[T],
 	publishMode PublishMode,
-	recoderConfig *transcodertypes.RecoderConfig,
+	transcoderConfig *transcodertypes.TranscoderConfig,
 ) (_ret *RouteForwarding[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwarding(ctx, '%s', '%s', %s)", srcPath, outputFactory, publishMode)
 	defer func() {
@@ -56,12 +56,12 @@ func (r *Router[T]) AddRouteForwarding(
 	ctx = belt.WithField(ctx, "src_path", srcPath)
 
 	fwd := &RouteForwarding[T]{
-		Router:          r,
-		SrcPath:         srcPath,
-		GetSrcRouteMode: getSrcRouteMode,
-		OutputFactory:   outputFactory,
-		PublishMode:     publishMode,
-		RecoderConfig:   recoderConfig,
+		Router:           r,
+		SrcPath:          srcPath,
+		GetSrcRouteMode:  getSrcRouteMode,
+		OutputFactory:    outputFactory,
+		PublishMode:      publishMode,
+		TranscoderConfig: transcoderConfig,
 	}
 	if err := fwd.open(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize: %w", err)
@@ -169,9 +169,9 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 	}
 	fwd.Output = dstNode
 
-	f, err := NewStreamForwarder(ctx, src.Node, dstNode, fwd.RecoderConfig)
+	f, err := NewStreamForwarder(ctx, src.Node, dstNode, fwd.TranscoderConfig)
 	if err != nil {
-		return fmt.Errorf("unable to initialize a forwarder from '%s' to '%s' (%#+v): %w", src.Path, dstNode, fwd.RecoderConfig, err)
+		return fmt.Errorf("unable to initialize a forwarder from '%s' to '%s' (%#+v): %w", src.Path, dstNode, fwd.TranscoderConfig, err)
 	}
 	fwd.StreamForwarder = f
 

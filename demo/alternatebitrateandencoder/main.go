@@ -102,7 +102,7 @@ func main() {
 	inputNode := node.New(input)
 	var finalNode node.Abstract
 	finalNode = inputNode
-	var recoders []*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
+	var transcoders []*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]
 	for _, vcodec := range *videoCodecs {
 		hwDeviceName := codec.HardwareDeviceName(*hwDeviceName)
 		encoderFactory := codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
@@ -111,7 +111,7 @@ func main() {
 			HardwareDeviceType: 0,
 			HardwareDeviceName: hwDeviceName,
 		})
-		recoder, err := kernel.NewRecoder(
+		transcoder, err := kernel.NewTranscoder(
 			ctx,
 			codec.NewNaiveDecoderFactory(ctx, &codec.NaiveDecoderFactoryParams{
 				HardwareDeviceName: hwDeviceName,
@@ -122,38 +122,38 @@ func main() {
 		if err != nil {
 			l.Fatal(err)
 		}
-		defer recoder.Close(ctx)
-		l.Debugf("initialized a recoder to %s (hwdev:%s)...", *videoCodecs, hwDeviceName)
-		recoders = append(recoders, recoder)
+		defer transcoder.Close(ctx)
+		l.Debugf("initialized a transcoder to %s (hwdev:%s)...", *videoCodecs, hwDeviceName)
+		transcoders = append(transcoders, transcoder)
 	}
-	var recodingNode node.Abstract
-	var sw *kernel.Switch[*kernel.Recoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]
-	switch len(recoders) {
+	var transcodingNode node.Abstract
+	var sw *kernel.Switch[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]
+	switch len(transcoders) {
 	case 0:
 	case 1:
-		recodingNode = node.NewFromKernel(
+		transcodingNode = node.NewFromKernel(
 			ctx,
-			recoders[0],
-			processor.DefaultOptionsRecoder()...,
+			transcoders[0],
+			processor.DefaultOptionsTranscoder()...,
 		)
 	default:
-		sw = kernel.NewSwitch(recoders...)
+		sw = kernel.NewSwitch(transcoders...)
 		sw.SetVerifySwitchOutput(condition.And{
 			condition.MediaType(astiav.MediaTypeVideo),
 			condition.IsKeyFrame(true),
 		})
-		recodingNode = node.NewFromKernel(
+		transcodingNode = node.NewFromKernel(
 			ctx,
 			sw,
-			processor.DefaultOptionsRecoder()...,
+			processor.DefaultOptionsTranscoder()...,
 		)
 	}
-	if recodingNode != nil {
-		inputNode.PushPacketsTos.Add(recodingNode)
-		finalNode = recodingNode
+	if transcodingNode != nil {
+		inputNode.PushPacketsTos.Add(transcodingNode)
+		finalNode = transcodingNode
 
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
-			recodingNode.SetInputPacketFilter(ctx,
+			transcodingNode.SetInputPacketFilter(ctx,
 				packetfiltercondition.Packet{
 					condition.Function(sillyAlternationsJustForDemonstration(
 						sw,

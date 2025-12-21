@@ -699,8 +699,8 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 	if videoOutputKey == nil {
 		videoOutputKey = ptr(h.StreamMux.GetBestNotBypassOutput(ctx).GetKey())
 		logger.Tracef(ctx, "using best not-bypass output key: %v", videoOutputKey)
-		origConfig := h.StreamMux.GetRecoderConfig(ctx)
-		logger.Tracef(ctx, "original recoder config: %+v", origConfig)
+		origConfig := h.StreamMux.GetTranscoderConfig(ctx)
+		logger.Tracef(ctx, "original transcoder config: %+v", origConfig)
 		if len(origConfig.Output.VideoTrackConfigs) > 0 {
 			videoCfg := origConfig.Output.VideoTrackConfigs[0]
 			videoOutputKey.VideoCodec = codectypes.Name(videoCfg.CodecName)
@@ -774,9 +774,9 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 
 	if videoOutputKey.VideoCodec == codectypes.NameCopy {
 		logger.Infof(ctx, "switching to bypass mode")
-		err := h.StreamMux.EnableVideoRecodingBypass(ctx)
+		err := h.StreamMux.EnableVideoTranscodingBypass(ctx)
 		if err != nil {
-			return fmt.Errorf("unable to enable video recoding bypass: %w", err)
+			return fmt.Errorf("unable to enable video transcoding bypass: %w", err)
 		}
 		return nil
 	}

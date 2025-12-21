@@ -22,18 +22,18 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	ctx context.Context,
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
-	recoderConfig *transcodertypes.RecoderConfig,
+	transcoderConfig *transcodertypes.TranscoderConfig,
 ) (_ret StreamForwarder[CS, PS], _err error) {
-	logger.Tracef(ctx, "NewStreamForwarder(ctx, %s, %s, %#+v)", src, dst, recoderConfig)
+	logger.Tracef(ctx, "NewStreamForwarder(ctx, %s, %s, %#+v)", src, dst, transcoderConfig)
 	defer func() {
-		logger.Tracef(ctx, "/NewStreamForwarder(ctx, %s, %s, %#+v): %v %v", src, dst, recoderConfig, _ret, _err)
+		logger.Tracef(ctx, "/NewStreamForwarder(ctx, %s, %s, %#+v): %v %v", src, dst, transcoderConfig, _ret, _err)
 	}()
 	var fwd StreamForwarder[CS, PS]
 	var err error
-	if recoderConfig == nil {
+	if transcoderConfig == nil {
 		fwd, err = NewStreamForwarderCopy(ctx, src, dst)
 	} else {
-		fwd, err = NewStreamForwarderRecoding(ctx, src, dst, recoderConfig)
+		fwd, err = NewStreamForwarderTranscoding(ctx, src, dst, transcoderConfig)
 	}
 	if err != nil {
 		return nil, err

@@ -80,10 +80,10 @@ func main() {
 	defer output.Close(ctx)
 	outputNode := node.New(output)
 
-	// recoder node
+	// transcoder node
 
 	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
-	recoder, err := processor.NewRecoder(
+	transcoder, err := processor.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, &codec.NaiveDecoderFactoryParams{
 			HardwareDeviceName: hwDevName,
@@ -98,9 +98,9 @@ func main() {
 		nil,
 	)
 	assert(ctx, err == nil, err)
-	defer recoder.Close(ctx)
-	logger.Debugf(ctx, "initialized a recoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-	recodingNode := node.New(recoder)
+	defer transcoder.Close(ctx)
+	logger.Debugf(ctx, "initialized a transcoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
+	transcodingNode := node.New(transcoder)
 
 	// configure optional FPS downscaling
 
@@ -113,7 +113,7 @@ func main() {
 		if fps.Float64() > 1 {
 			logger.Fatalf(ctx, "scaling video framerate up is not supported in this demo, yet: %v", fps.Float64())
 		}
-		recodingNode.Processor.Kernel.Filter = framecondition.Or{
+		transcodingNode.Processor.Kernel.Filter = framecondition.Or{
 			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
 			framecondition.PacketOrFrame{
 				reduceframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{
@@ -123,10 +123,10 @@ func main() {
 		}
 	}
 
-	// route nodes: input -> recoder -> output
+	// route nodes: input -> transcoder -> output
 
-	inputNode.AddPushPacketsTo(ctx, recodingNode)
-	recodingNode.AddPushPacketsTo(ctx, outputNode)
+	inputNode.AddPushPacketsTo(ctx, transcodingNode)
+	transcodingNode.AddPushPacketsTo(ctx, outputNode)
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 
