@@ -393,7 +393,10 @@ func (o *Output) doOpen(
 	o.URLParsed = url
 	if cfg.SendBufferSize != 0 {
 		if err := o.UnsafeSetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
-			return fmt.Errorf("unable to set the send buffer size to %d: %w", cfg.SendBufferSize, err)
+			return ErrUnableToSetSendBufferSize{
+				Size: cfg.SendBufferSize,
+				Err:  err,
+			}
 		}
 		logger.Debugf(ctx, "set the send buffer size to %d", cfg.SendBufferSize)
 	}
