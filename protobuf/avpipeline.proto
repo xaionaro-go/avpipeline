@@ -181,3 +181,8 @@ message MonitorEvent {
   repeated libav.Frame frames = 5;
   bytes pipeline_side_data = 6;
 }
+
+message CustomOption {
+  string key = 1;
+  string value = 2;
+}
