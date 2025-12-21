@@ -16,11 +16,11 @@ func AutoBitRateCalculatorFromProto(
 		return nil, nil
 	case *avpipelinegrpc.AutoBitrateCalculator_Thresholds:
 		return &smtypes.AutoBitrateCalculatorThresholds{
-			OutputExtremelyHighQueueSizeDuration: time.Duration(calculator.Thresholds.GetOutputExtremelyHighQueueSizeDurationMS()) * time.Millisecond,
-			OutputVeryHighQueueSizeDuration:      time.Duration(calculator.Thresholds.GetOutputVeryHighQueueSizeDurationMS()) * time.Millisecond,
-			OutputHighQueueSizeDuration:          time.Duration(calculator.Thresholds.GetOutputHighQueueSizeDurationMS()) * time.Millisecond,
-			OutputLowQueueSizeDuration:           time.Duration(calculator.Thresholds.GetOutputLowQueueSizeDurationMS()) * time.Millisecond,
-			OutputVeryLowQueueSizeDuration:       time.Duration(calculator.Thresholds.GetOutputVeryLowQueueSizeDurationMS()) * time.Millisecond,
+			OutputExtremelyHighQueueSizeDuration: time.Duration(calculator.Thresholds.GetOutputExtremelyHighQueueSizeDurationMs()) * time.Millisecond,
+			OutputVeryHighQueueSizeDuration:      time.Duration(calculator.Thresholds.GetOutputVeryHighQueueSizeDurationMs()) * time.Millisecond,
+			OutputHighQueueSizeDuration:          time.Duration(calculator.Thresholds.GetOutputHighQueueSizeDurationMs()) * time.Millisecond,
+			OutputLowQueueSizeDuration:           time.Duration(calculator.Thresholds.GetOutputLowQueueSizeDurationMs()) * time.Millisecond,
+			OutputVeryLowQueueSizeDuration:       time.Duration(calculator.Thresholds.GetOutputVeryLowQueueSizeDurationMs()) * time.Millisecond,
 			IncreaseK:                            calculator.Thresholds.GetIncreaseK(),
 			DecreaseK:                            calculator.Thresholds.GetDecreaseK(),
 			QuickIncreaseK:                       calculator.Thresholds.GetQuickIncreaseK(),
@@ -29,7 +29,7 @@ func AutoBitRateCalculatorFromProto(
 		}, nil
 	case *avpipelinegrpc.AutoBitrateCalculator_LogK:
 		return &smtypes.AutoBitrateCalculatorLogK{
-			QueueOptimal:  time.Duration(calculator.LogK.GetQueueOptimalMS()) * time.Millisecond,
+			QueueOptimal:  time.Duration(calculator.LogK.GetQueueOptimalMs()) * time.Millisecond,
 			Inertia:       calculator.LogK.GetInertia(),
 			MovingAverage: MovingAverageFromGRPC[float64](calculator.LogK.GetMovingAverage()),
 		}, nil
@@ -37,10 +37,10 @@ func AutoBitRateCalculatorFromProto(
 		return smtypes.AutoBitrateCalculatorStatic(calculator.Static), nil
 	case *avpipelinegrpc.AutoBitrateCalculator_QueueSizeGapDecay:
 		return &smtypes.AutoBitrateCalculatorQueueSizeGapDecay{
-			QueueDurationOptimal: time.Duration(calculator.QueueSizeGapDecay.GetQueueOptimalMS()) * time.Millisecond,
+			QueueDurationOptimal: time.Duration(calculator.QueueSizeGapDecay.GetQueueOptimalMs()) * time.Millisecond,
 			QueueSizeMin:         smtypes.UB(calculator.QueueSizeGapDecay.GetQueueSizeMin()),
-			GapDecay:             time.Duration(calculator.QueueSizeGapDecay.GetGapDecayMS()) * time.Millisecond,
-			InertiaIncrease:      time.Duration(calculator.QueueSizeGapDecay.GetIncreaseInertiaMS()) * time.Millisecond,
+			GapDecay:             time.Duration(calculator.QueueSizeGapDecay.GetGapDecayMs()) * time.Millisecond,
+			InertiaIncrease:      time.Duration(calculator.QueueSizeGapDecay.GetIncreaseInertiaMs()) * time.Millisecond,
 			DerivativeSmoothed:   MovingAverageFromGRPC[smtypes.UBps](calculator.QueueSizeGapDecay.GetDerivativeSmoothed()),
 		}, nil
 	default:
@@ -59,11 +59,11 @@ func AutoBitRateCalculatorToProto(
 		return &avpipelinegrpc.AutoBitrateCalculator{
 			AutoBitrateCalculator: &avpipelinegrpc.AutoBitrateCalculator_Thresholds{
 				Thresholds: &avpipelinegrpc.AutoBitRateCalculatorThresholds{
-					OutputExtremelyHighQueueSizeDurationMS: uint64(c.OutputExtremelyHighQueueSizeDuration / time.Millisecond),
-					OutputVeryHighQueueSizeDurationMS:      uint64(c.OutputVeryHighQueueSizeDuration / time.Millisecond),
-					OutputHighQueueSizeDurationMS:          uint64(c.OutputHighQueueSizeDuration / time.Millisecond),
-					OutputLowQueueSizeDurationMS:           uint64(c.OutputLowQueueSizeDuration / time.Millisecond),
-					OutputVeryLowQueueSizeDurationMS:       uint64(c.OutputVeryLowQueueSizeDuration / time.Millisecond),
+					OutputExtremelyHighQueueSizeDurationMs: uint64(c.OutputExtremelyHighQueueSizeDuration / time.Millisecond),
+					OutputVeryHighQueueSizeDurationMs:      uint64(c.OutputVeryHighQueueSizeDuration / time.Millisecond),
+					OutputHighQueueSizeDurationMs:          uint64(c.OutputHighQueueSizeDuration / time.Millisecond),
+					OutputLowQueueSizeDurationMs:           uint64(c.OutputLowQueueSizeDuration / time.Millisecond),
+					OutputVeryLowQueueSizeDurationMs:       uint64(c.OutputVeryLowQueueSizeDuration / time.Millisecond),
 					IncreaseK:                              c.IncreaseK,
 					DecreaseK:                              c.DecreaseK,
 					QuickIncreaseK:                         c.QuickIncreaseK,
@@ -76,7 +76,7 @@ func AutoBitRateCalculatorToProto(
 		return &avpipelinegrpc.AutoBitrateCalculator{
 			AutoBitrateCalculator: &avpipelinegrpc.AutoBitrateCalculator_LogK{
 				LogK: &avpipelinegrpc.AutoBitrateCalculatorLogK{
-					QueueOptimalMS: uint64(c.QueueOptimal / time.Millisecond),
+					QueueOptimalMs: uint64(c.QueueOptimal / time.Millisecond),
 					Inertia:        c.Inertia,
 					MovingAverage:  MovingAverageToGRPC(c.MovingAverage),
 				},
@@ -92,10 +92,10 @@ func AutoBitRateCalculatorToProto(
 		return &avpipelinegrpc.AutoBitrateCalculator{
 			AutoBitrateCalculator: &avpipelinegrpc.AutoBitrateCalculator_QueueSizeGapDecay{
 				QueueSizeGapDecay: &avpipelinegrpc.AutoBitrateCalculatorQueueSizeGapDecay{
-					QueueOptimalMS:     uint64(c.QueueDurationOptimal / time.Millisecond),
+					QueueOptimalMs:     uint64(c.QueueDurationOptimal / time.Millisecond),
 					QueueSizeMin:       uint64(c.QueueSizeMin),
-					GapDecayMS:         uint64(c.GapDecay / time.Millisecond),
-					IncreaseInertiaMS:  uint64(c.InertiaIncrease / time.Millisecond),
+					GapDecayMs:         uint64(c.GapDecay / time.Millisecond),
+					IncreaseInertiaMs:  uint64(c.InertiaIncrease / time.Millisecond),
 					DerivativeSmoothed: MovingAverageToGRPC(c.DerivativeSmoothed),
 				},
 			},

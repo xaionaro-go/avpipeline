@@ -12,8 +12,8 @@ message PacketSideData {
 }
 
 message Rational {
-  int64 N = 1;
-  int64 D = 2;
+  int64 n = 1;
+  int64 d = 2;
 }
 
 message Packet {
@@ -21,49 +21,49 @@ message Packet {
   int64 dts = 2;
   uint32 data_size = 3;
   bytes data = 4;
-  int32 streamIndex = 5;
+  int32 stream_index = 5;
   uint32 flags = 6;
-  PacketSideData sideData = 7;
+  PacketSideData side_data = 7;
   int64 duration = 8;
   int64 pos = 9;
-  Rational timeBase = 10;
+  Rational time_base = 10;
 }
 
 message ChannelLayout {
   uint32 order = 1;
-  int32 nbChannels = 2;
+  int32 nb_channels = 2;
   uint64 u = 3;
 }
 
 message CodecParameters {
-  int32 codecType = 1;
-  uint32 codecID = 2;
-  uint32 codecTag = 3;
-  bytes extraData = 4;
-  PacketSideData codedSideData = 5;
+  int32 codec_type = 1;
+  uint32 codec_id = 2;
+  uint32 codec_tag = 3;
+  bytes extra_data = 4;
+  PacketSideData coded_side_data = 5;
   int32 format = 6;
-  int64 bitRate = 7;
-  int32 bitsPerCodecSample = 8;
-  int32 bitsPerRawSample = 9;
+  int64 bit_rate = 7;
+  int32 bits_per_codec_sample = 8;
+  int32 bits_per_raw_sample = 9;
   int32 profile = 10;
   int32 level = 11;
   int32 width = 12;
   int32 height = 13;
-  Rational sampleAspectRatio = 14;
+  Rational sample_aspect_ratio = 14;
   Rational framerate = 15;
-  uint32 fieldOrder = 16;
-  uint32 colorRange = 17;
-  uint32 colorTRC = 18;
-  uint32 colorSpace = 19;
-  uint32 chromaLocation = 20;
-  int32 videoDelay = 21;
-  ChannelLayout chLayout = 22;
-  int32 sampleRate = 23;
-  int32 blockAlign = 24;
-  int32 frameSize = 25;
-  int32 initialPadding = 26;
-  int32 trailingPadding = 27;
-  int32 seekPreroll = 28;
+  uint32 field_order = 16;
+  uint32 color_range = 17;
+  uint32 color_trc = 18;
+  uint32 color_space = 19;
+  uint32 chroma_location = 20;
+  int32 video_delay = 21;
+  ChannelLayout ch_layout = 22;
+  int32 sample_rate = 23;
+  int32 block_align = 24;
+  int32 frame_size = 25;
+  int32 initial_padding = 26;
+  int32 trailing_padding = 27;
+  int32 seek_preroll = 28;
 }
 
 message DictionaryItem {
@@ -77,21 +77,21 @@ message Dictionary {
 
 message Stream {
   int32 index = 1;
-  CodecParameters codecParameters = 2;
-  Rational timeBase = 3;
-  int64 startTime = 4;
+  CodecParameters codec_parameters = 2;
+  Rational time_base = 3;
+  int64 start_time = 4;
   int64 duration = 5;
-  int64 nbFrames = 6;
+  int64 nb_frames = 6;
   int32 disposition = 7;
   int32 discard = 8;
-  Rational sampleAspectRatio = 9;
-  Dictionary Metadata = 10;
-  Rational avgFrameRate = 11;
-  Packet AttachedPic = 12;
-  PacketSideData SideData = 13;
-  int32 eventFlags = 14;
-  Rational rFrameRate = 15;
-  int32 ptsWrapBits = 16;
+  Rational sample_aspect_ratio = 9;
+  Dictionary metadata = 10;
+  Rational avg_frame_rate = 11;
+  Packet attached_pic = 12;
+  PacketSideData side_data = 13;
+  int32 event_flags = 14;
+  Rational r_frame_rate = 15;
+  int32 pts_wrap_bits = 16;
 }
 
 message FrameSideData {
@@ -106,39 +106,39 @@ message Frame {
   uint32 data_size = 1;
   bytes data = 2;
   repeated uint32 linesize = 3;
-  bytes extendedData = 4;
+  bytes extended_data = 4;
   int32 width = 5;
   int32 height = 6;
-  int32 nbSamples = 7;
+  int32 nb_samples = 7;
   int32 format = 8;
-  int32 keyFrame = 9;
-  uint32 pictType = 10;
-  Rational sampleAspectRatio = 11;
+  int32 key_frame = 9;
+  uint32 pict_type = 10;
+  Rational sample_aspect_ratio = 11;
   int64 pts = 12;
   int64 pkt_dts = 13;
-  Rational timeBase = 14;
+  Rational time_base = 14;
   int32 quality = 15;
-  int32 repeatPict = 16;
-  int32 interlacedFrame = 17;
-  int32 topFieldFirst = 18;
-  int32 paletteHasChanged = 19;
-  int32 sampleRate = 20;
-  FrameSideData sideData = 21;
+  int32 repeat_pict = 16;
+  int32 interlaced_frame = 17;
+  int32 top_field_first = 18;
+  int32 palette_has_changed = 19;
+  int32 sample_rate = 20;
+  FrameSideData side_data = 21;
   int32 flags = 22;
-  uint32 colorRange = 23;
-  uint32 colorTRC = 24;
-  uint32 colorSpace = 25;
-  uint32 chromaLocation = 26;
-  int64 bestEffortTimestamp = 27;
-  int64 pktPos = 28;
+  uint32 color_range = 23;
+  uint32 color_trc = 24;
+  uint32 color_space = 25;
+  uint32 chroma_location = 26;
+  int64 best_effort_timestamp = 27;
+  int64 pkt_pos = 28;
   Dictionary metadata = 29;
-  int32 decodeErrorFlags = 30;
-  int32 pktSize = 31;
-  uint64 cropTop = 32;
-  uint64 cropBottom = 33;
-  uint64 cropLeft = 34;
-  uint64 cropRight = 35;
-  ChannelLayout chLayout = 36;
+  int32 decode_error_flags = 30;
+  int32 pkt_size = 31;
+  uint64 crop_top = 32;
+  uint64 crop_bottom = 33;
+  uint64 crop_left = 34;
+  uint64 crop_right = 35;
+  ChannelLayout ch_layout = 36;
   int64 duration = 37;
 }
 
@@ -147,11 +147,11 @@ message Class {
 }
 
 message CodecContext {
-  Class avClass = 1;
-  int32 logLevelOffset = 2;
-  int32 codecType = 3;
-  uint32 codecID = 4;
-  uint32 codecTag = 5;
+  Class av_class = 1;
+  int32 log_level_offset = 2;
+  int32 codec_type = 3;
+  uint32 codec_id = 4;
+  uint32 codec_tag = 5;
   
 }
 

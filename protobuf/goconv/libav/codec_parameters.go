@@ -18,7 +18,7 @@ func CodecParametersFromGo(input *astiav.CodecParameters) *CodecParameters {
 	}
 	return &CodecParameters{
 		//CodecType: int32(input.CodecType),
-		CodecID:  uint32(input.CodecID()),
+		CodecId:  uint32(input.CodecID()),
 		CodecTag: uint32(input.CodecTag()),
 		//ExtraData:
 		//CodedSideData: PacketSideDataFromGo(input.CodedSideData).Protobuf(),

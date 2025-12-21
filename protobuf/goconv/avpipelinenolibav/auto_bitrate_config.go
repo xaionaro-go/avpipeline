@@ -84,13 +84,13 @@ func AutoBitRateVideoConfigFromProto(
 		ResolutionsAndBitRates:              AutoBitRateResolutionAndBitRateConfigsFromProto(cfg.ResolutionsAndBitRates),
 		Calculator:                          calc,
 		FPSReducer:                          FPSReducerConfigFromProto(cfg.GetFpsReducer()),
-		CheckInterval:                       time.Duration(cfg.GetCheckIntervalMS()) * time.Millisecond,
+		CheckInterval:                       time.Duration(cfg.GetCheckIntervalMs()) * time.Millisecond,
 		AutoByPass:                          cfg.GetAutoByPass(),
 		MaxBitRate:                          smtypes.Ubps(cfg.GetMaxBitRateBps()),
 		MinBitRate:                          smtypes.Ubps(cfg.GetMinBitRateBps()),
-		BitRateIncreaseSlowdown:             time.Duration(cfg.GetBitRateIncreaseSlowdownMS()) * time.Millisecond,
-		ResolutionSlowdownDurationUpgrade:   time.Duration(cfg.GetResolutionSlowdownDurationUpgradeMS()) * time.Millisecond,
-		ResolutionSlowdownDurationDowngrade: time.Duration(cfg.GetResolutionSlowdownDurationDowngradeMS()) * time.Millisecond,
+		BitRateIncreaseSlowdown:             time.Duration(cfg.GetBitRateIncreaseSlowdownMs()) * time.Millisecond,
+		ResolutionSlowdownDurationUpgrade:   time.Duration(cfg.GetResolutionSlowdownDurationUpgradeMs()) * time.Millisecond,
+		ResolutionSlowdownDurationDowngrade: time.Duration(cfg.GetResolutionSlowdownDurationDowngradeMs()) * time.Millisecond,
 	}, nil
 }
 
@@ -110,12 +110,12 @@ func AutoBitRateVideoConfigToProto(
 		ResolutionsAndBitRates:                AutoBitRateResolutionAndBitRateConfigsToProto(cfg.ResolutionsAndBitRates),
 		Calculator:                            calc,
 		FpsReducer:                            FPSReducerConfigToProto(cfg.FPSReducer),
-		CheckIntervalMS:                       uint64(cfg.CheckInterval / time.Millisecond),
+		CheckIntervalMs:                       uint64(cfg.CheckInterval / time.Millisecond),
 		AutoByPass:                            cfg.AutoByPass,
 		MaxBitRateBps:                         uint64(cfg.MaxBitRate),
 		MinBitRateBps:                         uint64(cfg.MinBitRate),
-		BitRateIncreaseSlowdownMS:             uint64(cfg.BitRateIncreaseSlowdown / time.Millisecond),
-		ResolutionSlowdownDurationUpgradeMS:   uint64(cfg.ResolutionSlowdownDurationUpgrade / time.Millisecond),
-		ResolutionSlowdownDurationDowngradeMS: uint64(cfg.ResolutionSlowdownDurationDowngrade / time.Millisecond),
+		BitRateIncreaseSlowdownMs:             uint64(cfg.BitRateIncreaseSlowdown / time.Millisecond),
+		ResolutionSlowdownDurationUpgradeMs:   uint64(cfg.ResolutionSlowdownDurationUpgrade / time.Millisecond),
+		ResolutionSlowdownDurationDowngradeMs: uint64(cfg.ResolutionSlowdownDurationDowngrade / time.Millisecond),
 	}, nil
 }
