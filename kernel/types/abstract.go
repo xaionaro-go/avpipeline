@@ -1,17 +1,12 @@
 package types
 
 import (
-	"fmt"
-
-	"github.com/xaionaro-go/avpipeline/types"
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 )
 
 type Abstract interface {
+	typesnolibav.Abstract
 	SendInputer
-	fmt.Stringer
-	types.Closer
-	types.GetObjectIDer
-	CloseChaner
 	Generator
 }
 

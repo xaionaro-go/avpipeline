@@ -1,7 +1,7 @@
 package avpipelinenolibav
 
 import (
-	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )

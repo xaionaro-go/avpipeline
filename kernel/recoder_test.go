@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/kernel/typesnolibav"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -65,7 +66,7 @@ func TestRecoderNoFailure(t *testing.T) {
 				ctx,
 				fromURL, secret.New(""),
 				kernel.InputConfig{
-					OnPreClose: kernel.HookFunc(func(ctx context.Context, i kernel.Abstract) error {
+					OnPreClose: kernel.HookFunc(func(ctx context.Context, i typesnolibav.Abstract) error {
 						time.Sleep(time.Second) // TODO: remove this ugly hack
 						return nil
 					}),
