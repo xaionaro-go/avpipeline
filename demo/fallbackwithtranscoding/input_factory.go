@@ -13,7 +13,7 @@ type inputFactory struct {
 	URL string
 }
 
-var _ inputwithfallback.InputFactory[*kernel.Input, *codec.NaiveDecoderFactory] = (*inputFactory)(nil)
+var _ inputwithfallback.InputFactory[*kernel.Input, *codec.NaiveDecoderFactory, struct{}] = (*inputFactory)(nil)
 
 func (f *inputFactory) String() string {
 	return f.URL
@@ -21,12 +21,14 @@ func (f *inputFactory) String() string {
 
 func (f *inputFactory) NewInput(
 	ctx context.Context,
+	_ *inputwithfallback.InputChain[*kernel.Input, *codec.NaiveDecoderFactory, struct{}],
 ) (*kernel.Input, error) {
 	return kernel.NewInputFromURL(ctx, f.URL, secret.New(""), kernel.InputConfig{})
 }
 
 func (f *inputFactory) NewDecoderFactory(
 	ctx context.Context,
+	_ *inputwithfallback.InputChain[*kernel.Input, *codec.NaiveDecoderFactory, struct{}],
 ) (*codec.NaiveDecoderFactory, error) {
 	return codec.NewNaiveDecoderFactory(ctx, nil), nil
 }

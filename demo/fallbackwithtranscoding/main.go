@@ -107,9 +107,9 @@ func main() {
 
 	defer logger.Infof(ctx, "finishing: finalization")
 
-	inputs, err := inputwithfallback.New[*kernel.Input, *codec.NaiveDecoderFactory, struct{}](
+	inputs, err := inputwithfallback.New(
 		ctx,
-		[]inputwithfallback.InputFactory[*kernel.Input, *codec.NaiveDecoderFactory]{
+		[]inputwithfallback.InputFactory[*kernel.Input, *codec.NaiveDecoderFactory, struct{}]{
 			&inputFactory{URL: fromURLMain},
 			&inputFactory{URL: fromURLFallback},
 		},

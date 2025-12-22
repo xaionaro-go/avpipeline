@@ -44,7 +44,7 @@ var _ InputKernel = (*kernel.Input)(nil)
 // retryable:input -> filter (-> autoheaders -> decoder) -> syncBarrier
 type InputChain[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	ID           InputID
-	InputFactory InputFactory[K, DF]
+	InputFactory InputFactory[K, DF, C]
 	Input        *InputNode[K, C]
 	FilterSwitch *barrierstategetter.SwitchOutput
 	Filter       *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
@@ -58,7 +58,7 @@ type InputChain[K InputKernel, DF codec.DecoderFactory, C any] struct {
 func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 	ctx context.Context,
 	inputID InputID,
-	inputFactory InputFactory[K, DF],
+	inputFactory InputFactory[K, DF, C],
 	filterSwitch *barrierstategetter.SwitchOutput,
 	syncSwitch *barrierstategetter.SwitchOutput,
 	onKernelOpen func(context.Context, *InputChain[K, DF, C]),
@@ -73,7 +73,7 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		SyncBarrier:  node.NewWithCustomDataFromKernel[C](ctx, kernel.NewBarrier(ctx, syncSwitch)),
 	}
 
-	decoderFactory, err := inputFactory.NewDecoderFactory(ctx)
+	decoderFactory, err := inputFactory.NewDecoderFactory(ctx, r)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create decoder factory for input %v: %w", inputID, err)
 	}
@@ -87,7 +87,7 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 
 	inputKernel := kernel.NewRetryable(ctx,
 		func(ctx context.Context) (K, error) {
-			return inputFactory.NewInput(ctx)
+			return inputFactory.NewInput(ctx, r)
 		},
 		func(ctx context.Context, k K, err error) error {
 			logger.Errorf(ctx, "input %v error: %v", inputID, err)

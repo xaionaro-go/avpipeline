@@ -68,7 +68,7 @@ func main() {
 
 	inputs, err := inputwithfallback.New[*kernel.Input, codec.DecoderFactory, struct{}](
 		ctx,
-		[]inputwithfallback.InputFactory[*kernel.Input, codec.DecoderFactory]{
+		[]inputwithfallback.InputFactory[*kernel.Input, codec.DecoderFactory, struct{}]{
 			&inputFactory{URL: fromURLMain},
 			&inputFactory{URL: fromURLFallback},
 		},
