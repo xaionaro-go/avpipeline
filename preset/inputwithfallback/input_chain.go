@@ -116,8 +116,8 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		inputKernel,
 		processor.DefaultOptionsInput()...,
 	)
-	r.Input.AddPushPacketsTo(ctx, r.Filter)
-	r.Input.AddPushFramesTo(ctx, r.Filter)
+	r.Input.AddPushPacketsTo(ctx, r.Filter, r.onInputPacket())
+	r.Input.AddPushFramesTo(ctx, r.Filter, r.onInputFrame())
 	if r.Decoder == nil {
 		r.Filter.AddPushPacketsTo(ctx, r.SyncBarrier)
 		r.Filter.AddPushFramesTo(ctx, r.SyncBarrier)

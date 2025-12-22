@@ -57,6 +57,17 @@ func (k *AudioNormalize) Match(
 	return true
 }
 
+func (k *AudioNormalize) Reset(
+	ctx context.Context,
+) (_ret error) {
+	logger.Tracef(ctx, "Reset")
+	defer func() { logger.Tracef(ctx, "/Reset: %v", _ret) }()
+	return xsync.DoR1(ctx, &k.Locker, func() error {
+		k.MaxSeen = 0
+		return nil
+	})
+}
+
 func (k *AudioNormalize) normalizeAudioFrame(
 	ctx context.Context,
 	input frame.Input,
