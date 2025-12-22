@@ -1,4 +1,4 @@
-package kernel
+package audionormalize
 
 import (
 	"context"
@@ -9,9 +9,8 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
-	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -23,9 +22,9 @@ type AudioNormalize struct {
 	Scratch    []byte
 }
 
-var _ Abstract = (*AudioNormalize)(nil)
+var _ condition.Condition = (*AudioNormalize)(nil)
 
-func NewAudioNormalize(
+func New(
 	targetPeak float64,
 	maxGain float64,
 ) (*AudioNormalize, error) {
@@ -38,54 +37,29 @@ func NewAudioNormalize(
 	}, nil
 }
 
-func (*AudioNormalize) SendInputPacket(
-	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
-	return fmt.Errorf("AudioNormalize kernel does not support packets, only frames")
+func (k *AudioNormalize) String() string {
+	return fmt.Sprintf("AudioNormalize(TargetPeak=%v, MaxGain=%v; MaxSeen=%v)", k.TargetPeak, k.MaxGain, k.MaxSeen)
 }
 
-func (k *AudioNormalize) SendInputFrame(
+func (k *AudioNormalize) Match(
 	ctx context.Context,
 	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "SendInputFrame")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+) (_ret bool) {
+	logger.Tracef(ctx, "Match")
+	defer func() { logger.Tracef(ctx, "/Match: %v", _ret) }()
 	switch input.GetMediaType() {
 	case astiav.MediaTypeAudio:
-		return xsync.DoA3R1(ctx, &k.Locker, k.sendInputFrameAudio, ctx, input, outputFramesCh)
+		err := xsync.DoA2R1(ctx, &k.Locker, k.normalizeAudioFrame, ctx, input)
+		if err != nil {
+			logger.Errorf(ctx, "AudioNormalize: unable to normalize audio frame: %v", err)
+		}
 	}
-	return k.passthrough(ctx, input, outputFramesCh)
+	return true
 }
 
-func (k *AudioNormalize) passthrough(
+func (k *AudioNormalize) normalizeAudioFrame(
 	ctx context.Context,
 	input frame.Input,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "passthrough")
-	defer func() { logger.Tracef(ctx, "/passthrough: %v", _err) }()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case outputFramesCh <- frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	):
-	}
-	return nil
-}
-
-func (k *AudioNormalize) sendInputFrameAudio(
-	ctx context.Context,
-	input frame.Input,
-	outputFramesCh chan<- frame.Output,
 ) (_err error) {
 	logger.Tracef(ctx, "sendInputFrameAudio")
 	defer func() { logger.Tracef(ctx, "/sendInputFrameAudio: %v", _err) }()
@@ -154,32 +128,6 @@ func (k *AudioNormalize) sendInputFrameAudio(
 		return fmt.Errorf("unable to set frame data from buffer: %w", err)
 	}
 
-	return nil
-}
-
-func (k *AudioNormalize) GetObjectID() globaltypes.ObjectID {
-	return globaltypes.GetObjectID(k)
-}
-
-func (*AudioNormalize) String() string {
-	return "AudioNormalize"
-}
-
-func (*AudioNormalize) Close(context.Context) error {
-	return nil
-}
-
-func (*AudioNormalize) CloseChan() <-chan struct{} {
-	return nil
-}
-
-func (*AudioNormalize) Generate(
-	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "Generate")
-	defer func() { logger.Tracef(ctx, "/Generate: %v", _err) }()
 	return nil
 }
 
