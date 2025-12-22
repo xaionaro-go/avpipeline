@@ -752,12 +752,12 @@ func (e *streamEncoderUnlocked) fitFrameForEncoding(
 		if res == nil {
 			return nil, fmt.Errorf("unable to get the resolution from the encoder")
 		}
+		encoderPixelFormat := e.Encoder.CodecContext().PixelFormat()
 		if encoderDebug {
-			logger.Tracef(ctx, "input frame: %dx%d (%s); encoder resolution: %s", input.Frame.Width(), input.Frame.Height(), input.CodecParameters.CodecID(), res)
+			logger.Tracef(ctx, "input frame: %dx%d/%s (%s); encoder resolution: %s, encoder pixel format: %s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), input.CodecParameters.CodecID(), res, encoderPixelFormat)
 		}
-		// TODO: also check if non-hardware-backed pixel formats do match
 		if !encoderRescaleSameResolution {
-			if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) {
+			if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) && input.PixelFormat() == encoderPixelFormat {
 				return []*astiav.Frame{input.Frame}, nil
 			}
 		}
