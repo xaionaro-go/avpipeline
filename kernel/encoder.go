@@ -752,7 +752,7 @@ func (e *streamEncoderUnlocked) fitFrameForEncoding(
 		if res == nil {
 			return nil, fmt.Errorf("unable to get the resolution from the encoder")
 		}
-		encoderPixelFormat := e.Encoder.CodecContext().PixelFormat()
+		encoderPixelFormat := e.CodecContext().PixelFormat()
 		if encoderDebug {
 			logger.Tracef(ctx, "input frame: %dx%d/%s (%s); encoder resolution: %s, encoder pixel format: %s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), input.CodecParameters.CodecID(), res, encoderPixelFormat)
 		}
@@ -761,10 +761,10 @@ func (e *streamEncoderUnlocked) fitFrameForEncoding(
 				return []*astiav.Frame{input.Frame}, nil
 			}
 		}
-		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat())
+		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext().PixelFormat())
 		scaledFrame, err := e.getScaledFrame(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("unable to scale the frame from %dx%d/%s to %s/%s: %w", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.Encoder.CodecContext().PixelFormat(), err)
+			return nil, fmt.Errorf("unable to scale the frame from %dx%d/%s to %s/%s: %w", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext().PixelFormat(), err)
 		}
 		if encoderCopyTimeAfterScaling {
 			scaledFrame.SetPts(input.Frame.Pts())
@@ -777,7 +777,7 @@ func (e *streamEncoderUnlocked) fitFrameForEncoding(
 		if inPCMFmt == nil {
 			return nil, fmt.Errorf("unable to get PCM audio format from the input frame")
 		}
-		encPCMFmt := e.Encoder.GetPCMAudioFormat(ctx)
+		encPCMFmt := e.GetPCMAudioFormat(ctx)
 		if encPCMFmt == nil {
 			return []*astiav.Frame{input.Frame}, nil
 		}

@@ -447,3 +447,7 @@ func (e *EncoderFullLocked) checkCallCount(context.Context) context.CancelFunc {
 func (e *EncoderFullLocked) Codec() *astiav.Codec {
 	return e.codec
 }
+
+func (e *EncoderFullLocked) CodecContext() *astiav.CodecContext {
+	return e.codecContext
+}
