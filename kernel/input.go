@@ -23,6 +23,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/observability"
@@ -66,6 +67,8 @@ type Input struct {
 	SyncStartUnixNano atomic.Int64
 	PTSShift          atomic.Int64
 	DTSShift          atomic.Int64
+
+	OutputFilters []packetcondition.Condition
 
 	WaitGroup sync.WaitGroup
 }
@@ -462,6 +465,13 @@ func (i *Input) Generate(
 
 	lastDuration := map[int]int64{}
 	sendPkt := func(outPkt *packet.Output) error {
+		for _, filter := range i.OutputFilters {
+			if !filter.Match(ctx, (packet.Input)(*outPkt)) {
+				logger.Tracef(ctx, "packet filtered out by %s: stream:%d pos:%d pts:%d", filter, outPkt.StreamIndex(), outPkt.Pos(), outPkt.Pts())
+				return nil
+			}
+		}
+
 		i.slowdownIfNeeded(ctx, outPkt)
 
 		codecParams := outPkt.Stream.CodecParameters()
