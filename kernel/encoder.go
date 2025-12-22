@@ -61,7 +61,7 @@ var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
 var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
 
 type streamEncoder struct {
-	codec.Encoder
+	Encoder         codec.Encoder
 	Resampler       *resampler.Resampler
 	ResampledFrames []*astiav.Frame
 	Scaler          scaler.Scaler
@@ -278,10 +278,10 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	case codec.IsEncoderRaw(encoder.Encoder):
 		return nil
 	default:
-		err = e.initOutputStream(ctx, streamIndex, encoder)
+		err = e.initOutputStream(ctx, streamIndex, encoder.Encoder)
 	}
 	if err != nil {
-		return fmt.Errorf("unable to init an output stream for encoder %s for input stream #%d: %w", encoder, streamIndex, err)
+		return fmt.Errorf("unable to init an output stream for encoder %s for input stream #%d: %w", encoder.Encoder, streamIndex, err)
 	}
 
 	return nil
@@ -559,6 +559,7 @@ func (e *Encoder[EF]) SendInputFrame(
 	}
 
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+		streamEncoder := streamEncoder.withUnlockedEncoder(encoder)
 		fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
 		if err != nil {
 			return fmt.Errorf("unable to fit the frame for encoding: %w", err)
@@ -724,7 +725,21 @@ func (e *Encoder[EF]) drain(
 	})
 }
 
-func (e *streamEncoder) fitFrameForEncoding(
+type streamEncoderUnlocked struct {
+	codec.Encoder
+	*streamEncoder
+}
+
+func (e *streamEncoder) withUnlockedEncoder(
+	encoder codec.Encoder,
+) *streamEncoderUnlocked {
+	return &streamEncoderUnlocked{
+		Encoder:       encoder,
+		streamEncoder: e,
+	}
+}
+
+func (e *streamEncoderUnlocked) fitFrameForEncoding(
 	ctx context.Context,
 	input frame.Input,
 ) (fittedFrames []*astiav.Frame, _err error) {
@@ -795,7 +810,7 @@ func getPCMAudioFormatFromFrame(
 	}
 }
 
-func (e *streamEncoder) getResampledFrames(
+func (e *streamEncoderUnlocked) getResampledFrames(
 	ctx context.Context,
 	inputFrame *astiav.Frame,
 	outPCMFmt codec.PCMAudioFormat,
@@ -855,7 +870,7 @@ func (e *streamEncoder) getResampledFrames(
 	return resampledFrames, nil
 }
 
-func (e *streamEncoder) prepareResampler(
+func (e *streamEncoderUnlocked) prepareResampler(
 	ctx context.Context,
 	inPCMFmt codec.PCMAudioFormat,
 	outPCMFmt codec.PCMAudioFormat,
@@ -887,7 +902,7 @@ func (e *streamEncoder) prepareResampler(
 	return nil
 }
 
-func (e *streamEncoder) getScaledFrame(
+func (e *streamEncoderUnlocked) getScaledFrame(
 	ctx context.Context,
 	input frame.Input,
 ) (_ret *astiav.Frame, _err error) {
@@ -1145,7 +1160,7 @@ func (e *Encoder[EF]) resetSoft(
 
 	var errs []error
 	for streamIndex, encoder := range e.encoders {
-		if err := encoder.Flush(ctx, nil); err != nil {
+		if err := encoder.Encoder.Flush(ctx, nil); err != nil {
 			errs = append(errs, fmt.Errorf("unable to reset the encoder for stream #%d: %w", streamIndex, err))
 		}
 	}
@@ -1198,7 +1213,7 @@ func (e *Encoder[EF]) isDirty(ctx context.Context) (_ret bool) {
 	defer func() { logger.Tracef(ctx, "/isDirty: %v", _ret) }()
 	defer func() { e.isDirtyCache.Store(_ret) }()
 	for _, encoder := range e.encoders {
-		if encoder.IsDirty() {
+		if encoder.Encoder.IsDirty() {
 			return true
 		}
 	}
@@ -1238,7 +1253,7 @@ func (e *Encoder[EF]) Flush(
 					err := e.drain(
 						ctx,
 						outputPacketCh,
-						encoder.Flush,
+						encoder.Encoder.Flush,
 						e.outputStreams[streamIndex],
 						FrameInfo{
 							StreamIndex: streamIndex,
