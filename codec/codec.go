@@ -174,6 +174,13 @@ func (c *codecInternals) IsEncoder() bool {
 	return c.codec.IsEncoder()
 }
 
+func (c *codecInternals) isMediaCodec() bool {
+	if c.codec == nil {
+		return false
+	}
+	return strings.HasSuffix(c.codec.Name(), "_mediacodec")
+}
+
 func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "reset")
 	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
@@ -395,7 +402,7 @@ func newCodec(
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 
 		defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
-		if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+		if c.isMediaCodec() {
 			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
 				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
 			}
@@ -446,7 +453,7 @@ func newCodec(
 					customOptions.Set("bitrate_mode", rcMode, 0) // TODO: do we need to deduplicate this with the line above?
 				}
 			}
-			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+			if c.isMediaCodec() {
 				{
 					// TODO: delete this block, this is a temporary workaround
 					//       until it'll become clear how to bypass the quality floor
@@ -492,7 +499,7 @@ func newCodec(
 				}
 			}
 		} else {
-			if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+			if c.isMediaCodec() {
 				if customOptions.Get("pixel_format", nil, 0) == nil {
 					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 					logIfError(customOptions.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
@@ -679,7 +686,7 @@ func newCodec(
 	case err == nil:
 	case errors.Is(err, astiav.ErrExternal):
 		// "Generic error in an external library"
-		if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+		if c.isMediaCodec() {
 			// there were known cases where MediaCodec returned ErrExternal due to
 			// "ERROR_INSUFFICIENT_RESOURCE" (https://developer.android.com/reference/android/media/MediaCodec.CodecException#ERROR_INSUFFICIENT_RESOURCE)
 			if input.Params.ResourceManager == nil {
@@ -708,7 +715,7 @@ func newCodec(
 func (c *Codec) setQuirks(ctx context.Context) {}
 
 func (c *Codec) logHints(ctx context.Context) {
-	if strings.HasSuffix(c.codec.Name(), "_mediacodec") {
+	if c.isMediaCodec() {
 		height := c.codecContext.Height()
 		suggestedHeight := (height + 15) &^ 15
 		if suggestedHeight != height {
