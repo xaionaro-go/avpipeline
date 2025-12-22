@@ -273,9 +273,11 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 			if !ok {
 				return
 			}
+			logger.Tracef(ctx, "got a decoded %s frame from the decoder", f.GetMediaType())
 			func() {
 				defer frame.Pool.Put(f.Frame)
 				if encoderError != nil {
+					logger.Tracef(ctx, "skipping encoding because there is already an encoder error: %v", encoderError)
 					return
 				}
 
@@ -286,6 +288,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 				}
 				err := r.Encoder.SendInputFrame(ctx, inputFrame, outputPacketsCh, outputFramesCh)
 				if err != nil {
+					logger.Tracef(ctx, "encoder returned an error: %v", err)
 					encoderError = err
 				}
 			}()

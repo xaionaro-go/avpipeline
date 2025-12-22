@@ -444,7 +444,7 @@ func (d *Decoder[DF]) send(
 		streamInfo,
 	)
 	logger.Tracef(ctx, "sending a %s frame", frameToSend.GetMediaType())
-	defer func() { logger.Tracef(ctx, "/sending a %s frame", frameToSend.GetMediaType()) }()
+	defer func() { logger.Tracef(ctx, "/sending a %s frame: %v", frameToSend.GetMediaType(), _err) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
