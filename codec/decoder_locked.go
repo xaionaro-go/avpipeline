@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -27,7 +26,6 @@ type CallbackFrameReceiver func(
 type DecoderLocked struct {
 	*Codec
 	receivedKeyFrame bool
-	IsDirtyValue     atomic.Bool
 }
 
 type DecoderInput struct {
@@ -66,7 +64,7 @@ func (d *DecoderLocked) SendPacket(
 		}
 		d.receivedKeyFrame = true
 	}
-	d.IsDirtyValue.Store(true)
+	d.isDirty = true
 	return d.codecContext.SendPacket(p)
 }
 
@@ -131,9 +129,9 @@ func (d *DecoderLocked) Flush(
 
 	defer func() {
 		if _err == nil {
-			if d.IsDirtyValue.Load() {
-				logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", d)
-				d.IsDirtyValue.Store(false)
+			if d.isDirty {
+				logger.Errorf(ctx, "%v is still dirty after flush; forcing isDirty:false", d)
+				d.isDirty = false
 			}
 		}
 	}()
@@ -186,12 +184,12 @@ func (d *DecoderLocked) Drain(
 			// isEAgain means that there are no more frames to receive right now
 			logger.Tracef(ctx, "decoder.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
-				d.IsDirtyValue.Store(false)
+				d.isDirty = false
 				return nil
 			}
 			if isEAgain {
 				if caps&astiav.CodecCapabilityDelay == 0 {
-					d.IsDirtyValue.Store(false)
+					d.isDirty = false
 				}
 				return nil
 			}

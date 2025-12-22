@@ -49,6 +49,7 @@ type codecInternals struct {
 	hardwareContextType   hardwareContextType
 	closer                *astikit.Closer
 	quirks                Quirks
+	isDirty               bool
 }
 
 type Codec struct {
@@ -120,11 +121,13 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	if c.closer == nil {
 		return nil
 	}
-	logger.Debugf(ctx, "resetting")
-	if err := c.reset(ctx); err != nil {
-		logger.Errorf(ctx, "unable to reset the codec: %v", err)
-		if err == io.EOF {
-			return err
+	if c.isDirty {
+		logger.Debugf(ctx, "resetting")
+		if err := c.reset(ctx); err != nil {
+			logger.Errorf(ctx, "unable to reset the codec: %v", err)
+			if err == io.EOF {
+				return err
+			}
 		}
 	}
 	logger.Debugf(ctx, "closing the codec internals")

@@ -158,7 +158,7 @@ func (e *EncoderFull) Drain(
 }
 
 func (e *EncoderFull) IsDirty() bool {
-	return e.IsDirtyValue.Load()
+	return e.isDirty
 }
 
 func (e *EncoderFull) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) (_err error) {

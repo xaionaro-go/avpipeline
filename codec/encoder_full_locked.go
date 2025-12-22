@@ -31,7 +31,6 @@ type EncoderFullLocked struct {
 	Quality           Quality
 	InitTS            time.Time
 	Next              typing.Optional[SwitchEncoderParams]
-	IsDirtyValue      atomic.Bool
 	CallCount         atomic.Int64
 	ForceNextKeyFrame bool
 	AverageFPS        *indicator.MAMA[float64]
@@ -152,7 +151,7 @@ func (e *EncoderFullLocked) SendFrame(
 		}
 	}
 
-	e.IsDirtyValue.Store(true)
+	e.isDirty = true
 	return e.codecContext.SendFrame(f)
 }
 
@@ -246,7 +245,7 @@ func (e *EncoderFullLocked) Close(ctx context.Context) (_err error) {
 	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
 	var result []error
 	if err := e.EncoderFullBackend.closeLocked(ctx); err != nil {
-		result = append(result, fmt.Errorf("unable to close the old encoder: %w", err))
+		result = append(result, fmt.Errorf("unable to close the encoder: %w", err))
 	}
 	e.InitParams.CustomOptions = nil
 	e.InitParams.CodecParameters = nil
@@ -271,7 +270,6 @@ func (e *EncoderFullLocked) reinitEncoder(
 	logger.Tracef(ctx, "replaced the encoder with a new one (%p); the old one (%p) is going to be closed", newEncoder.EncoderFullBackend, e.EncoderFullBackend)
 
 	e.codecInternals = newEncoder.codecInternals
-	e.IsDirtyValue.Store(false)
 	e.InitTS = newEncoder.InitTS
 	e.Quality = newEncoder.Quality
 	e.Next = newEncoder.Next
@@ -323,9 +321,9 @@ func (e *EncoderFullLocked) Flush(
 		case astiav.MediaTypeVideo:
 			e.ForceNextKeyFrame = true
 		}
-		if e.IsDirtyValue.Load() {
-			logger.Errorf(ctx, "%v is still dirty after flush; forcing IsDirty:false", e)
-			e.IsDirtyValue.Store(false)
+		if e.isDirty {
+			logger.Errorf(ctx, "%v is still dirty after flush; forcing isDirty:false", e)
+			e.isDirty = false
 		}
 	}()
 
@@ -393,12 +391,12 @@ func (e *EncoderFullLocked) Drain(
 			packet.Pool.Pool.Put(pkt)
 			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
-				e.IsDirtyValue.Store(false)
+				e.isDirty = false
 				return io.EOF
 			}
 			if isEAgain {
 				if caps&astiav.CodecCapabilityDelay == 0 {
-					e.IsDirtyValue.Store(false)
+					e.isDirty = false
 				}
 				return nil
 			}
@@ -417,14 +415,14 @@ func (e *EncoderFullLocked) Drain(
 }
 
 func (e *EncoderFullLocked) IsDirty() bool {
-	return e.IsDirtyValue.Load()
+	return e.isDirty
 }
 
 func (e *EncoderFullLocked) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
 	return fn(ctx, e)
 }
 
-func (e *EncoderFullLocked) checkCallCount(ctx context.Context) context.CancelFunc {
+func (e *EncoderFullLocked) checkCallCount(context.Context) context.CancelFunc {
 	if !extraDefensiveChecks {
 		return func() {}
 	}
