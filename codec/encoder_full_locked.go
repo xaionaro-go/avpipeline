@@ -119,11 +119,18 @@ func (e *EncoderFullLocked) SendFrame(
 	f *astiav.Frame,
 ) (_err error) {
 	defer e.checkCallCount(ctx)()
-	logger.Tracef(ctx, "SendFrame: pts:%d, pixel_format:%s", f.Pts(), f.PixelFormat())
+	logger.Tracef(ctx, "SendFrame: pts:%d, pixel_format:%s, linesize:%v, width:%d, height:%d", f.Pts(), f.PixelFormat(), f.Linesize(), f.Width(), f.Height())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
 
 	switch e.MediaType() {
 	case astiav.MediaTypeVideo:
+		// Validate linesize before sending to encoder to catch invalid frames early
+		linesize := f.Linesize()
+		width := f.Width()
+		if linesize[0] < width {
+			return fmt.Errorf("invalid frame: linesize[0]=%d < width=%d (pixel_format=%s)", linesize[0], width, f.PixelFormat())
+		}
+
 		if e.ForceNextKeyFrame {
 			e.ForceNextKeyFrame = false
 			if !f.Flags().Has(astiav.FrameFlagKey) {

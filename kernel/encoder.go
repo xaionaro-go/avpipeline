@@ -558,26 +558,27 @@ func (e *Encoder[EF]) SendInputFrame(
 		}
 	}
 
-	fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
-	if err != nil {
-		return fmt.Errorf("unable to fit the frame for encoding: %w", err)
-	}
-
-	if len(fittedFrames) == 0 {
-		logger.Tracef(ctx, "the frame was dropped by the fitter")
-		return nil
-	}
-
-	frameInfo := FrameInfo{
-		PTS:         input.Pts(),
-		DTS:         input.PktDts(),
-		Duration:    input.Frame.Duration(),
-		StreamIndex: input.StreamIndex,
-		TimeBase:    input.GetTimeBase(),
-		FrameFlags:  input.Flags(),
-		PictureType: input.Frame.PictureType(),
-	}
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
+		fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
+		if err != nil {
+			return fmt.Errorf("unable to fit the frame for encoding: %w", err)
+		}
+
+		if len(fittedFrames) == 0 {
+			logger.Tracef(ctx, "the frame was dropped by the fitter")
+			return nil
+		}
+
+		frameInfo := FrameInfo{
+			PTS:         input.Pts(),
+			DTS:         input.PktDts(),
+			Duration:    input.Frame.Duration(),
+			StreamIndex: input.StreamIndex,
+			TimeBase:    input.GetTimeBase(),
+			FrameFlags:  input.Flags(),
+			PictureType: input.Frame.PictureType(),
+		}
+
 		if encoder.Codec() == nil {
 			logger.Errorf(ctx, "the encoder is closed; dropping the frame")
 			return nil
