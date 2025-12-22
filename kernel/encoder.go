@@ -559,7 +559,7 @@ func (e *Encoder[EF]) SendInputFrame(
 	}
 
 	return streamEncoder.Encoder.LockDo(ctx, func(ctx context.Context, encoder codec.Encoder) error {
-		streamEncoder := streamEncoder.withUnlockedEncoder(encoder)
+		streamEncoder := streamEncoder.withLockedEncoder(encoder)
 		fittedFrames, err := streamEncoder.fitFrameForEncoding(ctx, input)
 		if err != nil {
 			return fmt.Errorf("unable to fit the frame for encoding: %w", err)
@@ -725,21 +725,21 @@ func (e *Encoder[EF]) drain(
 	})
 }
 
-type streamEncoderUnlocked struct {
+type streamEncoderLocked struct {
 	codec.Encoder
 	*streamEncoder
 }
 
-func (e *streamEncoder) withUnlockedEncoder(
+func (e *streamEncoder) withLockedEncoder(
 	encoder codec.Encoder,
-) *streamEncoderUnlocked {
-	return &streamEncoderUnlocked{
+) *streamEncoderLocked {
+	return &streamEncoderLocked{
 		Encoder:       encoder,
 		streamEncoder: e,
 	}
 }
 
-func (e *streamEncoderUnlocked) fitFrameForEncoding(
+func (e *streamEncoderLocked) fitFrameForEncoding(
 	ctx context.Context,
 	input frame.Input,
 ) (fittedFrames []*astiav.Frame, _err error) {
@@ -810,7 +810,7 @@ func getPCMAudioFormatFromFrame(
 	}
 }
 
-func (e *streamEncoderUnlocked) getResampledFrames(
+func (e *streamEncoderLocked) getResampledFrames(
 	ctx context.Context,
 	inputFrame *astiav.Frame,
 	outPCMFmt codec.PCMAudioFormat,
@@ -870,7 +870,7 @@ func (e *streamEncoderUnlocked) getResampledFrames(
 	return resampledFrames, nil
 }
 
-func (e *streamEncoderUnlocked) prepareResampler(
+func (e *streamEncoderLocked) prepareResampler(
 	ctx context.Context,
 	inPCMFmt codec.PCMAudioFormat,
 	outPCMFmt codec.PCMAudioFormat,
@@ -902,7 +902,7 @@ func (e *streamEncoderUnlocked) prepareResampler(
 	return nil
 }
 
-func (e *streamEncoderUnlocked) getScaledFrame(
+func (e *streamEncoderLocked) getScaledFrame(
 	ctx context.Context,
 	input frame.Input,
 ) (_ret *astiav.Frame, _err error) {
@@ -999,16 +999,16 @@ func tightPackNV12(src *astiav.Frame) (*astiav.Frame, error) {
 	return packed, nil
 }
 
-func (e *streamEncoder) prepareScaler(
+func (e *streamEncoderLocked) prepareScaler(
 	ctx context.Context,
 	input frame.Input,
 ) (_err error) {
 	inputResolution := input.GetResolution()
 
-	outputResolution := e.Encoder.GetResolution(ctx)
-	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat())
+	outputResolution := e.GetResolution(ctx)
+	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext().PixelFormat())
 	defer func() {
-		logger.Tracef(ctx, "/prepareScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.Encoder.CodecContext().PixelFormat(), _err)
+		logger.Tracef(ctx, "/prepareScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext().PixelFormat(), _err)
 	}()
 
 	if outputResolution == nil {
@@ -1016,7 +1016,7 @@ func (e *streamEncoder) prepareScaler(
 	}
 
 	if e.Scaler != nil {
-		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == *outputResolution && input.PixelFormat() == e.Scaler.SourcePixelFormat() && e.Encoder.CodecContext().PixelFormat() == e.Scaler.DestinationPixelFormat() {
+		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == *outputResolution && input.PixelFormat() == e.Scaler.SourcePixelFormat() && e.CodecContext().PixelFormat() == e.Scaler.DestinationPixelFormat() {
 			logger.Tracef(ctx, "reusing the scaler")
 			return nil
 		}
@@ -1029,7 +1029,7 @@ func (e *streamEncoder) prepareScaler(
 	setFinalizerFree(ctx, e.ScaledFrame)
 	e.ScaledFrame.SetWidth(int(outputResolution.Width))
 	e.ScaledFrame.SetHeight(int(outputResolution.Height))
-	e.ScaledFrame.SetPixelFormat(e.Encoder.CodecContext().PixelFormat())
+	e.ScaledFrame.SetPixelFormat(e.CodecContext().PixelFormat())
 	if err := e.ScaledFrame.AllocBuffer(0); err != nil { // TODO(memleak): make sure the buffer is not already allocated, otherwise it may lead to a memleak
 		return fmt.Errorf("unable to allocate a buffer for the scaled frame: %w", err)
 	}
