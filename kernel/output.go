@@ -40,7 +40,6 @@ const (
 	unwrapTLSViaProxy                   = false
 	pendingPacketsAndFramesLimit        = 10000
 	outputWaitForKeyFrames              = false
-	outputWaitForStreams                = true
 	outputCopyStreamIndex               = false
 	outputUpdateStreams                 = false
 	outputSendPendingPackets            = true
@@ -790,7 +789,7 @@ func (o *Output) send(
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount)
+	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d, videoBeforeAudio:%t", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount, *o.Config.WaitForOutputStreams.VideoBeforeAudio)
 	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
 		if outputAcceptOnlyKeyFramesUntilStart {
 			logger.Debugf(ctx, "not a key frame; skipping")
@@ -801,7 +800,7 @@ func (o *Output) send(
 		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
 		// does not see the video track:
 		if mediaType != astiav.MediaTypeVideo {
-			logger.Debugf(ctx, "skipping a non-video packet to avoid MediaMTX from losing the video track")
+			logger.Debugf(ctx, "skipping a non-video (%s) packet to avoid MediaMTX from losing the video track", mediaType)
 			return nil
 		}
 	}
