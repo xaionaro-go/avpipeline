@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,14 @@ type streamEncoder struct {
 	Scaler          scaler.Scaler
 	ScaledFrame     *astiav.Frame
 	LastInitTS      time.Time
+}
+
+func (e *streamEncoder) Close(ctx context.Context) error {
+	// Close the codec encoder first (this drains any buffered frames)
+	err := e.Encoder.Close(ctx)
+	// Prevent GC from collecting ScaledFrame before the encoder is done draining
+	runtime.KeepAlive(e.ScaledFrame)
+	return err
 }
 
 func NewEncoder[EF codec.EncoderFactory](
