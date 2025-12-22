@@ -174,7 +174,9 @@ func (r *Retryable[K]) retry(
 	callback func(K) error,
 ) error {
 	var zeroValue K
-	return xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() error {
+	ctx = xsync.WithEnableDeadlock(ctx, false)
+	// TODO: ctx = xsync.AllowUnlockNotLocked(ctx, true)  (to handle panic: 'not locked!')
+	return xsync.DoR1(ctx, &r.KernelLocker, func() error {
 		for {
 			k, err := r.getKernel(ctx)
 			if err != nil {

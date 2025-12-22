@@ -946,13 +946,14 @@ func tightPack(
 // tightPackNV12 copies only the visible WxH and discards any padded columns/rows.
 // align=1 => linesize(Y)=W, linesize(UV)=W for NV12.
 func tightPackNV12(src *astiav.Frame) (*astiav.Frame, error) {
-	srcSize, err := src.ImageBufferSize(1)
+	const align = 1
+	srcSize, err := src.ImageBufferSize(align)
 	if err != nil {
 		return nil, fmt.Errorf("ImageBufferSize: %w", err)
 	}
 
 	tmp := make([]byte, srcSize)
-	if _, err := src.ImageCopyToBuffer(tmp, 1); err != nil {
+	if _, err := src.ImageCopyToBuffer(tmp, align); err != nil {
 		return nil, fmt.Errorf("ImageCopyToBuffer: %w", err)
 	}
 
@@ -961,8 +962,8 @@ func tightPackNV12(src *astiav.Frame) (*astiav.Frame, error) {
 	packed.SetPixelFormat(src.PixelFormat())
 	packed.SetWidth(src.Width())
 	packed.SetHeight(src.Height())
-	packed.AllocBuffer(0)
-	if err := packed.Data().SetBytes(tmp, 1); err != nil {
+	packed.AllocBuffer(align)
+	if err := packed.Data().SetBytes(tmp, align); err != nil {
 		return nil, fmt.Errorf("SetBytes: %w", err)
 	}
 
