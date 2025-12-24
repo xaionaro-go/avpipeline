@@ -604,7 +604,7 @@ func (e *Encoder[EF]) SendInputFrame(
 				switch {
 				case err == nil:
 				case errors.Is(err, astiav.ErrEagain):
-					logger.Debugf(ctx, "encoder.SendFrame(): EAGAIN; draining and retrying")
+					logger.Tracef(ctx, "encoder.SendFrame(): EAGAIN; draining and retrying")
 					err = e.drain(
 						ctx,
 						outputPacketsCh,

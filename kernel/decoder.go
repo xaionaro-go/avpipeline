@@ -313,7 +313,7 @@ func (d *Decoder[DF]) SendInputPacket(
 			case err == nil:
 				d.SentPacketsWithoutDecodingFrames++
 			case errors.Is(err, astiav.ErrEagain):
-				logger.Debugf(ctx, "the decoder is not ready to accept new packets; draining and retrying")
+				logger.Tracef(ctx, "the decoder is not ready to accept new packets; draining and retrying")
 				shouldRetry = true
 			case errors.Is(err, codec.ErrNotKeyFrame{}):
 				logger.Debugf(ctx, "the packet is not a keyframe and the decoder cannot decode it; dropping the packet")

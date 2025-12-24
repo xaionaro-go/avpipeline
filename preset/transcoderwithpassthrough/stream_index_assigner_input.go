@@ -88,7 +88,7 @@ func (s *streamIndexAssignerInput[C, P]) StreamIndexAssign(
 }
 
 func (s *streamIndexAssignerInput[C, P]) streamIndexAssign(
-	ctx context.Context,
+	_ context.Context,
 	input packetorframe.InputUnion,
 ) ([]int, error) {
 	if len(s.VideoIndexMap) == 0 && len(s.AudioIndexMap) == 0 {

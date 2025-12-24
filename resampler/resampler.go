@@ -237,6 +237,6 @@ func (r *Resampler) ensureResampledFrameCapacity(ctx context.Context, samples in
 	if err := r.ResampledFrame.AllocBuffer(0); err != nil {
 		return fmt.Errorf("cannot grow resampled frame buffer: %w", err)
 	}
-	logger.Debugf(ctx, "resampler resized output buffer to %d samples", samples)
+	logger.Tracef(ctx, "resampler resized output buffer to %d samples", samples)
 	return nil
 }

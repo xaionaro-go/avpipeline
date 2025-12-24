@@ -3,11 +3,13 @@ package packet
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -78,6 +80,35 @@ func BuildStreamInfo(
 type Commons struct {
 	*astiav.Packet
 	*StreamInfo
+}
+
+func (pkt Commons) String() string {
+	var params []string
+	params = append(params,
+		fmt.Sprintf("stream_index=%d", pkt.GetStreamIndex()),
+		fmt.Sprintf("media_type=%s", pkt.GetMediaType()),
+		fmt.Sprintf("pts=%d", pkt.GetPTS()),
+		fmt.Sprintf("dts=%d", pkt.GetDTS()),
+		fmt.Sprintf("size=%d", pkt.GetSize()),
+		fmt.Sprintf("duration=%d", pkt.GetDuration()),
+		fmt.Sprintf("is_key=%t", pkt.IsKey()),
+	)
+	sideData := pkt.Packet.SideData()
+	if newExtraData, ok := sideData.NewExtraData().Get(); ok {
+		params = append(params, fmt.Sprintf("new_extra_data=%s", extradata.Raw(newExtraData)))
+	}
+	return fmt.Sprintf("Packet{%s}", strings.Join(params, " "))
+}
+
+func (pkt *Commons) IsOOBHeaders() bool {
+	if pkt.Stream == nil {
+		return false
+	}
+	codecParams := pkt.Stream.CodecParameters()
+	if codecParams == nil {
+		return false
+	}
+	return len(codecParams.ExtraData()) > 0
 }
 
 func (pkt *Commons) GetSize() int {

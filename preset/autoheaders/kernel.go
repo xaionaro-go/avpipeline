@@ -152,7 +152,7 @@ func (h *AutoHeaders) detectAppropriateFixerKernel(
 	})
 	logger.Debugf(ctx, "output format: '%s'", outputFormatName)
 
-	isOOBHeadersInput := isOOBHeadersByFormatName(ctx, inputFormatName)
+	isOOBHeadersInput := input.IsOOBHeaders()
 	isOOBHeadersOutput := isOOBHeadersByFormatName(ctx, outputFormatName)
 	logger.Debugf(ctx, "isOOBHeaders: input:%t output:%t", isOOBHeadersInput, isOOBHeadersOutput)
 
