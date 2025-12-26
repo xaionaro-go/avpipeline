@@ -17,3 +17,9 @@ The connections between nodes may be filtered by "filters".
 
 A "kernel" may process incoming packets/frames (and as result may send these or other packets/frames to the output) or generate new packets/frames to the output on its own.
 
+## Non-core features
+
+There also various helpers are available to make pipeline building easier:
+* "router" is a handler that may be used to publish or/and consume named streams.
+* "monitor" is a debugging feature that allows to snoop on packets/frames.
+
