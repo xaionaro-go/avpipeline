@@ -708,6 +708,9 @@ func (o *Output) SendInputPacket(
 		}
 	})
 	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("unable to get output stream because the context is Done: %w", err)
+		}
 		if o.Config.IgnoreNoSourceFormatCtxErrors && errors.As(err, &ErrNoSourceFormatContext{}) {
 			logger.Warnf(ctx, "ignoring error: %v", err)
 			return nil
