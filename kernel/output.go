@@ -68,7 +68,8 @@ type OutputConfig struct {
 
 	WaitForOutputStreams *OutputConfigWaitForOutputStreams
 
-	ErrorOnNSequentialInvalidDTS uint
+	ErrorOnNSequentialInvalidDTS  uint
+	IgnoreNoSourceFormatCtxErrors bool
 }
 
 type OutputPacketMonitor interface {
@@ -707,6 +708,10 @@ func (o *Output) SendInputPacket(
 		}
 	})
 	if err != nil {
+		if o.Config.IgnoreNoSourceFormatCtxErrors && errors.As(err, &ErrNoSourceFormatContext{}) {
+			logger.Warnf(ctx, "ignoring error: %v", err)
+			return nil
+		}
 		return fmt.Errorf("unable to get the output stream: %w", err)
 	}
 	assert(ctx, outputStream != nil)
