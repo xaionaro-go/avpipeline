@@ -804,10 +804,10 @@ func (o *Output) send(
 		}
 	}
 
-	streamIndex := pkt.StreamIndex()
-	_, waitingKeyFrame := o.waitingKeyFrames[streamIndex]
+	outputStreamIndex := outputStream.Index()
+	_, waitingKeyFrame := o.waitingKeyFrames[outputStreamIndex]
 	if waitingKeyFrame {
-		delete(o.waitingKeyFrames, streamIndex)
+		delete(o.waitingKeyFrames, outputStreamIndex)
 		logger.Debugf(ctx, "len(waitingKeyFrames): decrease -> %d", len(o.waitingKeyFrames))
 	}
 	if outputSendPendingPackets {
