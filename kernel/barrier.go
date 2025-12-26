@@ -30,7 +30,7 @@ var _ boilerplate.VisitInputFramer = (*barrierHandler)(nil)
 var _ boilerplate.VisitInputPacketer = (*barrierHandler)(nil)
 
 func newBarrierHandler(
-	cond stategetter.StateGetter,
+	cond stategetter.StateGetter, // is never nil: all callers pass non-nil values
 ) *barrierHandler {
 	return &barrierHandler{
 		Condition: cond,

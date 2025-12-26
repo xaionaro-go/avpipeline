@@ -124,7 +124,7 @@ func (r *ReorderMonotonicDTS) CurrentDTS() typing.Optional[int64] {
 		return typing.Optional[int64]{}
 	}
 
-	return typing.Opt(r.ItemQueue[0].Packet.Dts())
+	return typing.Opt(r.ItemQueue[0].GetDTS())
 }
 
 func (r *ReorderMonotonicDTS) pushToQueue(
@@ -133,7 +133,7 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	dts := item.Packet.Dts()
+	dts := item.GetDTS()
 	shouldContinue, err := r.enforceLowDTSDifference(ctx, dts, outputPacketsCh, outputFramesCh)
 	if err != nil {
 		return fmt.Errorf("unable to enforce low enough DTS difference: %w", err)
@@ -155,7 +155,7 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 		}
 	}
 	heap.Push(&r.ItemQueue, item)
-	logger.Tracef(ctx, "the earliest DTS is now %d", r.ItemQueue[0].Packet.Dts())
+	logger.Tracef(ctx, "the earliest DTS is now %d", r.ItemQueue[0].GetDTS())
 
 	streamKey := InternalStreamKey{
 		StreamIndex: item.GetStreamIndex(),
@@ -263,7 +263,7 @@ func (r *ReorderMonotonicDTS) sendOneItemFromQueue(
 	oldDTS := heap.Pop(streamQueue)
 	logger.Tracef(ctx, "popped DTS:%d from stream queue %v", oldDTS, streamKey)
 
-	itemDTS := oldestItem.Packet.Dts()
+	itemDTS := oldestItem.GetDTS()
 	assert(ctx, itemDTS == oldDTS, itemDTS, oldDTS)
 
 	if len(*streamQueue) == 0 {
@@ -302,9 +302,9 @@ func (r *ReorderMonotonicDTS) doSendItem(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "sending out item: DTS:%d, stream:%d", item.Packet.Dts(), item.GetStreamIndex())
+	logger.Tracef(ctx, "sending out item: DTS:%d, stream:%d", item.GetDTS(), item.GetStreamIndex())
 	defer func() {
-		logger.Tracef(ctx, "/sending out item: DTS:%d, stream:%d: %v", item.Packet.Dts(), item.GetStreamIndex(), _err)
+		logger.Tracef(ctx, "/sending out item: DTS:%d, stream:%d: %v", item.GetDTS(), item.GetStreamIndex(), _err)
 	}()
 	dts := avconv.Duration(item.GetDTS(), item.GetTimeBase())
 	if r.PrevDTS > dts {

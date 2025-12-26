@@ -826,6 +826,9 @@ func (o *Output) send(
 	var activeVideoStreamCount uint
 	var activeAudioStreamCount uint
 	for _, stream := range o.OutputStreams {
+		if stream == nil {
+			continue
+		}
 		switch stream.CodecParameters().MediaType() {
 		case astiav.MediaTypeVideo:
 			activeVideoStreamCount++

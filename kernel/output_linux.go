@@ -14,6 +14,10 @@ func (r *Output) unsafeGetTCPSocketQueue(
 	ctx context.Context,
 ) map[string]uint64 {
 	tcpCtx := r.unsafeGetRawTCPContext(ctx)
+	if tcpCtx == nil {
+		logger.Errorf(ctx, "unable to get TCP context")
+		return nil
+	}
 	fd := tcpCtx.FileDescriptor()
 	if fd < 0 {
 		logger.Errorf(ctx, "invalid file descriptor: %d", fd)

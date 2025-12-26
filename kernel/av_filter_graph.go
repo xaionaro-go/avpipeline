@@ -93,7 +93,8 @@ func (f *AVFilterGraph[T]) SendInputFrame(
 	outputFramesCh chan<- frame.Output,
 ) error {
 	for _, filter := range f.Filters {
-		if filter.Condition.Match(ctx, input) {
+		if filter.Condition != nil && filter.Condition.Match(ctx, input) {
+			// TODO: implement
 		}
 	}
 	return nil

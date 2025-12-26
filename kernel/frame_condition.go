@@ -45,7 +45,7 @@ func (k *FrameCondition) SendInputFrame(
 	logger.Tracef(ctx, "SendInputFrame")
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
 
-	if !k.Condition.Match(ctx, input) {
+	if k.Condition != nil && !k.Condition.Match(ctx, input) {
 		logger.Tracef(ctx, "frame does not match condition, dropping: stream:%d frame:%p pts:%d", input.StreamIndex, input.Frame, input.Frame.Pts())
 		return nil
 	}
