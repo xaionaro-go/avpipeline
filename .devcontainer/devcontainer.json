@@ -1,6 +1,6 @@
 {
 	"name": "Ubuntu",
-	"image": "mcr.microsoft.com/devcontainers/base:noble",
+	"image": "ubuntu:25.04",
 	"runArgs": ["--gpus", "all"],
 	"features": {
 		"ghcr.io/devcontainers/features/nvidia-cuda:2": {},
