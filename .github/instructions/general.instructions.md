@@ -27,14 +27,17 @@
   - Prefer OS packages via the detected system package manager (`apt`, `dnf`, `pacman`, `xbps`, etc.).
 
 ## 5. Testing policy
-- Before fixing a bug, prefer adding/adjusting a unit/integration test that reproduces it (when feasible and not prohibitively expensive).
+- Before fixing a bug, add/adjust a unit/integration test that reproduces it (when feasible and not prohibitively expensive).
 - After code changes, ensure relevant tests are updated and passing.
 - If tests are not feasible, document why and provide an alternative verification method.
-- If logs were provided for diagnosis, use them as verification evidence: confirm the fix by showing (from the logs) that the previously-missing behavior now occurs (or the previously-present error no longer occurs). If the original logs are insufficient to verify, state what additional log line(s) or log level would be needed.
+- If logs, stacktraces or whatnot were provided for diagnosis, use them as verification evidence: prove your hypothesis throught it. If the original logs are insufficient to verify then add additional logging.
 - If an auto-test unrelated to your change does not work: fix it as well.
+- No auto-test should rely on actual clock (like waiting for an actual timeout).
+- Unit-tests must be deterministic.
 
 ## 6. Diagnostics and logging
-- When unsure, prefer more diagnostics.
+- If you cannot diagnose an issue, try adding logging (in an attempt to gather more info about the issue) and auto-tests (in an attempt to reproduce the issue).
+- When unsure, prefer more logging in the code.
 
 ## 7. Root cause and correctness checks
 - Fix both root causes and symptoms. Fixing symptoms alone is NOT SUFFICIENT.
@@ -44,6 +47,7 @@
 ## 8. Self-review and reversions
 - Critique analysis and address found incompletenesses of your analysis. Continue repeating this critique&fix cycles until nothing left to critique.
 - If a change you made is reverted, assume it was incorrect.
+- After each change ask yourself: "why what I did may not be what was requested?". If you find any reason, then go back to the "critique analysis" point.
 
 ## 9. Hints file usage
 - Every ~5 meaningful steps and before any major step, read `(ffstream/).github/instructions/hints.md`.
@@ -56,11 +60,12 @@
 - When strong input expectations exist, validate inputs. If no error channel exists, use an assertion (or equivalent invariant enforcement).
 - Maintain internal semantic consistency: one source of truth for each piece of logic/constant, within the touched scope.
 - Split logic into distinct functions when there is an opportunity to do so. Prefer small functions, but do not split a self-sufficient thought into pieces that are no longer semantically self-sufficient.
+- Always satisfy the linter.
 
 ## 11. Output verbosity
 - If you designed something, build information-dense documentation in directory `doc` of the relevant project.
 - Keep outputs in the chat short.
-- Again: do not write long texts in the chat! Let me repeat: DO NOT WRITE LONG TEXTS IN THE CHAT!
+- Again: do not write long texts in the chat! Let me repeat: DO NOT WRITE LONG TEXTS IN THE CHAT! KEEP IT AS CONCISE AND INFORMATION DENSE AS POSSIBLE!
 - If you don't have anything conclusive then don't write more than 3 sentences per message.
 - On success, report only:
   - Status: DONE
