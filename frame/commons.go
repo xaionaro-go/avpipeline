@@ -65,6 +65,9 @@ func (f *Commons) GetDurationAsDuration() time.Duration {
 }
 
 func (f *Commons) GetDTSAsDuration() time.Duration {
+	if f.Frame == nil {
+		return 0
+	}
 	return avconv.Duration(f.PktDts(), f.StreamInfo.TimeBase)
 
 }
@@ -74,34 +77,58 @@ func (f *Commons) SetTimeBase(v astiav.Rational) {
 }
 
 func (f *Commons) GetDuration() int64 {
-	return (*Commons)(f).Frame.Duration()
+	if f.Frame == nil {
+		return 0
+	}
+	return f.Frame.Duration()
 }
 
 func (f *Commons) SetDuration(v int64) {
-	(*Commons)(f).Frame.SetDuration(v)
+	if f.Frame == nil {
+		return
+	}
+	f.Frame.SetDuration(v)
 }
 
 func (f *Commons) GetPTS() int64 {
+	if f.Frame == nil {
+		return astiav.NoPtsValue
+	}
 	return f.Frame.Pts()
 }
 
 func (f *Commons) GetDTS() int64 {
+	if f.Frame == nil {
+		return astiav.NoPtsValue
+	}
 	return f.Frame.PktDts()
 }
 
 func (f *Commons) SetPTS(v int64) {
+	if f.Frame == nil {
+		return
+	}
 	f.Frame.SetPts(v)
 }
 
 func (f *Commons) SetDTS(v int64) {
+	if f.Frame == nil {
+		return
+	}
 	f.Frame.SetPktDts(v)
 }
 
 func (f *Commons) GetPTSAsDuration() time.Duration {
+	if f.Frame == nil {
+		return 0
+	}
 	return avconv.Duration(f.Frame.Pts(), f.StreamInfo.TimeBase)
 }
 
 func (f *Commons) GetResolution() codectypes.Resolution {
+	if f.Frame == nil {
+		return codectypes.Resolution{}
+	}
 	return codectypes.Resolution{
 		Width:  uint32(f.Frame.Width()),
 		Height: uint32(f.Frame.Height()),

@@ -93,9 +93,11 @@ func (pkt Commons) String() string {
 		fmt.Sprintf("duration=%d", pkt.GetDuration()),
 		fmt.Sprintf("is_key=%t", pkt.IsKey()),
 	)
-	sideData := pkt.Packet.SideData()
-	if newExtraData, ok := sideData.NewExtraData().Get(); ok {
-		params = append(params, fmt.Sprintf("new_extra_data=%s", extradata.Raw(newExtraData)))
+	if pkt.Packet != nil {
+		sideData := pkt.Packet.SideData()
+		if newExtraData, ok := sideData.NewExtraData().Get(); ok {
+			params = append(params, fmt.Sprintf("new_extra_data=%s", extradata.Raw(newExtraData)))
+		}
 	}
 	return fmt.Sprintf("Packet{%s}", strings.Join(params, " "))
 }
@@ -164,26 +166,44 @@ func (pkt *Commons) SetTimeBase(v astiav.Rational) {
 }
 
 func (pkt *Commons) GetDuration() int64 {
+	if pkt.Packet == nil {
+		return 0
+	}
 	return pkt.Packet.Duration()
 }
 
 func (pkt *Commons) SetDuration(v int64) {
+	if pkt.Packet == nil {
+		return
+	}
 	pkt.Packet.SetDuration(v)
 }
 
 func (pkt *Commons) GetPTS() int64 {
+	if pkt.Packet == nil {
+		return astiav.NoPtsValue
+	}
 	return pkt.Packet.Pts()
 }
 
 func (pkt *Commons) GetDTS() int64 {
+	if pkt.Packet == nil {
+		return astiav.NoPtsValue
+	}
 	return pkt.Packet.Dts()
 }
 
 func (pkt *Commons) SetPTS(v int64) {
+	if pkt.Packet == nil {
+		return
+	}
 	pkt.Packet.SetPts(v)
 }
 
 func (pkt *Commons) SetDTS(v int64) {
+	if pkt.Packet == nil {
+		return
+	}
 	pkt.Packet.SetDts(v)
 }
 

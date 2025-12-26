@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -46,7 +47,11 @@ func (k *FrameCondition) SendInputFrame(
 	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
 
 	if k.Condition != nil && !k.Condition.Match(ctx, input) {
-		logger.Tracef(ctx, "frame does not match condition, dropping: stream:%d frame:%p pts:%d", input.StreamIndex, input.Frame, input.Frame.Pts())
+		var pts int64 = astiav.NoPtsValue
+		if input.Frame != nil {
+			pts = input.Frame.Pts()
+		}
+		logger.Tracef(ctx, "frame does not match condition, dropping: stream:%d frame:%p pts:%d", input.StreamIndex, input.Frame, pts)
 		return nil
 	}
 

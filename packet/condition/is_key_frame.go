@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
@@ -20,6 +19,6 @@ func (v IsKeyFrame) Match(
 	_ context.Context,
 	input packet.Input,
 ) bool {
-	isKeyFrame := input.Packet.Flags().Has(astiav.PacketFlagKey)
+	isKeyFrame := input.IsKey()
 	return bool(v) == isKeyFrame
 }

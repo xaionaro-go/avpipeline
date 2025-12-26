@@ -671,19 +671,18 @@ func (o *Output) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx,
-		"SendInputPacket (stream: %d:%s, pkt:%p, pos:%d, pts:%d, dts:%d, dur:%d, size: %d)",
-		inputPkt.StreamIndex(), inputPkt.GetMediaType(), inputPkt.Packet, inputPkt.Packet.Pos(), inputPkt.Packet.Pts(), inputPkt.Packet.Dts(), inputPkt.Packet.Duration(), inputPkt.Packet.Size(),
-	)
-	defer func() {
-		logger.Tracef(ctx, "/SendInputPacket (stream: %d:%s, pkt:%p): %v",
-			inputPkt.StreamIndex(), inputPkt.GetMediaType(), inputPkt.Packet, _err)
-	}()
-
 	pkt := inputPkt.Packet
 	if pkt == nil {
 		return fmt.Errorf("packet == nil")
 	}
+	logger.Tracef(ctx,
+		"SendInputPacket (stream: %d:%s, pkt:%p, pos:%d, pts:%d, dts:%d, dur:%d, size: %d)",
+		inputPkt.StreamIndex(), inputPkt.GetMediaType(), pkt, pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), pkt.Size(),
+	)
+	defer func() {
+		logger.Tracef(ctx, "/SendInputPacket (stream: %d:%s, pkt:%p): %v",
+			inputPkt.StreamIndex(), inputPkt.GetMediaType(), pkt, _err)
+	}()
 
 	if pkt.Flags().Has(astiav.PacketFlagDiscard) {
 		logger.Tracef(ctx, "the packet has a discard flag; discarding")

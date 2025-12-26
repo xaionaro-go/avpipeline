@@ -53,7 +53,7 @@ func (f *PacketFilter) match(
 		}
 	}()
 	streamIndex := in.Input.GetStreamIndex()
-	isKeyFrame := in.Input.Packet.Flags().Has(astiav.PacketFlagKey)
+	isKeyFrame := in.Input.IsKey()
 	if isKeyFrame {
 		delete(f.WaitingForKeyFrame, streamIndex)
 		return true

@@ -82,9 +82,9 @@ func (r *ReorderMonotonicDTS) SendInputPacket(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "MonotonicDTS: packet: DTS:%d, stream:%d", input.Packet.Dts(), input.StreamInfo.Index)
+	logger.Tracef(ctx, "MonotonicDTS: packet: DTS:%d, stream:%d", input.GetDTS(), input.StreamInfo.Index)
 	defer func() {
-		logger.Tracef(ctx, "/MonotonicDTS: packet: DTS:%d, stream:%d: %v", input.Packet.Dts(), input.StreamInfo.Index, _err)
+		logger.Tracef(ctx, "/MonotonicDTS: packet: DTS:%d, stream:%d: %v", input.GetDTS(), input.StreamInfo.Index, _err)
 	}()
 	return xsync.DoA4R1(
 		ctx, &r.Locker, r.pushToQueue,
@@ -103,9 +103,9 @@ func (r *ReorderMonotonicDTS) SendInputFrame(
 	outputPacketsCh chan<- packet.Output,
 	outputFramesCh chan<- frame.Output,
 ) (_err error) {
-	logger.Tracef(ctx, "MonotonicDTS: frame: DTS:%d, stream:%d", input.Frame.PktDts(), input.StreamInfo.StreamIndex)
+	logger.Tracef(ctx, "MonotonicDTS: frame: DTS:%d, stream:%d", input.GetDTS(), input.StreamInfo.StreamIndex)
 	defer func() {
-		logger.Tracef(ctx, "/MonotonicDTS: frame: DTS:%d, stream:%d: %v", input.Frame.PktDts(), input.StreamInfo.StreamIndex, _err)
+		logger.Tracef(ctx, "/MonotonicDTS: frame: DTS:%d, stream:%d: %v", input.GetDTS(), input.StreamInfo.StreamIndex, _err)
 	}()
 	return xsync.DoA4R1(
 		ctx, &r.Locker, r.pushToQueue,

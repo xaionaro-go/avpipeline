@@ -20,5 +20,8 @@ func (v HasPacketFlags) Match(
 	_ context.Context,
 	input packet.Input,
 ) bool {
+	if input.Packet == nil {
+		return false
+	}
 	return input.Packet.Flags().Has(astiav.PacketFlag(v))
 }

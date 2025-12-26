@@ -23,6 +23,9 @@ func (v IsKeyFrame) Match(
 	if input.Frame != nil {
 		return bool(v) == input.Frame.Flags().Has(astiav.FrameFlagKey)
 	}
+	if input.Packet == nil {
+		return false
+	}
 	isKeyFrame := input.Packet.Flags().Has(astiav.PacketFlagKey)
 	return bool(v) == isKeyFrame
 }

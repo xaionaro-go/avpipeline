@@ -26,7 +26,7 @@ func (v HasPipelineSideDataCond) Match(
 	ctx context.Context,
 	input packetorframe.InputUnion,
 ) (_ret bool) {
-	sideData := input.Packet.GetPipelineSideData()
+	sideData := input.GetPipelineSideData()
 	logger.Tracef(ctx, "sideData: %#+v", sideData)
 	return sideData.Contains(v.Value)
 }

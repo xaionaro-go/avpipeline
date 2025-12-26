@@ -38,7 +38,8 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 	input packetorframe.InputUnion,
 ) ([]int, error) {
 	inputStreamIndex := input.GetStreamIndex()
-	switch input.Packet.Source {
+	source := input.GetSource()
+	switch source {
 	case s.StreamForward.PacketSource, s.StreamForward.inputStreamMapIndicesAsPacketSource, s.StreamForward.MapInputStreamIndicesNode.Processor.Kernel, s.StreamForward.PacketSource, s.StreamForward.NodeStreamFixerPassthrough.MapStreamIndicesNode.Processor.Kernel:
 		logger.Tracef(ctx, "passing through index %d as is", inputStreamIndex)
 		return []int{inputStreamIndex}, nil
@@ -69,6 +70,6 @@ func (s *streamIndexAssignerOutput[C, P]) streamIndexAssign(
 			return []int{result}, nil
 		}
 	default:
-		return nil, fmt.Errorf("unexpected source: %T %p %s", input.Packet.Source, input.Packet.Source, input.Packet.Source)
+		return nil, fmt.Errorf("unexpected source: %T %p %s", source, source, source)
 	}
 }

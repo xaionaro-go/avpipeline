@@ -63,6 +63,11 @@ func (f *Filter) sendInputVideo(
 	ctx context.Context,
 	input packetorframe.InputUnion,
 ) bool {
+	if input.Packet == nil || input.Packet.Packet == nil {
+		// This filter only works with packets, not frames
+		return true
+	}
+
 	now := time.Now()
 	prevTS := f.prevEncodeTS
 	f.prevEncodeTS = now
