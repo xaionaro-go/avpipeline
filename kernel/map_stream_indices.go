@@ -75,7 +75,7 @@ func (m *MapStreamIndices) getOutputPacketStreamIndex(
 	}()
 
 	if m.Assigner == nil {
-		return []int{input.GetStreamIndex()}, nil
+		return []int{inputStreamIndex}, nil
 	}
 
 	return m.Assigner.StreamIndexAssign(ctx, input)

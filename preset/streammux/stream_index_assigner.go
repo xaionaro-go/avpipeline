@@ -32,15 +32,16 @@ func (s *streamIndexAssigner) StreamIndexAssign(
 	ctx context.Context,
 	in packetorframe.InputUnion,
 ) ([]int, error) {
+	inputStreamIndex := in.GetStreamIndex()
 	switch s.MuxMode {
 	case types.MuxModeForbid,
 		types.MuxModeSameOutputSameTracks,
 		types.MuxModeDifferentOutputsSameTracks,
 		types.MuxModeDifferentOutputsSameTracksSplitAV:
-		return []int{in.GetStreamIndex()}, nil
+		return []int{inputStreamIndex}, nil
 	case types.MuxModeSameOutputDifferentTracks:
 		if s.OutputID == 0 {
-			return []int{in.GetStreamIndex()}, nil
+			return []int{inputStreamIndex}, nil
 		}
 		var streamCount int
 		s.PacketSource.WithOutputFormatContext(ctx, func(formatCtx *astiav.FormatContext) {
@@ -49,7 +50,7 @@ func (s *streamIndexAssigner) StreamIndexAssign(
 		if streamCount <= 0 {
 			return nil, fmt.Errorf("no streams in the output format context")
 		}
-		return []int{in.GetStreamIndex() + int(s.OutputID)*streamCount}, nil
+		return []int{inputStreamIndex + int(s.OutputID)*streamCount}, nil
 	default:
 		return nil, fmt.Errorf("unknown MuxMode: %s", s.MuxMode)
 	}

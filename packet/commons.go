@@ -60,8 +60,8 @@ func () NotifyAboutPacketSource(
 */
 
 type StreamInfo struct {
-	*astiav.Stream
-	Source
+	*astiav.Stream   // is never nil
+	Source           // is never nil
 	PipelineSideData types.PipelineSideData
 }
 
@@ -78,8 +78,8 @@ func BuildStreamInfo(
 }
 
 type Commons struct {
-	*astiav.Packet
-	*StreamInfo
+	*astiav.Packet // may be nil, if comes from NotifyAboutPacketSource instead of SendInputPacket
+	*StreamInfo    // is never nil
 }
 
 func (pkt Commons) String() string {
