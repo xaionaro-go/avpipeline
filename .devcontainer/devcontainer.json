@@ -1,0 +1,10 @@
+{
+	"name": "Ubuntu",
+	"image": "mcr.microsoft.com/devcontainers/base:noble",
+	"runArgs": ["--gpus", "all"],
+	"features": {
+		"ghcr.io/devcontainers/features/nvidia-cuda:2": {},
+		"ghcr.io/iterative/features/nvtop:1": {},
+		"ghcr.io/devcontainers-extra/features/apt-get-packages:1": {}
+	}
+}
