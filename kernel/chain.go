@@ -11,6 +11,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -29,6 +30,23 @@ type Chain[T Abstract] struct {
 var _ Abstract = (*Chain[Abstract])(nil)
 var _ packet.Source = (*Chain[Abstract])(nil)
 var _ packet.Sink = (*Chain[Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*Chain[Abstract])(nil)
+
+// OriginalPacketSource returns the latest kernel in the chain that is a packet source.
+// It iterates backwards through the chain to find the last actual source.
+func (c *Chain[T]) OriginalPacketSource() packet.Source {
+	for i := len(c.Kernels) - 1; i >= 0; i-- {
+		k := c.Kernels[i]
+		src, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		if result := types.GetOriginalPacketSource(src); result != nil {
+			return result
+		}
+	}
+	return nil
+}
 
 func NewChain[T Abstract](kernels ...T) *Chain[T] {
 	return &Chain[T]{

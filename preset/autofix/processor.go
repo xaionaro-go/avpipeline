@@ -7,6 +7,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
@@ -14,6 +15,12 @@ import (
 var _ processor.Abstract = (*AutoFixerWithCustomData[struct{}])(nil)
 var _ packet.Source = (*AutoFixerWithCustomData[struct{}])(nil)
 var _ packet.Sink = (*AutoFixerWithCustomData[struct{}])(nil)
+var _ types.OriginalPacketSourcer = (*AutoFixerWithCustomData[struct{}])(nil)
+
+// OriginalPacketSource returns the underlying MapStreamIndices kernel as the original packet source.
+func (a *AutoFixerWithCustomData[T]) OriginalPacketSource() packet.Source {
+	return types.GetOriginalPacketSource(a.MapStreamIndicesNode.Processor.Kernel)
+}
 
 func (a *AutoFixerWithCustomData[T]) Close(ctx context.Context) error {
 	if a == nil {

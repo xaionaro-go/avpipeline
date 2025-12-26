@@ -289,7 +289,11 @@ func (p *FromKernel[T]) GetPacketSource() packet.Source {
 	if !ok {
 		return nil
 	}
-	return source
+	// Unwrap wrapper types (like Retryable) to get the actual source kernel.
+	// This handles multiple layers of wrapping recursively.
+	// If any wrapper's inner kernel is not available, returns nil rather than
+	// returning a wrapper, since wrappers should never be used as packet sources.
+	return kerneltypes.GetOriginalPacketSource(source)
 }
 
 func (p *FromKernel[T]) GetPacketSink() packet.Sink {

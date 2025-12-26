@@ -12,6 +12,7 @@ import (
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
@@ -37,6 +38,19 @@ type Switch[T Abstract] struct {
 var _ Abstract = (*Switch[Abstract])(nil)
 var _ packet.Source = (*Switch[Abstract])(nil)
 var _ packet.Sink = (*Switch[Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*Switch[Abstract])(nil)
+
+// OriginalPacketSource returns the currently active kernel's original packet source.
+func (sw *Switch[T]) OriginalPacketSource() packet.Source {
+	idx := sw.KernelIndex.Load()
+	if int(idx) >= len(sw.Kernels) {
+		return nil
+	}
+	if src, ok := any(sw.Kernels[idx]).(packet.Source); ok {
+		return types.GetOriginalPacketSource(src)
+	}
+	return nil
+}
 
 func NewSwitch[T Abstract](
 	kernels ...T,

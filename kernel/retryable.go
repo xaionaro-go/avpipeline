@@ -69,6 +69,20 @@ func NewRetryable[K Abstract](
 var _ Abstract = (*Retryable[Abstract])(nil)
 var _ packet.Source = (*Retryable[Abstract])(nil)
 var _ packet.Sink = (*Retryable[Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*Retryable[Abstract])(nil)
+
+// OriginalPacketSource returns the underlying kernel as a packet.Source if it
+// implements that interface and is currently available. This allows downstream
+// code to get the actual source kernel rather than the Retryable wrapper.
+func (r *Retryable[K]) OriginalPacketSource() packet.Source {
+	if !r.KernelIsSet {
+		return nil
+	}
+	if src, ok := any(r.Kernel).(packet.Source); ok {
+		return src
+	}
+	return nil
+}
 
 func (r *Retryable[K]) unpauseKernelOpening(
 	ctx context.Context,

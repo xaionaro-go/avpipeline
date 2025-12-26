@@ -9,6 +9,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -29,6 +30,22 @@ type ChainOfThree[A, B, C Abstract] struct {
 var _ Abstract = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
 var _ packet.Source = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
 var _ packet.Sink = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+
+// OriginalPacketSource returns the latest kernel in the chain that is a packet source.
+// It checks Kernel2 first, then Kernel1, then Kernel0.
+func (c *ChainOfThree[A, B, C]) OriginalPacketSource() packet.Source {
+	for _, k := range []Abstract{c.Kernel2, c.Kernel1, c.Kernel0} {
+		src, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		if result := types.GetOriginalPacketSource(src); result != nil {
+			return result
+		}
+	}
+	return nil
+}
 
 func NewChainOfThree[A, B, C Abstract](kernel0 A, kernel1 B, kernel2 C) *ChainOfThree[A, B, C] {
 	return &ChainOfThree[A, B, C]{

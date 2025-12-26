@@ -9,6 +9,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -28,6 +29,22 @@ type ChainOfTwo[A, B Abstract] struct {
 var _ Abstract = (*ChainOfTwo[Abstract, Abstract])(nil)
 var _ packet.Source = (*ChainOfTwo[Abstract, Abstract])(nil)
 var _ packet.Sink = (*ChainOfTwo[Abstract, Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*ChainOfTwo[Abstract, Abstract])(nil)
+
+// OriginalPacketSource returns the latest kernel in the chain that is a packet source.
+// It checks Kernel1 first, then Kernel0.
+func (c *ChainOfTwo[A, B]) OriginalPacketSource() packet.Source {
+	for _, k := range []Abstract{c.Kernel1, c.Kernel0} {
+		src, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		if result := types.GetOriginalPacketSource(src); result != nil {
+			return result
+		}
+	}
+	return nil
+}
 
 func NewChainOfTwo[A, B Abstract](kernel0 A, kernel1 B) *ChainOfTwo[A, B] {
 	return &ChainOfTwo[A, B]{

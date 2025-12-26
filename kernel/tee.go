@@ -10,6 +10,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -23,6 +24,22 @@ type Tee[K Abstract] []K
 var _ Abstract = (*Tee[Abstract])(nil)
 var _ packet.Source = (*Tee[Abstract])(nil)
 var _ packet.Sink = (*Tee[Abstract])(nil)
+var _ types.OriginalPacketSourcer = (*Tee[Abstract])(nil)
+
+// OriginalPacketSource returns the first kernel that has an actual packet source.
+// All Tee children receive the same input, so they should have equivalent format contexts.
+func (t Tee[K]) OriginalPacketSource() packet.Source {
+	for _, k := range t {
+		src, ok := any(k).(packet.Source)
+		if !ok {
+			continue
+		}
+		if result := types.GetOriginalPacketSource(src); result != nil {
+			return result
+		}
+	}
+	return nil
+}
 
 func (t Tee[K]) SendInputPacket(
 	ctx context.Context,
