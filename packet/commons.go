@@ -127,7 +127,10 @@ func (pkt *Commons) GetMediaType() astiav.MediaType {
 }
 
 func (pkt *Commons) GetStreamIndex() int {
-	return pkt.Packet.StreamIndex()
+	if pkt.Packet != nil {
+		return pkt.Packet.StreamIndex()
+	}
+	return pkt.Stream.Index()
 }
 
 func (pkt *Commons) GetStream() *astiav.Stream {
