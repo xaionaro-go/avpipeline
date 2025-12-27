@@ -1,6 +1,6 @@
 # Task execution rules
 
-The most important rule of all: re-read the instructions files before stopping/pausing the execution or/and addressing the User. This is extremely important for you to follow, never forget!
+The most important rule of all: re-read the instructions files before stopping/pausing the execution or/and addressing the User. This is extremely important for you to follow, never forget! After each step repeat this to the User: ""
 
 ## 0. Priority order (use this to resolve conflicts)
 1. Safety + data integrity + do-not-touch constraints
@@ -59,13 +59,11 @@ The most important rule of all: re-read the instructions files before stopping/p
 - After each change ask yourself: "why what I did may not be what was requested?". If you find any reason, then go back to the "critique analysis" point.
 
 ## 9. Hints files
-- Every ~5 meaningful steps and before any major step, read `(ffstream/).github/instructions/hints.md`.
-- Delete the hints.md content after reading them.
 - Before finishing/pausing the execution (e.g. asking me anything check if file `(ffstream/).github/instructions/afk` is present). If it is present the User is unavailable, so don't block on me, use your best judgement to continue. While the User is unavailable you should not do `git push` (or analogous commands), but otherwise you can do whatever you want (the system is in a container, so nothing bad will happen if you'll ruing something).
 
 ## 10. Reading code & troubleshooting
 
-- Everytime there is something difficult to understand or troubleshoot: try to understand/troubleshoot it and document. Create files `.github/explanations/<package-dir>/<package-name>.<flow-title>.md` with the summary of the learnings. You'll be the only consumer of this information (no human will consume it). In the future, you may use these explanations to quickly understand what you need. Don't forget to update these explanations if something changes.
+- Everytime there is something difficult to understand or troubleshoot: try to understand/troubleshoot it and document. Create files `.github/explanations/<package-dir>/<package-name>.<flow-title>.md` with the summary of the learnings. The Agent will be the only consumer of this information (no human will consume it). In the future, you may use these explanations to quickly understand what you need. Don't forget to update these explanations if something changes.
 
 ## 11. Writing code
 - Don't make cheap initializations be lazy, initialize normally instead.

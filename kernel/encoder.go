@@ -513,6 +513,10 @@ func (e *Encoder[EF]) SendInputFrame(
 		return err
 	}
 
+	if codec.IsEncoderCopy(streamEncoder.Encoder) {
+		return codec.ErrCopyEncoder{}
+	}
+
 	outputStream := xsync.DoR1(ctx, &e.Locker, func() *astiav.Stream {
 		outputStream := e.outputStreams[input.GetStreamIndex()]
 		assert(ctx, outputStream != nil, "outputStream != nil")
