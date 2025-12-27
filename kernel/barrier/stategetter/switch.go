@@ -26,6 +26,7 @@ const (
 	SwitchFlagForbidTakeoverInKeepUnless            = types.SwitchFlagForbidTakeoverInKeepUnless
 	SwitchFlagNextOutputStateBlock                  = types.SwitchFlagNextOutputStateBlock
 	SwitchFlagInactiveBlock                         = types.SwitchFlagInactiveBlock
+	SwitchFlagPassPreviousOutput                    = types.SwitchFlagPassPreviousOutput
 )
 
 type State = types.State
@@ -49,6 +50,10 @@ type Switch struct {
 	OnAfterSwitch                 *FuncOnAfterSwitch
 	Flags                         SwitchFlags
 	FirstPacketOrFrameAfterSwitch packetorframe.Abstract
+
+	// TestHookAfterSwitchCommit is called after OnAfterSwitch completes during a switch.
+	// This is only for testing - it allows tests to inject delays to reproduce race conditions.
+	TestHookAfterSwitchCommit func(ctx context.Context)
 
 	CommitMutex xsync.Mutex
 }
@@ -130,6 +135,16 @@ func (s *Switch) GetValue(
 	return s.CurrentValue.Load()
 }
 
+func (s *Switch) ClearPreviousValue(
+	ctx context.Context,
+) {
+	logger.Tracef(ctx, "Switch.ClearPreviousValue")
+	s.CommitMutex.Do(ctx, func() {
+		s.PreviousValue.Store(math.MinInt32)
+		s.rotateChangeChan()
+	})
+}
+
 func (s *Switch) SetValue(
 	ctx context.Context,
 	idx int32,
@@ -172,6 +187,9 @@ func (s *Switch) setValueNow(
 		if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
 			s.PreviousValue.Store(old)
 			s.FirstPacketOrFrameAfterSwitch = nil
+		}
+		if s.Flags.HasAny(types.SwitchFlagPassPreviousOutput) {
+			s.PreviousValue.Store(old)
 		}
 
 		s.rotateChangeChan()
@@ -244,6 +262,13 @@ func (s *SwitchOutput) GetState(
 			if currentValue == s.OutputID {
 				return types.StatePass, s.GetChangeChan()
 			}
+			if s.Flags.HasAny(types.SwitchFlagPassPreviousOutput) {
+				// allow the previous output (the one that used to be current) to pass all packets
+				// until ClearPreviousValue is called
+				if previousValue == s.OutputID {
+					return types.StatePass, s.GetChangeChan()
+				}
+			}
 			if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
 				// allow the previous output (the one that used to be current) to pass the first packet after a switch
 				if previousValue == s.OutputID && pkt.Get() == s.FirstPacketOrFrameAfterSwitch {
@@ -295,6 +320,9 @@ func (s *SwitchOutput) GetState(
 				onAfter := s.GetOnAfterSwitch()
 				if onAfter != nil {
 					onAfter(ctx, pkt, previousValue, currentValue)
+				}
+				if s.TestHookAfterSwitchCommit != nil {
+					s.TestHookAfterSwitchCommit(ctx)
 				}
 				_ret = true
 			})

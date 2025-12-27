@@ -14,6 +14,11 @@ const (
 
 	// If set then the state of all inactive outputs will be "block".
 	SwitchFlagInactiveBlock
+
+	// If set then the previous output (after a switch) will continue to pass packets
+	// until ClearPreviousValue is called. This is useful when draining is disabled
+	// and data in transit needs to pass through to the old output.
+	SwitchFlagPassPreviousOutput
 )
 
 func (f SwitchFlags) HasAll(flag SwitchFlags) bool {

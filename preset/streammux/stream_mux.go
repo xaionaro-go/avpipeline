@@ -327,6 +327,10 @@ func (s *StreamMux[C]) initSwitches(
 					logger.Errorf(ctx, "Switch[%s]: unable to close the output %d: %v", inputType, from, err)
 				}
 
+				// Clear the previous value in OutputSyncer now that the old output is closed.
+				// This stops the syncer from accepting packets for the old output.
+				input.OutputSyncer.ClearPreviousValue(ctx)
+
 				outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(ctx, packetfiltercondition.Panic("Switch["+inputType.String()+"]: somehow received a packet, while the output is closed"))
 
 				observability.Go(ctx, func(ctx context.Context) {
@@ -339,7 +343,11 @@ func (s *StreamMux[C]) initSwitches(
 				})
 			})
 		})
-		input.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
+		// SwitchFlagInactiveBlock: Block (not drop) packets for inactive outputs to prevent data loss.
+		// SwitchFlagPassPreviousOutput: Allow packets for the previous output to pass during transition
+		// until ClearPreviousValue is called (after the old output is closed). This prevents blocking
+		// of in-transit data when draining is disabled.
+		input.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock | barrierstategetter.SwitchFlagPassPreviousOutput)
 
 		logger.Tracef(ctx, "Switch[%s]: %p", inputType, input.OutputSwitch)
 		logger.Tracef(ctx, "Syncer[%s]: %p", inputType, input.OutputSyncer)

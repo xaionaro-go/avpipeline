@@ -203,7 +203,25 @@ func (i *Input) doOpen(
 	setFinalizerFree(ctx, i.IOInterrupter)
 	i.FormatContext.SetIOInterrupter(i.IOInterrupter)
 
-	if err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary); err != nil {
+	if err := ctx.Err(); err != nil {
+		i.FormatContext.Free()
+		return fmt.Errorf("context cancelled before opening input: %w", err)
+	}
+
+	// interruptable OpenInput
+	openInputDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			logger.Debugf(ctx, "context cancelled during OpenInput, interrupting IO")
+			i.IOInterrupter.Interrupt()
+		case <-openInputDone:
+		}
+	}()
+	err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary)
+	close(openInputDone)
+
+	if err != nil {
 		i.FormatContext.Free()
 		if authKey.Get() != "" {
 			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>' (format: %q): %w", urlString, inputFormat, err)
@@ -289,6 +307,17 @@ func (i *Input) Close(
 	if i == nil {
 		return nil
 	}
+
+	logger.Debugf(ctx, "interrupting IO before close")
+	i.IOInterrupter.Interrupt()
+
+	select {
+	case <-i.initialized:
+		logger.Debugf(ctx, "doOpen completed, proceeding with close")
+	default:
+		logger.Errorf(ctx, "closing before initialization is complete is not implemented yet; it may SEGFAULT")
+	}
+
 	i.ClosureSignaler.Close(ctx)
 	i.WaitGroup.Wait()
 
