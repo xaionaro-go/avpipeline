@@ -41,9 +41,9 @@ func AddRouteSource[T any, C any, P processor.Abstract](
 	onPreStop func(context.Context, *RouteSource[T, C, P]),
 	onPostStop func(context.Context, *RouteSource[T, C, P]),
 ) (_ret *RouteSource[T, C, P], _err error) {
-	logger.Debugf(ctx, "AddRouteSource(ctx, %#+v, '%s')", srcNode, dstPath)
+	logger.Debugf(ctx, "AddRouteSource(ctx, %v, '%s')", srcNode, dstPath)
 	defer func() {
-		logger.Debugf(ctx, "/AddRouteSource(ctx, %#+v, '%s'): %p %v", srcNode, dstPath, _ret, _err)
+		logger.Debugf(ctx, "/AddRouteSource(ctx, %v, '%s'): %p %v", srcNode, dstPath, _ret, _err)
 	}()
 	ctx = belt.WithField(ctx, "dst_path", dstPath)
 

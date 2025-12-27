@@ -49,8 +49,7 @@ type Switch struct {
 	OnAfterSwitch                 *FuncOnAfterSwitch
 	Flags                         SwitchFlags
 	FirstPacketOrFrameAfterSwitch packetorframe.Abstract
-
-	CommitMutex xsync.Mutex
+	CommitMutex                   xsync.Mutex
 }
 
 func NewSwitch() *Switch {

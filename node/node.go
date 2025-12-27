@@ -444,7 +444,7 @@ func (n *NodeWithCustomData[C, T]) RemovePushPacketsTo(
 	to Abstract,
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushPacketsTo")
-	defer func() { defer logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
+	defer func() { logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
 	logger.Tracef(ctx, "RemovePushPacketsTo: %s", debug.Stack())
 
 	if !xsync.DoR1(ctx, &n.Locker, func() bool {
@@ -472,7 +472,7 @@ func (n *NodeWithCustomData[C, P]) RemovePushFramesTo(
 	to Abstract,
 ) (_err error) {
 	logger.Debugf(ctx, "RemovePushFramesTo")
-	defer func() { defer logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
+	defer func() { logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
 	logger.Tracef(ctx, "RemovePushFramesTo: %s", debug.Stack())
 
 	return xsync.DoR1(ctx, &n.Locker, func() error {
