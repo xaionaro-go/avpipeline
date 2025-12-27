@@ -1,6 +1,6 @@
 # Task execution rules
 
-The most important rule of all: re-read the instructions files before addressing the User.
+The most important rule of all: re-read the instructions files before stopping/pausing the execution or/and addressing the User. This is extremely important for you to follow, never forget!
 
 ## 0. Priority order (use this to resolve conflicts)
 1. Safety + data integrity + do-not-touch constraints
@@ -8,9 +8,8 @@ The most important rule of all: re-read the instructions files before addressing
 3. Interface stability + minimal-diff policy
 
 ## 1. Completion and stopping
-- Always show your TODO list.
 - Keep updated description of the full tree of what needs to be done in `.github/instructions/todo.md`. Before finishing a task, ensure that all items in that file are addressed. If the file contains not what you expected, trust the file. Before writing the file, look if it already exist in another `.github/instructions` directory.
-- Each time after summarizing the conversation, immediatelly write the summary to `.github/instructions/current_summary.md`.
+- Each time after summarizing the conversation, immediatelly write the summary to `.github/instructions/current_summary.md` (in a way consumed by Agent, not by User).
 - A task is **DONE** only with objective evidence. Do not infer, do not assume, only directly objectively confirm and prove.
 - If you cannot obtain objective evidence, the task is **NOT DONE**. State exactly what evidence is missing and why.
 - If absolutely blocked on required user input/permission/action, report **BLOCKED** with the fields listed below and run `sleep $[ 24 * 3600 ]` (after `sleep` is finished you need to recheck if you are unblocked, and if not, finish the execution):
@@ -78,6 +77,7 @@ The most important rule of all: re-read the instructions files before addressing
 - Always satisfy the linter.
 - Do not make code racy unless explicitly instructed otherwise. Make logic event-driven, not clock/race-driven. For example:
   - Do not rely on timeouts.
+  - Near-simultaneous/atomic events are not simultaneous/atomic.
 - If there is something slightly weird about a function name, then don't assume what it does: check the implementation to be sure.
 - Before reporting DONE you must have re-read all changed code and confirmed it is correct.
 
