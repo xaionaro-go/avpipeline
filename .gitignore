@@ -1,4 +1,5 @@
 /.vscode
-/avpipeline.test
+*.test
 /preset/streammux/streammux.test
 /.github/instructions/afk
+/3rdparty

@@ -309,8 +309,12 @@ func (s *StreamMux[C]) initSwitches(
 					return
 				}
 
-				if err := outputPrev.InputFrom.RemovePushPacketsTo(ctx, outputPrev.Input()); err != nil {
+				input := outputPrev.Input()
+				if err := outputPrev.InputFrom.RemovePushPacketsTo(ctx, input); err != nil {
 					logger.Errorf(ctx, "Switch[%s]: unable to remove push packets to the output %d: %v", inputType, from, err)
+				}
+				if err := outputPrev.InputFrom.RemovePushFramesTo(ctx, input); err != nil {
+					logger.Errorf(ctx, "Switch[%s]: unable to remove push frames to the output %d: %v", inputType, from, err)
 				}
 
 				if EnableDraining {
