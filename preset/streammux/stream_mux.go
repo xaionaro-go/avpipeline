@@ -328,6 +328,14 @@ func (s *StreamMux[C]) initSwitches(
 				})
 			})
 		})
+
+		// To prevent corrupting the stream by mixing packets via two different Output:
+		//
+		// Different output exists to allow different codecs/resolutions/whatnot, but
+		// they are not really different outputs, they all lead to the same destination.
+		// Thus the order of the packets is important. Thus we first allow the previous,
+		// output to empty, while holding packets in the new output (thus InactiveBlock),
+		// and after that release the held packets.
 		input.OutputSyncer.Flags.Set(barrierstategetter.SwitchFlagInactiveBlock)
 
 		logger.Tracef(ctx, "Switch[%s]: %p", inputType, input.OutputSwitch)
@@ -1041,6 +1049,9 @@ func (s *StreamMux[C]) withActiveVideoOutput(
 	}
 }
 
+// GetActiveVideoOutput returns the currently active video output.
+//
+// Note: the "active" means gated in by OutputSyncer.
 func (s *StreamMux[C]) GetActiveVideoOutput(
 	ctx context.Context,
 ) *Output[C] {
@@ -1056,6 +1067,9 @@ func (s *StreamMux[C]) getActiveVideoOutputLocked(
 	return output
 }
 
+// GetActiveAudioOutput returns the currently active audio output.
+//
+// Note: the "active" means gated in by OutputSyncer.
 func (s *StreamMux[C]) GetActiveAudioOutput(
 	ctx context.Context,
 ) *Output[C] {
