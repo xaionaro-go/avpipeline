@@ -8,8 +8,7 @@ import (
 	"sync"
 
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -75,74 +74,39 @@ func (a *ScreenCapturer[C]) DotBlockContentStringWriteTo(
 	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.Input().GetProcessor(), a.Output().GetProcessor())
 }
 
-func (a *ScreenCapturer[C]) GetPushPacketsTos(
+func (a *ScreenCapturer[C]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
-	return a.Output().GetPushPacketsTos(ctx)
+) node.PushTos {
+	return a.Output().GetPushTos(ctx)
 }
 
-func (a *ScreenCapturer[C]) WithPushPacketsTos(
+func (a *ScreenCapturer[C]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
-	a.Output().WithPushPacketsTos(ctx, callback)
+	a.Output().WithPushTos(ctx, callback)
 }
 
-func (a *ScreenCapturer[C]) AddPushPacketsTo(
+func (a *ScreenCapturer[C]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	a.Output().AddPushPacketsTo(ctx, dst, conds...)
+	a.Output().AddPushTo(ctx, dst, conds...)
 }
 
-func (a *ScreenCapturer[C]) SetPushPacketsTos(
+func (a *ScreenCapturer[C]) SetPushTos(
 	ctx context.Context,
-	pushTos node.PushPacketsTos,
+	pushTos node.PushTos,
 ) {
-	a.Output().SetPushPacketsTos(ctx, pushTos)
+	a.Output().SetPushTos(ctx, pushTos)
 }
 
-func (a *ScreenCapturer[C]) RemovePushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-) error {
-	return a.Output().RemovePushPacketsTo(ctx, dst)
-}
-
-func (a *ScreenCapturer[C]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return a.Output().GetPushFramesTos(ctx)
-}
-
-func (a *ScreenCapturer[C]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-	a.Output().WithPushFramesTos(ctx, callback)
-}
-
-func (a *ScreenCapturer[C]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-	a.Output().AddPushFramesTo(ctx, dst, conds...)
-}
-
-func (a *ScreenCapturer[C]) SetPushFramesTos(
-	ctx context.Context,
-	pushTos node.PushFramesTos,
-) {
-	a.Output().SetPushFramesTos(ctx, pushTos)
-}
-
-func (a *ScreenCapturer[C]) RemovePushFramesTo(
+func (a *ScreenCapturer[C]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return a.Output().RemovePushFramesTo(ctx, dst)
+	return a.Output().RemovePushTo(ctx, dst)
 }
 
 func (a *ScreenCapturer[C]) IsServing() bool {
@@ -167,42 +131,25 @@ func (a *ScreenCapturer[C]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *ScreenCapturer[C]) GetInputPacketFilter(
+func (a *ScreenCapturer[C]) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
-	return a.Input().GetInputPacketFilter(ctx)
+) packetorframefiltercondition.Condition {
+	return a.Input().GetInputFilter(ctx)
 }
 
-func (a *ScreenCapturer[C]) SetInputPacketFilter(
+func (a *ScreenCapturer[C]) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	a.Input().SetInputPacketFilter(ctx, cond)
-}
-
-func (a *ScreenCapturer[C]) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-	return a.Input().GetInputFrameFilter(ctx)
-}
-
-func (a *ScreenCapturer[C]) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
-) {
-	a.Input().SetInputFrameFilter(ctx, cond)
+	a.Input().SetInputFilter(ctx, cond)
 }
 
 func (a *ScreenCapturer[C]) GetChangeChanIsServing() <-chan struct{} {
 	return a.Input().GetChangeChanIsServing()
 }
 
-func (a *ScreenCapturer[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return a.Output().GetChangeChanPushPacketsTo()
-}
-
-func (a *ScreenCapturer[C]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return a.Output().GetChangeChanPushFramesTo()
+func (a *ScreenCapturer[C]) GetChangeChanPushTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushTo()
 }
 
 func (a *ScreenCapturer[C]) GetChangeChanDrained() <-chan struct{} {

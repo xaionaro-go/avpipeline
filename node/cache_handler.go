@@ -7,18 +7,18 @@ import (
 )
 
 type CachingHandler interface {
-	OnAddPushPacketsTo(
+	OnAddPushTo(
 		ctx context.Context,
-		pushTo PushPacketsTo,
+		pushTo PushTo,
 	)
-	OnRemovePushPacketsTo(
+	OnRemovePushTo(
 		ctx context.Context,
-		pushTo PushPacketsTo,
+		pushTo PushTo,
 	)
 	RememberPacketIfNeeded(ctx context.Context, pkt packet.Input) error
-	GetPendingPackets(
+	GetPending(
 		ctx context.Context,
-		pushTo PushPacketsTo,
+		pushTo PushTo,
 	) ([]packet.Input, error)
 	Reset(context.Context)
 }

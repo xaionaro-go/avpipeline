@@ -7,12 +7,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -28,19 +28,21 @@ func (h *receiverHandler) String() string {
 	return fmt.Sprintf("receiverHandler{Received:%d, Expected:%d}", h.Received, h.Expected)
 }
 
-var _ kerneltypes.SendInputPacketer = (*receiverHandler)(nil)
-
-func (h *receiverHandler) SendInputPacket(
+func (h *receiverHandler) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	h.Received++
-	if h.Received >= h.Expected {
-		close(h.FinishedCh)
+	switch {
+	case input.Packet != nil:
+		h.Received++
+		if h.Received >= h.Expected {
+			close(h.FinishedCh)
+		}
+		return nil
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
 	}
-	return nil
 }
 
 func newReceiverNode(
@@ -99,11 +101,11 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 	errCh := make(chan node.Error, 10000)
 	for range connsCount - 1 {
 		next := node.NewFromKernel(ctx, &kernel.Passthrough{})
-		n.AddPushPacketsTo(ctx, next)
+		n.AddPushTo(ctx, next)
 		n = next
 	}
 	recvNode := newReceiverNode(ctx, b.N)
-	n.AddPushPacketsTo(ctx, recvNode)
+	n.AddPushTo(ctx, recvNode)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -132,14 +134,16 @@ func benchmarkPipeline(ctx context.Context, b *testing.B, connsCount int) {
 	defer func() {
 		<-recvNode.Processor.Kernel.Handler.FinishedCh
 	}()
-	inCh := first.Processor.InputPacketChan()
+	inCh := first.Processor.InputChan()
 	counters := first.GetCountersPtr().Received.Packets
-	pkt := packet.Input{
-		StreamInfo: &packet.StreamInfo{},
+	pkt := packetorframe.InputUnion{
+		Packet: &packet.Input{
+			StreamInfo: &packet.StreamInfo{},
+		},
 	}
-	pkt.Packet = packet.Pool.Get()
-	pkt.Packet.MakeWritable()
-	pkt.Packet.SetSize(0)
+	pkt.Packet.Packet = packet.Pool.Get()
+	pkt.Packet.Packet.MakeWritable()
+	pkt.Packet.Packet.SetSize(0)
 
 	b.SetBytes(2000) // approx size of one packet (usually 200-20000 bytes; with ~20000 being on the rarer side)
 	b.ResetTimer()

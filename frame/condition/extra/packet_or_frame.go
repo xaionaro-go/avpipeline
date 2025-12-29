@@ -1,16 +1,17 @@
-package condition
+package extra
 
 import (
 	"context"
 
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 )
 
 type PacketOrFrame packetorframecondition.And
 
-var _ Condition = PacketOrFrame{}
+var _ condition.Condition = PacketOrFrame{}
 
 func (v PacketOrFrame) String() string {
 	return packetorframecondition.And(v).String()

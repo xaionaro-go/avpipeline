@@ -9,10 +9,10 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
@@ -58,28 +58,17 @@ func (g *generatorKernel) String() string {
 	return "generatorKernel"
 }
 
-func (g *generatorKernel) SendInputPacket(
+func (g *generatorKernel) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return nil
-}
-
-func (g *generatorKernel) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }
 
 func (g *generatorKernel) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	for g.generated < g.PacketCount {
 		select {
@@ -93,11 +82,14 @@ func (g *generatorKernel) Generate(
 		pkt := packet.Pool.Get()
 		pkt.SetStreamIndex(0)
 
-		select {
-		case outputPacketsCh <- packet.BuildOutput(pkt, &packet.StreamInfo{
+		pktOut := packet.BuildOutput(pkt, &packet.StreamInfo{
 			Stream: g.Stream,
 			Source: g.Source,
-		}):
+		})
+		select {
+		case outputCh <- packetorframe.OutputUnion{
+			Packet: &pktOut,
+		}:
 			g.generated++
 		case <-ctx.Done():
 			pkt.Free()
@@ -132,7 +124,7 @@ var _ kernel.Abstract = (*generatorKernel)(nil)
 // TestPipeline_ErrNoSourceFormatContext tests the production scenario at pipeline level:
 // 1. Generator node creates packets with Source = mockRetryableNotReady
 // 2. Packets flow through node connections to Output node
-// 3. Output.SendInputPacket calls Source.WithOutputFormatContext
+// 3. Output.SendInput calls Source.WithOutputFormatContext
 // 4. mockRetryableNotReady.WithOutputFormatContext doesn't call callback
 // 5. ErrNoSourceFormatContext is raised (or ignored with option)
 func TestPipeline_ErrNoSourceFormatContext(t *testing.T) {
@@ -161,7 +153,7 @@ func TestPipeline_ErrNoSourceFormatContext(t *testing.T) {
 	outputNode := node.NewFromKernel(ctx, output)
 
 	// Connect: generator -> output (packets flow through node connection)
-	generatorNode.AddPushPacketsTo(ctx, outputNode)
+	generatorNode.AddPushTo(ctx, outputNode)
 
 	// Setup error channel
 	errCh := make(chan node.Error, 100)

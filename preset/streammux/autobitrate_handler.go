@@ -304,7 +304,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	wg.Wait()
 	logger.Tracef(ctx, "total queue size: %d", totalQueue.Load())
 	if !haveAnError.Load() {
-		h.lastVideoBitRate = h.StreamMux.CurrentVideoOutputBitRate.Load()
+		h.lastVideoBitRate = h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).OutputBitRate.Load()
 	}
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
@@ -316,7 +316,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	var curReqBitRate types.Ubps
 	if codec.IsEncoderCopy(encoderV) {
 		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
-		curReqBitRate = types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
+		curReqBitRate = types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load())
 	} else {
 		logger.Tracef(ctx, "getting current bitrate from the encoder")
 		q := encoderV.GetQuality(ctx)
@@ -332,14 +332,14 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		return
 	}
 
-	actualOutputBitrate := types.Ubps(h.StreamMux.CurrentVideoOutputBitRate.Load())
+	actualOutputBitrate := types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).OutputBitRate.Load())
 	totalQueueSizeDerivative := (float64(totalQueue.Load()) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
 	h.lastTotalQueueSize = totalQueue.Load()
 	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
 		CalculateBitRateRequest{
 			CurrentBitrateSetting: types.Ubps(curReqBitRate),
-			InputBitrate:          types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load()),
+			InputBitrate:          types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load()),
 			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
 			QueueSize:             types.UB(totalQueue.Load()),
 			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
@@ -398,7 +398,7 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	return h.setVideoOutput(
 		ctx,
 		nil,
-		types.Ubps(float64(h.StreamMux.CurrentVideoInputBitRate.Load())*0.9),
+		types.Ubps(float64(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load())*0.9),
 		force,
 		allowTrafficLoss,
 	)
@@ -437,7 +437,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		}
 	}
 
-	videoInputBitRate := types.Ubps(h.StreamMux.CurrentVideoInputBitRate.Load())
+	videoInputBitRate := types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load())
 	if h.StreamMux.AutoBitRateHandler.AutoByPass {
 		if !h.StreamMux.IsAllowedDifferentOutputs() {
 			logger.Errorf(ctx, "AutoByPass is enabled, but changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
@@ -841,7 +841,7 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 		return nil
 	}
 
-	curBitRate := h.StreamMux.CurrentVideoEncodedBitRate.Load()
+	curBitRate := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).EncodedBitRate.Load()
 	fpsReductionMultiplier0 := temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate)
 	fpsReductionMultiplier1 := float64(bitrate) / float64(bitrate-bitrateBeyondThreshold)
 	fpsReductionMultiplierAvg := (fpsReductionMultiplier0 + fpsReductionMultiplier1) / 2

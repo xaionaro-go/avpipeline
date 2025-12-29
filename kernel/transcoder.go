@@ -13,6 +13,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -40,7 +41,7 @@ type Transcoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	started                 bool
 	activeStreamsMap        map[int]struct{}
 	activeStreamsCount      uint
-	pendingPacketsAndFrames []packetorframe.Abstract
+	pendingPacketsAndFrames []packetorframe.OutputUnion
 }
 
 var _ Abstract = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
@@ -83,52 +84,54 @@ func (r *Transcoder[DF, EF]) Close(ctx context.Context) (_err error) {
 
 func (r *Transcoder[DF, EF]) Generate(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "Generate")
-	defer func() { logger.Tracef(ctx, "/Generate: %v", _err) }()
+	outputCh chan<- packetorframe.OutputUnion,
+) error {
 	return nil
 }
 
-func (r *Transcoder[DF, EF]) SendInputPacket(
+func (r *Transcoder[DF, EF]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
-	return xsync.DoA4R1(
-		ctx,
-		&r.locker,
-		r.sendInputPacket,
-		ctx,
-		input,
-		outputPacketsCh, outputFramesCh,
-	)
+	pkt, frame := input.Unwrap()
+	switch {
+	case pkt != nil:
+		logger.Tracef(ctx, "SendInput(packet)")
+		defer func() { logger.Tracef(ctx, "/SendInput(packet): %v", _err) }()
+		return xsync.DoA3R1(
+			ctx,
+			&r.locker,
+			r.sendPacketNoLock,
+			ctx,
+			*pkt,
+			outputCh,
+		)
+	case frame != nil:
+		return r.sendFrame(ctx, *frame, outputCh)
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
+	}
 }
 
-func (r *Transcoder[DF, EF]) sendInputPacket(
+func (r *Transcoder[DF, EF]) sendPacketNoLock(
 	ctx context.Context,
 	input packet.Input,
-	outputPacketCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	mediaType := input.GetMediaType()
-	logger.Tracef(ctx, "sendInputPacket %s (started: %v)", mediaType, r.started)
-	defer func() { logger.Tracef(ctx, "/sendInputPacket: %v: %v (started: %v)", mediaType, _err, r.started) }()
+	logger.Tracef(ctx, "sendPacket %s (started: %v)", mediaType, r.started)
+	defer func() { logger.Tracef(ctx, "/sendPacket: %v: %v (started: %v)", mediaType, _err, r.started) }()
 
 	if r.IsClosed() {
 		return io.ErrClosedPipe
 	}
 
 	if r.started || !transcoderWaitForStreamsStart {
-		return r.process(ctx, input, outputPacketCh, outputFramesCh)
+		return r.process(ctx, input, outputCh)
 	}
 
-	resultPacketsCh := make(chan packet.Output, 1)
-	resultFramesCh := make(chan frame.Output, 1)
+	resultCh := make(chan packetorframe.OutputUnion, 1)
 	var wg sync.WaitGroup
 	defer func() {
 		logger.Tracef(ctx, "waiting for the result channel to be closed")
@@ -141,26 +144,16 @@ func (r *Transcoder[DF, EF]) sendInputPacket(
 		for {
 			var streamIdx int
 			select {
-			case pkt, ok := <-resultPacketsCh:
+			case out, ok := <-resultCh:
 				if !ok {
 					return
 				}
-				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, &pkt)
+				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, out)
 				if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
 					logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 					r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
 				}
-				streamIdx = pkt.Stream.Index()
-			case frame, ok := <-resultFramesCh:
-				if !ok {
-					return
-				}
-				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, &frame)
-				if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
-					logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-					r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
-				}
-				streamIdx = frame.StreamIndex
+				streamIdx = out.GetStreamIndex()
 			}
 
 			if _, ok := r.activeStreamsMap[streamIdx]; ok {
@@ -174,38 +167,26 @@ func (r *Transcoder[DF, EF]) sendInputPacket(
 	defer func() {
 		r := recover()
 		if r != nil {
-			close(resultPacketsCh)
+			close(resultCh)
 			panic(r)
 		}
 	}()
-	err := r.process(ctx, input, resultPacketsCh, resultFramesCh)
+	err := r.process(ctx, input, resultCh)
 	logger.Tracef(ctx, "closing the result channels")
-	close(resultPacketsCh)
-	close(resultFramesCh)
+	close(resultCh)
 
-	inputStreamsCount := sourceNbStreams(ctx, input.Source)
-	logger.Tracef(ctx, "input streams count: %d (source: %s), active streams count: %d", inputStreamsCount, input.Source, r.activeStreamsCount)
+	inputStreamsCount := sourceNbStreams(ctx, input.GetSource())
+	logger.Tracef(ctx, "input streams count: %d (source: %s), active streams count: %d", inputStreamsCount, input.GetSource(), r.activeStreamsCount)
 	if inputStreamsCount > int(r.activeStreamsCount) {
 		return err
 	}
 
 	logger.Debugf(ctx, "sending out all the pending packets (%d), because the amount of streams is %d (/%d)", len(r.pendingPacketsAndFrames), int(r.activeStreamsCount), inputStreamsCount)
 	for _, pktOrFrame := range r.pendingPacketsAndFrames {
-		switch pktOrFrame := pktOrFrame.(type) {
-		case *packet.Output:
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case outputPacketCh <- *pktOrFrame:
-			}
-		case *frame.Output:
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case outputFramesCh <- *pktOrFrame:
-			}
-		default:
-			return fmt.Errorf("unexpected type of pending packet/frame: %T", pktOrFrame)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case outputCh <- pktOrFrame:
 		}
 	}
 	r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[:0]
@@ -216,15 +197,14 @@ func (r *Transcoder[DF, EF]) sendInputPacket(
 func (r *Transcoder[DF, EF]) process(
 	ctx context.Context,
 	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "process")
 	defer func() { logger.Tracef(ctx, "/process: %v", _err) }()
 
 	// try copying first (e.g. in case '-c:v copy' is used):
 
-	err := r.Encoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
+	err := r.Encoder.SendInput(ctx, packetorframe.InputUnion{Packet: &input}, outputCh)
 	switch {
 	case err == nil:
 		return
@@ -237,17 +217,16 @@ func (r *Transcoder[DF, EF]) process(
 
 	return r.decoderToEncoder(ctx, func(
 		ctx context.Context,
-		outputFramesCh chan<- frame.Output,
+		outputCh chan<- packetorframe.OutputUnion,
 	) error {
-		return r.Decoder.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
-	}, outputPacketsCh, outputFramesCh)
+		return r.Decoder.SendInput(ctx, packetorframe.InputUnion{Packet: &input}, outputCh)
+	}, outputCh)
 }
 
 func (r *Transcoder[DF, EF]) decoderToEncoder(
 	ctx context.Context,
-	decodeFn func(ctx context.Context, outputFramesCh chan<- frame.Output) error,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	decodeFn func(ctx context.Context, outputCh chan<- packetorframe.OutputUnion) error,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_ret error) {
 	logger.Tracef(ctx, "decoderToEncoder")
 	defer func() { logger.Tracef(ctx, "/decoderToEncoder: %v", _ret) }()
@@ -260,7 +239,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	framesCh := make(chan frame.Output, 2)
+	resultCh := make(chan packetorframe.OutputUnion, 2)
 	wg.Add(1)
 	var encoderError error
 	observability.Go(ctx, func(ctx context.Context) {
@@ -269,10 +248,20 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 			cancelFn()
 		}()
 		for {
-			f, ok := <-framesCh
+			out, ok := <-resultCh
 			if !ok {
 				return
 			}
+			if out.Frame == nil {
+				logger.Tracef(ctx, "got a non-frame output from the decoder; passing it through")
+				select {
+				case <-ctx.Done():
+					return
+				case outputCh <- out:
+				}
+				continue
+			}
+			f := *out.Frame
 			logger.Tracef(ctx, "got a decoded %s frame from the decoder", f.GetMediaType())
 			func() {
 				defer frame.Pool.Put(f.Frame)
@@ -286,7 +275,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 					logger.Tracef(ctx, "frame filtered out")
 					return
 				}
-				err := r.Encoder.SendInputFrame(ctx, inputFrame, outputPacketsCh, outputFramesCh)
+				err := r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, outputCh)
 				if err != nil {
 					logger.Tracef(ctx, "encoder returned an error: %v", err)
 					encoderError = err
@@ -297,8 +286,8 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 
 	var err error
 	func() {
-		defer close(framesCh)
-		err = decodeFn(ctx, framesCh)
+		defer close(resultCh)
+		err = decodeFn(ctx, resultCh)
 	}()
 	wg.Wait()
 	if encoderError != nil {
@@ -312,14 +301,13 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 
 }
 
-func (r *Transcoder[DF, EF]) SendInputFrame(
+func (r *Transcoder[DF, EF]) sendFrame(
 	ctx context.Context,
 	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputFrame")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+	logger.Tracef(ctx, "sendFrame")
+	defer func() { logger.Tracef(ctx, "/sendFrame: %v", _err) }()
 	r.locker.Do(ctx, func() {
 		if r.started {
 			return
@@ -335,7 +323,7 @@ func (r *Transcoder[DF, EF]) SendInputFrame(
 		logger.Tracef(ctx, "frame filtered out")
 		return nil
 	}
-	return r.Encoder.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
+	return r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &input}, outputCh)
 }
 
 func (r *Transcoder[DF, EF]) GetObjectID() globaltypes.ObjectID {
@@ -438,8 +426,7 @@ var _ Flusher = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
 
 func (r *Transcoder[DF, EF]) Flush(
 	ctx context.Context,
-	outputPacketCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Debugf(ctx, "Flush")
 	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
@@ -448,7 +435,7 @@ func (r *Transcoder[DF, EF]) Flush(
 	r.flushLocker.Do(ctx, func() {
 		if err := r.decoderToEncoder(ctx, func(
 			ctx context.Context,
-			outputFramesCh chan<- frame.Output,
+			outputCh chan<- packetorframe.OutputUnion,
 		) (_err error) {
 			defer func() {
 				r := recover()
@@ -456,12 +443,12 @@ func (r *Transcoder[DF, EF]) Flush(
 					_err = fmt.Errorf("panic: %v:\n%s", r, debug.Stack())
 				}
 			}()
-			return r.Decoder.Flush(ctx, outputPacketCh, outputFramesCh)
-		}, outputPacketCh, outputFramesCh); err != nil {
+			return r.Decoder.Flush(ctx, outputCh)
+		}, outputCh); err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush the decoder: %w", err))
 		}
 
-		if err := r.Encoder.Flush(ctx, outputPacketCh, outputFramesCh); err != nil {
+		if err := r.Encoder.Flush(ctx, outputCh); err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush the encoder: %w", err))
 		}
 	})

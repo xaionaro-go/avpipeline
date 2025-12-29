@@ -13,9 +13,7 @@ import (
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/node/filter"
-	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -98,7 +96,7 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	defer t.Stop()
 	for {
 		logger.Tracef(ctx, "Serve[%s]: an iteration started", nodeKey)
-		pktCh, frameCh := n.Processor.OutputPacketChan(), n.Processor.OutputFrameChan()
+		outputCh := n.Processor.OutputChan()
 		n.updateProcInfo(ctx)
 		select {
 		case <-t.C:
@@ -122,66 +120,64 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			if err != nil {
 				sendErr(err)
 			}
-		case pkt, ok := <-pktCh:
+		case output, ok := <-outputCh:
 			if !ok {
 				sendErr(io.EOF)
 				return
 			}
-			logger.Tracef(ctx, "pulled from %s a %s packet with stream index %d", n.Processor, pkt.GetMediaType(), pkt.Packet.StreamIndex())
-			if n.Config.CacheHandler != nil {
-				if err := n.Config.CacheHandler.RememberPacketIfNeeded(ctx, packet.BuildInput(
-					pkt.Packet,
-					pkt.StreamInfo,
-				)); err != nil {
-					logger.Errorf(ctx, "unable to cache packet: %v", err)
+			if output.Packet != nil {
+				pkt := *output.Packet
+				logger.Tracef(ctx, "pulled from %s a %s packet with stream index %d", n.Processor, pkt.GetMediaType(), pkt.Packet.StreamIndex())
+				if n.Config.CacheHandler != nil {
+					if err := n.Config.CacheHandler.RememberPacketIfNeeded(ctx, packet.BuildInput(
+						pkt.Packet,
+						pkt.StreamInfo,
+					)); err != nil {
+						logger.Errorf(ctx, "unable to cache packet: %v", err)
+					}
 				}
+				n.Locker.Do(ctx, func() {
+					pushFurther(
+						ctx, n, pkt, n.PushTos, &serveConfig,
+						buildPacketInput,
+						func(ctx context.Context, n Abstract) packetorframefiltercondition.Condition {
+							return n.GetInputFilter(ctx)
+						},
+						poolPutPacketOutput,
+						globaltypes.CountersSubSectionIDPackets,
+					)
+				})
 			}
-			n.Locker.Do(ctx, func() {
-				pushFurther(
-					ctx, n, pkt, n.PushPacketsTos, &serveConfig,
-					buildPacketInput,
-					getInputPacketFilter,
-					getInputPacketChan,
-					poolPutPacketInput,
-					poolPutPacketOutput,
-					globaltypes.CountersSubSectionIDPackets,
-				)
-			})
-		case f, ok := <-frameCh:
-			if !ok {
-				sendErr(io.EOF)
-				return
+			if output.Frame != nil {
+				f := *output.Frame
+				n.Locker.Do(ctx, func() {
+					pushFurther(
+						ctx, n, f, n.PushTos, &serveConfig,
+						buildFrameInput,
+						func(ctx context.Context, n Abstract) packetorframefiltercondition.Condition {
+							return n.GetInputFilter(ctx)
+						},
+						poolPutFrameOutput,
+						globaltypes.CountersSubSectionIDFrames,
+					)
+				})
 			}
-			n.Locker.Do(ctx, func() {
-				pushFurther(
-					ctx, n, f, n.PushFramesTos, &serveConfig,
-					buildFrameInput,
-					getInputFrameFilter,
-					getInputFrameChan,
-					poolPutFrameInput,
-					poolPutFrameOutput,
-					globaltypes.CountersSubSectionIDFrames,
-				)
-			})
 		}
 	}
 }
 
 func pushFurther[
 	P processor.Abstract,
-	I packetorframe.Input, C filter.Condition[I],
 	O packetorframe.Output, OP packetorframe.Pointer[O],
 	CD any,
 ](
 	ctx context.Context,
 	n *NodeWithCustomData[CD, P],
 	outputObj O,
-	pushTos []PushTo[I, C],
+	pushTos PushTos,
 	serveConfig *ServeConfig,
-	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
-	getInputCondition func(context.Context, Abstract) C,
-	getPushChan func(processor.Abstract) (chan<- I, bool),
-	poolPutInput func(I),
+	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo) []packetorframe.InputUnion,
+	getInputCondition func(context.Context, Abstract) packetorframefiltercondition.Condition,
 	poolPutOutput func(O),
 	countersSubSectionID globaltypes.CountersSubSectionID,
 ) {
@@ -220,7 +216,7 @@ func pushFurther[
 		pushTo := pushTos[0]
 		n.Locker.ManualUnlock(ctx)
 		defer n.Locker.ManualLock(ctx)
-		pushToDestination[P, I, C, O, OP, CD](
+		pushToDestination[P, O, OP, CD](
 			ctx,
 			n,
 			outputObj,
@@ -228,8 +224,6 @@ func pushFurther[
 			serveConfig,
 			buildInput,
 			getInputCondition,
-			getPushChan,
-			poolPutInput,
 			countersSubSectionID,
 		)
 		return
@@ -243,7 +237,7 @@ func pushFurther[
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			pushToDestination[P, I, C, O, OP, CD](
+			pushToDestination[P, O, OP, CD](
 				ctx,
 				n,
 				outputObj,
@@ -251,8 +245,6 @@ func pushFurther[
 				serveConfig,
 				buildInput,
 				getInputCondition,
-				getPushChan,
-				poolPutInput,
 				countersSubSectionID,
 			)
 		})
@@ -261,19 +253,16 @@ func pushFurther[
 
 func pushToDestination[
 	P processor.Abstract,
-	I packetorframe.Input, C filter.Condition[I],
 	O packetorframe.Output, OP packetorframe.Pointer[O],
 	CD any,
 ](
 	ctx context.Context,
 	n *NodeWithCustomData[CD, P],
 	outputObj O,
-	pushTo PushTo[I, C],
+	pushTo PushTo,
 	serveConfig *ServeConfig,
-	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo[I, C]) []I,
-	getInputCondition func(context.Context, Abstract) C,
-	getPushChan func(processor.Abstract) (chan<- I, bool),
-	poolPutInput func(I),
+	buildInput func(context.Context, *NodeWithCustomData[CD, P], O, PushTo) []packetorframe.InputUnion,
+	getInputCondition func(context.Context, Abstract) packetorframefiltercondition.Condition,
 	countersSubSectionID globaltypes.CountersSubSectionID,
 ) {
 	outputObjPtr := OP(&outputObj)
@@ -281,7 +270,7 @@ func pushToDestination[
 	objSize := uint64(outputObjPtr.GetSize())
 
 	for _, inputObj := range buildInput(ctx, n, outputObj, pushTo) {
-		filterArg := filter.Input[I]{
+		filterArg := packetorframefiltercondition.Input{
 			Destination: pushTo.Node,
 			Input:       inputObj,
 		}
@@ -314,7 +303,10 @@ func pushToDestination[
 			return
 		}
 
-		pushChan, isDiscard := getPushChan(pushTo.Node.GetProcessor())
+		p := pushTo.Node.GetProcessor()
+		pushChan := p.InputChan()
+		isDiscard := pushChan == processor.DiscardInputChan
+
 		logger.Tracef(ctx, "pushing to %s %s %T with stream index %d via chan %p", pushTo.Node.GetProcessor(), mediaType, outputObj, outputObjPtr.GetStreamIndex(), pushChan)
 		frameDrop := false
 		switch mediaType {
@@ -363,22 +355,28 @@ func buildPacketInput[
 	ctx context.Context,
 	n *NodeWithCustomData[CD, P],
 	pkt packet.Output,
-	pushTo PushTo[packet.Input, packetcondition.Condition],
-) []packet.Input {
-	var result []packet.Input
+	pushTo PushTo,
+) []packetorframe.InputUnion {
+	var result []packetorframe.InputUnion
 	if n.Config.CacheHandler != nil {
-		pendingPackets, err := n.Config.CacheHandler.GetPendingPackets(ctx, pushTo)
+		pendingPackets, err := n.Config.CacheHandler.GetPending(ctx, pushTo)
 		if err != nil {
 			logger.Errorf(ctx, "unable to cache packet: %v", err)
 		}
-		if len(pendingPackets) > 0 {
-			return pendingPackets
+		for _, p := range pendingPackets {
+			result = append(result, packetorframe.InputUnion{Packet: &p})
+		}
+		if len(result) > 0 {
+			return result
 		}
 	}
-	result = append(result, packet.BuildInput(
+	p := packet.BuildInput(
 		packet.CloneAsReferenced(pkt.Packet),
 		pkt.StreamInfo,
-	))
+	)
+	result = append(result, packetorframe.InputUnion{
+		Packet: &p,
+	})
 	return result
 }
 
@@ -389,31 +387,25 @@ func buildFrameInput[
 	ctx context.Context,
 	_ *NodeWithCustomData[CD, P],
 	f frame.Output,
-	pushTo PushTo[frame.Input, framecondition.Condition],
-) []frame.Input {
-	return []frame.Input{frame.BuildInput(
+	pushTo PushTo,
+) []packetorframe.InputUnion {
+	fr := frame.BuildInput(
 		frame.CloneAsReferenced(f.Frame),
 		f.Pos,
 		f.StreamInfo,
-	)}
+	)
+	return []packetorframe.InputUnion{{
+		Frame: &fr,
+	}}
 }
 
-func getInputPacketFilter(ctx context.Context, n Abstract) packetcondition.Condition {
-	return n.GetInputPacketFilter(ctx)
-}
-
-func getInputPacketChan(p processor.Abstract) (chan<- packet.Input, bool) {
-	ch := p.InputPacketChan()
-	return ch, ch == processor.DiscardInputPacketChan
-}
-
-func getInputFrameFilter(ctx context.Context, n Abstract) framecondition.Condition {
-	return n.GetInputFrameFilter(ctx)
-}
-
-func getInputFrameChan(p processor.Abstract) (chan<- frame.Input, bool) {
-	ch := p.InputFrameChan()
-	return ch, ch == processor.DiscardInputFrameChan
+func poolPutInput(in packetorframe.InputUnion) {
+	if in.Packet != nil {
+		packet.Pool.Put(in.Packet.Packet)
+	}
+	if in.Frame != nil {
+		frame.Pool.Put(in.Frame.Frame)
+	}
 }
 
 func poolPutPacketInput(p packet.Input) {

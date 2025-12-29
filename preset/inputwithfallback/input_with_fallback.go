@@ -17,8 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
@@ -32,8 +31,7 @@ const (
 )
 
 type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
-	InputPacketFilter   xatomic.Value[packetfiltercondition.Condition]
-	InputFrameFilter    xatomic.Value[framefiltercondition.Condition]
+	InputFilter         xatomic.Value[packetorframefiltercondition.Condition]
 	InputChainsLocker   xsync.Mutex
 	InputChains         []*InputChain[K, DF, C]
 	InputSwitch         *barrierstategetter.Switch
@@ -81,8 +79,7 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 		MonotonicPTS:      monotonicpts.New(true),
 		newInputChainChan: make(chan *InputChain[K, DF, C], 100),
 	}
-	i.PreOutput.AddPushPacketsTo(ctx, i.Output, packetfiltercondition.PacketOrFrame{i.MonotonicPTS})
-	i.PreOutput.AddPushFramesTo(ctx, i.Output, framefiltercondition.PacketOrFrame{i.MonotonicPTS})
+	i.PreOutput.AddPushTo(ctx, i.Output, packetorframefiltercondition.PacketOrFrame{i.MonotonicPTS})
 	if err := i.initSwitches(ctx); err != nil {
 		return nil, fmt.Errorf("cannot init switches: %w", err)
 	}
@@ -329,10 +326,8 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 		if err != nil {
 			return fmt.Errorf("cannot create input chain for input %d: %w", inputID, err)
 		}
-		inputChain.GetInput().SetInputPacketFilter(ctx, i.inputPacketFilter())
-		inputChain.GetInput().SetInputFrameFilter(ctx, i.inputFrameFilter())
-		inputChain.GetOutput().AddPushPacketsTo(ctx, i.PreOutput)
-		inputChain.GetOutput().AddPushFramesTo(ctx, i.PreOutput)
+		inputChain.GetInput().SetInputFilter(ctx, i.inputFilter())
+		inputChain.GetOutput().AddPushTo(ctx, i.PreOutput)
 		i.InputChains = append(i.InputChains, inputChain)
 		select {
 		case <-ctx.Done():
@@ -408,46 +403,25 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 	return nil
 }
 
-type asInputPacketFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]
+type asInputFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]
 
-func (f *asInputPacketFilter[K, DF, C]) String() string {
-	return "InputWithFallback:InputPacketFilter"
+func (f *asInputFilter[K, DF, C]) String() string {
+	return "InputWithFallback:InputFilter"
 }
 
-func (f *asInputPacketFilter[K, DF, C]) Match(
+func (f *asInputFilter[K, DF, C]) Match(
 	ctx context.Context,
-	in packetfiltercondition.Input,
+	in packetorframefiltercondition.Input,
 ) bool {
-	v := f.InputPacketFilter.Load()
+	v := f.InputFilter.Load()
 	if v == nil {
 		return true
 	}
 	return v.Match(ctx, in)
 }
 
-func (i *InputWithFallback[K, DF, C]) inputPacketFilter() packetfiltercondition.Condition {
-	return (*asInputPacketFilter[K, DF, C])(i)
-}
-
-type asInputFrameFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]
-
-func (f *asInputFrameFilter[K, DF, C]) String() string {
-	return "InputWithFallback:InputFrameFilter"
-}
-
-func (f *asInputFrameFilter[K, DF, C]) Match(
-	ctx context.Context,
-	in framefiltercondition.Input,
-) bool {
-	v := f.InputFrameFilter.Load()
-	if v == nil {
-		return true
-	}
-	return v.Match(ctx, in)
-}
-
-func (i *InputWithFallback[K, DF, C]) inputFrameFilter() framefiltercondition.Condition {
-	return (*asInputFrameFilter[K, DF, C])(i)
+func (i *InputWithFallback[K, DF, C]) inputFilter() packetorframefiltercondition.Condition {
+	return (*asInputFilter[K, DF, C])(i)
 }
 
 func (i *InputWithFallback[K, DF, C]) GetInputs(

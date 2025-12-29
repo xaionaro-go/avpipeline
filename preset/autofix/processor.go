@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -38,20 +38,12 @@ func (a *AutoFixerWithCustomData[T]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (a *AutoFixerWithCustomData[T]) InputPacketChan() chan<- packet.Input {
-	return a.Input().GetProcessor().InputPacketChan()
+func (a *AutoFixerWithCustomData[T]) InputChan() chan<- packetorframe.InputUnion {
+	return a.Input().GetProcessor().InputChan()
 }
 
-func (a *AutoFixerWithCustomData[T]) OutputPacketChan() <-chan packet.Output {
-	return a.Output().GetProcessor().OutputPacketChan()
-}
-
-func (a *AutoFixerWithCustomData[T]) InputFrameChan() chan<- frame.Input {
-	return a.Input().GetProcessor().InputFrameChan()
-}
-
-func (a *AutoFixerWithCustomData[T]) OutputFrameChan() <-chan frame.Output {
-	return a.Output().GetProcessor().OutputFrameChan()
+func (a *AutoFixerWithCustomData[T]) OutputChan() <-chan packetorframe.OutputUnion {
+	return a.Output().GetProcessor().OutputChan()
 }
 
 func (a *AutoFixerWithCustomData[T]) ErrorChan() <-chan error {

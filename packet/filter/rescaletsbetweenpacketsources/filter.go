@@ -81,8 +81,8 @@ func (f *Filter) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
-	streamFrom := f.getFromStream(ctx, pkt.StreamIndex())
-	streamTo := f.getToStream(ctx, pkt.StreamIndex())
+	streamFrom := f.getFromStream(ctx, pkt.GetStreamIndex())
+	streamTo := f.getToStream(ctx, pkt.GetStreamIndex())
 	pkt.RescaleTs(streamFrom.TimeBase(), streamTo.TimeBase())
 	return true
 }

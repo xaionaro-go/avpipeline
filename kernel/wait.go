@@ -4,121 +4,74 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
 type Wait struct {
 	*closuresignaler.ClosureSignaler
-	Locker             xsync.Mutex
-	PacketCondition    packetcondition.Condition
-	FrameCondition     framecondition.Condition
-	PacketsQueue       []packet.Output
-	FramesQueue        []frame.Output
-	MaxPacketQueueSize uint
-	MaxFrameQueueSize  uint
+	Locker       xsync.Mutex
+	Condition    packetorframecondition.Condition
+	Queue        []packetorframe.OutputUnion
+	MaxQueueSize uint
 }
 
 var _ Abstract = (*Wait)(nil)
 
 func NewWait(
-	packetCondition packetcondition.Condition,
-	frameCondition framecondition.Condition,
-	maxPacketQueueSize uint,
-	maxFrameQueueSize uint,
+	condition packetorframecondition.Condition,
+	maxQueueSize uint,
 ) *Wait {
 	m := &Wait{
-		ClosureSignaler:    closuresignaler.New(),
-		PacketCondition:    packetCondition,
-		FrameCondition:     frameCondition,
-		MaxPacketQueueSize: maxPacketQueueSize,
-		MaxFrameQueueSize:  maxFrameQueueSize,
+		ClosureSignaler: closuresignaler.New(),
+		Condition:       condition,
+		MaxQueueSize:    maxQueueSize,
 	}
 	return m
 }
 
-func (w *Wait) SendInputPacket(
+func (w *Wait) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
-) error {
-	return xsync.DoA3R1(ctx, &w.Locker, w.sendInputPacket, ctx, input, outputPacketsCh)
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
+) (_err error) {
+	return xsync.DoA3R1(ctx, &w.Locker, w.sendInput, ctx, input, outputCh)
 }
 
-func (w *Wait) sendInputPacket(
+func (w *Wait) sendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	output := packet.BuildOutput(
-		packet.CloneAsReferenced(input.Packet),
-		input.StreamInfo,
-	)
-	shouldWait := w.PacketCondition != nil && w.PacketCondition.Match(ctx, input)
+	output := input.CloneAsReferencedOutput()
+	if output.Get() == nil {
+		return types.ErrUnexpectedInputType{}
+	}
+
+	shouldWait := w.Condition != nil && w.Condition.Match(ctx, input)
 	logger.Tracef(ctx, "shouldWait: %t", shouldWait)
 	if shouldWait {
-		w.PacketsQueue = append(w.PacketsQueue, output)
-		if len(w.PacketsQueue) > int(w.MaxPacketQueueSize) {
-			w.PacketsQueue = w.PacketsQueue[1:]
+		w.Queue = append(w.Queue, output)
+		if len(w.Queue) > int(w.MaxQueueSize) {
+			w.Queue = w.Queue[1:]
 		}
 		return nil
 	}
 
-	if len(w.PacketsQueue) > 0 {
-		logger.Debugf(ctx, "releasing %d packets", len(w.PacketsQueue))
-		for _, pkt := range w.PacketsQueue {
-			outputPacketsCh <- pkt
+	if len(w.Queue) > 0 {
+		logger.Debugf(ctx, "releasing %d items", len(w.Queue))
+		for _, item := range w.Queue {
+			outputCh <- item
 		}
-		w.PacketsQueue = w.PacketsQueue[:0]
+		w.Queue = w.Queue[:0]
 	}
 
-	outputPacketsCh <- output
-	return nil
-}
-
-func (w *Wait) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	_ chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return xsync.DoA3R1(ctx, &w.Locker, w.sendInputFrame, ctx, input, outputFramesCh)
-}
-
-func (w *Wait) sendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputFramesCh chan<- frame.Output,
-) error {
-	output := frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	)
-	shouldWait := w.FrameCondition != nil && w.FrameCondition.Match(ctx, input)
-	logger.Tracef(ctx, "shouldWait: %t", shouldWait)
-	if shouldWait {
-		w.FramesQueue = append(w.FramesQueue, output)
-		if len(w.FramesQueue) > int(w.MaxFrameQueueSize) {
-			w.FramesQueue = w.FramesQueue[1:]
-		}
-		return nil
-	}
-
-	if len(w.FramesQueue) > 0 {
-		logger.Debugf(ctx, "releasing %d frames", len(w.FramesQueue))
-		for _, pkt := range w.FramesQueue {
-			outputFramesCh <- pkt
-		}
-	}
-
-	outputFramesCh <- output
+	outputCh <- output
 	return nil
 }
 
@@ -127,7 +80,7 @@ func (w *Wait) GetObjectID() globaltypes.ObjectID {
 }
 
 func (w *Wait) String() string {
-	return fmt.Sprintf("Wait(%v, %v)", w.PacketCondition, w.FrameCondition)
+	return fmt.Sprintf("Wait(%v)", w.Condition)
 }
 
 func (w *Wait) Close(ctx context.Context) error {
@@ -137,8 +90,7 @@ func (w *Wait) Close(ctx context.Context) error {
 
 func (w *Wait) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }

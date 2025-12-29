@@ -18,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 	goconvavp "github.com/xaionaro-go/avpipeline/protobuf/goconv/avpipeline"
 	goconvlibav "github.com/xaionaro-go/avpipeline/protobuf/goconv/libav"
@@ -34,8 +35,7 @@ type Monitor struct {
 	IncludeFramePayload   bool
 	DoDecode              bool
 	Decoder               *kernel.Decoder[*codec.NaiveDecoderFactory]
-	DecodedPackets        chan packet.Output
-	DecodedFrames         chan frame.Output
+	DecodedOutput         chan packetorframe.OutputUnion
 	KernelClosureSignaler *closuresignaler.ClosureSignaler
 	Node                  *MonitorNode
 }
@@ -62,8 +62,7 @@ func New(
 		KernelClosureSignaler: closuresignaler.New(),
 	}
 	if doDecode {
-		m.DecodedPackets = make(chan packet.Output, 100)
-		m.DecodedFrames = make(chan frame.Output, 100)
+		m.DecodedOutput = make(chan packetorframe.OutputUnion, 100)
 		m.Decoder = kernel.NewDecoder(ctx, codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
 				ErrorRecognitionFlags: astiav.ErrorRecognitionFlags(astiav.ErrorRecognitionFlagIgnoreErr),
@@ -88,16 +87,13 @@ func (m *Monitor) inject(
 ) error {
 	switch m.Type {
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_RECEIVE:
-		assert(ctx, m.Object.GetInputPacketFilter(ctx) == nil, "input packet filter is already set for node %v", m.Object.GetObjectID())
-		assert(ctx, m.Object.GetInputFrameFilter(ctx) == nil, "input frame filter is already set for node %v", m.Object.GetObjectID())
-		m.Object.SetInputPacketFilter(ctx, m.asPacketFilterCondition())
-		m.Object.SetInputFrameFilter(ctx, m.asFrameFilterCondition())
+		assert(ctx, m.Object.GetInputFilter(ctx) == nil, "input filter is already set for node %v", m.Object.GetObjectID())
+		m.Object.SetInputFilter(ctx, m.asInputFilterCondition())
 		return nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_SEND:
 		assert(ctx, m.Node == nil, "internal error: push to monitor is already set for node %v", m.Object.GetObjectID())
 		m.Node = m.newNode(ctx)
-		m.Object.AddPushPacketsTo(ctx, m.Node)
-		m.Object.AddPushFramesTo(ctx, m.Node)
+		m.Object.AddPushTo(ctx, m.Node)
 		return nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_KERNEL_OUTPUT_SEND:
 		k, err := getOutputMonitorer(ctx, m.Object)
@@ -117,15 +113,12 @@ func (m *Monitor) uninject(
 ) error {
 	switch m.Type {
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_RECEIVE:
-		assert(ctx, m.Object.GetInputPacketFilter(ctx) != nil, "input packet filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputPacketFilter(ctx))
-		assert(ctx, m.Object.GetInputFrameFilter(ctx) != nil, "input frame filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputFrameFilter(ctx))
-		m.Object.SetInputPacketFilter(ctx, nil)
-		m.Object.SetInputFrameFilter(ctx, nil)
+		assert(ctx, m.Object.GetInputFilter(ctx) != nil, "input filter is already unset for node %v: %#+v", m.Object.GetObjectID(), m.Object.GetInputFilter(ctx))
+		m.Object.SetInputFilter(ctx, nil)
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_SEND:
 		n := m.Node
 		assert(ctx, n != nil, "internal error: push to monitor is already unset for node %v", m.Object.GetObjectID())
-		assert(ctx, m.Object.RemovePushPacketsTo(ctx, n) == nil, "push packets to monitor is already unset for node %v", m.Object.GetObjectID())
-		assert(ctx, m.Object.RemovePushFramesTo(ctx, n) == nil, "push frames to monitor is already unset for node %v", m.Object.GetObjectID())
+		assert(ctx, m.Object.RemovePushTo(ctx, n) == nil, "push to monitor is already unset for node %v", m.Object.GetObjectID())
 		m.Node = nil
 	case avpipelinegrpc.MonitorEventType_EVENT_TYPE_KERNEL_OUTPUT_SEND:
 		k, err := getOutputMonitorer(ctx, m.Object)
@@ -192,7 +185,7 @@ func (m *Monitor) decodeFrames(
 	errCh := make(chan error, 1)
 	in := packet.BuildInput(pkt, streamInfo)
 	observability.Go(ctx, func(ctx context.Context) {
-		errCh <- m.Decoder.SendInputPacket(ctx, in, m.DecodedPackets, m.DecodedFrames)
+		errCh <- m.Decoder.SendInput(ctx, packetorframe.InputUnion{Packet: &in}, m.DecodedOutput)
 	})
 	var frames []*astiav.Frame
 	for {
@@ -204,8 +197,10 @@ func (m *Monitor) decodeFrames(
 				return frames, fmt.Errorf("unable to send packet to decoder: %w", err)
 			}
 			return frames, nil
-		case outFrame := <-m.DecodedFrames:
-			frames = append(frames, outFrame.Frame)
+		case out := <-m.DecodedOutput:
+			if out.Frame != nil {
+				frames = append(frames, out.Frame.Frame)
+			}
 		}
 	}
 }

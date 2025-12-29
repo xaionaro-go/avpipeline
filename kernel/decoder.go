@@ -17,6 +17,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
@@ -162,9 +163,8 @@ func (d *Decoder[DF]) String() string {
 }
 
 func (d *Decoder[DF]) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }
@@ -200,7 +200,7 @@ func (d *Decoder[DF]) getStreamDecoder(
 
 func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
 	ctx context.Context,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 	decoder *codec.DecoderLocked,
 	streamInfo *frame.StreamInfo,
 	packetInfo packetInfo,
@@ -225,7 +225,7 @@ func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
 	if isKeyFrame {
 		f.SetFlags(f.Flags().Add(astiav.FrameFlagKey))
 	}
-	err = d.send(ctx, outputFramesCh, f, streamInfo)
+	err = d.send(ctx, outputCh, f, streamInfo)
 	if err != nil {
 		return fmt.Errorf("unable to send a blank frame: %w", err)
 	}
@@ -233,14 +233,25 @@ func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
 	return nil
 }
 
-func (d *Decoder[DF]) SendInputPacket(
+func (d *Decoder[DF]) SendInput(
+	ctx context.Context,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
+) (_err error) {
+	pkt, _ := input.Unwrap()
+	if pkt == nil {
+		return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
+	}
+	return d.sendPacket(ctx, *pkt, outputCh)
+}
+
+func (d *Decoder[DF]) sendPacket(
 	ctx context.Context,
 	input packet.Input,
-	_ chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
+	logger.Tracef(ctx, "sendPacket")
+	defer func() { logger.Tracef(ctx, "/sendPacket: %v", _err) }()
 	if d.IsClosed() {
 		return io.ErrClosedPipe
 	}
@@ -254,19 +265,19 @@ func (d *Decoder[DF]) SendInputPacket(
 	ctx = belt.WithField(ctx, "decoder", streamDecoder)
 
 	if decoderDebug {
-		logger.Tracef(ctx, "input packet: dur:%d; res:%s", input.Duration(), input.GetResolution())
+		logger.Tracef(ctx, "input packet: dur:%d", input.GetDuration())
 	}
 
-	timeBase := input.Stream.TimeBase()
+	timeBase := input.GetTimeBase()
 	if timeBase.Num() == 0 {
 		return fmt.Errorf("internal error: TimeBase is not set")
 	}
 
 	if !encoderForceCopyTime {
-		input.Packet.RescaleTs(input.Stream.TimeBase(), streamDecoder.TimeBase())
+		input.RescaleTs(input.GetTimeBase(), streamDecoder.TimeBase())
 	}
 
-	streamIndex := input.StreamIndex()
+	streamIndex := input.GetStreamIndex()
 
 	return streamDecoder.LockDo(ctx, func(
 		ctx context.Context,
@@ -285,9 +296,9 @@ func (d *Decoder[DF]) SendInputPacket(
 					Source:           d.asSource(streamDecoder.Decoder),
 					CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
 					StreamIndex:      streamIndex,
-					StreamsCount:     sourceNbStreams(ctx, input.Source),
+					StreamsCount:     sourceNbStreams(ctx, input.GetSource()),
 					TimeBase:         timeBase,
-					Duration:         input.Packet.Duration(),
+					Duration:         input.GetDuration(),
 					PipelineSideData: nil,
 				}
 				d.StreamInfo.Store(streamIndex, streamInfo)
@@ -295,8 +306,8 @@ func (d *Decoder[DF]) SendInputPacket(
 		}
 
 		packetInfo := packetInfo{
-			PTS:         input.Packet.Pts(),
-			DTS:         input.Packet.Dts(),
+			PTS:         input.GetPTS(),
+			DTS:         input.GetDTS(),
 			Duration:    input.Packet.Duration(),
 			StreamIndex: streamIndex,
 			Flags:       packetInfoFlagsFromPipelineSideData(input.PipelineSideData),
@@ -320,7 +331,7 @@ func (d *Decoder[DF]) SendInputPacket(
 				if decoderSendBlankFrames && d.AllowBlankFrames.Load() {
 					err := d.sendBlankFrameForDroppedPacket(
 						ctx,
-						outputFramesCh,
+						outputCh,
 						decoder,
 						streamInfo,
 						packetInfo,
@@ -341,7 +352,7 @@ func (d *Decoder[DF]) SendInputPacket(
 				logger.Debugf(ctx, "flushing the decoder after sending the packet due to SideFlagFlush")
 				drainFn = decoder.Flush
 			}
-			if err := d.drain(ctx, outputFramesCh, drainFn, packetInfo); err != nil {
+			if err := d.drain(ctx, outputCh, drainFn, packetInfo); err != nil {
 				return fmt.Errorf("unable to drain the decoder: %w", err)
 			}
 			if !shouldRetry {
@@ -366,7 +377,7 @@ func (d *Decoder[DF]) SendInputPacket(
 
 func (d *Decoder[DF]) drain(
 	ctx context.Context,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 	decoderDrainFn func(context.Context, codec.CallbackFrameReceiver) error,
 	packetInfo packetInfo,
 ) (_err error) {
@@ -424,7 +435,7 @@ func (d *Decoder[DF]) drain(
 			streamInfo = frame.BuildStreamInfo(streamInfo.Source, streamInfo.CodecParameters, streamInfo.StreamIndex, streamInfo.StreamsCount, streamInfo.TimeBase, streamInfo.Duration, packetInfo.Flags.PipelineSideData())
 		}
 
-		err := d.send(ctx, outputFramesCh, f, streamInfo)
+		err := d.send(ctx, outputCh, f, streamInfo)
 		if err != nil {
 			return fmt.Errorf("unable to send decoded frame: %w", err)
 		}
@@ -435,7 +446,7 @@ func (d *Decoder[DF]) drain(
 
 func (d *Decoder[DF]) send(
 	ctx context.Context,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 	f *astiav.Frame,
 	streamInfo *frame.StreamInfo,
 ) (_err error) {
@@ -448,7 +459,7 @@ func (d *Decoder[DF]) send(
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case outputFramesCh <- frameToSend:
+	case outputCh <- packetorframe.OutputUnion{Frame: &frameToSend}:
 	}
 	return nil
 }
@@ -497,15 +508,6 @@ func (d *Decoder[DF]) getOutputCodecParameters(
 	d.OutputCodecParameters[streamIndex] = codecParams
 	logger.Debugf(ctx, "extraData: %s", extradata.Raw(codecParams.ExtraData()))
 	return codecParams
-}
-
-func (d *Decoder[DF]) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
 }
 
 func (d *Decoder[DF]) WithInputFormatContext(
@@ -625,8 +627,7 @@ var _ Flusher = (*Decoder[codec.DecoderFactory])(nil)
 
 func (d *Decoder[DF]) Flush(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	outputFrameCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Debugf(ctx, "Flush()")
 	defer func() { logger.Debugf(ctx, "/Flush(): %v", _err) }()
@@ -657,7 +658,7 @@ func (d *Decoder[DF]) Flush(
 					defer wg.Done()
 					err := d.drain(
 						ctx,
-						outputFrameCh,
+						outputCh,
 						decoder.Flush,
 						packetInfo{
 							StreamIndex: streamIndex,

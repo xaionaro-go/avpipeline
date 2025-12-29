@@ -24,7 +24,7 @@ func (c *StreamIndexT) Match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
-	return c.Condition.Match(ctx, pkt.StreamIndex())
+	return c.Condition.Match(ctx, pkt.GetStreamIndex())
 }
 
 func (c *StreamIndexT) String() string {

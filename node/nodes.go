@@ -39,16 +39,7 @@ func (s Nodes[T]) StringRecursive() string {
 	for _, n := range s {
 		isSet := map[Abstract]struct{}{}
 		var pushToStrs []string
-		origNode(n).WithPushPacketsTos(ctx, func(ctx context.Context, pushTos *PushPacketsTos) {
-			for _, pushTo := range *pushTos {
-				if _, ok := isSet[pushTo.Node]; ok {
-					continue
-				}
-				isSet[pushTo.Node] = struct{}{}
-				pushToStrs = append(pushToStrs, pushTo.Node.GetProcessor().String())
-			}
-		})
-		origNode(n).WithPushFramesTos(ctx, func(ctx context.Context, pushTos *PushFramesTos) {
+		origNode(n).WithPushTos(ctx, func(ctx context.Context, pushTos *PushTos) {
 			for _, pushTo := range *pushTos {
 				if _, ok := isSet[pushTo.Node]; ok {
 					continue

@@ -8,12 +8,10 @@ import (
 
 	"github.com/facebookincubator/go-belt/tool/logger"
 	"github.com/xaionaro-go/avpipeline/codec"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -116,74 +114,39 @@ func (i *InputWithFallback[K, DF, C]) IsServing() bool {
 	return i.isServing.Load()
 }
 
-func (i *InputWithFallback[K, DF, C]) GetPushPacketsTos(
+func (i *InputWithFallback[K, DF, C]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
-	return i.Output.GetPushPacketsTos(ctx)
+) node.PushTos {
+	return i.Output.GetPushTos(ctx)
 }
 
-func (i *InputWithFallback[K, DF, C]) AddPushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
-) {
-	i.Output.AddPushPacketsTo(ctx, dst, conds...)
-}
-
-func (i *InputWithFallback[K, DF, C]) SetPushPacketsTos(
-	ctx context.Context,
-	pushTos node.PushPacketsTos,
-) {
-	i.Output.SetPushPacketsTos(ctx, pushTos)
-}
-
-func (i *InputWithFallback[K, DF, C]) WithPushPacketsTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
-) {
-	i.Output.WithPushPacketsTos(ctx, callback)
-}
-
-func (i *InputWithFallback[K, DF, C]) RemovePushPacketsTo(
+func (i *InputWithFallback[K, DF, C]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-) error {
-	return i.Output.RemovePushPacketsTo(ctx, dst)
-}
-
-func (i *InputWithFallback[K, DF, C]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return i.Output.GetPushFramesTos(ctx)
-}
-
-func (i *InputWithFallback[K, DF, C]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	i.Output.AddPushFramesTo(ctx, dst, conds...)
+	i.Output.AddPushTo(ctx, dst, conds...)
 }
 
-func (i *InputWithFallback[K, DF, C]) SetPushFramesTos(
+func (i *InputWithFallback[K, DF, C]) SetPushTos(
 	ctx context.Context,
-	pushTos node.PushFramesTos,
+	pushTos node.PushTos,
 ) {
-	i.Output.SetPushFramesTos(ctx, pushTos)
+	i.Output.SetPushTos(ctx, pushTos)
 }
 
-func (i *InputWithFallback[K, DF, C]) WithPushFramesTos(
+func (i *InputWithFallback[K, DF, C]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
+	callback func(context.Context, *node.PushTos),
 ) {
-	i.Output.WithPushFramesTos(ctx, callback)
+	i.Output.WithPushTos(ctx, callback)
 }
 
-func (i *InputWithFallback[K, DF, C]) RemovePushFramesTo(
+func (i *InputWithFallback[K, DF, C]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return i.Output.RemovePushFramesTo(ctx, dst)
+	return i.Output.RemovePushTo(ctx, dst)
 }
 
 func (i *InputWithFallback[K, DF, C]) GetCountersPtr() *nodetypes.Counters {
@@ -194,42 +157,25 @@ func (i *InputWithFallback[K, DF, C]) GetProcessor() processor.Abstract {
 	return i
 }
 
-func (i *InputWithFallback[K, DF, C]) GetInputPacketFilter(
+func (i *InputWithFallback[K, DF, C]) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
-	return i.InputPacketFilter.Load()
+) packetorframefiltercondition.Condition {
+	return i.InputFilter.Load()
 }
 
-func (i *InputWithFallback[K, DF, C]) SetInputPacketFilter(
+func (i *InputWithFallback[K, DF, C]) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	i.InputPacketFilter.Store(cond)
-}
-
-func (i *InputWithFallback[K, DF, C]) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-	return i.InputFrameFilter.Load()
-}
-
-func (i *InputWithFallback[K, DF, C]) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
-) {
-	i.InputFrameFilter.Store(cond)
+	i.InputFilter.Store(cond)
 }
 
 func (i *InputWithFallback[K, DF, C]) GetChangeChanIsServing() <-chan struct{} {
 	return i.Output.GetChangeChanIsServing()
 }
 
-func (i *InputWithFallback[K, DF, C]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return i.Output.GetChangeChanPushPacketsTo()
-}
-
-func (i *InputWithFallback[K, DF, C]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return i.Output.GetChangeChanPushFramesTo()
+func (i *InputWithFallback[K, DF, C]) GetChangeChanPushTo() <-chan struct{} {
+	return i.Output.GetChangeChanPushTo()
 }
 
 func (i *InputWithFallback[K, DF, C]) GetChangeChanDrained() <-chan struct{} {
@@ -267,20 +213,12 @@ func (i *InputWithFallback[K, DF, C]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (i *InputWithFallback[K, DF, C]) InputPacketChan() chan<- packet.Input {
+func (i *InputWithFallback[K, DF, C]) InputChan() chan<- packetorframe.InputUnion {
 	return nil
 }
 
-func (i *InputWithFallback[K, DF, C]) OutputPacketChan() <-chan packet.Output {
-	return i.Output.Processor.OutputPacketChan()
-}
-
-func (i *InputWithFallback[K, DF, C]) InputFrameChan() chan<- frame.Input {
-	return nil
-}
-
-func (i *InputWithFallback[K, DF, C]) OutputFrameChan() <-chan frame.Output {
-	return i.Output.Processor.OutputFrameChan()
+func (i *InputWithFallback[K, DF, C]) OutputChan() <-chan packetorframe.OutputUnion {
+	return i.Output.Processor.OutputChan()
 }
 
 func (i *InputWithFallback[K, DF, C]) ErrorChan() <-chan error {

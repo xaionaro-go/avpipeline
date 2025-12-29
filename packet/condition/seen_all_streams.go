@@ -46,12 +46,12 @@ func (c *SeenAllStreamsT) acknowledgeInput(
 	pkt packet.Input,
 ) {
 	if c.ExpectedStreams == 0 {
-		pkt.Source.WithOutputFormatContext(ctx, func(fmtCtc *astiav.FormatContext) {
+		pkt.GetSource().WithOutputFormatContext(ctx, func(fmtCtc *astiav.FormatContext) {
 			c.ExpectedStreams = uint(fmtCtc.NbStreams())
 		})
 	}
 
-	streamIdx := pkt.Stream.Index()
+	streamIdx := pkt.GetStreamIndex()
 	if _, ok := c.SeenStreamsMap[streamIdx]; ok {
 		return
 	}

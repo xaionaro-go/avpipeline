@@ -10,8 +10,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -108,74 +107,39 @@ func (a *AutoFixerWithCustomData[T]) DotBlockContentStringWriteTo(
 	fmt.Fprintf(w, "\tnode_%p -> node_%p\n", a.GetProcessor(), a.Output().GetProcessor())
 }
 
-func (a *AutoFixerWithCustomData[T]) GetPushPacketsTos(
+func (a *AutoFixerWithCustomData[T]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
-	return a.Output().GetPushPacketsTos(ctx)
+) node.PushTos {
+	return a.Output().GetPushTos(ctx)
 }
 
-func (a *AutoFixerWithCustomData[T]) WithPushPacketsTos(
+func (a *AutoFixerWithCustomData[T]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
-	a.Output().WithPushPacketsTos(ctx, callback)
+	a.Output().WithPushTos(ctx, callback)
 }
 
-func (a *AutoFixerWithCustomData[T]) AddPushPacketsTo(
+func (a *AutoFixerWithCustomData[T]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	a.Output().AddPushPacketsTo(ctx, dst, conds...)
+	a.Output().AddPushTo(ctx, dst, conds...)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetPushPacketsTos(
+func (a *AutoFixerWithCustomData[T]) SetPushTos(
 	ctx context.Context,
-	pushTos node.PushPacketsTos,
+	pushTos node.PushTos,
 ) {
-	a.Output().SetPushPacketsTos(ctx, pushTos)
+	a.Output().SetPushTos(ctx, pushTos)
 }
 
-func (a *AutoFixerWithCustomData[T]) RemovePushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-) error {
-	return a.Output().RemovePushPacketsTo(ctx, dst)
-}
-
-func (a *AutoFixerWithCustomData[T]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return a.Output().GetPushFramesTos(ctx)
-}
-
-func (a *AutoFixerWithCustomData[T]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-	a.Output().WithPushFramesTos(ctx, callback)
-}
-
-func (a *AutoFixerWithCustomData[T]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-	a.Output().AddPushFramesTo(ctx, dst, conds...)
-}
-
-func (a *AutoFixerWithCustomData[T]) SetPushFramesTos(
-	ctx context.Context,
-	pushTos node.PushFramesTos,
-) {
-	a.Output().SetPushFramesTos(ctx, pushTos)
-}
-
-func (a *AutoFixerWithCustomData[T]) RemovePushFramesTo(
+func (a *AutoFixerWithCustomData[T]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return a.Output().RemovePushFramesTo(ctx, dst)
+	return a.Output().RemovePushTo(ctx, dst)
 }
 
 func (a *AutoFixerWithCustomData[T]) IsServing() bool {
@@ -200,42 +164,25 @@ func (a *AutoFixerWithCustomData[T]) GetProcessor() processor.Abstract {
 	return a
 }
 
-func (a *AutoFixerWithCustomData[T]) GetInputPacketFilter(
+func (a *AutoFixerWithCustomData[T]) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
-	return a.Input().GetInputPacketFilter(ctx)
+) packetorframefiltercondition.Condition {
+	return a.Input().GetInputFilter(ctx)
 }
 
-func (a *AutoFixerWithCustomData[T]) SetInputPacketFilter(
+func (a *AutoFixerWithCustomData[T]) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	a.Input().SetInputPacketFilter(ctx, cond)
-}
-
-func (a *AutoFixerWithCustomData[T]) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-	return a.Input().GetInputFrameFilter(ctx)
-}
-
-func (a *AutoFixerWithCustomData[T]) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
-) {
-	a.Input().SetInputFrameFilter(ctx, cond)
+	a.Input().SetInputFilter(ctx, cond)
 }
 
 func (a *AutoFixerWithCustomData[T]) GetChangeChanIsServing() <-chan struct{} {
 	return a.Input().GetChangeChanIsServing()
 }
 
-func (a *AutoFixerWithCustomData[T]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return a.Output().GetChangeChanPushPacketsTo()
-}
-
-func (a *AutoFixerWithCustomData[T]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return a.Output().GetChangeChanPushFramesTo()
+func (a *AutoFixerWithCustomData[T]) GetChangeChanPushTo() <-chan struct{} {
+	return a.Output().GetChangeChanPushTo()
 }
 
 func (a *AutoFixerWithCustomData[T]) GetChangeChanDrained() <-chan struct{} {

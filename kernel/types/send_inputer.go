@@ -3,29 +3,13 @@ package types
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 type SendInputer interface {
-	SendInputPacketer
-	SendInputFramer
-}
-
-type SendInputPacketer interface {
-	SendInputPacket(
+	SendInput(
 		ctx context.Context,
-		input packet.Input,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
-	) error
-}
-
-type SendInputFramer interface {
-	SendInputFrame(
-		ctx context.Context,
-		input frame.Input,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
+		input packetorframe.InputUnion,
+		outputCh chan<- packetorframe.OutputUnion,
 	) error
 }

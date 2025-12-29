@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	frameconditionextra "github.com/xaionaro-go/avpipeline/frame/condition/extra"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
@@ -115,7 +116,7 @@ func main() {
 		}
 		transcodingNode.Processor.Kernel.Filter = framecondition.Or{
 			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-			framecondition.PacketOrFrame{
+			frameconditionextra.PacketOrFrame{
 				reduceframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{
 					StaticValue: fps,
 				}),
@@ -125,8 +126,8 @@ func main() {
 
 	// route nodes: input -> transcoder -> output
 
-	inputNode.AddPushPacketsTo(ctx, transcodingNode)
-	transcodingNode.AddPushPacketsTo(ctx, outputNode)
+	inputNode.AddPushTo(ctx, transcodingNode)
+	transcodingNode.AddPushTo(ctx, outputNode)
 	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
 	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
 

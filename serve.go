@@ -74,10 +74,8 @@ func serve[T node.Abstract](
 
 			childrenCtx, childrenCancelFn := context.WithCancel(childrenCtx)
 
-			pushPacketsChangeChan := n.GetChangeChanPushPacketsTo()
-			currentPushPacketsTos := n.GetPushPacketsTos(ctx)
-			pushFramesChangeChan := n.GetChangeChanPushFramesTo()
-			currentPushFramesTos := n.GetPushFramesTos(ctx)
+			pushChangeChan := n.GetChangeChanPushTo()
+			currentPushTos := n.GetPushTos(ctx)
 
 			nodesWG.Add(1)
 			observability.Go(ctx, func(ctx context.Context) {
@@ -87,32 +85,20 @@ func serve[T node.Abstract](
 					case <-ctx.Done():
 						logger.Tracef(ctx, "/Serve[%s]: context done", nodeKey)
 						return
-					case <-pushPacketsChangeChan:
-						pushPacketsChangeChan = n.GetChangeChanPushPacketsTo()
-						newPushPacketsTos := n.GetPushPacketsTos(ctx)
-						newNodes := newPushPacketsTos.Nodes().Without(currentPushPacketsTos.Nodes())
-						logger.Tracef(ctx, "Serve[%s]: push packets change; new nodes count: %d", nodeKey, len(newNodes))
+					case <-pushChangeChan:
+						pushChangeChan = n.GetChangeChanPushTo()
+						newPushTos := n.GetPushTos(ctx)
+						newNodes := newPushTos.Nodes().Without(currentPushTos.Nodes())
+						logger.Tracef(ctx, "Serve[%s]: push change; new nodes count: %d", nodeKey, len(newNodes))
 						for _, newNode := range newNodes {
 							serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, newNode)
 						}
-						currentPushPacketsTos = newPushPacketsTos
-					case <-pushFramesChangeChan:
-						pushFramesChangeChan = n.GetChangeChanPushFramesTo()
-						newPushFramesTos := n.GetPushFramesTos(ctx)
-						newNodes := newPushFramesTos.Nodes().Without(currentPushFramesTos.Nodes())
-						logger.Tracef(ctx, "Serve[%s]: push frames change; new nodes count: %d", nodeKey, len(newNodes))
-						for _, newNode := range newNodes {
-							serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, newNode)
-						}
-						currentPushFramesTos = newPushFramesTos
+						currentPushTos = newPushTos
 					}
 				}
 			})
 
-			for _, pushTo := range currentPushPacketsTos {
-				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
-			}
-			for _, pushTo := range currentPushFramesTos {
+			for _, pushTo := range currentPushTos {
 				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
 			}
 

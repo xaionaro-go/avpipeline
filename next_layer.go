@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 func NextLayer[T node.Abstract](
@@ -44,32 +43,17 @@ func nextLayer[T node.Abstract](
 	var nextNodes []nodeAbstractWithItemType
 	var errs []error
 	for _, n := range nodes {
-		for _, pushTo := range n.GetPushPacketsTos(ctx) {
+		for _, pushTo := range n.GetPushTos(ctx) {
 			r := nodeAbstractWithItemType{
 				Node:     pushTo.Node,
-				ItemType: reflect.TypeOf((*packet.Input)(nil)),
+				ItemType: reflect.TypeOf((*packetorframe.InputUnion)(nil)),
 			}
 			if _, ok := isSet[r]; ok {
 				continue
 			}
 			isSet[r] = struct{}{}
 			if pushTo.Node == nil {
-				errs = append(errs, fmt.Errorf("received a nil node (PushPacketsTo)"))
-				continue
-			}
-			nextNodes = append(nextNodes, r)
-		}
-		for _, pushTo := range n.GetPushFramesTos(ctx) {
-			r := nodeAbstractWithItemType{
-				Node:     pushTo.Node,
-				ItemType: reflect.TypeOf((*frame.Input)(nil)),
-			}
-			if _, ok := isSet[r]; ok {
-				continue
-			}
-			isSet[r] = struct{}{}
-			if pushTo.Node == nil {
-				errs = append(errs, fmt.Errorf("received a nil node (PushFramesTo)"))
+				errs = append(errs, fmt.Errorf("received a nil node (PushTo)"))
 				continue
 			}
 			nextNodes = append(nextNodes, r)

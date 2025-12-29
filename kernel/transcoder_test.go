@@ -96,8 +96,8 @@ func TestTranscoderNoFailure(t *testing.T) {
 			inputNode := node.NewFromKernel(
 				ctx,
 				input,
-				processor.OptionQueueSizeInputPacket(1),
-				processor.OptionQueueSizeOutputPacket(1),
+				processor.OptionQueueSizeInput(1),
+				processor.OptionQueueSizeOutput(1),
 				processor.OptionQueueSizeError(2),
 			)
 			var finalNode node.Abstract
@@ -120,17 +120,17 @@ func TestTranscoderNoFailure(t *testing.T) {
 			transcodingNode := node.NewFromKernel(
 				ctx,
 				transcoder,
-				processor.OptionQueueSizeInputPacket(100),
-				processor.OptionQueueSizeOutputPacket(1),
+				processor.OptionQueueSizeInput(10),
+				processor.OptionQueueSizeOutput(10),
 				processor.OptionQueueSizeError(2),
 			)
-			inputNode.PushPacketsTos.Add(transcodingNode)
+			inputNode.AddPushTo(ctx, transcodingNode)
 			finalNode = transcodingNode
-			finalNode.AddPushPacketsTo(ctx, node.NewFromKernel(
+			finalNode.AddPushTo(ctx, node.NewFromKernel(
 				ctx,
 				output,
-				processor.OptionQueueSizeInputPacket(600),
-				processor.OptionQueueSizeOutputPacket(0),
+				processor.OptionQueueSizeInput(600),
+				processor.OptionQueueSizeOutput(0),
 				processor.OptionQueueSizeError(2),
 			))
 

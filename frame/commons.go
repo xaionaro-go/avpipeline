@@ -6,18 +6,11 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	packetorframetypes "github.com/xaionaro-go/avpipeline/packetorframe/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type StreamInfo struct {
-	Source           Source
-	CodecParameters  *astiav.CodecParameters // TODO: remove this from here
-	StreamIndex      int
-	StreamsCount     int
-	TimeBase         astiav.Rational
-	Duration         int64
-	PipelineSideData types.PipelineSideData
-}
+type StreamInfo = packetorframetypes.StreamInfo
 
 func BuildStreamInfo(
 	source Source,
@@ -48,16 +41,20 @@ func (f *Commons) GetMediaType() astiav.MediaType {
 	return f.CodecParameters.MediaType()
 }
 
+func (f *Commons) GetStreamIndex() int {
+	return f.StreamIndex
+}
+
+func (f *Commons) SetStreamIndex(v int) {
+	f.StreamIndex = v
+}
+
 func (f *Commons) GetTimeBase() astiav.Rational {
 	return f.StreamInfo.TimeBase
 }
 
 func (f *Commons) GetSize() int {
 	return 0 // TODO: fix this
-}
-
-func (f *Commons) GetStreamIndex() int {
-	return f.StreamIndex
 }
 
 func (f *Commons) GetDurationAsDuration() time.Duration {
@@ -133,4 +130,24 @@ func (f *Commons) GetResolution() codectypes.Resolution {
 		Width:  uint32(f.Frame.Width()),
 		Height: uint32(f.Frame.Height()),
 	}
+}
+
+func (f *Commons) IsKey() bool {
+	if f.Frame == nil {
+		return false
+	}
+	return f.Frame.Flags().Has(astiav.FrameFlagKey)
+}
+
+func (f *Commons) GetCodecParameters() *astiav.CodecParameters {
+	return f.CodecParameters
+}
+
+func (f *Commons) GetPipelineSideData() types.PipelineSideData {
+	return f.PipelineSideData
+}
+
+func (f *Commons) AddPipelineSideData(v any) types.PipelineSideData {
+	f.PipelineSideData = append(f.PipelineSideData, v)
+	return f.PipelineSideData
 }

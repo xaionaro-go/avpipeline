@@ -16,15 +16,14 @@ type Flusher interface {
 }
 
 type ProcessingState struct {
-	PendingPackets   int
-	PendingFrames    int
+	PendingInputs    int
 	IsProcessorDirty bool
 	IsProcessing     bool
 	InputSent        atomic.Bool
 }
 
 func IsInputDrained(p Abstract) bool {
-	return len(p.InputPacketChan()) == 0 && len(p.InputFrameChan()) == 0
+	return len(p.InputChan()) == 0
 }
 
 func DrainInput(

@@ -18,12 +18,12 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/extradata"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	"github.com/xaionaro-go/avpipeline/kernel/types"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/observability"
@@ -37,7 +37,7 @@ const (
 	inputDefaultFPS    = 30
 )
 
-type InputConfig = types.InputConfig
+type InputConfig = kerneltypes.InputConfig
 
 type Input struct {
 	*closuresignaler.ClosureSignaler
@@ -358,10 +358,10 @@ func (i *Input) autoDetectSyncStreamIndexIfNeeded(
 		return true
 	}
 
-	switch outPkt.CodecParameters().MediaType() {
+	switch outPkt.GetCodecParameters().MediaType() {
 	case astiav.MediaTypeAudio:
-		if i.SyncStreamIndex.CompareAndSwap(math.MinInt64, int64(outPkt.StreamIndex())) {
-			logger.Debugf(ctx, "auto-detected sync stream index: %d (video)", outPkt.StreamIndex())
+		if i.SyncStreamIndex.CompareAndSwap(math.MinInt64, int64(outPkt.GetStreamIndex())) {
+			logger.Debugf(ctx, "auto-detected sync stream index: %d (video)", outPkt.GetStreamIndex())
 		}
 		return i.SyncStreamIndex.Load() >= 0
 	default:
@@ -450,8 +450,7 @@ func (i *Input) slowdownIfNeeded(
 
 func (i *Input) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
@@ -496,50 +495,50 @@ func (i *Input) Generate(
 	sendPkt := func(outPkt *packet.Output) error {
 		for _, filter := range i.OutputFilters {
 			if !filter.Match(ctx, (packet.Input)(*outPkt)) {
-				logger.Tracef(ctx, "packet filtered out by %s: stream:%d pos:%d pts:%d", filter, outPkt.StreamIndex(), outPkt.Pos(), outPkt.Pts())
+				logger.Tracef(ctx, "packet filtered out by %s: stream:%d pos:%d pts:%d", filter, outPkt.GetStreamIndex(), outPkt.Pos, outPkt.GetPTS())
 				return nil
 			}
 		}
 
 		i.slowdownIfNeeded(ctx, outPkt)
 
-		codecParams := outPkt.Stream.CodecParameters()
+		codecParams := outPkt.GetStream().CodecParameters()
 		switch codecParams.MediaType() {
 		case astiav.MediaTypeVideo:
-			if outPkt.CodecParameters().Width() != 0 && outPkt.CodecParameters().Width() != codecParams.Width() {
-				logger.Debugf(ctx, "correcting packet width from %d to %d", outPkt.CodecParameters().Width(), codecParams.Width())
-				codecParams.SetWidth(outPkt.CodecParameters().Width())
+			if outPkt.GetCodecParameters().Width() != 0 && outPkt.GetCodecParameters().Width() != codecParams.Width() {
+				logger.Debugf(ctx, "correcting packet width from %d to %d", outPkt.GetCodecParameters().Width(), codecParams.Width())
+				codecParams.SetWidth(outPkt.GetCodecParameters().Width())
 			}
 			if codecParams.Width() == 0 {
 				logger.Warnf(ctx, "width is zero, defaulting to %d", i.DefaultWidth)
 				codecParams.SetWidth(i.DefaultWidth)
-				outPkt.CodecParameters().SetWidth(i.DefaultWidth)
+				outPkt.GetCodecParameters().SetWidth(i.DefaultWidth)
 			}
-			if outPkt.CodecParameters().Height() != 0 && outPkt.CodecParameters().Height() != codecParams.Height() {
-				logger.Debugf(ctx, "correcting packet height from %d to %d", outPkt.CodecParameters().Height(), codecParams.Height())
-				codecParams.SetHeight(outPkt.CodecParameters().Height())
+			if outPkt.GetCodecParameters().Height() != 0 && outPkt.GetCodecParameters().Height() != codecParams.Height() {
+				logger.Debugf(ctx, "correcting packet height from %d to %d", outPkt.GetCodecParameters().Height(), codecParams.Height())
+				codecParams.SetHeight(outPkt.GetCodecParameters().Height())
 			}
 			if codecParams.Height() == 0 {
 				logger.Warnf(ctx, "height is zero, defaulting to %d", i.DefaultHeight)
 				codecParams.SetHeight(i.DefaultHeight)
-				outPkt.CodecParameters().SetHeight(i.DefaultHeight)
+				outPkt.GetCodecParameters().SetHeight(i.DefaultHeight)
 			}
 		}
 		logger.Tracef(
 			ctx,
 			"sending a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, res:%dx%d",
 			codecParams.MediaType(),
-			outPkt.StreamIndex(),
-			outPkt.Pos(), outPkt.Pts(), outPkt.Dts(), outPkt.Packet.Duration(),
+			outPkt.GetStreamIndex(),
+			outPkt.Pos, outPkt.GetPTS(), outPkt.GetDTS(), outPkt.GetDuration(),
 			outPkt.GetTimeBase(),
 			outPkt.Flags().Has(astiav.PacketFlagKey),
 			len(outPkt.Data()),
 			codecParams.Width(), codecParams.Height(),
 		)
 
-		lastDuration[outPkt.StreamIndex()] = outPkt.Duration()
+		lastDuration[outPkt.GetStreamIndex()] = outPkt.GetDuration()
 		select {
-		case outputPacketsCh <- *outPkt:
+		case outputCh <- packetorframe.OutputUnion{Packet: outPkt}:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-i.CloseChan():
@@ -571,7 +570,7 @@ func (i *Input) Generate(
 		case nil:
 		case io.EOF:
 			pkt.Free()
-			return io.EOF
+			return nil
 		default:
 			pkt.Free()
 			return fmt.Errorf("unable to read a packet: %w", err)
@@ -628,8 +627,8 @@ func (i *Input) Generate(
 			if frameSecs > 1 || suggestedDuration <= 0 {
 				logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
 			} else {
-				prevPkt.Packet.SetDuration(suggestedDuration)
-				logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.Pts(), prevPkt.Pts(), prevPkt.Packet.Duration())
+				prevPkt.SetDuration(suggestedDuration)
+				logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.GetPTS(), prevPkt.GetPTS(), prevPkt.GetDuration())
 			}
 
 			if err := sendPkt(prevPkt); err != nil {
@@ -637,13 +636,13 @@ func (i *Input) Generate(
 			}
 		}
 
-		if !i.IgnoreIncorrectDTS && curPkt.Dts() == astiav.NoPtsValue {
-			curPkt.Packet.SetDts(curPkt.Pts())
-			logger.Tracef(ctx, "the packet had no DTS set; setting DTS=PTS: %d", curPkt.Pts())
+		if !i.IgnoreIncorrectDTS && curPkt.GetDTS() == astiav.NoPtsValue {
+			curPkt.SetDTS(curPkt.GetPTS())
+			logger.Tracef(ctx, "the packet had no DTS set; setting DTS=PTS: %d", curPkt.GetPTS())
 		}
 
 		if !i.IgnoreZeroDuration {
-			isDurationIncorrect := curPkt.Duration() <= 1
+			isDurationIncorrect := curPkt.GetDuration() <= 1
 			if isDurationIncorrect {
 				switch curPkt.GetMediaType() {
 				case astiav.MediaTypeVideo:
@@ -653,12 +652,12 @@ func (i *Input) Generate(
 						fps = i.DefaultFPS
 					}
 					duration := int(float64(1) / fps.Float64() / stream.TimeBase().Float64())
-					curPkt.Packet.SetDuration(int64(duration))
-					logger.Tracef(ctx, "the video packet had no duration set; setting duration to default FPS %d: %d", fps.Float64(), curPkt.Packet.Duration())
+					curPkt.SetDuration(int64(duration))
+					logger.Tracef(ctx, "the video packet had no duration set; setting duration to default FPS %d: %d", fps.Float64(), curPkt.GetDuration())
 				default:
-					if curPkt.Pts() >= curPkt.Dts() && // not a B-frame-like packet
-						curPkt.Pts() != astiav.NoPtsValue { // PTS is set (thus duration can be calculated)
-						assert(ctx, curPkt.Pts() >= 0, "previous packet PTS is negative")
+					if curPkt.GetPTS() >= curPkt.GetDTS() && // not a B-frame-like packet
+						curPkt.GetPTS() != astiav.NoPtsValue { // PTS is set (thus duration can be calculated)
+						assert(ctx, curPkt.GetPTS() >= 0, "previous packet PTS is negative")
 						logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
 						prevPkt = nil
 						prevPkts[streamIndex] = curPkt
@@ -697,22 +696,19 @@ func (i *Input) WithOutputFormatContext(
 	callback(i.FormatContext)
 }
 
-func (i *Input) SendInputPacket(
+func (i *Input) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	return fmt.Errorf("cannot send packets to an Input")
-}
-
-func (i *Input) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return fmt.Errorf("cannot send frames to an Input")
+	switch {
+	case input.Packet != nil:
+		return fmt.Errorf("cannot send packets to an Input")
+	case input.Frame != nil:
+		return fmt.Errorf("cannot send frames to an Input")
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
+	}
 }
 
 func (i *Input) GetObjectID() globaltypes.ObjectID {

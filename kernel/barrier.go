@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/types"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
@@ -26,8 +24,7 @@ type barrierHandler struct {
 	Condition stategetter.StateGetter
 }
 
-var _ boilerplate.VisitInputFramer = (*barrierHandler)(nil)
-var _ boilerplate.VisitInputPacketer = (*barrierHandler)(nil)
+var _ boilerplate.VisitInputer = (*barrierHandler)(nil)
 
 func newBarrierHandler(
 	cond stategetter.StateGetter, // is never nil: all callers pass non-nil values
@@ -41,22 +38,13 @@ func (b *barrierHandler) String() string {
 	return fmt.Sprintf("Barrier(%s)", b.Condition)
 }
 
-func (b *barrierHandler) VisitInputFrame(
+func (b *barrierHandler) VisitInput(
 	ctx context.Context,
-	input *frame.Input,
+	input *packetorframe.InputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "VisitInputFrame")
-	defer func() { logger.Tracef(ctx, "/VisitInputFrame: %v", _err) }()
-	return b.processInput(ctx, packetorframe.InputUnion{Frame: input})
-}
-
-func (b *barrierHandler) VisitInputPacket(
-	ctx context.Context,
-	input *packet.Input,
-) (_err error) {
-	logger.Tracef(ctx, "VisitInputPacket")
-	defer func() { logger.Tracef(ctx, "/VisitInputPacket: %v", _err) }()
-	return b.processInput(ctx, packetorframe.InputUnion{Packet: input})
+	logger.Tracef(ctx, "VisitInput")
+	defer func() { logger.Tracef(ctx, "/VisitInput: %v", _err) }()
+	return b.processInput(ctx, *input)
 }
 
 func (b *barrierHandler) processInput(

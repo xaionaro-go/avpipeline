@@ -8,47 +8,48 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 func TestChainOfTwo_GenerateForwarding(t *testing.T) {
 	ctx := context.Background()
 
 	k0 := &Dummy{
-		GenerateFn: func(ctx context.Context, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(packet.Input{Packet: &astiav.Packet{}})
-			outputFramesCh <- frame.Output(frame.Input{Frame: &astiav.Frame{}})
+		GenerateFn: func(ctx context.Context, outputCh chan<- packetorframe.OutputUnion) error {
+			outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)(&packet.Input{Packet: &astiav.Packet{}})}
+			outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(&frame.Input{Frame: &astiav.Frame{}})}
 			return nil
 		},
 	}
 	k1 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)(input.Packet)}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(input.Frame)}
+			}
 			return nil
 		},
 	}
 
 	chain := NewChainOfTwo[Abstract, Abstract](k0, k1)
-	outPktCh := make(chan packet.Output, 10)
-	outFrameCh := make(chan frame.Output, 10)
+	outCh := make(chan packetorframe.OutputUnion, 10)
 
-	err := chain.Generate(ctx, outPktCh, outFrameCh)
+	err := chain.Generate(ctx, outCh)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, k0.GenerateCallCount)
-	require.Equal(t, 1, k1.SendInputPacketCallCount)
-	require.Equal(t, 1, k1.SendInputFrameCallCount)
+	require.Equal(t, 1, k1.SendPacketCallCount)
+	require.Equal(t, 1, k1.SendFrameCallCount)
 
 	select {
-	case <-outPktCh:
+	case <-outCh:
 	default:
 		t.Fatal("expected at least one output packet")
 	}
 	select {
-	case <-outFrameCh:
+	case <-outCh:
 	default:
 		t.Fatal("expected at least one output frame")
 	}

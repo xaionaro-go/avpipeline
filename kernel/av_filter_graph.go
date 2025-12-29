@@ -5,10 +5,9 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -77,23 +76,17 @@ func (f *AVFilterGraph[T]) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(f)
 }
 
-func (f *AVFilterGraph[T]) SendInputPacket(
+func (f *AVFilterGraph[T]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return fmt.Errorf("a Filter is supposed to be used only for Frame-s, not Packet-s")
-}
-
-func (f *AVFilterGraph[T]) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
+) (_err error) {
+	_, frame := input.Unwrap()
+	if frame == nil {
+		return fmt.Errorf("a Filter is supposed to be used only for Frame-s, not Packet-s")
+	}
 	for _, filter := range f.Filters {
-		if filter.Condition != nil && filter.Condition.Match(ctx, input) {
+		if filter.Condition != nil && filter.Condition.Match(ctx, *frame) {
 			// TODO: implement
 		}
 	}
@@ -111,8 +104,7 @@ func (f *AVFilterGraph[T]) Close(ctx context.Context) error {
 
 func (f *AVFilterGraph[T]) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }

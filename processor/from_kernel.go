@@ -12,11 +12,11 @@ import (
 	"github.com/asticode/go-astikit"
 	xruntime "github.com/facebookincubator/go-belt/pkg/runtime"
 	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -27,8 +27,7 @@ type FromKernel[T kernel.Abstract] struct {
 	*ChanStruct
 	Kernel T
 
-	preOutputPacketsCh chan packet.Output
-	preOutputFramesCh  chan frame.Output
+	preOutputCh chan packetorframe.OutputUnion
 
 	closeOnce sync.Once
 	closer    *astikit.Closer
@@ -57,23 +56,20 @@ func NewFromKernel[T kernel.Abstract](
 	opts ...Option,
 ) *FromKernel[T] {
 	opts = append([]Option{
-		OptionQueueSizeInputPacket(1),
-		OptionQueueSizeOutputPacket(1),
-		OptionQueueSizeInputFrame(1),
-		OptionQueueSizeOutputFrame(1),
+		OptionQueueSizeInput(1),
+		OptionQueueSizeOutput(1),
 		OptionQueueSizeError(1),
 	}, opts...)
 	cfg := Options(opts).config()
 	p := &FromKernel[T]{
 		ChanStruct: NewChanStruct(
-			cfg.InputPacketQueue, cfg.OutputPacketQueue,
-			cfg.InputFrameQueue, cfg.OutputFrameQueue,
+			cfg.InputQueue,
+			cfg.OutputQueue,
 			cfg.ErrorQueue,
 		),
 		Kernel: kernel,
 
-		preOutputPacketsCh: make(chan packet.Output, 1),
-		preOutputFramesCh:  make(chan frame.Output, 1),
+		preOutputCh: make(chan packetorframe.OutputUnion, 1),
 
 		CountersStorage: processortypes.NewCounters(),
 		closer:          astikit.NewCloser(),
@@ -93,55 +89,43 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 
 	var debugM xsync.Map[string, struct{}]
 
-	debugM.Store("preOutputPacketsCh", struct{}{})
+	debugM.Store("preOutputCh", struct{}{})
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
-		defer debugM.Delete("preOutputPacketsCh")
+		defer debugM.Delete("preOutputCh")
 		defer wg.Done()
-		defer close(p.OutputPacketCh)
+		defer close(p.OutputCh)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case outputPacket, ok := <-p.preOutputPacketsCh:
+			case output, ok := <-p.preOutputCh:
 				if !ok {
 					return
 				}
-				mediaType := outputPacket.GetMediaType()
-				objSize := uint64(outputPacket.GetSize())
-				p.CountersStorage.Generated.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
-				select {
-				case <-ctx.Done():
-					p.CountersStorage.Omitted.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
-					return
-				case p.OutputPacketCh <- outputPacket:
+				if output.Packet != nil {
+					outputPacket := *output.Packet
+					mediaType := outputPacket.GetMediaType()
+					objSize := uint64(outputPacket.GetSize())
+					p.CountersStorage.Generated.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+					select {
+					case <-ctx.Done():
+						p.CountersStorage.Omitted.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+						return
+					case p.OutputCh <- output:
+					}
 				}
-			}
-		}
-	})
-
-	debugM.Store("preOutputFramesCh", struct{}{})
-	wg.Add(1)
-	observability.Go(ctx, func(ctx context.Context) {
-		defer debugM.Delete("preOutputFramesCh")
-		defer wg.Done()
-		defer close(p.OutputFrameCh)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case outputFrame, ok := <-p.preOutputFramesCh:
-				if !ok {
-					return
-				}
-				mediaType := outputFrame.GetMediaType()
-				objSize := uint64(outputFrame.GetSize())
-				p.CountersStorage.Generated.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
-				select {
-				case <-ctx.Done():
-					p.CountersStorage.Omitted.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
-					return
-				case p.OutputFrameCh <- outputFrame:
+				if output.Frame != nil {
+					outputFrame := *output.Frame
+					mediaType := outputFrame.GetMediaType()
+					objSize := uint64(outputFrame.GetSize())
+					p.CountersStorage.Generated.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
+					select {
+					case <-ctx.Done():
+						p.CountersStorage.Omitted.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
+						return
+					case p.OutputCh <- output:
+					}
 				}
 			}
 		}
@@ -168,7 +152,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		swg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer swg.Done()
-			err := p.Kernel.Generate(ctx, p.preOutputPacketsCh, p.preOutputFramesCh)
+			err := p.Kernel.Generate(ctx, p.preOutputCh)
 			logger.Tracef(ctx, "p.Kernel[%T].Generate: %v", p, err)
 			if err != nil {
 				p.ErrorCh <- fmt.Errorf(
@@ -181,9 +165,9 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		logger.Tracef(ctx, "ReaderLoop[%s]", p)
 		err := readerLoop(
 			ctx,
-			p.InputPacketCh, p.InputFrameCh,
+			p.InputCh,
 			p.Kernel,
-			p.preOutputPacketsCh, p.preOutputFramesCh,
+			p.preOutputCh,
 			p.CountersStorage,
 		)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
@@ -239,8 +223,7 @@ func (p *FromKernel[T]) addToCloser(callback func()) {
 func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	logger.Debugf(ctx, "closing %T", p.Kernel)
 	defer func() {
-		close(p.preOutputPacketsCh)
-		close(p.preOutputFramesCh)
+		close(p.preOutputCh)
 	}()
 
 	var errs []error
@@ -256,20 +239,12 @@ func (p *FromKernel[T]) finalize(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (p *FromKernel[T]) InputPacketChan() chan<- packet.Input {
-	return p.InputPacketCh
+func (p *FromKernel[T]) InputChan() chan<- packetorframe.InputUnion {
+	return p.InputCh
 }
 
-func (p *FromKernel[T]) OutputPacketChan() <-chan packet.Output {
-	return p.OutputPacketCh
-}
-
-func (p *FromKernel[T]) InputFrameChan() chan<- frame.Input {
-	return p.InputFrameCh
-}
-
-func (p *FromKernel[T]) OutputFrameChan() <-chan frame.Output {
-	return p.OutputFrameCh
+func (p *FromKernel[T]) OutputChan() <-chan packetorframe.OutputUnion {
+	return p.OutputCh
 }
 
 func (p *FromKernel[T]) ErrorChan() <-chan error {
@@ -348,7 +323,7 @@ func (p *FromKernel[T]) Flush(
 		return nil // no internal buffers to flush
 	}
 
-	return flusher.Flush(ctx, p.preOutputPacketsCh, p.preOutputFramesCh)
+	return flusher.Flush(ctx, p.preOutputCh)
 }
 
 func (p *FromKernel[T]) HandleError(

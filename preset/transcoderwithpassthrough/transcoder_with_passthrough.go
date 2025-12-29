@@ -18,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -107,10 +108,8 @@ func New[C any, P processor.Abstract](
 	s.MapInputStreamIndicesNode = node.NewFromKernel(
 		ctx,
 		kernel.NewMapStreamIndices(ctx, newStreamIndexAssignerInput(ctx, s)),
-		processor.OptionQueueSizeInputPacket(6000),
-		processor.OptionQueueSizeInputFrame(6000),
-		processor.OptionQueueSizeOutputPacket(10),
-		processor.OptionQueueSizeOutputFrame(10),
+		processor.OptionQueueSizeInput(6000),
+		processor.OptionQueueSizeOutput(10),
 		processor.OptionQueueSizeError(2),
 	)
 	s.inputStreamMapIndicesAsPacketSource = asPacketSource(s.MapInputStreamIndicesNode.Processor)
@@ -461,23 +460,27 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	)
 	nodeFilterThrottle := node.NewFromKernel(
 		ctx,
-		kernel.NewPacketFilter(packetcondition.PacketOrFrame{s.FilterThrottle}, nil),
+		kernel.NewPacketFilter(s.FilterThrottle),
 		processor.DefaultOptionsOutput()...,
 	)
 
 	if passthroughMode != types.PassthroughModeNever {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
+		s.MapInputStreamIndicesNode.AddPushTo(ctx,
 			s.NodeTranscoder,
-			packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(0),
-				s.SwitchPostFilter.PacketCondition(0),
+			packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
+				},
 			},
 		)
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx,
+		s.MapInputStreamIndicesNode.AddPushTo(ctx,
 			nodeFilterThrottle,
-			packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(1),
-				s.SwitchPostFilter.PacketCondition(1),
+			packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
+				},
 			},
 		)
 
@@ -489,8 +492,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			}
 		}
 	} else {
-		s.MapInputStreamIndicesNode.AddPushPacketsTo(ctx, s.NodeTranscoder)
-		s.MapInputStreamIndicesNode.AddPushFramesTo(ctx, s.NodeTranscoder)
+		s.MapInputStreamIndicesNode.AddPushTo(ctx, s.NodeTranscoder)
 	}
 
 	s.NodeStreamFixerMain = autofix.New(
@@ -508,8 +510,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 			passthroughOutputReference,
 		)
 		if s.NodeStreamFixerPassthrough != nil {
-			nodeFilterThrottle.AddPushPacketsTo(ctx, s.NodeStreamFixerPassthrough)
-			nodeFilterThrottle.AddPushFramesTo(ctx, s.NodeStreamFixerPassthrough)
+			nodeFilterThrottle.AddPushTo(ctx, s.NodeStreamFixerPassthrough)
 		}
 
 		if startWithPassthrough {
@@ -521,28 +522,34 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 
 		if passthroughRescaleTS {
 			if !startWithPassthrough || notifyAboutPacketSources {
-				nodeFilterThrottle.InputPacketFilter = packetfiltercondition.Packet{
-					rescaletsbetweenpacketsources.New(
-						s.PacketSource,
-						s.NodeTranscoder.Processor.Kernel.Encoder,
-					),
+				nodeFilterThrottle.InputFilter = packetorframefiltercondition.PacketFilter{
+					Condition: packetfiltercondition.Packet{
+						rescaletsbetweenpacketsources.New(
+							s.PacketSource,
+							s.NodeTranscoder.Processor.Kernel.Encoder,
+						),
+					},
 				}
 			} else {
 				logger.Warnf(ctx, "unable to configure rescale_ts because startWithPassthrough && !notifyAboutPacketSources")
 			}
 		}
 
-		var condTranscoder, condPassthrough packetfiltercondition.And
+		var condTranscoder, condPassthrough packetorframefiltercondition.And
 		var sinkMain, sinkPassthrough node.Abstract
 		switch passthroughMode {
 		case types.PassthroughModeSameTracks:
-			condTranscoder = append(condTranscoder, packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(0),
-				s.SwitchPostFilter.PacketCondition(0),
+			condTranscoder = append(condTranscoder, packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
+				},
 			})
-			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(1),
-				s.SwitchPostFilter.PacketCondition(1),
+			condPassthrough = append(condPassthrough, packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
+				},
 			})
 			sinkMain, sinkPassthrough = outputMain, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
@@ -554,44 +561,45 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.MapOutputStreamIndices,
 				processor.DefaultOptionsOutput()...,
 			)
-			nodeMapStreamIndices.AddPushPacketsTo(ctx, outputMain)
+			nodeMapStreamIndices.AddPushTo(ctx, outputMain)
 			sinkMain, sinkPassthrough = nodeMapStreamIndices, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = nodeMapStreamIndices
 			}
 		case types.PassthroughModeNextOutput:
-			condTranscoder = append(condTranscoder, packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(0),
-				s.SwitchPostFilter.PacketCondition(0),
+			condTranscoder = append(condTranscoder, packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(0),
+					s.SwitchPostFilter.PacketCondition(0),
+				},
 			})
-			condPassthrough = append(condPassthrough, packetfiltercondition.Packet{
-				s.SwitchPreFilter.PacketCondition(1),
-				s.SwitchPostFilter.PacketCondition(1),
+			condPassthrough = append(condPassthrough, packetorframefiltercondition.PacketFilter{
+				Condition: packetfiltercondition.Packet{
+					s.SwitchPreFilter.PacketCondition(1),
+					s.SwitchPostFilter.PacketCondition(1),
+				},
 			})
 			sinkMain, sinkPassthrough = outputMain, &nodewrapper.NoServe[node.Abstract]{Node: s.Outputs[1]}
 		default:
 			return fmt.Errorf("unknown passthrough mode: '%s'", passthroughMode)
 		}
 		if s.NodeStreamFixerMain != nil {
-			s.NodeTranscoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain, condTranscoder...)
-			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, sinkMain)
+			s.NodeTranscoder.AddPushTo(ctx, s.NodeStreamFixerMain, condTranscoder...)
+			s.NodeStreamFixerMain.AddPushTo(ctx, sinkMain)
 		} else {
-			s.NodeTranscoder.AddPushPacketsTo(ctx, sinkMain, condTranscoder...)
+			s.NodeTranscoder.AddPushTo(ctx, sinkMain, condTranscoder...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
-			s.NodeStreamFixerPassthrough.AddPushPacketsTo(ctx, sinkPassthrough, condPassthrough...)
+			s.NodeStreamFixerPassthrough.AddPushTo(ctx, sinkPassthrough, condPassthrough...)
 		} else {
-			nodeFilterThrottle.AddPushPacketsTo(ctx, sinkPassthrough, condPassthrough...)
+			nodeFilterThrottle.AddPushTo(ctx, sinkPassthrough, condPassthrough...)
 		}
 	} else {
 		if s.NodeStreamFixerMain != nil {
-			s.NodeTranscoder.AddPushPacketsTo(ctx, s.NodeStreamFixerMain)
-			s.NodeTranscoder.AddPushFramesTo(ctx, s.NodeStreamFixerMain)
-			s.NodeStreamFixerMain.AddPushPacketsTo(ctx, outputMain)
-			s.NodeStreamFixerMain.AddPushFramesTo(ctx, outputMain)
+			s.NodeTranscoder.AddPushTo(ctx, s.NodeStreamFixerMain)
+			s.NodeStreamFixerMain.AddPushTo(ctx, outputMain)
 		} else {
-			s.NodeTranscoder.AddPushPacketsTo(ctx, outputMain)
-			s.NodeTranscoder.AddPushFramesTo(ctx, outputMain)
+			s.NodeTranscoder.AddPushTo(ctx, outputMain)
 		}
 	}
 

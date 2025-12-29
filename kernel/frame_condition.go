@@ -7,8 +7,9 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/frame/condition"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -26,52 +27,52 @@ func NewFrameCondition(
 	}
 }
 
-func (*FrameCondition) SendInputPacket(
+func (k *FrameCondition) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
-	return fmt.Errorf("FrameCondition does not process packets")
-}
+	pkt, frameInput := input.Unwrap()
+	switch {
+	case pkt != nil:
+		logger.Tracef(ctx, "SendInput(packet)")
+		defer func() { logger.Tracef(ctx, "/SendInput(packet): %v", _err) }()
+		return fmt.Errorf("FrameCondition does not process packets")
+	case frameInput != nil:
+		logger.Tracef(ctx, "SendInput(frame)")
+		defer func() { logger.Tracef(ctx, "/SendInput(frame): %v", _err) }()
 
-func (k *FrameCondition) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "SendInputFrame")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
-
-	if k.Condition != nil && !k.Condition.Match(ctx, input) {
-		var pts int64 = astiav.NoPtsValue
-		if input.Frame != nil {
-			pts = input.Frame.Pts()
+		if k.Condition != nil && !k.Condition.Match(ctx, *frameInput) {
+			var pts int64 = astiav.NoPtsValue
+			if frameInput.Frame != nil {
+				pts = frameInput.Frame.Pts()
+			}
+			logger.Tracef(ctx, "frame does not match condition, dropping: stream:%d frame:%p pts:%d", frameInput.StreamIndex, frameInput.Frame, pts)
+			return nil
 		}
-		logger.Tracef(ctx, "frame does not match condition, dropping: stream:%d frame:%p pts:%d", input.StreamIndex, input.Frame, pts)
-		return nil
-	}
 
-	return k.passthrough(ctx, input, outputFramesCh)
+		return k.passthrough(ctx, *frameInput, outputCh)
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
+	}
 }
 
 func (k *FrameCondition) passthrough(
 	ctx context.Context,
 	input frame.Input,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "passthrough")
 	defer func() { logger.Tracef(ctx, "/passthrough: %v", _err) }()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case outputFramesCh <- frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	):
+	case outputCh <- packetorframe.OutputUnion{
+		Frame: ptr(frame.BuildOutput(
+			frame.CloneAsReferenced(input.Frame),
+			input.StreamInfo,
+		)),
+	}:
 	}
 	return nil
 }
@@ -94,8 +95,7 @@ func (*FrameCondition) CloseChan() <-chan struct{} {
 
 func (*FrameCondition) Generate(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
+	_ chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "Generate")
 	defer func() { logger.Tracef(ctx, "/Generate: %v", _err) }()

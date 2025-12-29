@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -54,36 +55,44 @@ func NewNodeKernel(
 	return k, nil
 }
 
-func (k *NodeKernel) SendInputPacket(
+func (k *NodeKernel) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
-	return xsync.DoA3R1(ctx, &k.Locker, k.sendInputPacket, ctx, input, outputPacketsCh)
+	logger.Tracef(ctx, "SendInput()")
+	defer func() { logger.Tracef(ctx, "/SendInput(): %v", _err) }()
+
+	switch {
+	case input.Packet != nil:
+		return xsync.DoA3R1(ctx, &k.Locker, k.sendPacket, ctx, *input.Packet, outputCh)
+	case input.Frame != nil:
+		return xsync.DoA3R1(ctx, &k.Locker, k.sendFrame, ctx, *input.Frame, outputCh)
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
+	}
 }
 
-func (k *NodeKernel) sendInputPacket(
+func (k *NodeKernel) sendPacket(
 	ctx context.Context,
 	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "sendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/sendInputPacket(): %v", _err) }()
+	logger.Tracef(ctx, "sendPacket()")
+	defer func() { logger.Tracef(ctx, "/sendPacket(): %v", _err) }()
 
-	isNewSource := input.Source != k.PreviousSource[input.StreamIndex()]
+	inputSource := input.Source.(packet.Source)
+	isNewSource := inputSource != k.PreviousSource[input.GetStreamIndex()]
 	if isNewSource {
-		logger.Tracef(ctx, "New source for stream %d: %s", input.Stream, input.Source)
-		k.PreviousSource[input.StreamIndex()] = input.Source
+		logger.Tracef(ctx, "New source for stream %d: %s", input.GetStreamIndex(), inputSource)
+		k.PreviousSource[input.GetStreamIndex()] = inputSource
 	}
-	if err := k.makeTimeMoveOnlyForward(ctx, &input, input.Source, isNewSource); err != nil {
+	if err := k.makeTimeMoveOnlyForward(ctx, &input, inputSource, isNewSource); err != nil {
 		if errors.Is(err, errSkip{}) {
-			logger.Tracef(ctx, "skipping packet for stream %v due to errSkip", input.Stream)
+			logger.Tracef(ctx, "skipping packet for stream %v due to errSkip", input.GetStreamIndex())
 			return nil
 		}
-		return fmt.Errorf("unable to handle corrections for stream %v: %w", input.Stream, err)
+		return fmt.Errorf("unable to handle corrections for stream %v: %w", input.GetStreamIndex(), err)
 	}
 
 	outPkt := packet.BuildOutput(
@@ -91,31 +100,20 @@ func (k *NodeKernel) sendInputPacket(
 		input.StreamInfo,
 	)
 	select {
-	case outputPacketsCh <- outPkt:
+	case outputCh <- packetorframe.OutputUnion{Packet: &outPkt}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	return nil
 }
 
-func (k *NodeKernel) SendInputFrame(
+func (k *NodeKernel) sendFrame(
 	ctx context.Context,
 	input frame.Input,
-	_ chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.SendInputFrame()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.SendInputFrame(): %v", _err) }()
-	return xsync.DoA3R1(ctx, &k.Locker, k.sendInputFrame, ctx, input, outputFramesCh)
-}
-
-func (k *NodeKernel) sendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "NodeKernel.sendInputFrame()")
-	defer func() { logger.Tracef(ctx, "/NodeKernel.sendInputFrame(): %v", _err) }()
+	logger.Tracef(ctx, "NodeKernel.sendFrame()")
+	defer func() { logger.Tracef(ctx, "/NodeKernel.sendFrame(): %v", _err) }()
 
 	if err := k.makeTimeMoveOnlyForward(ctx, &input, nil, input.GetDTS() == 0); err != nil {
 		if errors.Is(err, errSkip{}) {
@@ -130,7 +128,7 @@ func (k *NodeKernel) sendInputFrame(
 		input.StreamInfo,
 	)
 	select {
-	case outputFramesCh <- outFrame:
+	case outputCh <- packetorframe.OutputUnion{Frame: &outFrame}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -238,8 +236,7 @@ func (k *NodeKernel) CloseChan() <-chan struct{} {
 
 func (k *NodeKernel) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "NodeKernel.Generate()")
 	defer func() { logger.Tracef(ctx, "/NodeKernel.Generate(): %v", _err) }()

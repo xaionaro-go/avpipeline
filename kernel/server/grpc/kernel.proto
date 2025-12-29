@@ -7,8 +7,7 @@ import "avpipeline.proto";
 option go_package = "github.com/xaionaro-go/avpipeline/kernel/server/grpc/kernel";
 
 service Kernel {
-  rpc SendInputPacket(SendInputPacketRequest) returns (SendInputPacketReply) {}
-  rpc SendInputFrame(SendInputFrameRequest) returns (SendInputFrameReply) {}
+  rpc SendInput(SendInputRequest) returns (SendInputReply) {}
   rpc String(google.protobuf.Empty) returns (google.protobuf.StringValue) {}
   rpc Close(google.protobuf.Empty) returns (google.protobuf.Empty) {}
   rpc CloseChan(google.protobuf.Empty) returns (stream google.protobuf.Empty) {}
@@ -18,6 +17,15 @@ service Kernel {
   rpc GetInputFormatContext(google.protobuf.Empty) returns (GetInputFormatContextReply) {}
   rpc NotifyAboutPacketFormatContext(NotifyAboutPacketFormatContextRequest) returns (google.protobuf.Empty) {}
 }
+
+message SendInputRequest {
+  oneof input {
+    SendInputPacketRequest packet = 1;
+    SendInputFrameRequest frame = 2;
+  }
+}
+
+message SendInputReply {}
 
 message SendInputPacketRequest {
   libav.Packet packet = 1;

@@ -19,11 +19,13 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	frameconditionextra "github.com/xaionaro-go/avpipeline/frame/condition/extra"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitframerate"
 	"github.com/xaionaro-go/avpipeline/preset/autoheaders"
 	"github.com/xaionaro-go/avpipeline/preset/inputwithfallback"
@@ -137,7 +139,7 @@ func main() {
 		nil,
 	)
 	encoderNode := node.NewFromKernel(ctx, encoder, processor.DefaultOptionsTranscoder()...)
-	inputs.AddPushFramesTo(ctx, encoderNode)
+	inputs.AddPushTo(ctx, encoderNode)
 
 	// output node
 
@@ -158,20 +160,22 @@ func main() {
 
 	if *videoMaxFPS >= 0 {
 		r := globaltypes.RationalFromApproxFloat64(*videoMaxFPS)
-		encoderNode.SetInputFrameFilter(ctx, framefiltercondition.Frame{framecondition.Or{
-			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-			framecondition.PacketOrFrame{
-				limitframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
-			},
-		}})
+		encoderNode.SetInputFilter(ctx, packetorframefiltercondition.FrameFilter{
+			Condition: framefiltercondition.Frame{framecondition.Or{
+				framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
+				frameconditionextra.PacketOrFrame{
+					limitframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+				},
+			}},
+		})
 	}
 
 	if outputBSFEnabled {
 		encoderBSF := autoheaders.NewNode(ctx, output.Kernel)
-		encoderNode.AddPushPacketsTo(ctx, encoderBSF)
-		encoderBSF.AddPushPacketsTo(ctx, outputNode)
+		encoderNode.AddPushTo(ctx, encoderBSF)
+		encoderBSF.AddPushTo(ctx, outputNode)
 	} else {
-		encoderNode.AddPushPacketsTo(ctx, outputNode)
+		encoderNode.AddPushTo(ctx, outputNode)
 	}
 
 	defer logger.Infof(ctx, "finishing: routing")

@@ -23,7 +23,9 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
@@ -138,9 +140,9 @@ func main() {
 		)
 	default:
 		sw = kernel.NewSwitch(transcoders...)
-		sw.SetVerifySwitchOutput(condition.And{
-			condition.MediaType(astiav.MediaTypeVideo),
-			condition.IsKeyFrame(true),
+		sw.SetVerifySwitchOutput(packetorframecondition.And{
+			packetorframecondition.MediaType(astiav.MediaTypeVideo),
+			packetorframecondition.IsKeyFrame(true),
 		})
 		transcodingNode = node.NewFromKernel(
 			ctx,
@@ -149,22 +151,24 @@ func main() {
 		)
 	}
 	if transcodingNode != nil {
-		inputNode.PushPacketsTos.Add(transcodingNode)
+		inputNode.AddPushTo(ctx, transcodingNode)
 		finalNode = transcodingNode
 
 		if len(*alternateBitrate) >= 2 || len(*videoCodecs) >= 2 {
-			transcodingNode.SetInputPacketFilter(ctx,
-				packetfiltercondition.Packet{
-					condition.Function(sillyAlternationsJustForDemonstration(
-						sw,
-						*alternateBitrate,
-					)),
+			transcodingNode.SetInputFilter(ctx,
+				packetorframefiltercondition.PacketFilter{
+					Condition: packetfiltercondition.Packet{
+						condition.Function(sillyAlternationsJustForDemonstration(
+							sw,
+							*alternateBitrate,
+						)),
+					},
 				},
 			)
 		}
 	}
-	finalNode.AddPushPacketsTo(ctx, node.New(output))
-	pushTos := finalNode.GetPushPacketsTos(ctx)
+	finalNode.AddPushTo(ctx, node.New(output))
+	pushTos := finalNode.GetPushTos(ctx)
 	assert(ctx, len(pushTos) == 1, len(pushTos))
 
 	l.Debugf("resulting pipeline: %s", inputNode.String())

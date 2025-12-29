@@ -15,13 +15,13 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec/resource"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	frameconditionextra "github.com/xaionaro-go/avpipeline/frame/condition/extra"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	extrapacketorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition/extra"
@@ -257,7 +257,7 @@ func newOutput[C any](
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.TranscoderNode.CustomData = customData
-	o.TranscoderNode.SetInputPacketFilter(ctx, packetfiltercondition.Panic("the transcoder is not configured, yet!"))
+	o.TranscoderNode.SetInputFilter(ctx, packetorframefiltercondition.Panic("the transcoder is not configured, yet!"))
 	codecOpts := []codec.Option{CodecOptionOutputID{OutputID: o.ID}}
 	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
 	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
@@ -299,19 +299,14 @@ func newOutput[C any](
 			return true
 		}),
 	}
-	o.InputFilter.AddPushPacketsTo(ctx, inputFixer, packetfiltercondition.PacketOrFrame{pushToFixerConds})
-	o.InputFilter.AddPushFramesTo(ctx, inputFixer, framefiltercondition.PacketOrFrame{pushToFixerConds})
+	o.InputFilter.AddPushTo(ctx, inputFixer, packetorframefiltercondition.PacketOrFrame{pushToFixerConds})
 	pushToTranscoderConds := packetorframecondition.Function(o.onTranscoderInput)
-	o.InputFixer.AddPushPacketsTo(ctx, o.TranscoderNode, packetfiltercondition.PacketOrFrame{pushToTranscoderConds})
-	o.InputFixer.AddPushFramesTo(ctx, o.TranscoderNode, framefiltercondition.PacketOrFrame{pushToTranscoderConds})
+	o.InputFixer.AddPushTo(ctx, o.TranscoderNode, packetorframefiltercondition.PacketOrFrame{pushToTranscoderConds})
 	pushToMapIndicesConds := packetorframecondition.Function(o.onTranscoderOutput)
-	o.TranscoderNode.AddPushPacketsTo(ctx, o.MapIndices, packetfiltercondition.PacketOrFrame{pushToMapIndicesConds})
-	o.TranscoderNode.AddPushFramesTo(ctx, o.MapIndices, framefiltercondition.PacketOrFrame{pushToMapIndicesConds})
-	o.MapIndices.AddPushPacketsTo(ctx, outputFixer)
-	o.MapIndices.AddPushFramesTo(ctx, outputFixer)
+	o.TranscoderNode.AddPushTo(ctx, o.MapIndices, packetorframefiltercondition.PacketOrFrame{pushToMapIndicesConds})
+	o.MapIndices.AddPushTo(ctx, outputFixer)
 	pushToSenderConds := packetorframecondition.Function(o.onSenderInput)
-	o.SendingFixer.AddPushPacketsTo(ctx, o.SendingSyncer, packetfiltercondition.PacketOrFrame{pushToSenderConds})
-	o.SendingFixer.AddPushFramesTo(ctx, o.SendingSyncer, framefiltercondition.PacketOrFrame{pushToSenderConds})
+	o.SendingFixer.AddPushTo(ctx, o.SendingSyncer, packetorframefiltercondition.PacketOrFrame{pushToSenderConds})
 	maxQueueSizeGetter := mathcondition.GetterFunction[uint64](func(context.Context) uint64 {
 		return sendingCfg.OutputThrottlerMaxQueueSizeBytes
 	})
@@ -333,8 +328,7 @@ func newOutput[C any](
 			),
 		},
 	}
-	o.SendingSyncer.AddPushPacketsTo(ctx, o.SendingNode, packetfiltercondition.PacketOrFrame{pushToSendingNodeConds})
-	o.SendingSyncer.AddPushFramesTo(ctx, o.SendingNode, framefiltercondition.PacketOrFrame{pushToSendingNodeConds})
+	o.SendingSyncer.AddPushTo(ctx, o.SendingNode, packetorframefiltercondition.PacketOrFrame{pushToSendingNodeConds})
 
 	// logging
 
@@ -429,7 +423,7 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 
 	o.TranscoderNode.Processor.Kernel.Filter = framecondition.Or{
 		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-		framecondition.PacketOrFrame{
+		frameconditionextra.PacketOrFrame{
 			reduceframerate.New(mathcondition.GetterFunction[globaltypes.Rational](
 				o.FPSFractionGetter.GetFPSFraction,
 			)),
@@ -496,8 +490,7 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 
 	var errs []error
 
-	node.AppendInputPacketFilter(ctx, o.FirstNodeAfterFilter(), packetfiltercondition.Static(false))
-	node.AppendInputFrameFilter(ctx, o.FirstNodeAfterFilter(), framefiltercondition.Static(false))
+	node.AppendInputFilter(ctx, o.FirstNodeAfterFilter(), packetorframefiltercondition.Static(false))
 	if shouldDrain {
 		if err := o.DrainAfterFilter(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to flush %d: %w", o.ID, err))
@@ -665,7 +658,7 @@ func (o *Output[C]) reconfigureTranscoder(
 		}
 	}
 
-	o.TranscoderNode.SetInputPacketFilter(ctx, nil)
+	o.TranscoderNode.SetInputFilter(ctx, nil)
 	return nil
 }
 

@@ -39,17 +39,17 @@ func (c *OnStreamSourceChange) match(
 	ctx context.Context,
 	pkt packet.Input,
 ) bool {
-	if pkt.Source == nil {
+	if pkt.GetSource() == nil {
 		return true
 	}
 	streamIndex := pkt.GetStreamIndex()
 	prevSource := c.PreviousStreamSource[streamIndex]
-	if pkt.Source == prevSource {
+	if pkt.GetSource() == prevSource {
 		return true
 	}
-	logger.Debugf(ctx, "stream source for stream #%d changed from %s to %s", streamIndex, prevSource, pkt.Source)
+	logger.Debugf(ctx, "stream source for stream #%d changed from %s to %s", streamIndex, prevSource, pkt.GetSource())
 	c.Handler.OnStreamSourceChange(ctx, pkt, prevSource)
-	c.PreviousStreamSource[streamIndex] = pkt.Source
+	c.PreviousStreamSource[streamIndex] = pkt.GetSource()
 	return true
 }
 

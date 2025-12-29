@@ -19,8 +19,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/resampler"
 	"github.com/xaionaro-go/avpipeline/scaler"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -335,9 +337,8 @@ func (e *Encoder[EF]) String() string {
 }
 
 func (e *Encoder[EF]) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }
@@ -348,15 +349,30 @@ func (ErrNotCopyEncoder) Error() string {
 	return "one cannot send undecoded packets via an encoder; it is required to decode them first and send as raw frames"
 }
 
-func (e *Encoder[EF]) SendInputPacket(
+func (e *Encoder[EF]) SendInput(
+	ctx context.Context,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
+) (_err error) {
+	pkt, frame := input.Unwrap()
+	switch {
+	case pkt != nil:
+		return e.sendPacket(ctx, *pkt, outputCh)
+	case frame != nil:
+		return e.sendFrame(ctx, *frame, outputCh)
+	default:
+		return types.ErrUnexpectedInputType{}
+	}
+}
+
+func (e *Encoder[EF]) sendPacket(
 	ctx context.Context,
 	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	ctx = belt.WithField(ctx, "encoder", e)
-	logger.Tracef(ctx, "SendInputPacket: %s", input.GetMediaType())
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input.GetMediaType(), _err) }()
+	logger.Tracef(ctx, "sendPacket: %s", input.GetMediaType())
+	defer func() { logger.Tracef(ctx, "/sendPacket: %s: %v", input.GetMediaType(), _err) }()
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
@@ -365,13 +381,15 @@ func (e *Encoder[EF]) SendInputPacket(
 		streamEncoder := e.encoders[input.GetStreamIndex()]
 		logger.Tracef(ctx, "e.Encoders[%d] == %v", input.GetStreamIndex(), streamEncoder)
 		if streamEncoder == nil {
-			input.Stream.AvgFrameRate()
+			if stream := input.GetStream(); stream != nil {
+				stream.AvgFrameRate()
+			}
 			logger.Debugf(ctx, "an encoder is not initialized, yet")
 			err := e.initEncoderAndOutputFor(
 				ctx,
 				input.GetStreamIndex(),
-				input.CodecParameters(),
-				input.GetStream().TimeBase(),
+				input.GetCodecParameters(),
+				input.GetTimeBase(),
 				nil,
 			)
 			switch {
@@ -412,7 +430,7 @@ func (e *Encoder[EF]) SendInputPacket(
 	assert(ctx, outputStream.CodecParameters().MediaType() == input.GetMediaType(), outputStream.CodecParameters().MediaType(), input.GetMediaType())
 	pkt := packet.CloneAsReferenced(input.Packet)
 	pkt.SetStreamIndex(outputStream.Index())
-	err = e.send(ctx, pkt, input.PipelineSideData, outputStream, outputPacketsCh)
+	err = e.send(ctx, pkt, input.PipelineSideData, outputStream, outputCh)
 	if err != nil {
 		return fmt.Errorf("unable to send a packet: %w", err)
 	}
@@ -431,11 +449,10 @@ func (e *Encoder[EF]) SetForceNextKeyFrame(
 	})
 }
 
-func (e *Encoder[EF]) SendInputFrame(
+func (e *Encoder[EF]) sendFrame(
 	ctx context.Context,
 	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	ctx = belt.WithField(ctx, "encoder", e)
 	ctx = belt.WithField(ctx, "mode", "frame")
@@ -444,8 +461,8 @@ func (e *Encoder[EF]) SendInputFrame(
 	ctx = belt.WithField(ctx, "is_key", input.Flags().Has(astiav.FrameFlagKey))
 	ctx = xsync.WithNoLogging(ctx, true)
 
-	logger.Tracef(ctx, "SendInputFrame")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+	logger.Tracef(ctx, "sendFrame")
+	defer func() { logger.Tracef(ctx, "/sendFrame: %v", _err) }()
 	if e.IsClosed() {
 		return io.ErrClosedPipe
 	}
@@ -505,10 +522,12 @@ func (e *Encoder[EF]) SendInputFrame(
 			err = io.ErrClosedPipe
 		case <-ctx.Done():
 			err = ctx.Err()
-		case outputFramesCh <- frame.BuildOutput(
-			frame.CloneAsReferenced(input.Frame),
-			input.StreamInfo,
-		):
+		case outputCh <- packetorframe.OutputUnion{
+			Frame: ptr(frame.BuildOutput(
+				frame.CloneAsReferenced(input.Frame),
+				input.StreamInfo,
+			)),
+		}:
 		}
 		return err
 	}
@@ -611,7 +630,7 @@ func (e *Encoder[EF]) SendInputFrame(
 					logger.Tracef(ctx, "encoder.SendFrame(): EAGAIN; draining and retrying")
 					err = e.drain(
 						ctx,
-						outputPacketsCh,
+						outputCh,
 						encoder.Drain,
 						outputStream,
 						frameInfo,
@@ -631,7 +650,7 @@ func (e *Encoder[EF]) SendInputFrame(
 		// For now we do the batching approach.
 		err = e.drain(
 			ctx,
-			outputPacketsCh,
+			outputCh,
 			encoder.Drain,
 			outputStream,
 			frameInfo,
@@ -667,7 +686,7 @@ func isEmptyFrame(
 
 func (e *Encoder[EF]) drain(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 	encoderDrainFn func(context.Context, codec.CallbackPacketReceiver) error,
 	outputStream *astiav.Stream,
 	frameInfo FrameInfo,
@@ -720,7 +739,7 @@ func (e *Encoder[EF]) drain(
 			}
 		}
 
-		err := e.send(ctx, pkt, []any{frameInfo}, outputStream, outputPacketsCh)
+		err := e.send(ctx, pkt, []any{frameInfo}, outputStream, outputCh)
 		if err != nil {
 			return fmt.Errorf("unable to send a packet: %w", err)
 		}
@@ -1058,7 +1077,7 @@ func (e *Encoder[EF]) send(
 	outPkt *astiav.Packet,
 	pipelineSideData []any,
 	outputStream *astiav.Stream,
-	out chan<- packet.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 
 	outPktWrapped := packet.BuildOutput(
@@ -1071,13 +1090,15 @@ func (e *Encoder[EF]) send(
 	)
 
 	if encoderDebug {
-		if outPktWrapped.Duration() <= 0 {
+		if outPktWrapped.GetDuration() <= 0 {
 			logger.Warnf(ctx, "packet duration is not set")
 		}
 	}
 
-	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.CodecParameters().MediaType(), outPktWrapped.Dts(), outPktWrapped.Pts())
-	defer func() { logger.Tracef(ctx, "/send: %v %v", outPktWrapped.CodecParameters().MediaType(), _err) }()
+	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.GetCodecParameters().MediaType(), outPktWrapped.GetDTS(), outPktWrapped.GetPTS())
+	defer func() {
+		logger.Tracef(ctx, "/send: %v %v", outPktWrapped.GetCodecParameters().MediaType(), _err)
+	}()
 
 	var err error
 	select {
@@ -1085,7 +1106,7 @@ func (e *Encoder[EF]) send(
 		err = io.ErrClosedPipe
 	case <-ctx.Done():
 		err = ctx.Err()
-	case out <- outPktWrapped:
+	case outputCh <- packetorframe.OutputUnion{Packet: &outPktWrapped}:
 	}
 	return err
 }
@@ -1228,8 +1249,7 @@ var _ Flusher = (*Encoder[codec.EncoderFactory])(nil)
 
 func (e *Encoder[EF]) Flush(
 	ctx context.Context,
-	outputPacketCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Debugf(ctx, "Flush")
 	defer func() { logger.Debugf(ctx, "/Flush: %v", _err) }()
@@ -1256,7 +1276,7 @@ func (e *Encoder[EF]) Flush(
 					defer wg.Done()
 					err := e.drain(
 						ctx,
-						outputPacketCh,
+						outputCh,
 						encoder.Encoder.Flush,
 						e.outputStreams[streamIndex],
 						FrameInfo{

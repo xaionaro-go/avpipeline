@@ -140,8 +140,7 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) start(origCtx context.Context) (_
 	}
 
 	fwd.ChainInput = &nodewrapper.NoServe[*chainInputNode]{Node: fwd.Chain.Input()}
-	fwd.Input.AddPushPacketsTo(ctx, fwd.ChainInput)
-	fwd.Input.AddPushFramesTo(ctx, fwd.ChainInput)
+	fwd.Input.AddPushTo(ctx, fwd.ChainInput)
 
 	observability.Go(ctx, func(ctx context.Context) {
 		logger.Debugf(ctx, "waiter")
@@ -201,25 +200,18 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) stop(
 	}
 	fwd.CancelFunc()
 	fwd.CancelFunc = nil
-	for _, c := range []struct {
-		Name string
-		Err  error
-	}{
-		{Name: "packet", Err: fwd.Input.RemovePushPacketsTo(ctx, fwd.ChainInput)},
-		{Name: "frame", Err: fwd.Input.RemovePushFramesTo(ctx, fwd.ChainInput)},
-	} {
-		if c.Err != nil {
-			if fwd.Input == nil {
-				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.Input == nil)", c.Name, c.Err)
-			}
-			if fwd.ChainInput == nil {
-				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.ChainInput == nil)", c.Name, c.Err)
-			}
-			if fwd.ChainInput.Node == nil {
-				return fmt.Errorf("unable to remove pushing %ss: %w (and fwd.ChainInput.Node == nil)", c.Name, c.Err)
-			}
-			return fmt.Errorf("unable to remove pushing %ss from %s to %s: %w", c.Name, fwd.Input, fwd.ChainInput.Node, c.Err)
+	err := fwd.Input.RemovePushTo(ctx, fwd.ChainInput)
+	if err != nil {
+		if fwd.Input == nil {
+			return fmt.Errorf("unable to remove pushing: %w (and fwd.Input == nil)", err)
 		}
+		if fwd.ChainInput == nil {
+			return fmt.Errorf("unable to remove pushing: %w (and fwd.ChainInput == nil)", err)
+		}
+		if fwd.ChainInput.Node == nil {
+			return fmt.Errorf("unable to remove pushing: %w (and fwd.ChainInput.Node == nil)", err)
+		}
+		return fmt.Errorf("unable to remove pushing from %s to %s: %w", fwd.Input, fwd.ChainInput.Node, err)
 	}
 	fwd.Chain.Wait(ctx)
 	return nil

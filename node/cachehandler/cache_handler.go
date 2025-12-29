@@ -100,27 +100,27 @@ func (h *CacheHandler) handlePacketSinceLastKeyFrame(
 	return nil
 }
 
-func (h *CacheHandler) OnAddPushPacketsTo(
+func (h *CacheHandler) OnAddPushTo(
 	ctx context.Context,
-	pushTo node.PushPacketsTo,
+	pushTo node.PushTo,
 ) {
-	logger.Debugf(ctx, "OnAddPushPacketsTo: %s", pushTo.Node)
+	logger.Debugf(ctx, "OnAddPushTo: %s", pushTo.Node)
 	h.needsSendingTo.Store(pushTo.Node, struct{}{})
 }
-func (h *CacheHandler) OnRemovePushPacketsTo(
+func (h *CacheHandler) OnRemovePushTo(
 	ctx context.Context,
-	pushTo node.PushPacketsTo,
+	pushTo node.PushTo,
 ) {
-	logger.Debugf(ctx, "OnRemovePushPacketsTo: %s", pushTo.Node)
+	logger.Debugf(ctx, "OnRemovePushTo: %s", pushTo.Node)
 	h.needsSendingTo.Delete(pushTo.Node)
 }
 
-func (h *CacheHandler) GetPendingPackets(
+func (h *CacheHandler) GetPending(
 	ctx context.Context,
-	pushTo node.PushPacketsTo,
+	pushTo node.PushTo,
 ) (_ret []packet.Input, _err error) {
-	logger.Tracef(ctx, "GetPendingPackets")
-	defer func() { logger.Tracef(ctx, "/GetPendingPackets: %d %v", len(_ret), _err) }()
+	logger.Tracef(ctx, "GetPending")
+	defer func() { logger.Tracef(ctx, "/GetPending: %d %v", len(_ret), _err) }()
 
 	if _, ok := h.needsSendingTo.LoadAndDelete(pushTo.Node); !ok {
 		return nil, nil

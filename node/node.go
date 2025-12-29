@@ -13,8 +13,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -29,29 +28,20 @@ type Abstract interface {
 	GetObjectID() globaltypes.ObjectID
 	IsServing() bool
 
-	GetPushPacketsTos(context.Context) PushPacketsTos
-	AddPushPacketsTo(context.Context, Abstract, ...packetfiltercondition.Condition)
-	SetPushPacketsTos(context.Context, PushPacketsTos)
-	WithPushPacketsTos(context.Context, func(context.Context, *PushPacketsTos))
-	RemovePushPacketsTo(context.Context, Abstract) error
-
-	GetPushFramesTos(context.Context) PushFramesTos
-	AddPushFramesTo(context.Context, Abstract, ...framefiltercondition.Condition)
-	SetPushFramesTos(context.Context, PushFramesTos)
-	WithPushFramesTos(context.Context, func(context.Context, *PushFramesTos))
-	RemovePushFramesTo(context.Context, Abstract) error
+	GetPushTos(context.Context) PushTos
+	AddPushTo(context.Context, Abstract, ...packetorframefiltercondition.Condition)
+	SetPushTos(context.Context, PushTos)
+	WithPushTos(context.Context, func(context.Context, *PushTos))
+	RemovePushTo(context.Context, Abstract) error
 
 	GetProcessor() processor.Abstract
 	GetCountersPtr() *types.Counters
 
-	GetInputPacketFilter(context.Context) packetfiltercondition.Condition
-	SetInputPacketFilter(context.Context, packetfiltercondition.Condition)
-	GetInputFrameFilter(context.Context) framefiltercondition.Condition
-	SetInputFrameFilter(context.Context, framefiltercondition.Condition)
+	GetInputFilter(context.Context) packetorframefiltercondition.Condition
+	SetInputFilter(context.Context, packetorframefiltercondition.Condition)
 
 	GetChangeChanIsServing() <-chan struct{}
-	GetChangeChanPushPacketsTo() <-chan struct{}
-	GetChangeChanPushFramesTo() <-chan struct{}
+	GetChangeChanPushTo() <-chan struct{}
 
 	GetChangeChanDrained() <-chan struct{}
 	IsDrained(context.Context) bool
@@ -70,8 +60,7 @@ import (
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -94,65 +83,47 @@ func (n *MyFancyNodePlaceholder) String() string {
 }
 
 func (n *MyFancyNodePlaceholder) IsServing() bool {
-
+	return false
 }
 
-func (n *MyFancyNodePlaceholder) GetPushPacketsTos(
+func (n *MyFancyNodePlaceholder) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
+) node.PushTos {
+	return nil
 }
 
-func (n *MyFancyNodePlaceholder) WithPushPacketsTos(
+func (n *MyFancyNodePlaceholder) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
 
 }
 
-func (n *MyFancyNodePlaceholder) AddPushPacketsTo(
+func (n *MyFancyNodePlaceholder) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
 
 }
 
-func (n *MyFancyNodePlaceholder) SetPushPacketsTos(
+func (n *MyFancyNodePlaceholder) SetPushTos(
 	ctx context.Context,
-	v node.PushPacketsTos,
+	v node.PushTos,
 ) {
 
 }
 
-func (n *MyFancyNodePlaceholder) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-}
-
-func (n *MyFancyNodePlaceholder) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-
-}
-
-
-func (n *MyFancyNodePlaceholder) AddPushFramesTo(
+func (n *MyFancyNodePlaceholder) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-
-}
-
-func (n *MyFancyNodePlaceholder) SetPushFramesTos(
-	ctx context.Context,
-	v node.PushFramesTos,
-) {
-
+) error {
+	return nil
 }
 
 func (n *MyFancyNodePlaceholder) GetCountersPtr() *nodetypes.Counters {
+	return nil
+}
 
 }
 
@@ -160,46 +131,29 @@ func (n *MyFancyNodePlaceholder) GetProcessor() processor.Abstract {
 
 }
 
-func (n *MyFancyNodePlaceholder) GetInputPacketFilter(
+func (n *MyFancyNodePlaceholder) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
+) packetorframefiltercondition.Condition {
 
 }
 
-func (n *MyFancyNodePlaceholder) SetInputPacketFilter(
+func (n *MyFancyNodePlaceholder) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
-) {
-
-}
-
-func (n *MyFancyNodePlaceholder) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-
-}
-
-func (n *MyFancyNodePlaceholder) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
 
 }
 
 func (n *MyFancyNodePlaceholder) GetChangeChanIsServing() <-chan struct{} {
-
+	return nil
 }
 
-func (n *MyFancyNodePlaceholder) GetChangeChanPushPacketsTo() <-chan struct{} {
-
-}
-
-func (n *MyFancyNodePlaceholder) GetChangeChanPushFramesTo() <-chan struct{} {
-
+func (n *MyFancyNodePlaceholder) GetChangeChanPushTo() <-chan struct{} {
+	return nil
 }
 
 func (n *MyFancyNodePlaceholder) GetChangeChanDrained() <-chan struct{} {
-
+	return nil
 }
 
 func (n *MyFancyNodePlaceholder) IsDrained(
@@ -221,23 +175,20 @@ type GetCustomDataer[C any] interface {
 }
 
 type NodeWithCustomData[C any, T processor.Abstract] struct {
-	Processor         T
-	Counters          *types.Counters
-	PushPacketsTos    PushPacketsTos
-	PushFramesTos     PushFramesTos
-	InputPacketFilter packetfiltercondition.Condition
-	InputFrameFilter  framefiltercondition.Condition
-	Locker            xsync.Mutex
-	ServeDebugData    any
-	IsServingValue    bool
-	IsDrainedValue    atomic.Bool
-	IsProcessorDirty  bool
-	Config            Config
+	Processor        T
+	Counters         *types.Counters
+	PushTos          PushTos
+	InputFilter      packetorframefiltercondition.Condition
+	Locker           xsync.Mutex
+	ServeDebugData   any
+	IsServingValue   bool
+	IsDrainedValue   atomic.Bool
+	IsProcessorDirty bool
+	Config           Config
 
-	ChangeChanIsServing     *chan struct{}
-	ChangeChanPushPacketsTo *chan struct{}
-	ChangeChanPushFramesTo  *chan struct{}
-	ChangeChanDrained       *chan struct{}
+	ChangeChanIsServing *chan struct{}
+	ChangeChanPushTo    *chan struct{}
+	ChangeChanDrained   *chan struct{}
 
 	CustomData C
 }
@@ -268,13 +219,12 @@ func NewWithCustomData[C any, T processor.Abstract](
 	opts ...Option,
 ) *NodeWithCustomData[C, T] {
 	n := &NodeWithCustomData[C, T]{
-		Processor:               processor,
-		ChangeChanIsServing:     ptr(make(chan struct{})),
-		ChangeChanPushPacketsTo: ptr(make(chan struct{})),
-		ChangeChanPushFramesTo:  ptr(make(chan struct{})),
-		ChangeChanDrained:       ptr(make(chan struct{})),
-		Config:                  Options(opts).config(),
-		Counters:                types.NewCounters(),
+		Processor:           processor,
+		ChangeChanIsServing: ptr(make(chan struct{})),
+		ChangeChanPushTo:    ptr(make(chan struct{})),
+		ChangeChanDrained:   ptr(make(chan struct{})),
+		Config:              Options(opts).config(),
+		Counters:            types.NewCounters(),
 	}
 	n.IsDrainedValue.Store(true)
 	return n
@@ -322,223 +272,132 @@ func (n *NodeWithCustomData[C, T]) GetProcessor() processor.Abstract {
 	return n.Processor
 }
 
-func (n *NodeWithCustomData[C, T]) GetPushPacketsTos(
+func (n *NodeWithCustomData[C, T]) GetPushTos(
 	ctx context.Context,
-) PushPacketsTos {
+) PushTos {
 	if n == nil {
 		return nil
 	}
-	return xsync.DoR1(ctx, &n.Locker, func() PushPacketsTos {
-		return slices.Clone(n.PushPacketsTos)
+	return xsync.DoR1(ctx, &n.Locker, func() PushTos {
+		return slices.Clone(n.PushTos)
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) WithPushPacketsTos(
+func (n *NodeWithCustomData[C, T]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *PushPacketsTos),
+	callback func(context.Context, *PushTos),
 ) {
 	if n == nil {
 		return
 	}
 	n.Locker.Do(ctx, func() {
-		c := slices.Clone(n.PushPacketsTos)
-		callback(ctx, &n.PushPacketsTos)
-		removed, added := lo.Difference(c, n.PushPacketsTos)
+		c := slices.Clone(n.PushTos)
+		callback(ctx, &n.PushTos)
+		removed, added := lo.Difference(c, n.PushTos)
 		if len(removed) == 0 && len(added) == 0 {
 			return
 		}
 		if n.Config.CacheHandler != nil {
 			for _, pushTo := range added {
-				n.Config.CacheHandler.OnAddPushPacketsTo(ctx, pushTo)
+				n.Config.CacheHandler.OnAddPushTo(ctx, pushTo)
 			}
 		}
-		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
+		close(*xatomic.SwapPointer(&n.ChangeChanPushTo, ptr(make(chan struct{}))))
 		if n.Config.CacheHandler != nil {
 			for _, pushTo := range removed {
-				n.Config.CacheHandler.OnRemovePushPacketsTo(ctx, pushTo)
+				n.Config.CacheHandler.OnRemovePushTo(ctx, pushTo)
 			}
 		}
 	})
 }
 
-// TODO: add deduplication of of PushPacketsTos, because CacheHandler won't handle that correctly.
-func (n *NodeWithCustomData[C, T]) AddPushPacketsTo(
+func (n *NodeWithCustomData[C, T]) AddPushTo(
 	ctx context.Context,
 	dst Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	logger.Debugf(ctx, "AddPushPacketsTo: %s -> %s", n, dst)
-	defer logger.Debugf(ctx, "/AddPushPacketsTo: %s -> %s", n, dst)
+	logger.Debugf(ctx, "AddPushTo: %s -> %s", n, dst)
+	defer logger.Debugf(ctx, "/AddPushTo: %s -> %s", n, dst)
 	n.Locker.Do(ctx, func() {
 		if n.Config.CacheHandler != nil {
-			n.Config.CacheHandler.OnAddPushPacketsTo(ctx, PushPacketsTo{
+			n.Config.CacheHandler.OnAddPushTo(ctx, PushTo{
 				Node:      dst,
-				Condition: packetConds(conds...),
+				Condition: pushToConds(conds...),
 			})
 		}
-		n.PushPacketsTos.Add(dst, conds...)
-		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
+		n.PushTos.Add(dst, conds...)
+		close(*xatomic.SwapPointer(&n.ChangeChanPushTo, ptr(make(chan struct{}))))
 	})
 }
 
-// TODO: add deduplication of of PushPacketsTos, because CacheHandler won't handle that correctly.
-func (n *NodeWithCustomData[C, T]) SetPushPacketsTos(
+func (n *NodeWithCustomData[C, T]) SetPushTos(
 	ctx context.Context,
-	s PushPacketsTos,
+	s PushTos,
 ) {
-	logger.Tracef(ctx, "SetPushPacketsTos: %s", debug.Stack())
+	logger.Tracef(ctx, "SetPushTos: %s", debug.Stack())
 
 	n.Locker.Do(ctx, func() {
 		if n.Config.CacheHandler != nil {
 			for _, pushTo := range s {
-				if !n.PushPacketsTos.Contains(pushTo) {
-					n.Config.CacheHandler.OnAddPushPacketsTo(ctx, pushTo)
+				if !n.PushTos.Contains(pushTo) {
+					n.Config.CacheHandler.OnAddPushTo(ctx, pushTo)
 				}
 			}
 		}
 
-		n.PushPacketsTos = s
-		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
+		n.PushTos = s
+		close(*xatomic.SwapPointer(&n.ChangeChanPushTo, ptr(make(chan struct{}))))
 
 		if n.Config.CacheHandler != nil {
-			for _, pushTo := range n.PushPacketsTos {
+			for _, pushTo := range n.PushTos {
 				if !s.Contains(pushTo) {
-					n.Config.CacheHandler.OnRemovePushPacketsTo(ctx, pushTo)
+					n.Config.CacheHandler.OnRemovePushTo(ctx, pushTo)
 				}
 			}
 		}
 	})
 }
 
-func (n *NodeWithCustomData[C, T]) GetPushFramesTos(
-	ctx context.Context,
-) PushFramesTos {
-	if n == nil {
-		return nil
-	}
-	return xsync.DoR1(ctx, &n.Locker, func() PushFramesTos {
-		return slices.Clone(n.PushFramesTos)
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *PushFramesTos),
-) {
-	if n == nil {
-		return
-	}
-	n.Locker.Do(ctx, func() {
-		c := slices.Clone(n.PushFramesTos)
-		callback(ctx, &n.PushFramesTos)
-		removed, added := lo.Difference(c, n.PushFramesTos)
-		if len(removed) == 0 && len(added) == 0 {
-			return
-		}
-		close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) RemovePushPacketsTo(
+func (n *NodeWithCustomData[C, T]) RemovePushTo(
 	ctx context.Context,
 	to Abstract,
 ) (_err error) {
-	logger.Debugf(ctx, "RemovePushPacketsTo")
-	defer func() { logger.Debugf(ctx, "/RemovePushPacketsTo: %v", _err) }()
-	logger.Tracef(ctx, "RemovePushPacketsTo: %s", debug.Stack())
+	logger.Debugf(ctx, "RemovePushTo")
+	defer func() { logger.Debugf(ctx, "/RemovePushTo: %v", _err) }()
+	logger.Tracef(ctx, "RemovePushTo: %s", debug.Stack())
 
 	if !xsync.DoR1(ctx, &n.Locker, func() bool {
-		pushTos := n.PushPacketsTos
+		pushTos := n.PushTos
 		for idx, pushTo := range pushTos {
 			if pushTo.Node == to {
 				pushTos = slices.Delete(pushTos, idx, idx+1)
-				n.PushPacketsTos = pushTos
-				close(*xatomic.SwapPointer(&n.ChangeChanPushPacketsTo, ptr(make(chan struct{}))))
+				n.PushTos = pushTos
+				close(*xatomic.SwapPointer(&n.ChangeChanPushTo, ptr(make(chan struct{}))))
 				if n.Config.CacheHandler != nil {
-					n.Config.CacheHandler.OnRemovePushPacketsTo(ctx, pushTo)
+					n.Config.CacheHandler.OnRemovePushTo(ctx, pushTo)
 				}
 				return true
 			}
 		}
 		return false
 	}) {
-		return fmt.Errorf("%s does not push packets to %s", n, to)
+		return fmt.Errorf("%s does not push to %s", n, to)
 	}
 	return nil
 }
 
-func (n *NodeWithCustomData[C, P]) RemovePushFramesTo(
-	ctx context.Context,
-	to Abstract,
-) (_err error) {
-	logger.Debugf(ctx, "RemovePushFramesTo")
-	defer func() { logger.Debugf(ctx, "/RemovePushFramesTo: %v", _err) }()
-	logger.Tracef(ctx, "RemovePushFramesTo: %s", debug.Stack())
-
-	return xsync.DoR1(ctx, &n.Locker, func() error {
-		pushTos := n.PushFramesTos
-		for idx, pushTo := range pushTos {
-			if pushTo.Node == to {
-				pushTos = slices.Delete(pushTos, idx, idx+1)
-				n.PushFramesTos = pushTos
-				close(*xatomic.SwapPointer(&n.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
-				return nil
-			}
-		}
-		return fmt.Errorf("%s does not push frames to %s", n, to)
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) AddPushFramesTo(
-	ctx context.Context,
-	dst Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-	n.Locker.Do(ctx, func() {
-		n.PushFramesTos.Add(dst, conds...)
-		close(*xatomic.SwapPointer(&n.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) SetPushFramesTos(
-	ctx context.Context,
-	s PushFramesTos,
-) {
-	logger.Tracef(ctx, "SetPushFramesTos: %s", debug.Stack())
-	n.Locker.Do(ctx, func() {
-		n.PushFramesTos = s
-		close(*xatomic.SwapPointer(&n.ChangeChanPushFramesTo, ptr(make(chan struct{}))))
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) GetInputPacketFilter(ctx context.Context) (_ret packetfiltercondition.Condition) {
+func (n *NodeWithCustomData[C, T]) GetInputFilter(ctx context.Context) (_ret packetorframefiltercondition.Condition) {
 	if n == nil {
-		return packetfiltercondition.Static(false)
+		return packetorframefiltercondition.Static(false)
 	}
 	n.Locker.ManualLock(ctx)
 	defer n.Locker.ManualUnlock(ctx)
-	return n.InputPacketFilter
+	return n.InputFilter
 }
 
-func (n *NodeWithCustomData[C, T]) SetInputPacketFilter(ctx context.Context, cond packetfiltercondition.Condition) {
+func (n *NodeWithCustomData[C, T]) SetInputFilter(ctx context.Context, cond packetorframefiltercondition.Condition) {
 	n.Locker.Do(ctx, func() {
-		n.InputPacketFilter = cond
-	})
-}
-
-func (n *NodeWithCustomData[C, T]) GetInputFrameFilter(ctx context.Context) (_ret framefiltercondition.Condition) {
-	if n == nil {
-		return framefiltercondition.Static(false)
-	}
-	n.Locker.Do(ctx, func() {
-		_ret = n.InputFrameFilter
-	})
-	return
-}
-
-func (n *NodeWithCustomData[C, T]) SetInputFrameFilter(ctx context.Context, cond framefiltercondition.Condition) {
-	n.Locker.Do(ctx, func() {
-		n.InputFrameFilter = cond
+		n.InputFilter = cond
 	})
 }
 
@@ -590,38 +449,7 @@ func (n *NodeWithCustomData[C, T]) dotBlockContentStringWriteTo(
 		)
 		alreadyPrinted[n.Processor] = struct{}{}
 	}
-	for _, pushTo := range n.PushPacketsTos {
-		if pushTo.Node == nil {
-			continue
-		}
-		key := connectionKey{
-			From: n.Processor,
-			To:   pushTo.Node.GetProcessor(),
-		}
-		if _, ok := connectionIsAlreadyPrint[key]; ok {
-			continue
-		}
-		connectionIsAlreadyPrint[key] = struct{}{}
-
-		writer, ok := pushTo.Node.(DotBlockContentStringWriteToer)
-		if !ok {
-			continue
-		}
-		writer.DotBlockContentStringWriteTo(w, alreadyPrinted)
-		if pushTo.Condition == nil {
-			fmt.Fprintf(w, "\tnode_%p -> node_%p\n", any(n.Processor), pushTo.Node.GetProcessor())
-			continue
-		}
-
-		fmt.Fprintf(
-			w,
-			"\tnode_%p -> node_%p [label="+`"%s"`+"]\n",
-			any(n.Processor),
-			pushTo.Node.GetProcessor(),
-			sanitizeString(n.Processor.String()),
-		)
-	}
-	for _, pushTo := range n.PushFramesTos {
+	for _, pushTo := range n.PushTos {
 		if pushTo.Node == nil {
 			continue
 		}
@@ -658,12 +486,8 @@ func (n *NodeWithCustomData[C, T]) GetChangeChanIsServing() <-chan struct{} {
 	return *xatomic.LoadPointer(&n.ChangeChanIsServing)
 }
 
-func (n *NodeWithCustomData[C, T]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return *xatomic.LoadPointer(&n.ChangeChanPushPacketsTo)
-}
-
-func (n *NodeWithCustomData[C, T]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return *xatomic.LoadPointer(&n.ChangeChanPushFramesTo)
+func (n *NodeWithCustomData[C, T]) GetChangeChanPushTo() <-chan struct{} {
+	return *xatomic.LoadPointer(&n.ChangeChanPushTo)
 }
 
 func (n *NodeWithCustomData[C, T]) GetCountersPtr() *types.Counters {

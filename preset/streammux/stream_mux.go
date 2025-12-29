@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/dustin/go-humanize"
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
@@ -25,10 +24,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	nodeboilerplate "github.com/xaionaro-go/avpipeline/node/boilerplate"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
-	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
@@ -69,20 +66,8 @@ type StreamMux[C any] struct {
 	VideoOutputBeforeBypass *Output[C]
 
 	// measurements
-	CurrentVideoInputBitRate        atomic.Uint64
-	CurrentVideoEncodedBitRate      atomic.Uint64
-	CurrentVideoOutputBitRate       atomic.Uint64
-	CurrentAudioInputBitRate        atomic.Uint64
-	CurrentAudioEncodedBitRate      atomic.Uint64
-	CurrentAudioOutputBitRate       atomic.Uint64
-	CurrentOtherInputBitRate        atomic.Uint64
-	CurrentOtherEncodedBitRate      atomic.Uint64
-	CurrentOtherOutputBitRate       atomic.Uint64
+	Measurements                    map[astiav.MediaType]*TrackMeasurements
 	CurrentBitRateMeasurementsCount atomic.Uint64
-	InputAudioDTS                   atomic.Uint64
-	InputVideoDTS                   atomic.Uint64
-	SendingLatencyAudio             atomic.Uint64
-	SendingLatencyVideo             atomic.Uint64
 	LastLatencyCheckTS              atomic.Uint64
 
 	// to become a fake node myself:
@@ -92,7 +77,7 @@ type StreamMux[C any] struct {
 	// private:
 	startedCh           *chan struct{}
 	waitGroup           sync.WaitGroup
-	lastKeyFrames       map[int]*ringbuffer.RingBuffer[packet.Input]
+	lastKeyFrames       map[int]*ringbuffer.RingBuffer[packetorframe.InputUnion]
 	nextOutputID        atomic.Uint32
 	allowCorruptPackets atomic.Bool
 }
@@ -118,25 +103,28 @@ func NewWithCustomData[C any](
 		SenderFactory: senderFactory,
 		MuxMode:       muxMode,
 
-		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packet.Input]{},
+		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packetorframe.InputUnion]{},
 		startedCh:     ptr(make(chan struct{})),
+		Measurements: map[astiav.MediaType]*TrackMeasurements{
+			astiav.MediaTypeVideo:   newTrackMeasurements(),
+			astiav.MediaTypeAudio:   newTrackMeasurements(),
+			astiav.MediaTypeUnknown: newTrackMeasurements(),
+		},
 	}
 	s.InputAll = *newInput(ctx, s, InputTypeAll)
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
 		s.InputAudioOnly = newInput(ctx, s, InputTypeAudioOnly)
 		s.InputVideoOnly = newInput(ctx, s, InputTypeVideoOnly)
-		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputAudioOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeAudio))
-		s.InputAll.Node.AddPushFramesTo(ctx, s.InputAudioOnly.Node, framefiltercondition.MediaType(astiav.MediaTypeAudio))
-		s.InputAll.Node.AddPushPacketsTo(ctx, s.InputVideoOnly.Node, packetfiltercondition.MediaType(astiav.MediaTypeVideo))
-		s.InputAll.Node.AddPushFramesTo(ctx, s.InputVideoOnly.Node, framefiltercondition.MediaType(astiav.MediaTypeVideo))
+		s.InputAll.Node.AddPushTo(ctx, s.InputAudioOnly.Node, packetorframefiltercondition.MediaType(astiav.MediaTypeAudio))
+		s.InputAll.Node.AddPushTo(ctx, s.InputVideoOnly.Node, packetorframefiltercondition.MediaType(astiav.MediaTypeVideo))
 		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames (this is applicable not only to MuxModeDifferentOutputsSameTracksSplitAV, but we tested it only here for now)
 	}
-	s.CurrentAudioInputBitRate.Store(192_000) // some reasonable high end guess
-	s.CurrentOtherInputBitRate.Store(0)
+	s.getTrackMeasurements(astiav.MediaTypeAudio).InputBitRate.Store(192_000) // some reasonable high end guess
+	s.getTrackMeasurements(astiav.MediaTypeUnknown).InputBitRate.Store(0)
 	if err := s.initSwitches(ctx); err != nil {
 		return nil, fmt.Errorf("unable to initialize switches: %w", err)
 	}
-	s.CurrentVideoInputBitRate.Store(20_000_000) // some reasonable high end guess
+	s.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Store(20_000_000) // some reasonable high end guess
 	return s, nil
 }
 
@@ -310,11 +298,8 @@ func (s *StreamMux[C]) initSwitches(
 				}
 
 				input := outputPrev.Input()
-				if err := outputPrev.InputFrom.RemovePushPacketsTo(ctx, input); err != nil {
-					logger.Errorf(ctx, "Switch[%s]: unable to remove push packets to the output %d: %v", inputType, from, err)
-				}
-				if err := outputPrev.InputFrom.RemovePushFramesTo(ctx, input); err != nil {
-					logger.Errorf(ctx, "Switch[%s]: unable to remove push frames to the output %d: %v", inputType, from, err)
+				if err := outputPrev.InputFrom.RemovePushTo(ctx, input); err != nil {
+					logger.Errorf(ctx, "Switch[%s]: unable to remove push to the output %d: %v", inputType, from, err)
 				}
 
 				if EnableDraining {
@@ -331,7 +316,7 @@ func (s *StreamMux[C]) initSwitches(
 					logger.Errorf(ctx, "Switch[%s]: unable to close the output %d: %v", inputType, from, err)
 				}
 
-				outputPrev.FirstNodeAfterFilter().SetInputPacketFilter(ctx, packetfiltercondition.Panic("Switch["+inputType.String()+"]: somehow received a packet, while the output is closed"))
+				outputPrev.FirstNodeAfterFilter().SetInputFilter(ctx, packetorframefiltercondition.Panic("Switch["+inputType.String()+"]: somehow received a packet, while the output is closed"))
 
 				observability.Go(ctx, func(ctx context.Context) {
 					s.Locker.Do(ctx, func() {
@@ -631,8 +616,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	s.Outputs.Store(outputID, output)
 	s.OutputsMap.Store(outputKey, output)
 
-	input.Node.AddPushPacketsTo(ctx, output.Input())
-	input.Node.AddPushFramesTo(ctx, output.Input())
+	input.Node.AddPushTo(ctx, output.Input())
 	logger.Debugf(ctx, "initialized new output %d:%s", output.ID, outputKey)
 	return output, true, nil
 }
@@ -1207,15 +1191,9 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 
 	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
-	var bytesVideoInputReadPrev uint64
-	var bytesVideoEncodedGenPrev uint64
-	var bytesVideoOutputReadPrev uint64
-	var bytesAudioInputReadPrev uint64
-	var bytesAudioEncodedGenPrev uint64
-	var bytesAudioOutputReadPrev uint64
-	var bytesOtherInputReadPrev uint64
-	var bytesOtherEncodedGenPrev uint64
-	var bytesOtherOutputReadPrev uint64
+	bytesInputReadPrev := map[astiav.MediaType]uint64{}
+	bytesEncodedGenPrev := map[astiav.MediaType]uint64{}
+	bytesOutputReadPrev := map[astiav.MediaType]uint64{}
 	tsPrev := time.Now()
 	for {
 		var tsNext time.Time
@@ -1226,136 +1204,58 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			duration := tsNext.Sub(tsPrev)
 
 			inputCounters := s.InputAll.Node.GetCountersPtr()
-			bytesVideoInputReadNext := inputCounters.Received.Packets.Video.Bytes.Load()
-			bytesAudioInputReadNext := inputCounters.Received.Packets.Audio.Bytes.Load()
-			bytesOtherInputReadNext := inputCounters.Received.Packets.Other.Bytes.Load()
+			bytesInputReadNext := map[astiav.MediaType]uint64{
+				astiav.MediaTypeVideo:   inputCounters.Received.Packets.Video.Bytes.Load(),
+				astiav.MediaTypeAudio:   inputCounters.Received.Packets.Audio.Bytes.Load(),
+				astiav.MediaTypeUnknown: inputCounters.Received.Packets.Other.Bytes.Load(),
+			}
 
-			var bytesVideoEncodedGenNext uint64
-			var bytesVideoOutputReadNext uint64
-			var bytesAudioEncodedGenNext uint64
-			var bytesAudioOutputReadNext uint64
-			var bytesOtherEncodedGenNext uint64
-			var bytesOtherOutputReadNext uint64
+			bytesEncodedGenNext := map[astiav.MediaType]uint64{}
+			bytesOutputReadNext := map[astiav.MediaType]uint64{}
 			s.OutputsMap.Range(func(outputKey SenderKey, output *Output[C]) bool {
 				encoderCounters := output.TranscoderNode.Processor.CountersPtr()
-				bytesVideoEncodedGenNext += encoderCounters.Generated.Packets.Video.Bytes.Load() - encoderCounters.Omitted.Packets.Video.Bytes.Load()
-				bytesAudioEncodedGenNext += encoderCounters.Generated.Packets.Audio.Bytes.Load() - encoderCounters.Omitted.Packets.Audio.Bytes.Load()
-				bytesOtherEncodedGenNext += encoderCounters.Generated.Packets.Other.Bytes.Load() - encoderCounters.Omitted.Packets.Other.Bytes.Load()
+				bytesEncodedGenNext[astiav.MediaTypeVideo] += encoderCounters.Generated.Packets.Video.Bytes.Load() - encoderCounters.Omitted.Packets.Video.Bytes.Load()
+				bytesEncodedGenNext[astiav.MediaTypeAudio] += encoderCounters.Generated.Packets.Audio.Bytes.Load() - encoderCounters.Omitted.Packets.Audio.Bytes.Load()
+				bytesEncodedGenNext[astiav.MediaTypeUnknown] += encoderCounters.Generated.Packets.Other.Bytes.Load() - encoderCounters.Omitted.Packets.Other.Bytes.Load()
 				outputCounters := output.SendingNode.GetCountersPtr()
-				bytesVideoOutputReadNext += outputCounters.Received.Packets.Video.Bytes.Load()
-				bytesAudioOutputReadNext += outputCounters.Received.Packets.Audio.Bytes.Load()
-				bytesOtherOutputReadNext += outputCounters.Received.Packets.Other.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeVideo] += outputCounters.Received.Packets.Video.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeAudio] += outputCounters.Received.Packets.Audio.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeUnknown] += outputCounters.Received.Packets.Other.Bytes.Load()
 				return true
 			})
 
-			bytesVideoInputRead := bytesVideoInputReadNext - bytesVideoInputReadPrev
-			bitRateVideoInput := int(float64(bytesVideoInputRead*8) / duration.Seconds())
-			bytesAudioInputRead := bytesAudioInputReadNext - bytesAudioInputReadPrev
-			bitRateAudioInput := int(float64(bytesAudioInputRead*8) / duration.Seconds())
-			bytesOtherInputRead := bytesOtherInputReadNext - bytesOtherInputReadPrev
-			bitRateOtherInput := int(float64(bytesOtherInputRead*8) / duration.Seconds())
+			for _, mediaType := range []astiav.MediaType{astiav.MediaTypeVideo, astiav.MediaTypeAudio, astiav.MediaTypeUnknown} {
+				m := s.getTrackMeasurements(mediaType)
+				bytesInputRead := bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
+				oldInputValue := m.InputBitRate.Load()
+				newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				m.InputBitRate.Store(newInputValue)
 
-			oldVideoInputValue := s.CurrentVideoInputBitRate.Load()
-			newVideoInputValue := updateWithInertialValue(oldVideoInputValue, uint64(bitRateVideoInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldAudioInputValue := s.CurrentAudioInputBitRate.Load()
-			newAudioInputValue := updateWithInertialValue(oldAudioInputValue, uint64(bitRateAudioInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			oldOtherInputValue := s.CurrentOtherInputBitRate.Load()
-			newOtherInputValue := updateWithInertialValue(oldOtherInputValue, uint64(bitRateOtherInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-			logger.Debugf(ctx, "input bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
-				bitRateVideoInput, bitRateAudioInput, bitRateOtherInput,
-				humanize.SI(float64(bitRateVideoInput), "bps"), humanize.SI(float64(bitRateAudioInput), "bps"), humanize.SI(float64(bitRateOtherInput), "bps"),
-				bytesVideoInputReadNext, bytesVideoInputReadPrev, duration,
-				bytesAudioInputReadNext, bytesAudioInputReadPrev, duration,
-				bytesOtherInputReadNext, bytesOtherInputReadPrev, duration,
-				newVideoInputValue, newAudioInputValue, newOtherInputValue,
-			)
-			s.CurrentVideoInputBitRate.Store(newVideoInputValue)
-			s.CurrentAudioInputBitRate.Store(newAudioInputValue)
-			s.CurrentOtherInputBitRate.Store(newOtherInputValue)
+				bytesEncodedGen := int64(bytesEncodedGenNext[mediaType]) - int64(bytesEncodedGenPrev[mediaType])
+				if bytesEncodedGen >= 0 {
+					bitRateEncoded := int(float64(bytesEncodedGen*8) / duration.Seconds())
+					oldEncodedValue := m.EncodedBitRate.Load()
+					newEncodedValue := updateWithInertialValue(oldEncodedValue, uint64(bitRateEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+					m.EncodedBitRate.Store(newEncodedValue)
+				}
 
-			var (
-				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded    int
-				newVideoEncodedValue, newAudioEncodedValue, newOtherEncodedValue uint64
-			)
-
-			bytesVideoEncodedGen := int64(bytesVideoEncodedGenNext) - int64(bytesVideoEncodedGenPrev)
-			if bytesVideoEncodedGen >= 0 {
-				bitRateVideoEncoded = int(float64(bytesVideoEncodedGen*8) / duration.Seconds())
-				oldVideoEncodedValue := s.CurrentVideoEncodedBitRate.Load()
-				newVideoEncodedValue = updateWithInertialValue(oldVideoEncodedValue, uint64(bitRateVideoEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentVideoEncodedBitRate.Store(newVideoEncodedValue)
+				bytesOutputRead := int64(bytesOutputReadNext[mediaType]) - int64(bytesOutputReadPrev[mediaType])
+				if bytesOutputRead >= 0 {
+					bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
+					oldOutputValue := m.OutputBitRate.Load()
+					newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+					m.OutputBitRate.Store(newOutputValue)
+				}
 			}
-			bytesAudioEncodedGen := int64(bytesAudioEncodedGenNext) - int64(bytesAudioEncodedGenPrev)
-			if bytesAudioEncodedGen >= 0 {
-				bitRateAudioEncoded = int(float64(bytesAudioEncodedGen*8) / duration.Seconds())
-				oldAudioEncodedValue := s.CurrentAudioEncodedBitRate.Load()
-				newAudioEncodedValue = updateWithInertialValue(oldAudioEncodedValue, uint64(bitRateAudioEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentAudioEncodedBitRate.Store(newAudioEncodedValue)
-			}
-			bytesOtherEncodedGen := int64(bytesOtherEncodedGenNext) - int64(bytesOtherEncodedGenPrev)
-			if bytesOtherEncodedGen >= 0 {
-				bitRateOtherEncoded = int(float64(bytesOtherEncodedGen*8) / duration.Seconds())
-				oldOtherEncodedValue := s.CurrentOtherEncodedBitRate.Load()
-				newOtherEncodedValue = updateWithInertialValue(oldOtherEncodedValue, uint64(bitRateOtherEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentOtherEncodedBitRate.Store(newOtherEncodedValue)
-			}
-
-			logger.Debugf(ctx, "encoded bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
-				bitRateVideoEncoded, bitRateAudioEncoded, bitRateOtherEncoded,
-				humanize.SI(float64(bitRateVideoEncoded), "bps"), humanize.SI(float64(bitRateAudioEncoded), "bps"), humanize.SI(float64(bitRateOtherEncoded), "bps"),
-				bytesVideoEncodedGenNext, bytesVideoEncodedGenPrev, duration,
-				bytesAudioEncodedGenNext, bytesAudioEncodedGenPrev, duration,
-				bytesOtherEncodedGenNext, bytesOtherEncodedGenPrev, duration,
-				newVideoEncodedValue, newAudioEncodedValue, newOtherEncodedValue,
-			)
-
-			var (
-				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput    int
-				newVideoOutputValue, newAudioOutputValue, newOtherOutputValue uint64
-			)
-			bytesVideoOutputRead := int64(bytesVideoOutputReadNext) - int64(bytesVideoOutputReadPrev)
-			if bytesVideoOutputRead >= 0 {
-				bitRateVideoOutput = int(float64(bytesVideoOutputRead*8) / duration.Seconds())
-				oldVideoOutputValue := s.CurrentVideoOutputBitRate.Load()
-				newVideoOutputValue = updateWithInertialValue(oldVideoOutputValue, uint64(bitRateVideoOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentVideoOutputBitRate.Store(newVideoOutputValue)
-			}
-			bytesAudioOutputRead := int64(bytesAudioOutputReadNext) - int64(bytesAudioOutputReadPrev)
-			if bytesAudioOutputRead >= 0 {
-				bitRateAudioOutput = int(float64(bytesAudioOutputRead*8) / duration.Seconds())
-				oldAudioOutputValue := s.CurrentAudioOutputBitRate.Load()
-				newAudioOutputValue = updateWithInertialValue(oldAudioOutputValue, uint64(bitRateAudioOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentAudioOutputBitRate.Store(newAudioOutputValue)
-			}
-			bytesOtherOutputRead := int64(bytesOtherOutputReadNext) - int64(bytesOtherOutputReadPrev)
-			if bytesOtherOutputRead >= 0 {
-				bitRateOtherOutput = int(float64(bytesOtherOutputRead*8) / duration.Seconds())
-				oldOtherOutputValue := s.CurrentOtherOutputBitRate.Load()
-				newOtherOutputValue = updateWithInertialValue(oldOtherOutputValue, uint64(bitRateOtherOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-				s.CurrentOtherOutputBitRate.Store(newOtherOutputValue)
-			}
-			logger.Debugf(ctx, "output bitrate: %d | %d | %d: %s | %s | %s: (%d-%d)*8/%v | (%d-%d)*8/%v | (%d-%d)*8/%v; setting %d:%d:%d as the new value",
-				bitRateVideoOutput, bitRateAudioOutput, bitRateOtherOutput,
-				humanize.SI(float64(bitRateVideoOutput), "bps"), humanize.SI(float64(bitRateAudioOutput), "bps"), humanize.SI(float64(bitRateOtherOutput), "bps"),
-				bytesVideoOutputReadNext, bytesVideoOutputReadPrev, duration,
-				bytesAudioOutputReadNext, bytesAudioOutputReadPrev, duration,
-				bytesOtherOutputReadNext, bytesOtherOutputReadPrev, duration,
-				newVideoOutputValue, newAudioOutputValue, newOtherOutputValue,
-			)
 
 			// DONE
 
 			s.CurrentBitRateMeasurementsCount.Add(1)
 
-			bytesVideoInputReadPrev = bytesVideoInputReadNext
-			bytesVideoEncodedGenPrev = bytesVideoEncodedGenNext
-			bytesVideoOutputReadPrev = bytesVideoOutputReadNext
-			bytesAudioInputReadPrev = bytesAudioInputReadNext
-			bytesAudioEncodedGenPrev = bytesAudioEncodedGenNext
-			bytesAudioOutputReadPrev = bytesAudioOutputReadNext
-			bytesOtherInputReadPrev = bytesOtherInputReadNext
-			bytesOtherEncodedGenPrev = bytesOtherEncodedGenNext
-			bytesOtherOutputReadPrev = bytesOtherOutputReadNext
+			bytesInputReadPrev = bytesInputReadNext
+			bytesEncodedGenPrev = bytesEncodedGenNext
+			bytesOutputReadPrev = bytesOutputReadNext
 			tsPrev = tsNext
 		}
 	}
@@ -1430,45 +1330,39 @@ func (s *StreamMux[C]) getVideoEncoderLocked(
 	return vEnc, aEnc
 }
 
-func (s *StreamMux[C]) onInputPacket(
+func (s *StreamMux[C]) onInput(
 	ctx context.Context,
-	pkt *packet.Input,
+	input packetorframe.InputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "onInputPacket: %v", pkt.GetPTS())
-	defer func() { logger.Tracef(ctx, "/onInputPacket: %v: %v", pkt.GetPTS(), _err) }()
+	abstract := input.Get()
+	if abstract == nil {
+		return nil
+	}
+	logger.Tracef(ctx, "onInput: %v", abstract.GetPTS())
+	defer func() { logger.Tracef(ctx, "/onInput: %v: %v", abstract.GetPTS(), _err) }()
 
-	if dtsInt := pkt.Dts(); dtsInt > 0 && dtsInt != astiav.NoPtsValue {
-		dts := avconv.Duration(dtsInt, pkt.StreamInfo.TimeBase())
-		switch pkt.GetMediaType() {
-		case astiav.MediaTypeAudio:
-			logger.Tracef(ctx, "setting InputAudioDTS to %v (%v)", dts, dtsInt)
-			s.InputAudioDTS.Store(uint64(dts.Nanoseconds()))
-		case astiav.MediaTypeVideo:
-			logger.Tracef(ctx, "setting InputVideoDTS to %v (%v)", dts, dtsInt)
-			s.InputVideoDTS.Store(uint64(dts.Nanoseconds()))
-		}
+	if dtsInt := abstract.GetDTS(); dtsInt > 0 && dtsInt != astiav.NoPtsValue {
+		dts := avconv.Duration(dtsInt, abstract.GetTimeBase())
+		s.getTrackMeasurements(abstract.GetMediaType()).InputDTS.Store(uint64(dts.Nanoseconds()))
 	}
 
-	if pkt.GetMediaType() != astiav.MediaTypeVideo {
+	if abstract.GetMediaType() != astiav.MediaTypeVideo {
 		return nil
 	}
 
-	isKey := pkt.Flags().Has(astiav.PacketFlagKey)
+	isKey := abstract.IsKey()
 	if !isKey {
 		return nil
 	}
 	s.allowCorruptPackets.Store(false)
 
-	streamIndex := pkt.StreamIndex()
+	streamIndex := abstract.GetStreamIndex()
 
 	s.Locker.Do(ctx, func() {
 		if s.lastKeyFrames[streamIndex] == nil {
-			s.lastKeyFrames[streamIndex] = ringbuffer.New[packet.Input](2)
+			s.lastKeyFrames[streamIndex] = ringbuffer.New[packetorframe.InputUnion](2)
 		}
-		s.lastKeyFrames[streamIndex].Add(packet.BuildInput(
-			packet.CloneAsReferenced(pkt.Packet),
-			pkt.StreamInfo,
-		))
+		s.lastKeyFrames[streamIndex].Add(input.CloneAsReferencedInput())
 	})
 	return nil
 }
@@ -1494,7 +1388,7 @@ func (s *StreamMux[C]) initOutputVideoStreamsLocked(
 	logger.Tracef(ctx, "initOutputVideoStreamsLocked")
 	defer func() { logger.Tracef(ctx, "/initOutputVideoStreamsLocked: %v", _err) }()
 	counters := receiver.GetCountersPtr()
-	inputCh := receiver.GetProcessor().InputPacketChan()
+	inputCh := receiver.GetProcessor().InputChan()
 	var streamIndices []int
 	for streamIndex := range s.lastKeyFrames {
 		streamIndices = append(streamIndices, streamIndex)
@@ -1506,14 +1400,22 @@ func (s *StreamMux[C]) initOutputVideoStreamsLocked(
 		logger.Debugf(ctx, "initOutputStreamsLocked: re-sending %d last keyframes for stream index %d", len(items), streamIndex)
 		for _, pkt := range items {
 			mediaType := globaltypes.MediaType(pkt.GetMediaType())
-			dataSize := uint64(len(pkt.Data()))
-			counters.Addressed.Packets.Get(mediaType).Increment(dataSize)
+			dataSize := uint64(pkt.GetSize())
+			if pkt.Packet != nil {
+				counters.Addressed.Packets.Get(mediaType).Increment(dataSize)
+			} else if pkt.Frame != nil {
+				counters.Addressed.Frames.Get(mediaType).Increment(dataSize)
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case inputCh <- pkt:
 			}
-			counters.Received.Packets.Get(mediaType).Increment(dataSize)
+			if pkt.Packet != nil {
+				counters.Received.Packets.Get(mediaType).Increment(dataSize)
+			} else if pkt.Frame != nil {
+				counters.Received.Frames.Get(mediaType).Increment(dataSize)
+			}
 		}
 	}
 	return nil
@@ -1525,21 +1427,25 @@ func (s *StreamMux[C]) GetBitRates(
 	logger.Tracef(ctx, "GetBitRates")
 	defer func() { logger.Tracef(ctx, "/GetBitRates: %v, %v", _ret, _err) }()
 
+	video := s.getTrackMeasurements(astiav.MediaTypeVideo)
+	audio := s.getTrackMeasurements(astiav.MediaTypeAudio)
+	other := s.getTrackMeasurements(astiav.MediaTypeUnknown)
+
 	result := &types.BitRates{
 		Input: types.BitRateInfo{
-			Video: types.Ubps(s.CurrentVideoInputBitRate.Load()),
-			Audio: types.Ubps(s.CurrentAudioInputBitRate.Load()),
-			Other: types.Ubps(s.CurrentOtherInputBitRate.Load()),
+			Video: types.Ubps(video.InputBitRate.Load()),
+			Audio: types.Ubps(audio.InputBitRate.Load()),
+			Other: types.Ubps(other.InputBitRate.Load()),
 		},
 		Encoded: types.BitRateInfo{
-			Video: types.Ubps(s.CurrentVideoEncodedBitRate.Load()),
-			Audio: types.Ubps(s.CurrentAudioEncodedBitRate.Load()),
-			Other: types.Ubps(s.CurrentOtherEncodedBitRate.Load()),
+			Video: types.Ubps(video.EncodedBitRate.Load()),
+			Audio: types.Ubps(audio.EncodedBitRate.Load()),
+			Other: types.Ubps(other.EncodedBitRate.Load()),
 		},
 		Output: types.BitRateInfo{
-			Video: types.Ubps(s.CurrentVideoOutputBitRate.Load()),
-			Audio: types.Ubps(s.CurrentAudioOutputBitRate.Load()),
-			Other: types.Ubps(s.CurrentOtherOutputBitRate.Load()),
+			Video: types.Ubps(video.OutputBitRate.Load()),
+			Audio: types.Ubps(audio.OutputBitRate.Load()),
+			Other: types.Ubps(other.OutputBitRate.Load()),
 		},
 	}
 
@@ -1584,7 +1490,7 @@ func (s *StreamMux[C]) updateSendingLatencyValues(
 		logger.Tracef(ctx, "video latency is negative: %v; setting to 0", videoLatency)
 		videoLatency = 0
 	}
-	s.SendingLatencyVideo.Store(uint64(videoLatency.Nanoseconds()))
+	s.getTrackMeasurements(astiav.MediaTypeVideo).SendingLatency.Store(uint64(videoLatency.Nanoseconds()))
 
 	outputAudio := s.GetActiveAudioOutput(ctx)
 	if outputAudio == nil {
@@ -1613,7 +1519,7 @@ func (s *StreamMux[C]) updateSendingLatencyValues(
 		logger.Tracef(ctx, "audio latency is negative: %v; setting to 0", audioLatency)
 		audioLatency = 0
 	}
-	s.SendingLatencyAudio.Store(uint64(audioLatency.Nanoseconds()))
+	s.getTrackMeasurements(astiav.MediaTypeAudio).SendingLatency.Store(uint64(audioLatency.Nanoseconds()))
 
 	maxLatency := uint64(max(audioLatency, videoLatency).Nanoseconds())
 	logger.Debugf(ctx, "sending latencies: video=%v audio=%v max=%v", videoLatency, audioLatency, time.Duration(maxLatency))
@@ -1644,7 +1550,8 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 					return
 				}
 				tsDiff := newTS.Sub(prevTS)
-				newValue := s.SendingLatencyAudio.Swap(s.SendingLatencyAudio.Load() + uint64(tsDiff.Nanoseconds()))
+				audio := s.getTrackMeasurements(astiav.MediaTypeAudio)
+				newValue := audio.SendingLatency.Swap(audio.SendingLatency.Load() + uint64(tsDiff.Nanoseconds()))
 				logger.Debugf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(newValue), tsDiff, tsDiff+nanosecondsToDuration(newValue))
 			}()
 			prevTS = newTS
@@ -1674,7 +1581,10 @@ func (s *StreamMux[C]) GetLatencies(
 
 	transcodingStartAudioDTS, transcodingStartVideoDTS := outputAudio.Measurements.TranscodingStartAudioDTS.Load(), outputVideo.Measurements.TranscodingStartVideoDTS.Load()
 
-	inputAudioDts, inputVideoDTS := s.InputAudioDTS.Load(), s.InputVideoDTS.Load()
+	video := s.getTrackMeasurements(astiav.MediaTypeVideo)
+	audio := s.getTrackMeasurements(astiav.MediaTypeAudio)
+
+	inputAudioDts, inputVideoDTS := audio.InputDTS.Load(), video.InputDTS.Load()
 
 	audioPreTranscodingLatency := nanosecondsToDuration(inputAudioDts - transcodingStartAudioDTS)
 	videoPreTranscodingLatency := nanosecondsToDuration(inputVideoDTS - transcodingStartVideoDTS)
@@ -1685,21 +1595,21 @@ func (s *StreamMux[C]) GetLatencies(
 	audioTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndAudioDTS - lastSendingAudioDTS)
 	videoTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndVideoDTS - lastSendingVideoDTS)
 
-	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v transcoding=%v transcoded-pre-send=%v sending=%v", audioPreTranscodingLatency, audioTranscodingLatency, audioTranscodedPreSendLatency, nanosecondsToDuration(s.SendingLatencyAudio.Load()))
-	logger.Debugf(ctx, "latencies: video: pre-encoding=%v transcoding=%v transcoded-pre-send=%v (%v-%v) sending=%v", videoPreTranscodingLatency, videoTranscodingLatency, videoTranscodedPreSendLatency, transcodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(s.SendingLatencyVideo.Load()))
+	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v transcoding=%v transcoded-pre-send=%v sending=%v", audioPreTranscodingLatency, audioTranscodingLatency, audioTranscodedPreSendLatency, nanosecondsToDuration(audio.SendingLatency.Load()))
+	logger.Debugf(ctx, "latencies: video: pre-encoding=%v transcoding=%v transcoded-pre-send=%v (%v-%v) sending=%v", videoPreTranscodingLatency, videoTranscodingLatency, videoTranscodedPreSendLatency, transcodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(video.SendingLatency.Load()))
 
 	return &types.Latencies{
 		Audio: types.TrackLatencies{
 			PreTranscoding:    audioPreTranscodingLatency,
 			Transcoding:       audioTranscodingLatency,
 			TranscodedPreSend: audioTranscodedPreSendLatency,
-			Sending:           nanosecondsToDuration(s.SendingLatencyAudio.Load()),
+			Sending:           nanosecondsToDuration(audio.SendingLatency.Load()),
 		},
 		Video: types.TrackLatencies{
 			PreTranscoding:    videoPreTranscodingLatency,
 			Transcoding:       videoTranscodingLatency,
 			TranscodedPreSend: videoTranscodedPreSendLatency,
-			Sending:           nanosecondsToDuration(s.SendingLatencyVideo.Load()),
+			Sending:           nanosecondsToDuration(video.SendingLatency.Load()),
 		},
 	}, nil
 }
@@ -1713,4 +1623,24 @@ func (s *StreamMux[C]) IsAllowedDifferentOutputs() bool {
 	default:
 		panic(fmt.Sprintf("unknown MuxMode: %v", s.MuxMode))
 	}
+}
+
+type TrackMeasurements struct {
+	InputBitRate   atomic.Uint64
+	EncodedBitRate atomic.Uint64
+	OutputBitRate  atomic.Uint64
+	InputDTS       atomic.Uint64
+	SendingLatency atomic.Uint64
+}
+
+func newTrackMeasurements() *TrackMeasurements {
+	return &TrackMeasurements{}
+}
+
+func (s *StreamMux[C]) getTrackMeasurements(mediaType astiav.MediaType) *TrackMeasurements {
+	m := s.Measurements[mediaType]
+	if m != nil {
+		return m
+	}
+	return s.Measurements[astiav.MediaTypeUnknown]
 }

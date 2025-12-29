@@ -39,6 +39,42 @@ type Abstract interface {
 	GetPipelineSideData() types.PipelineSideData
 	AddPipelineSideData(any) types.PipelineSideData
 	IsKey() bool
+	GetCodecParameters() *astiav.CodecParameters
+	SetStreamIndex(int)
+}
+
+type StreamInfo struct {
+	*astiav.Stream
+	Source           AbstractSource
+	PipelineSideData types.PipelineSideData
+
+	// Fallback fields if Stream is nil
+	CodecParameters *astiav.CodecParameters
+	StreamIndex     int
+	StreamsCount    int
+	TimeBase        astiav.Rational
+	Duration        int64
+}
+
+func (si *StreamInfo) GetStreamIndex() int {
+	if si.Stream != nil {
+		return si.Stream.Index()
+	}
+	return si.StreamIndex
+}
+
+func (si *StreamInfo) GetTimeBase() astiav.Rational {
+	if si.Stream != nil {
+		return si.Stream.TimeBase()
+	}
+	return si.TimeBase
+}
+
+func (si *StreamInfo) GetCodecParameters() *astiav.CodecParameters {
+	if si.Stream != nil {
+		return si.Stream.CodecParameters()
+	}
+	return si.CodecParameters
 }
 
 type InputUnion struct {
@@ -46,17 +82,36 @@ type InputUnion struct {
 	Packet *packet.Input
 }
 
+type OutputUnion struct {
+	Frame  *frame.Output
+	Packet *packet.Output
+}
+
 var _ Abstract = (*InputUnion)(nil)
+var _ Abstract = (*OutputUnion)(nil)
 
 func (u *InputUnion) Get() Abstract {
-	if u.Frame != nil {
+	switch {
+	case u.Frame != nil:
 		return u.Frame
-	}
-	if u.Packet != nil {
+	case u.Packet != nil:
 		return u.Packet
+	default:
+		return nil
 	}
-	return nil
 }
+
+func (u *OutputUnion) Get() Abstract {
+	switch {
+	case u.Frame != nil:
+		return u.Frame
+	case u.Packet != nil:
+		return u.Packet
+	default:
+		return nil
+	}
+}
+
 func (u *InputUnion) GetSize() int {
 	return u.Get().GetSize()
 }
@@ -99,38 +154,21 @@ func (u *InputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 func (u *InputUnion) IsKey() bool {
 	return u.Get().IsKey()
 }
-func (u *InputUnion) GetSource() AbstractSource {
-	switch {
-	case u.Packet != nil:
-		return u.Packet.StreamInfo.Source
-	case u.Frame != nil:
-		return u.Frame.StreamInfo.Source
-	default:
-		return nil
-	}
+func (u *InputUnion) GetCodecParameters() *astiav.CodecParameters {
+	return u.Get().GetCodecParameters()
+}
+func (u *InputUnion) SetStreamIndex(v int) {
+	u.Get().SetStreamIndex(v)
 }
 
-type OutputUnion struct {
-	Frame  *frame.Output
-	Packet *packet.Output
-}
-
-var _ Abstract = (*OutputUnion)(nil)
-
-func (u *OutputUnion) Get() Abstract {
-	if u.Frame != nil {
-		return u.Frame
-	}
-	if u.Packet != nil {
-		return u.Packet
-	}
-	return nil
-}
 func (u *OutputUnion) GetSize() int {
 	return u.Get().GetSize()
 }
 func (u *OutputUnion) GetStreamIndex() int {
 	return u.Get().GetStreamIndex()
+}
+func (u *OutputUnion) SetStreamIndex(v int) {
+	u.Get().SetStreamIndex(v)
 }
 func (u *OutputUnion) GetMediaType() astiav.MediaType {
 	return u.Get().GetMediaType()
@@ -167,4 +205,95 @@ func (u *OutputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 }
 func (u *OutputUnion) IsKey() bool {
 	return u.Get().IsKey()
+}
+func (u *OutputUnion) GetCodecParameters() *astiav.CodecParameters {
+	return u.Get().GetCodecParameters()
+}
+
+func (u *InputUnion) GetSource() AbstractSource {
+	switch {
+	case u.Packet != nil:
+		return u.Packet.StreamInfo.Source
+	case u.Frame != nil:
+		return u.Frame.StreamInfo.Source
+	default:
+		return nil
+	}
+}
+
+func (u *OutputUnion) ToInput() InputUnion {
+	switch {
+	case u.Packet != nil:
+		return InputUnion{Packet: (*packet.Input)(u.Packet)}
+	case u.Frame != nil:
+		return InputUnion{Frame: (*frame.Input)(u.Frame)}
+	default:
+		return InputUnion{}
+	}
+}
+
+func (u *InputUnion) Unwrap() (*packet.Input, *frame.Input) {
+	return u.Packet, u.Frame
+}
+
+func (u *OutputUnion) Unwrap() (*packet.Output, *frame.Output) {
+	return u.Packet, u.Frame
+}
+
+func (u *InputUnion) CloneAsReferencedOutput() OutputUnion {
+	switch {
+	case u.Packet != nil:
+		var pkt *astiav.Packet
+		if u.Packet.Packet != nil {
+			pkt = packet.CloneAsReferenced(u.Packet.Packet)
+		}
+		return OutputUnion{
+			Packet: ptr(packet.BuildOutput(
+				pkt,
+				u.Packet.StreamInfo,
+			)),
+		}
+	case u.Frame != nil:
+		var f *astiav.Frame
+		if u.Frame.Frame != nil {
+			f = frame.CloneAsReferenced(u.Frame.Frame)
+		}
+		return OutputUnion{
+			Frame: ptr(frame.BuildOutput(
+				f,
+				u.Frame.StreamInfo,
+			)),
+		}
+	default:
+		return OutputUnion{}
+	}
+}
+
+func (u *InputUnion) CloneAsReferencedInput() InputUnion {
+	switch {
+	case u.Packet != nil:
+		var pkt *astiav.Packet
+		if u.Packet.Packet != nil {
+			pkt = packet.CloneAsReferenced(u.Packet.Packet)
+		}
+		return InputUnion{
+			Packet: &packet.Input{
+				Packet:     pkt,
+				StreamInfo: u.Packet.StreamInfo,
+			},
+		}
+	case u.Frame != nil:
+		var f *astiav.Frame
+		if u.Frame.Frame != nil {
+			f = frame.CloneAsReferenced(u.Frame.Frame)
+		}
+		return InputUnion{
+			Frame: &frame.Input{
+				Frame:      f,
+				StreamInfo: u.Frame.StreamInfo,
+			},
+		}
+	default:
+		return InputUnion{}
+	}
 }

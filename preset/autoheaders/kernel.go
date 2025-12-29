@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	kernelboilerplate "github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/xsync"
 )
@@ -47,34 +47,38 @@ func (h *AutoHeaders) SetProcessor(p *processor.FromKernel[kerneltypes.Abstract]
 	h.Processor = p
 }
 
-var _ kerneltypes.SendInputPacketer = (*AutoHeaders)(nil)
+var _ kerneltypes.SendInputer = (*AutoHeaders)(nil)
 
-func (h *AutoHeaders) SendInputPacket(
+func (h *AutoHeaders) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket: %s", input.Source)
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input.Source, _err) }()
-	return xsync.DoA4R1(ctx, &h.Locker, h.sendInputPacketLocked, ctx, input, outputPacketsCh, outputFramesCh)
+	logger.Tracef(ctx, "SendInput: %s", input)
+	defer func() { logger.Tracef(ctx, "/SendInput: %s: %v", input, _err) }()
+	return xsync.DoA3R1(ctx, &h.Locker, h.sendInputLocked, ctx, input, outputCh)
 }
 
-func (h *AutoHeaders) sendInputPacketLocked(
+func (h *AutoHeaders) sendInputLocked(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	if h.Processor == nil {
 		return fmt.Errorf("processor is not set")
 	}
 	if h.IsSet {
-		return h.Processor.Kernel.SendInputPacket(
+		return h.Processor.Kernel.SendInput(
 			ctx,
 			input,
-			outputPacketsCh,
-			outputFramesCh,
+			outputCh,
+		)
+	}
+	if input.Packet == nil {
+		return h.Processor.Kernel.SendInput(
+			ctx,
+			input,
+			outputCh,
 		)
 	}
 	if h.CallCount.Add(1) > 1 {
@@ -83,7 +87,7 @@ func (h *AutoHeaders) sendInputPacketLocked(
 		return fmt.Errorf("this kernel is supposed to be used only once")
 	}
 
-	newKernel, err := h.detectAppropriateFixerKernel(ctx, input)
+	newKernel, err := h.detectAppropriateFixerKernel(ctx, *input.Packet)
 	if err != nil {
 		return fmt.Errorf("unable to detect appropriate fixer kernel: %w", err)
 	}
@@ -96,11 +100,10 @@ func (h *AutoHeaders) sendInputPacketLocked(
 	h.IsSet = true
 
 	// to get the input finally processed
-	return h.Processor.Kernel.SendInputPacket(
+	return h.Processor.Kernel.SendInput(
 		ctx,
 		input,
-		outputPacketsCh,
-		outputFramesCh,
+		outputCh,
 	)
 }
 
@@ -119,10 +122,10 @@ func (h *AutoHeaders) detectAppropriateFixerKernel(
 		}
 	}()
 
-	logger.Debugf(ctx, "detecting for: %s %s", input.Source, h.Sink)
+	logger.Debugf(ctx, "detecting for: %s %s", input.GetSource(), h.Sink)
 	var inputFormatName string
 	inputAmountOfStreams := 0
-	input.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	input.GetSource().WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		if fmtCtx == nil {
 			logger.Errorf(ctx, "the output has no format context")
 			return

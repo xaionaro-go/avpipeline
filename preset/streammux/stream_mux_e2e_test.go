@@ -22,6 +22,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/preset/streammux"
 	streammuxtypes "github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -104,16 +105,16 @@ func readInputFromFile(ctx context.Context, t *testing.T, fileName string) ([]pa
 	))
 
 	var input []packet.Input
-	ch := make(chan packet.Output)
+	ch := make(chan packetorframe.OutputUnion)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		for p := range ch {
-			input = append(input, packet.BuildInput(p.Packet, p.StreamInfo))
+			input = append(input, packet.BuildInput(p.Packet.Packet, p.Packet.StreamInfo))
 		}
 	})
-	require.NoError(t, inputKernel.Generate(ctx, ch, nil))
+	require.NoError(t, inputKernel.Generate(ctx, ch))
 	close(ch)
 	wg.Wait()
 	require.NotEmpty(t, input)
@@ -204,7 +205,7 @@ func runTest(
 		defer streamMux.Close(ctx)
 		streamMux.Serve(ctx, node.ServeConfig{}, errCh)
 	})
-	inputCh := streamMux.GetProcessor().InputPacketChan()
+	inputCh := streamMux.GetProcessor().InputChan()
 
 	// simple test:
 
@@ -216,7 +217,7 @@ func runTest(
 		case <-ctx.Done():
 			streamMux.GetCountersPtr().Missed.Packets.Increment(mediaType, pktSize)
 			t.Fatalf("context is closed prematurely: %v", ctx.Err())
-		case inputCh <- p:
+		case inputCh <- packetorframe.InputUnion{Packet: &p}:
 			streamMux.GetCountersPtr().Received.Packets.Increment(mediaType, pktSize)
 		}
 	}
@@ -288,7 +289,7 @@ func runTest(
 		case <-ctx.Done():
 			streamMux.GetCountersPtr().Missed.Packets.Increment(mediaType, pktSize)
 			t.Fatalf("context is closed prematurely: %v", ctx.Err())
-		case inputCh <- p:
+		case inputCh <- packetorframe.InputUnion{Packet: &p}:
 			streamMux.GetCountersPtr().Received.Packets.Increment(
 				globaltypes.MediaType(p.GetMediaType()),
 				uint64(p.Packet.Size()),

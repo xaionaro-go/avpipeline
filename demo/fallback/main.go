@@ -90,7 +90,7 @@ func main() {
 
 	defer logger.Infof(ctx, "finishing: nodes")
 
-	inputs.GetOutput().AddPushPacketsTo(ctx, outputNode)
+	inputs.GetOutput().AddPushTo(ctx, outputNode)
 
 	defer logger.Infof(ctx, "finishing: routing")
 

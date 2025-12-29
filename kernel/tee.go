@@ -9,10 +9,10 @@ import (
 	"unsafe"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 )
@@ -41,11 +41,10 @@ func (t Tee[K]) OriginalPacketSource() packet.Source {
 	return nil
 }
 
-func (t Tee[K]) SendInputPacket(
+func (t Tee[K]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	errCh := make(chan error, len(t))
 	var wg sync.WaitGroup
@@ -54,60 +53,13 @@ func (t Tee[K]) SendInputPacket(
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			defer logger.Tracef(ctx, "Tee.SendInputPacket: packet/frame sender for child kernel ended")
-			pkt := input.Packet
-			if pkt != nil {
-				pkt = packet.CloneAsReferenced(pkt)
-			}
-			if err := k.SendInputPacket(ctx,
-				packet.BuildInput(
-					pkt,
-					input.StreamInfo,
-				),
-				outputPacketsCh, outputFramesCh,
+			defer logger.Tracef(ctx, "Tee.SendInput: packet/frame sender for child kernel ended")
+			inputClone := input.CloneAsReferencedInput()
+			if err := k.SendInput(ctx,
+				inputClone,
+				outputCh,
 			); err != nil {
-				errCh <- fmt.Errorf("tee send input packet error from kernel %v:%v: %w", k.GetObjectID(), k, err)
-			}
-		})
-	}
-	observability.Go(ctx, func(ctx context.Context) {
-		wg.Wait()
-		close(errCh)
-	})
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-	return errors.Join(errs...)
-}
-
-func (t Tee[K]) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	errCh := make(chan error, len(t))
-	var wg sync.WaitGroup
-	for _, k := range t {
-		k := k
-		wg.Add(1)
-		observability.Go(ctx, func(ctx context.Context) {
-			defer wg.Done()
-			defer logger.Tracef(ctx, "Tee.SendInputFrame: packet/frame sender for child kernel ended")
-			f := input.Frame
-			if f != nil {
-				f = frame.CloneAsReferenced(f)
-			}
-			if err := k.SendInputFrame(ctx,
-				frame.BuildInput(
-					f,
-					input.Pos,
-					input.StreamInfo,
-				),
-				outputPacketsCh, outputFramesCh,
-			); err != nil {
-				errCh <- fmt.Errorf("tee send input frame error from kernel %v:%v: %w", k.GetObjectID(), k, err)
+				errCh <- fmt.Errorf("tee send input error from kernel %v:%v: %w", k.GetObjectID(), k, err)
 			}
 		})
 	}
@@ -124,8 +76,7 @@ func (t Tee[K]) SendInputFrame(
 
 func (t Tee[K]) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -136,7 +87,7 @@ func (t Tee[K]) Generate(
 		k := k
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			err := k.Generate(ctx, outputPacketsCh, outputFramesCh)
+			err := k.Generate(ctx, outputCh)
 			if err == nil {
 				return
 			}

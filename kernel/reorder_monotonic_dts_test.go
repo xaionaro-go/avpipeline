@@ -8,9 +8,9 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/stretchr/testify/require"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
 )
@@ -44,8 +44,7 @@ func TestReorderMonotonicDTS(t *testing.T) {
 
 	k := NewReorderMonotonicDTS(ctx, nil, 100, 1000, true)
 
-	chPktOut := make(chan packet.Output, 100)
-	chFrameOut := make(chan frame.Output, 100)
+	chOut := make(chan packetorframe.OutputUnion, 100)
 
 	out, err := NewOutputFromURL(ctx, "", secret.New(""), OutputConfig{
 		CustomOptions: globaltypes.DictionaryItems{{
@@ -69,9 +68,10 @@ func TestReorderMonotonicDTS(t *testing.T) {
 		pkt := packet.Pool.Get()
 		pkt.SetStreamIndex(stream0.Index())
 		pkt.SetDts(5 + int64(i))
-		err = k.SendInputPacket(ctx,
-			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream0, Source: packetSource}),
-			chPktOut, chFrameOut,
+		input := packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream0, Source: packetSource})
+		err = k.SendInput(ctx,
+			packetorframe.InputUnion{Packet: &input},
+			chOut,
 		)
 		require.NoError(t, err)
 	}
@@ -80,9 +80,10 @@ func TestReorderMonotonicDTS(t *testing.T) {
 		pkt := packet.Pool.Get()
 		pkt.SetStreamIndex(stream1.Index())
 		pkt.SetDts(0 + int64(i))
-		err = k.SendInputPacket(ctx,
-			packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream1, Source: packetSource}),
-			chPktOut, chFrameOut,
+		input := packet.BuildInput(pkt, &packet.StreamInfo{Stream: stream1, Source: packetSource})
+		err = k.SendInput(ctx,
+			packetorframe.InputUnion{Packet: &input},
+			chOut,
 		)
 		require.NoError(t, err)
 	}
@@ -90,7 +91,8 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	pktCount := 0
 	for {
 		select {
-		case outPkt := <-chPktOut:
+		case out := <-chOut:
+			outPkt := out.Packet
 			expectedDTS := int64(pktCount)
 			if expectedDTS > 5 {
 				expectedDTS = 5 + int64(pktCount-5)/2
@@ -105,8 +107,8 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	require.Equal(t, 15, pktCount)
 
 	select {
-	case outPkt := <-chFrameOut:
-		t.Fatalf("unexpected frame output: %v", outPkt)
+	case out := <-chOut:
+		t.Fatalf("unexpected output: %v", out)
 	default:
 	}
 }

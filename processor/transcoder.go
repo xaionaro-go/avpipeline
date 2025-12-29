@@ -10,10 +10,8 @@ import (
 
 var DefaultOptionsTranscoder = func() []Option {
 	return []Option{
-		OptionQueueSizeInputPacket(600),
-		OptionQueueSizeInputFrame(600),
-		OptionQueueSizeOutputPacket(10),
-		OptionQueueSizeOutputFrame(10),
+		OptionQueueSizeInput(600),
+		OptionQueueSizeOutput(10),
 		OptionQueueSizeError(2),
 	}
 }

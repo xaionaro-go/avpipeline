@@ -24,9 +24,11 @@ import (
 	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/stream"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -455,9 +457,8 @@ func (o *Output) Close(
 }
 
 func (o *Output) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }
@@ -666,23 +667,38 @@ func (o *Output) getOutputStream(
 	return outputStream, nil
 }
 
-func (o *Output) SendInputPacket(
+func (o *Output) SendInput(
+	ctx context.Context,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
+) (_err error) {
+	pkt, frame := input.Unwrap()
+	switch {
+	case pkt != nil:
+		return o.sendPacket(ctx, *pkt, outputCh)
+	case frame != nil:
+		return o.sendFrame(ctx, *frame, outputCh)
+	default:
+		return types.ErrUnexpectedInputType{}
+	}
+}
+
+func (o *Output) sendPacket(
 	ctx context.Context,
 	inputPkt packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	pkt := inputPkt.Packet
 	if pkt == nil {
 		return fmt.Errorf("packet == nil")
 	}
 	logger.Tracef(ctx,
-		"SendInputPacket (stream: %d:%s, pkt:%p, pos:%d, pts:%d, dts:%d, dur:%d, size: %d)",
-		inputPkt.StreamIndex(), inputPkt.GetMediaType(), pkt, pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), pkt.Size(),
+		"sendPacket (stream: %d:%s, pkt:%p, pos:%d, pts:%d, dts:%d, dur:%d, size: %d)",
+		inputPkt.GetStreamIndex(), inputPkt.GetMediaType(), pkt, pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), pkt.Size(),
 	)
 	defer func() {
-		logger.Tracef(ctx, "/SendInputPacket (stream: %d:%s, pkt:%p): %v",
-			inputPkt.StreamIndex(), inputPkt.GetMediaType(), pkt, _err)
+		logger.Tracef(ctx, "/sendPacket (stream: %d:%s, pkt:%p): %v",
+			inputPkt.GetStreamIndex(), inputPkt.GetMediaType(), pkt, _err)
 	}()
 
 	if pkt.Flags().Has(astiav.PacketFlagDiscard) {
@@ -693,15 +709,15 @@ func (o *Output) SendInputPacket(
 	var (
 		outputStream *OutputStream
 		err          error = ErrNoSourceFormatContext{
-			StreamIndex: inputPkt.StreamIndex(),
+			StreamIndex: inputPkt.GetStreamIndex(),
 		}
 	)
 	o.formatContextLocker.Do(ctx, func() {
-		inputPkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
-			outputStream, err = o.getOutputStream(ctx, inputPkt.Source, inputPkt.Stream, fmtCtx)
+		inputPkt.GetSource().WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+			outputStream, err = o.getOutputStream(ctx, inputPkt.GetSource(), inputPkt.GetStream(), fmtCtx)
 		})
 		if errors.As(err, &ErrNoSourceFormatContext{}) {
-			outputStream = o.OutputStreams[inputPkt.StreamIndex()]
+			outputStream = o.OutputStreams[inputPkt.GetStreamIndex()]
 			if outputStream != nil {
 				err = nil
 			}
@@ -722,7 +738,7 @@ func (o *Output) SendInputPacket(
 	frameInfo := FrameInfoFromPacketInput(inputPkt)
 
 	err = xsync.DoR1(ctx, &o.SenderLocker, func() error {
-		return o.send(ctx, pkt, frameInfo, inputPkt.Source, inputPkt.Stream, outputStream)
+		return o.send(ctx, pkt, frameInfo, inputPkt.GetSource(), inputPkt.GetStream(), outputStream)
 	})
 	if err != nil {
 		return err
@@ -738,11 +754,10 @@ func (e ErrNoSourceFormatContext) Error() string {
 	return fmt.Sprintf("no source format context (stream_index: %d)", e.StreamIndex)
 }
 
-func (o *Output) SendInputFrame(
+func (o *Output) sendFrame(
 	ctx context.Context,
 	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
 }

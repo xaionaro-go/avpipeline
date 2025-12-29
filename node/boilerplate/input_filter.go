@@ -4,45 +4,26 @@ import (
 	"context"
 
 	"github.com/go-ng/xatomic"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 )
 
 type InputFilter struct {
-	PacketFilterCondition *packetfiltercondition.Condition
-	FrameFilterCondition  *framefiltercondition.Condition
+	InputFilterCondition *packetorframefiltercondition.Condition
 }
 
-func (n *InputFilter) GetInputPacketFilter(
+func (n *InputFilter) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
-	condPtr := xatomic.LoadPointer(&n.PacketFilterCondition)
+) packetorframefiltercondition.Condition {
+	condPtr := xatomic.LoadPointer(&n.InputFilterCondition)
 	if condPtr == nil {
 		return nil
 	}
 	return *condPtr
 }
 
-func (n *InputFilter) SetInputPacketFilter(
+func (n *InputFilter) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	xatomic.StorePointer(&n.PacketFilterCondition, &cond)
-}
-
-func (n *InputFilter) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-	condPtr := xatomic.LoadPointer(&n.FrameFilterCondition)
-	if condPtr == nil {
-		return nil
-	}
-	return *condPtr
-}
-
-func (n *InputFilter) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
-) {
-	xatomic.StorePointer(&n.FrameFilterCondition, &cond)
+	xatomic.StorePointer(&n.InputFilterCondition, &cond)
 }

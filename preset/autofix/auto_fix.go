@@ -75,8 +75,7 @@ func NewWithCustomData[T any](
 	}
 	a.MapStreamIndicesNode.CustomData = customData
 	if a.AutoHeadersNode != nil { // TODO: make a.AutoHeadersNode always non-nil
-		a.AutoHeadersNode.AddPushPacketsTo(ctx, a.MapStreamIndicesNode)
-		a.AutoHeadersNode.AddPushFramesTo(ctx, a.MapStreamIndicesNode)
+		a.AutoHeadersNode.AddPushTo(ctx, a.MapStreamIndicesNode)
 		a.AutoHeadersNode.CustomData = customData
 	}
 	return a

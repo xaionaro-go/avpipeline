@@ -7,10 +7,10 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
@@ -183,34 +183,35 @@ func (k *BaseWithFormatContext[H]) newOutputStream(
 	return outputStream, nil
 }
 
-func (k *BaseWithFormatContext[H]) SendInputPacket(
+func (k *BaseWithFormatContext[H]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
+	logger.Tracef(ctx, "SendInput()")
+	defer func() { logger.Tracef(ctx, "/SendInput(): %v", _err) }()
 
-	outputStream, err := xsync.DoR2(ctx, &k.Locker, func() (*astiav.Stream, error) {
-		return k.getOutputStreamForPacketByIndex(
-			ctx,
-			input.Stream.Index(),
-			input.Stream.CodecParameters(),
-			input.Stream.TimeBase(),
-		)
-	})
-	if err != nil {
-		return fmt.Errorf("unable to get output stream for input packet: %w", err)
+	if input.Packet != nil {
+		outputStream, err := xsync.DoR2(ctx, &k.Locker, func() (*astiav.Stream, error) {
+			return k.getOutputStreamForPacketByIndex(
+				ctx,
+				input.Packet.Stream.Index(),
+				input.Packet.Stream.CodecParameters(),
+				input.Packet.Stream.TimeBase(),
+			)
+		})
+		if err != nil {
+			return fmt.Errorf("unable to get output stream for input packet: %w", err)
+		}
+		assert(ctx, outputStream != nil, "output stream must be initialized")
+
+		input.Packet.Source = k
+		input.Packet.Stream = outputStream
 	}
-	assert(ctx, outputStream != nil, "output stream must be initialized")
 
-	input.Source = k
-	input.Stream = outputStream
-	return k.Base.SendInputPacket(
+	return k.Base.SendInput(
 		ctx,
 		input,
-		outputPacketsCh,
-		outputFramesCh,
+		outputCh,
 	)
 }

@@ -29,18 +29,11 @@ func New[K kernel.Abstract](kernel K) *Server[K] {
 	}
 }
 
-func (s *Server[K]) SendInputPacket(
+func (s *Server[K]) SendInput(
 	ctx context.Context,
-	req *kernel_grpc.SendInputPacketRequest,
-) (*kernel_grpc.SendInputPacketReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SendInputPacket not implemented")
-}
-
-func (s *Server[K]) SendInputFrame(
-	ctx context.Context,
-	req *kernel_grpc.SendInputFrameRequest,
-) (*kernel_grpc.SendInputFrameReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SendInputFrame not implemented")
+	req *kernel_grpc.SendInputRequest,
+) (*kernel_grpc.SendInputReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendInput not implemented")
 }
 
 func (s *Server[K]) String(

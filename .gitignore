@@ -2,4 +2,6 @@
 *.test
 /preset/streammux/streammux.test
 /.github/instructions/afk
+/.github/instructions/current_summary.md
+/.github/instructions/todo.md
 /3rdparty

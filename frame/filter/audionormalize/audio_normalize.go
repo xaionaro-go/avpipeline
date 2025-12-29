@@ -72,8 +72,8 @@ func (k *AudioNormalize) normalizeAudioFrame(
 	ctx context.Context,
 	input frame.Input,
 ) (_err error) {
-	logger.Tracef(ctx, "sendInputFrameAudio")
-	defer func() { logger.Tracef(ctx, "/sendInputFrameAudio: %v", _err) }()
+	logger.Tracef(ctx, "normalizeAudioFrame")
+	defer func() { logger.Tracef(ctx, "/normalizeAudioFrame: %v", _err) }()
 	f := input.Frame
 
 	if f == nil {

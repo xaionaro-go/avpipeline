@@ -38,7 +38,7 @@ func (c *StartWithKeyFrames) match(
 		return true
 	}
 
-	pkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	pkt.GetSource().WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		if fmtCtx.NbStreams() != len(c.WaitingKeyFrames) {
 			c.acknowledgeNewStreams(fmtCtx)
 		}

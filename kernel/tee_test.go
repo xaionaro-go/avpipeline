@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/xaionaro-go/avpipeline/frame"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -20,41 +22,38 @@ type fakeKernel struct {
 	genErr  error
 }
 
-func (f *fakeKernel) SendInputPacket(
+func (f *fakeKernel) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	f.mu.Lock()
-	f.packets = append(f.packets, packet.BuildOutput(input.Packet, input.StreamInfo))
-	f.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case outputPacketsCh <- packet.BuildOutput(input.Packet, input.StreamInfo):
+	switch {
+	case input.Packet != nil:
+		f.mu.Lock()
+		f.packets = append(f.packets, packet.BuildOutput(input.Packet.Packet, input.Packet.StreamInfo))
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case outputCh <- packetorframe.OutputUnion{Packet: ptr(packet.BuildOutput(input.Packet.Packet, input.Packet.StreamInfo))}:
+		}
+		return nil
+	case input.Frame != nil:
+		f.mu.Lock()
+		f.frames = append(f.frames, frame.BuildOutput(input.Frame.Frame, input.Frame.StreamInfo))
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case outputCh <- packetorframe.OutputUnion{Frame: ptr(frame.BuildOutput(input.Frame.Frame, input.Frame.StreamInfo))}:
+		}
+		return nil
+	default:
+		return kerneltypes.ErrUnexpectedInputType{}
 	}
-	return nil
 }
 
-func (f *fakeKernel) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	f.mu.Lock()
-	f.frames = append(f.frames, frame.BuildOutput(input.Frame, input.StreamInfo))
-	f.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case outputFramesCh <- frame.BuildOutput(input.Frame, input.StreamInfo):
-	}
-	return nil
-}
-
-func (f *fakeKernel) Generate(ctx context.Context, _ chan<- packet.Output, _ chan<- frame.Output) error {
+func (f *fakeKernel) Generate(ctx context.Context, _ chan<- packetorframe.OutputUnion) error {
 	return f.genErr
 }
 
@@ -63,24 +62,23 @@ func (f *fakeKernel) String() string                    { return "fake" }
 func (f *fakeKernel) Close(context.Context) error       { return nil }
 func (f *fakeKernel) CloseChan() <-chan struct{}        { return nil }
 
-func TestTee_SendInputPacket(t *testing.T) {
+func TestTee_SendInput_Packet(t *testing.T) {
 	ctx := context.Background()
 	fk1 := &fakeKernel{}
 	fk2 := &fakeKernel{}
 	tks := Tee[Abstract]{fk1, fk2}
 
-	outPktCh := make(chan packet.Output, 4)
-	outFrmCh := make(chan frame.Output, 4)
+	outCh := make(chan packetorframe.OutputUnion, 4)
 
-	in := packet.Input{Packet: nil, StreamInfo: nil}
-	if err := tks.SendInputPacket(ctx, in, outPktCh, outFrmCh); err != nil {
-		t.Fatalf("SendInputPacket error: %v", err)
+	in := packetorframe.InputUnion{Packet: &packet.Input{Packet: nil, StreamInfo: nil}}
+	if err := tks.SendInput(ctx, in, outCh); err != nil {
+		t.Fatalf("SendInput error: %v", err)
 	}
 
 	// collect outputs
-	close(outPktCh)
+	close(outCh)
 	cnt := 0
-	for range outPktCh {
+	for range outCh {
 		cnt++
 	}
 	if cnt != 2 {
@@ -88,23 +86,22 @@ func TestTee_SendInputPacket(t *testing.T) {
 	}
 }
 
-func TestTee_SendInputFrame(t *testing.T) {
+func TestTee_SendInput_Frame(t *testing.T) {
 	ctx := context.Background()
 	fk1 := &fakeKernel{}
 	fk2 := &fakeKernel{}
 	tks := Tee[Abstract]{fk1, fk2}
 
-	outPktCh := make(chan packet.Output, 4)
-	outFrmCh := make(chan frame.Output, 4)
+	outCh := make(chan packetorframe.OutputUnion, 4)
 
-	in := frame.Input{Frame: nil, StreamInfo: nil}
-	if err := tks.SendInputFrame(ctx, in, outPktCh, outFrmCh); err != nil {
-		t.Fatalf("SendInputFrame error: %v", err)
+	in := packetorframe.InputUnion{Frame: &frame.Input{Frame: nil, StreamInfo: nil}}
+	if err := tks.SendInput(ctx, in, outCh); err != nil {
+		t.Fatalf("SendInput error: %v", err)
 	}
 
-	close(outFrmCh)
+	close(outCh)
 	cnt := 0
-	for range outFrmCh {
+	for range outCh {
 		cnt++
 	}
 	if cnt != 2 {
@@ -118,9 +115,8 @@ func TestTee_Generate(t *testing.T) {
 	fk2 := &fakeKernel{genErr: nil}
 	tks := Tee[Abstract]{fk1, fk2}
 
-	outPktCh := make(chan packet.Output, 4)
-	outFrmCh := make(chan frame.Output, 4)
-	if err := tks.Generate(ctx, outPktCh, outFrmCh); err != nil {
+	outCh := make(chan packetorframe.OutputUnion, 4)
+	if err := tks.Generate(ctx, outCh); err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
 }
@@ -132,13 +128,10 @@ type closeFakeKernel struct {
 	ch       chan struct{}
 }
 
-func (c *closeFakeKernel) SendInputPacket(context.Context, packet.Input, chan<- packet.Output, chan<- frame.Output) error {
+func (c *closeFakeKernel) SendInput(context.Context, packetorframe.InputUnion, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
-func (c *closeFakeKernel) SendInputFrame(context.Context, frame.Input, chan<- packet.Output, chan<- frame.Output) error {
-	return nil
-}
-func (c *closeFakeKernel) Generate(context.Context, chan<- packet.Output, chan<- frame.Output) error {
+func (c *closeFakeKernel) Generate(context.Context, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
 func (c *closeFakeKernel) GetObjectID() globaltypes.ObjectID { return globaltypes.GetObjectID(c) }
@@ -197,13 +190,10 @@ type blockingKernel struct {
 	stopped chan struct{}
 }
 
-func (b *blockingKernel) SendInputPacket(context.Context, packet.Input, chan<- packet.Output, chan<- frame.Output) error {
+func (b *blockingKernel) SendInput(context.Context, packetorframe.InputUnion, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
-func (b *blockingKernel) SendInputFrame(context.Context, frame.Input, chan<- packet.Output, chan<- frame.Output) error {
-	return nil
-}
-func (b *blockingKernel) Generate(ctx context.Context, _ chan<- packet.Output, _ chan<- frame.Output) error {
+func (b *blockingKernel) Generate(ctx context.Context, _ chan<- packetorframe.OutputUnion) error {
 	close(b.started)
 	<-ctx.Done()
 	close(b.stopped)
@@ -227,11 +217,10 @@ func TestTee_GenerateCancellation(t *testing.T) {
 
 	tks := Tee[Abstract]{bk, child2}
 
-	outPktCh := make(chan packet.Output, 1)
-	outFrmCh := make(chan frame.Output, 1)
+	outCh := make(chan packetorframe.OutputUnion, 1)
 
 	// run Generate (it should cancel blocker when child2 errors)
-	err := tks.Generate(ctx, outPktCh, outFrmCh)
+	err := tks.Generate(ctx, outCh)
 	if err == nil {
 		t.Fatalf("expected error from Generate, got nil")
 	}

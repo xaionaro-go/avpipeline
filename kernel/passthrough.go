@@ -3,9 +3,9 @@ package kernel
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -13,40 +13,23 @@ type Passthrough struct{}
 
 var _ Abstract = (*Passthrough)(nil)
 
-func (Passthrough) SendInputPacket(
+func (Passthrough) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %v", _err) }()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case outputPacketsCh <- packet.BuildOutput(
-		packet.CloneAsReferenced(input.Packet),
-		input.StreamInfo,
-	):
-	}
-	return nil
-}
+	logger.Tracef(ctx, "SendInput")
+	defer func() { logger.Tracef(ctx, "/SendInput: %v", _err) }()
 
-func (Passthrough) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "SendInputFrame")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame: %v", _err) }()
+	output := input.CloneAsReferencedOutput()
+	if output.Get() == nil {
+		return kerneltypes.ErrUnexpectedInputType{}
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case outputFramesCh <- frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	):
+	case outputCh <- output:
 	}
 	return nil
 }
@@ -69,8 +52,7 @@ func (Passthrough) CloseChan() <-chan struct{} {
 
 func (Passthrough) Generate(
 	ctx context.Context,
-	_ chan<- packet.Output,
-	_ chan<- frame.Output,
+	_ chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "Generate")
 	defer func() { logger.Tracef(ctx, "/Generate: %v", _err) }()

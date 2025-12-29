@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline/logger"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
@@ -26,20 +26,20 @@ func SetBlockInput(
 		logger.Debugf(ctx, "/SetBlockInput(%v, %p:%p:%v): %v", blocked, node, node.GetProcessor(), node, _err)
 	}()
 
-	cond := node.GetInputPacketFilter(ctx)
-	condPause, ok := cond.(*packetfiltercondition.PauseCond)
+	cond := node.GetInputFilter(ctx)
+	condPause, ok := cond.(*packetorframefiltercondition.PauseCond)
 	if !ok {
 		if !blocked {
 			return nil
 		}
-		condPause = packetfiltercondition.Pause(ctx, cond)
-		node.SetInputPacketFilter(ctx, condPause)
+		condPause = packetorframefiltercondition.Pause(ctx, cond)
+		node.SetInputFilter(ctx, condPause)
 	}
 	if blocked {
 		return nil
 	}
 	condPause.ReleasePauseFn()
-	node.SetInputPacketFilter(ctx, condPause.OriginalCondition)
+	node.SetInputFilter(ctx, condPause.OriginalCondition)
 	return nil
 }
 

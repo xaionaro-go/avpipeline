@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -20,20 +20,10 @@ func (k *Kernel) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(k)
 }
 
-func (k *Kernel) SendInputPacket(
+func (k *Kernel) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	panic("not implemented")
-}
-
-func (k *Kernel) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	panic("not implemented")
 }
@@ -52,8 +42,7 @@ func (k *Kernel) CloseChan() <-chan struct{} {
 
 func (k *Kernel) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	panic("not implemented")
 }

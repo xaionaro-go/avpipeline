@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 func TestChainOfThree(t *testing.T) {
@@ -26,76 +27,77 @@ func TestChainOfThree(t *testing.T) {
 	}
 
 	d0 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)((*packet.Commons)(input.Packet))}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)((*frame.Commons)(input.Frame))}
+			}
 			return nil
 		},
 	}
 	d1 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			if d0.SendInputPacketCallCount == 0 {
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			if d0.SendInputCallCount == 0 {
 				return fmt.Errorf("invalid order d1 before d0")
 			}
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)((*packet.Commons)(input.Packet))}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)((*frame.Commons)(input.Frame))}
+			}
 			return nil
 		},
 	}
 	d2 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			if d1.SendInputPacketCallCount == 0 {
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			if d1.SendInputCallCount == 0 {
 				return fmt.Errorf("invalid order d2 before d1")
 			}
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)((*packet.Commons)(input.Packet))}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)((*frame.Commons)(input.Frame))}
+			}
 			return nil
 		},
 	}
 	chain := NewChainOfThree[Abstract, Abstract, Abstract](d0, d1, d2)
-	outPktCh := make(chan packet.Output, 10)
-	outFrameCh := make(chan frame.Output, 10)
+	outCh := make(chan packetorframe.OutputUnion, 10)
 
-	err := chain.SendInputPacket(ctx, packet.Input{
-		Packet: pkt,
-	}, outPktCh, outFrameCh)
+	err := chain.SendInput(ctx, packetorframe.InputUnion{
+		Packet: &packet.Input{
+			Packet: pkt,
+		},
+	}, outCh)
 	require.NoError(t, err)
 
-	err = chain.SendInputFrame(ctx, frame.Input{
-		Frame:      frm,
-		StreamInfo: frmStreamInfo,
-	}, outPktCh, outFrameCh)
+	err = chain.SendInput(ctx, packetorframe.InputUnion{
+		Frame: &frame.Input{
+			Frame:      frm,
+			StreamInfo: frmStreamInfo,
+		},
+	}, outCh)
 	require.NoError(t, err)
 
-	<-outPktCh
-	<-outFrameCh
+	<-outCh
+	<-outCh
 
 	select {
-	case pkt := <-outPktCh:
+	case pkt := <-outCh:
 		t.Errorf("receive an extra packet: %#+v", pkt)
 	default:
 	}
-	select {
-	case frame := <-outFrameCh:
-		t.Errorf("receive an extra frame: %#+v", frame)
-	default:
-	}
 
-	assertT.Equal(t, 1, d0.SendInputPacketCallCount)
-	assertT.Equal(t, 1, d1.SendInputPacketCallCount)
-	assertT.Equal(t, 1, d2.SendInputPacketCallCount)
-	assertT.Equal(t, 1, d0.SendInputFrameCallCount)
-	assertT.Equal(t, 1, d1.SendInputFrameCallCount)
-	assertT.Equal(t, 1, d2.SendInputFrameCallCount)
+	assertT.Equal(t, 1, d0.SendPacketCallCount)
+	assertT.Equal(t, 1, d1.SendPacketCallCount)
+	assertT.Equal(t, 1, d2.SendPacketCallCount)
+	assertT.Equal(t, 1, d0.SendFrameCallCount)
+	assertT.Equal(t, 1, d1.SendFrameCallCount)
+	assertT.Equal(t, 1, d2.SendFrameCallCount)
 }
 
 func TestChainOfThree_GenerateForwarding(t *testing.T) {
@@ -111,53 +113,54 @@ func TestChainOfThree_GenerateForwarding(t *testing.T) {
 	}
 
 	k0 := &Dummy{
-		GenerateFn: func(ctx context.Context, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(packet.Input{Packet: pkt})
-			outputFramesCh <- frame.Output(frame.Input{Frame: frm, StreamInfo: frmStreamInfo})
+		GenerateFn: func(ctx context.Context, outputCh chan<- packetorframe.OutputUnion) error {
+			outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)(&packet.Input{Packet: pkt})}
+			outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(&frame.Input{Frame: frm, StreamInfo: frmStreamInfo})}
 			return nil
 		},
 	}
 	k1 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)(input.Packet)}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(input.Frame)}
+			}
 			return nil
 		},
 	}
 	k2 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputPacketsCh <- packet.Output(input)
-			return nil
-		},
-		SendInputFrameFn: func(ctx context.Context, input frame.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
-			outputFramesCh <- frame.Output(input)
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
+			switch {
+			case input.Packet != nil:
+				outputCh <- packetorframe.OutputUnion{Packet: (*packet.Output)(input.Packet)}
+			case input.Frame != nil:
+				outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(input.Frame)}
+			}
 			return nil
 		},
 	}
 
 	chain := NewChainOfThree[Abstract, Abstract, Abstract](k0, k1, k2)
-	outPktCh := make(chan packet.Output, 10)
-	outFrameCh := make(chan frame.Output, 10)
+	outCh := make(chan packetorframe.OutputUnion, 10)
 
-	err := chain.Generate(ctx, outPktCh, outFrameCh)
+	err := chain.Generate(ctx, outCh)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, k0.GenerateCallCount)
-	require.Equal(t, 1, k1.SendInputPacketCallCount)
-	require.Equal(t, 1, k1.SendInputFrameCallCount)
-	require.Equal(t, 1, k2.SendInputPacketCallCount)
-	require.Equal(t, 1, k2.SendInputFrameCallCount)
+	require.Equal(t, 1, k1.SendPacketCallCount)
+	require.Equal(t, 1, k1.SendFrameCallCount)
+	require.Equal(t, 1, k2.SendPacketCallCount)
+	require.Equal(t, 1, k2.SendFrameCallCount)
 
 	select {
-	case <-outPktCh:
+	case <-outCh:
 	default:
 		t.Fatal("expected at least one output packet")
 	}
 	select {
-	case <-outFrameCh:
+	case <-outCh:
 	default:
 		t.Fatal("expected at least one output frame")
 	}
@@ -246,14 +249,14 @@ func TestChainOfThree_GetKernels(t *testing.T) {
 	require.Same(t, d2, kernels[2])
 }
 
-func TestChainOfThree_SendInputPacketError(t *testing.T) {
+func TestChainOfThree_SendInput_PacketError(t *testing.T) {
 	ctx := context.Background()
 
 	pkt := astiav.AllocPacket()
 	defer pkt.Free()
 
 	d0 := &Dummy{
-		SendInputPacketFn: func(ctx context.Context, input packet.Input, outputPacketsCh chan<- packet.Output, outputFramesCh chan<- frame.Output) error {
+		SendInputFn: func(ctx context.Context, input packetorframe.InputUnion, outputCh chan<- packetorframe.OutputUnion) error {
 			return fmt.Errorf("d0 error")
 		},
 	}
@@ -261,10 +264,13 @@ func TestChainOfThree_SendInputPacketError(t *testing.T) {
 	d2 := &Dummy{}
 
 	chain := NewChainOfThree[Abstract, Abstract, Abstract](d0, d1, d2)
-	outPktCh := make(chan packet.Output, 10)
-	outFrameCh := make(chan frame.Output, 10)
+	outCh := make(chan packetorframe.OutputUnion, 10)
 
-	err := chain.SendInputPacket(ctx, packet.Input{Packet: pkt}, outPktCh, outFrameCh)
+	err := chain.SendInput(ctx, packetorframe.InputUnion{
+		Packet: &packet.Input{
+			Packet: pkt,
+		},
+	}, outCh)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "d0 error")
 }

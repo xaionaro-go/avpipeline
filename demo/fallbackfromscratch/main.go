@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
 	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packet/filter/shifttimestamps"
@@ -143,57 +144,57 @@ func main() {
 	var filteredInputMain node.Abstract = inputMainNode
 	if nodeBSFMain != nil {
 		logger.Debugf(ctx, "inserting %s to the main pipeline", nodeBSFMain.Processor.Kernel)
-		filteredInputMain.AddPushPacketsTo(ctx, nodeBSFMain)
+		filteredInputMain.AddPushTo(ctx, nodeBSFMain)
 		filteredInputMain = nodeBSFMain
 	}
 
 	var filteredInputFallback node.Abstract = inputFallbackNode
 	if nodeBSFFallback != nil {
 		logger.Debugf(ctx, "inserting %s to the fallback pipeline", nodeBSFFallback.Processor.Kernel)
-		filteredInputFallback.AddPushPacketsTo(ctx, nodeBSFFallback)
+		filteredInputFallback.AddPushTo(ctx, nodeBSFFallback)
 		filteredInputFallback = nodeBSFFallback
 	}
 
 	lastDTS := int64(0)
-	filteredInputMain.AddPushPacketsTo(ctx,
+	filteredInputMain.AddPushTo(ctx,
 		outputNode,
-		packetfiltercondition.Packet{
+		packetorframefiltercondition.PacketFilter{Condition: packetfiltercondition.Packet{
 			sw.PacketCondition(0),
 			tsShifter,
 			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+				if pkt.GetCodecParameters().MediaType() != astiav.MediaTypeVideo {
 					return true
 				}
-				if !pkt.Flags().Has(astiav.PacketFlagKey) {
+				if !pkt.IsKey() {
 					return true
 				}
-				if pkt.Dts() > lastDTS {
-					lastDTS = pkt.Dts()
+				if pkt.GetDTS() > lastDTS {
+					lastDTS = pkt.GetDTS()
 				}
-				if pkt.Dts() < lastDTS {
-					tsShifter.Offset += lastDTS - pkt.Dts()
+				if pkt.GetDTS() < lastDTS {
+					tsShifter.Offset += lastDTS - pkt.GetDTS()
 				}
 				return true
 			}),
-		},
+		}},
 	)
-	filteredInputFallback.AddPushPacketsTo(ctx,
+	filteredInputFallback.AddPushTo(ctx,
 		outputNode,
-		packetfiltercondition.Packet{
+		packetorframefiltercondition.PacketFilter{Condition: packetfiltercondition.Packet{
 			sw.PacketCondition(1),
 			condition.Function(func(ctx context.Context, pkt packet.Input) bool {
-				if pkt.CodecParameters().MediaType() != astiav.MediaTypeVideo {
+				if pkt.GetCodecParameters().MediaType() != astiav.MediaTypeVideo {
 					return true
 				}
-				if !pkt.Flags().Has(astiav.PacketFlagKey) {
+				if !pkt.IsKey() {
 					return true
 				}
-				if pkt.Dts() > lastDTS {
-					lastDTS = pkt.Dts()
+				if pkt.GetDTS() > lastDTS {
+					lastDTS = pkt.GetDTS()
 				}
 				return true
 			}),
-		},
+		}},
 	)
 	pipelineInputs := node.Nodes[node.Abstract]{
 		inputMainNode,

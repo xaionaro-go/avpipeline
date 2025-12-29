@@ -9,7 +9,7 @@ import (
 	kernelboilerplate "github.com/xaionaro-go/avpipeline/kernel/boilerplate"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
 	"github.com/xaionaro-go/avpipeline/processor"
@@ -100,18 +100,18 @@ type NodeInput[C any] = node.NodeWithCustomData[
 	C, *processor.FromKernel[*kernelboilerplate.BaseWithFormatContext[*InputHandler[C]]],
 ]
 
-func (h *InputHandler[C]) VisitInputPacket(
+func (h *InputHandler[C]) VisitInput(
 	ctx context.Context,
-	input *packet.Input,
+	input *packetorframe.InputUnion,
 ) error {
 	if h.StreamMux == nil {
 		return nil
 	}
 	switch h.Type {
 	case InputTypeAll:
-		err := h.StreamMux.onInputPacket(ctx, input)
+		err := h.StreamMux.onInput(ctx, *input)
 		if err != nil {
-			return fmt.Errorf("unable to process input packet in StreamMux: %w", err)
+			return fmt.Errorf("unable to process input in StreamMux: %w", err)
 		}
 	}
 	return nil

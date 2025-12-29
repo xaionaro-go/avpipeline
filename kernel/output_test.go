@@ -8,6 +8,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
 )
@@ -30,7 +31,7 @@ func (m *mockPacketSourceNoFormatCtx) String() string {
 var _ packet.Source = (*mockPacketSourceNoFormatCtx)(nil)
 
 // TestOutput_ErrNoSourceFormatContext tests the scenario where:
-// 1. Output.SendInputPacket calls Source.WithOutputFormatContext
+// 1. Output.SendInput calls Source.WithOutputFormatContext
 // 2. The Source doesn't call the callback
 // 3. ErrNoSourceFormatContext is raised
 //
@@ -59,7 +60,7 @@ func TestOutput_ErrNoSourceFormatContext(t *testing.T) {
 			Source: &mockPacketSourceNoFormatCtx{},
 		})
 
-		err = output.SendInputPacket(ctx, inputPkt, nil, nil)
+		err = output.SendInput(ctx, packetorframe.InputUnion{Packet: &inputPkt}, nil)
 		require.Error(t, err)
 		require.True(t, errors.As(err, &ErrNoSourceFormatContext{}), "got: %v", err)
 	})
@@ -85,7 +86,7 @@ func TestOutput_ErrNoSourceFormatContext(t *testing.T) {
 			Source: &mockPacketSourceNoFormatCtx{},
 		})
 
-		err = output.SendInputPacket(ctx, inputPkt, nil, nil)
+		err = output.SendInput(ctx, packetorframe.InputUnion{Packet: &inputPkt}, nil)
 		require.NoError(t, err)
 	})
 }
@@ -139,10 +140,10 @@ func TestOutput_ReturnsContextErrorWhenCancelled(t *testing.T) {
 		Source: &mockPacketSourceContextRespecting{},
 	})
 
-	// Cancel context before calling SendInputPacket
+	// Cancel context before calling SendInput
 	cancel()
 
-	err = output.SendInputPacket(ctx, inputPkt, nil, nil)
+	err = output.SendInput(ctx, packetorframe.InputUnion{Packet: &inputPkt}, nil)
 	require.Error(t, err)
 	// Should return context.Canceled, not ErrNoSourceFormatContext
 	require.ErrorIs(t, err, context.Canceled, "expected context.Canceled, got: %v", err)

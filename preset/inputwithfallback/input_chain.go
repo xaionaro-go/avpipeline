@@ -116,19 +116,14 @@ func newInputChain[K InputKernel, DF codec.DecoderFactory, C any](
 		inputKernel,
 		processor.DefaultOptionsInput()...,
 	)
-	r.Input.AddPushPacketsTo(ctx, r.Filter, r.onInputPacket())
-	r.Input.AddPushFramesTo(ctx, r.Filter, r.onInputFrame())
+	r.Input.AddPushTo(ctx, r.Filter, r.onInput())
 	if r.Decoder == nil {
-		r.Filter.AddPushPacketsTo(ctx, r.SyncBarrier)
-		r.Filter.AddPushFramesTo(ctx, r.SyncBarrier)
+		r.Filter.AddPushTo(ctx, r.SyncBarrier)
 	} else {
 		r.AutoHeaders = autoheaders.NewNodeWithCustomData[C](ctx, r.Decoder.Processor.Kernel)
-		r.Filter.AddPushPacketsTo(ctx, r.AutoHeaders)
-		r.Filter.AddPushFramesTo(ctx, r.AutoHeaders)
-		r.AutoHeaders.AddPushPacketsTo(ctx, r.Decoder)
-		r.AutoHeaders.AddPushFramesTo(ctx, r.Decoder)
-		r.Decoder.AddPushPacketsTo(ctx, r.SyncBarrier)
-		r.Decoder.AddPushFramesTo(ctx, r.SyncBarrier)
+		r.Filter.AddPushTo(ctx, r.AutoHeaders)
+		r.AutoHeaders.AddPushTo(ctx, r.Decoder)
+		r.Decoder.AddPushTo(ctx, r.SyncBarrier)
 	}
 
 	return r, nil

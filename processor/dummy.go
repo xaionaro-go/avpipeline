@@ -3,8 +3,7 @@ package processor
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 )
 
@@ -26,16 +25,10 @@ func (p *Dummy) String() string {
 func (p *Dummy) Close(ctx context.Context) error {
 	return nil
 }
-func (p *Dummy) InputPacketChan() chan<- packet.Input {
-	return DiscardInputPacketChan
+func (p *Dummy) InputChan() chan<- packetorframe.InputUnion {
+	return DiscardInputChan
 }
-func (p *Dummy) OutputPacketChan() <-chan packet.Output {
-	return nil
-}
-func (p *Dummy) InputFrameChan() chan<- frame.Input {
-	return DiscardInputFrameChan
-}
-func (p *Dummy) OutputFrameChan() <-chan frame.Output {
+func (p *Dummy) OutputChan() <-chan packetorframe.OutputUnion {
 	return nil
 }
 func (p *Dummy) ErrorChan() <-chan error {

@@ -10,8 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -140,64 +139,32 @@ func (n *StreamMux[C]) OriginalNode() *NodeInput[C] {
 	return n.InputAll.Node
 }
 
-func (s *StreamMux[C]) GetPushPacketsTos(
+func (s *StreamMux[C]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
+) node.PushTos {
 	return nil
 }
 
-func (a *StreamMux[C]) WithPushPacketsTos(
+func (a *StreamMux[C]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
 }
 
-func (s *StreamMux[C]) AddPushPacketsTo(
+func (s *StreamMux[C]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
 }
 
-func (s *StreamMux[C]) SetPushPacketsTos(
+func (s *StreamMux[C]) SetPushTos(
 	ctx context.Context,
-	v node.PushPacketsTos,
+	v node.PushTos,
 ) {
 }
 
-func (s *StreamMux[C]) RemovePushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-) error {
-	return nil
-}
-
-func (s *StreamMux[C]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return nil
-}
-
-func (a *StreamMux[C]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-}
-
-func (s *StreamMux[C]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-}
-
-func (s *StreamMux[C]) SetPushFramesTos(
-	ctx context.Context,
-	v node.PushFramesTos,
-) {
-}
-
-func (s *StreamMux[C]) RemovePushFramesTo(
+func (s *StreamMux[C]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
@@ -212,11 +179,7 @@ func (s *StreamMux[C]) GetChangeChanIsServing() <-chan struct{} {
 	return s.InputAll.Node.GetChangeChanIsServing()
 }
 
-func (s *StreamMux[C]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return nil
-}
-
-func (s *StreamMux[C]) GetChangeChanPushFramesTo() <-chan struct{} {
+func (s *StreamMux[C]) GetChangeChanPushTo() <-chan struct{} {
 	return nil
 }
 

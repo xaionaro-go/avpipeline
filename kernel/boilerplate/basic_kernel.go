@@ -5,11 +5,10 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
@@ -19,8 +18,8 @@ type CustomHandler interface {
 	fmt.Stringer
 }
 
-type VisitInputFramer interface {
-	VisitInputFrame(ctx context.Context, input *frame.Input) error
+type VisitInputer interface {
+	VisitInput(ctx context.Context, input *packetorframe.InputUnion) error
 }
 
 type ErrSkip struct{}
@@ -29,16 +28,8 @@ func (ErrSkip) Error() string {
 	return "skip this frame/packet"
 }
 
-type AmendOutputFramer interface {
-	AmendOutputFrame(ctx context.Context, output *frame.Output) error
-}
-
-type VisitInputPacketer interface {
-	VisitInputPacket(ctx context.Context, input *packet.Input) error
-}
-
-type AmendOutputPacketer interface {
-	AmendOutputPacket(ctx context.Context, output *packet.Output) error
+type AmendOutputer interface {
+	AmendOutput(ctx context.Context, output *packetorframe.OutputUnion) error
 }
 
 type Base[H CustomHandler] struct {
@@ -67,80 +58,44 @@ func NewBasicKernel[H CustomHandler](
 	return k
 }
 
-func (k *Base[H]) SendInputPacket(
+func (k *Base[H]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket()")
-	defer func() { logger.Tracef(ctx, "/SendInputPacket(): %v", _err) }()
+	logger.Tracef(ctx, "SendInput()")
+	defer func() { logger.Tracef(ctx, "/SendInput(): %v", _err) }()
 
-	if sender, ok := any(k.Handler).(kerneltypes.SendInputPacketer); ok {
-		return sender.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
+	if sender, ok := any(k.Handler).(kerneltypes.SendInputer); ok {
+		return sender.SendInput(ctx, input, outputCh)
 	}
 
-	if visitor, ok := any(k.Handler).(VisitInputPacketer); ok {
-		if err := visitor.VisitInputPacket(ctx, &input); err != nil {
-			return prepareError(ctx, err, "visit input packet")
+	if visitor, ok := any(k.Handler).(VisitInputer); ok {
+		if err := visitor.VisitInput(ctx, &input); err != nil {
+			return prepareError(ctx, err, "visit input")
 		}
 	}
 
-	outPkt := packet.BuildOutput(
-		packet.CloneAsReferenced(input.Packet),
-		input.StreamInfo,
-	)
+	out := input.CloneAsReferencedOutput()
 
-	if sender, ok := any(k.Handler).(AmendOutputPacketer); ok {
-		if err := sender.AmendOutputPacket(ctx, &outPkt); err != nil {
-			return prepareError(ctx, err, "amend output packet")
+	if amender, ok := any(k.Handler).(AmendOutputer); ok {
+		if err := amender.AmendOutput(ctx, &out); err != nil {
+			return prepareError(ctx, err, "amend output")
 		}
 	}
 
-	select {
-	case outputPacketsCh <- outPkt:
-	case <-ctx.Done():
-		return ctx.Err()
+	if out.Packet != nil || out.Frame != nil {
+		select {
+		case outputCh <- out:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
 }
 
-func (k *Base[H]) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	logger.Tracef(ctx, "SendInputFrame()")
-	defer func() { logger.Tracef(ctx, "/SendInputFrame(): %v", _err) }()
-
-	if sender, ok := any(k.Handler).(kerneltypes.SendInputFramer); ok {
-		return sender.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
-	}
-
-	if visitor, ok := any(k.Handler).(VisitInputFramer); ok {
-		if err := visitor.VisitInputFrame(ctx, &input); err != nil {
-			return prepareError(ctx, err, "visit input frame")
-		}
-	}
-
-	outFrame := frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	)
-
-	if amender, ok := any(k.Handler).(AmendOutputFramer); ok {
-		if err := amender.AmendOutputFrame(ctx, &outFrame); err != nil {
-			return prepareError(ctx, err, "amend output frame")
-		}
-	}
-
-	select {
-	case outputFramesCh <- outFrame:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	return nil
+func ptr[T any](v T) *T {
+	return &v
 }
 
 func prepareError(ctx context.Context, err error, action string) error {
@@ -183,14 +138,13 @@ func (k *Base[H]) CloseChan() <-chan struct{} {
 
 func (k *Base[H]) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	logger.Tracef(ctx, "Generate()")
 	defer func() { logger.Tracef(ctx, "/Generate(): %v", _err) }()
 
 	if sender, ok := any(k.Handler).(kerneltypes.Generator); ok {
-		return sender.Generate(ctx, outputPacketsCh, outputFramesCh)
+		return sender.Generate(ctx, outputCh)
 	}
 
 	return nil

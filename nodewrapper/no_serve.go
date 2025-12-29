@@ -8,8 +8,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	framecondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetcondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -63,72 +62,38 @@ func (n *NoServe[N]) String() string {
 	return fmt.Sprintf("NoServe(%s)", stringer)
 }
 
-func (n *NoServe[N]) GetPushPacketsTos(
+func (n *NoServe[N]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
+) node.PushTos {
 	return nil
 }
 
-func (n *NoServe[N]) WithPushPacketsTos(
+func (n *NoServe[N]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
 }
 
-func (n *NoServe[N]) AddPushPacketsTo(
+func (n *NoServe[N]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetcondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	panic("NoServe cannot add PushPacketsTo")
+	panic("NoServe cannot add PushTo")
 }
 
-func (n *NoServe[N]) SetPushPacketsTos(
+func (n *NoServe[N]) SetPushTos(
 	ctx context.Context,
-	pushTos node.PushPacketsTos,
+	pushTos node.PushTos,
 ) {
-	panic("NoServe cannot set PushPacketsTos")
+	panic("NoServe cannot set PushTos")
 }
 
-func (n *NoServe[N]) RemovePushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-) error {
-	panic("NoServe cannot remove PushPacketsTo")
-}
-
-func (n *NoServe[N]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return nil
-}
-
-func (n *NoServe[N]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-}
-
-func (n *NoServe[N]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framecondition.Condition,
-) {
-	panic("NoServe cannot add PushFramesTo")
-}
-
-func (n *NoServe[N]) SetPushFramesTos(
-	ctx context.Context,
-	pushTos node.PushFramesTos,
-) {
-	panic("NoServe cannot set PushFramesTos")
-}
-
-func (n *NoServe[N]) RemovePushFramesTo(
+func (n *NoServe[N]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	panic("NoServe cannot remove PushFramesTo")
+	panic("NoServe cannot remove PushTo")
 }
 
 func (n *NoServe[N]) IsServing() bool {
@@ -143,40 +108,25 @@ func (n *NoServe[N]) GetProcessor() processor.Abstract {
 	return n.Node.GetProcessor()
 }
 
-func (n *NoServe[N]) GetInputPacketFilter(
+func (n *NoServe[N]) GetInputFilter(
 	ctx context.Context,
-) packetcondition.Condition {
-	return n.Node.GetInputPacketFilter(ctx)
+) packetorframefiltercondition.Condition {
+	return n.Node.GetInputFilter(ctx)
 }
 
-func (n *NoServe[N]) SetInputPacketFilter(
+func (n *NoServe[N]) SetInputFilter(
 	ctx context.Context,
-	cond packetcondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	n.Node.SetInputPacketFilter(ctx, cond)
-}
-
-func (n *NoServe[N]) GetInputFrameFilter(ctx context.Context) framecondition.Condition {
-	return n.Node.GetInputFrameFilter(ctx)
-}
-
-func (n *NoServe[N]) SetInputFrameFilter(
-	ctx context.Context,
-	cond framecondition.Condition,
-) {
-	n.Node.SetInputFrameFilter(ctx, cond)
+	n.Node.SetInputFilter(ctx, cond)
 }
 
 func (n *NoServe[N]) GetChangeChanIsServing() <-chan struct{} {
 	return n.Node.GetChangeChanIsServing()
 }
 
-func (n *NoServe[N]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return n.Node.GetChangeChanPushPacketsTo()
-}
-
-func (n *NoServe[N]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return n.Node.GetChangeChanPushFramesTo()
+func (n *NoServe[N]) GetChangeChanPushTo() <-chan struct{} {
+	return n.Node.GetChangeChanPushTo()
 }
 
 func (n *NoServe[N]) GetChangeChanDrained() <-chan struct{} {

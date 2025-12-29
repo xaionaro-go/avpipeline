@@ -4,62 +4,44 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	"github.com/xaionaro-go/avpipeline/packet"
-	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
+	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type PacketFilter struct {
 	*closuresignaler.ClosureSignaler
-	PacketFilter packetcondition.Condition
-	FrameFilter  framecondition.Condition
+	Condition packetorframecondition.Condition
 }
 
 var _ Abstract = (*PacketFilter)(nil)
 
 func NewPacketFilter(
-	packetFilter packetcondition.Condition,
-	frameFilter framecondition.Condition,
+	condition packetorframecondition.Condition,
 ) *PacketFilter {
 	return &PacketFilter{
 		ClosureSignaler: closuresignaler.New(),
-		PacketFilter:    packetFilter,
-		FrameFilter:     frameFilter,
+		Condition:       condition,
 	}
 }
 
-func (f *PacketFilter) SendInputPacket(
+func (f *PacketFilter) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	if f.PacketFilter != nil && !f.PacketFilter.Match(ctx, input) {
+	if f.Condition != nil && !f.Condition.Match(ctx, input) {
 		return nil
 	}
-	outputPacketsCh <- packet.BuildOutput(
-		packet.CloneAsReferenced(input.Packet),
-		input.StreamInfo,
-	)
-	return nil
-}
 
-func (f *PacketFilter) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	_ chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	if f.FrameFilter != nil && !f.FrameFilter.Match(ctx, input) {
-		return nil
+	output := input.CloneAsReferencedOutput()
+	if output.Get() == nil {
+		return kerneltypes.ErrUnexpectedInputType{}
 	}
-	outputFramesCh <- frame.BuildOutput(
-		frame.CloneAsReferenced(input.Frame),
-		input.StreamInfo,
-	)
+
+	outputCh <- output
 	return nil
 }
 
@@ -68,16 +50,7 @@ func (f *PacketFilter) GetObjectID() globaltypes.ObjectID {
 }
 
 func (f *PacketFilter) String() string {
-	switch {
-	case f.PacketFilter != nil && f.FrameFilter != nil:
-		return fmt.Sprintf("ConditionFilter(pkt:%s, frame:%s)", f.PacketFilter, f.FrameFilter)
-	case f.PacketFilter != nil:
-		return fmt.Sprintf("ConditionFilter(pkt:%s)", f.PacketFilter)
-	case f.FrameFilter != nil:
-		return fmt.Sprintf("ConditionFilter(frame:%s)", f.PacketFilter)
-	default:
-		return "ConditionFilter()"
-	}
+	return fmt.Sprintf("ConditionFilter(%s)", f.Condition)
 }
 
 func (f *PacketFilter) Close(ctx context.Context) error {
@@ -90,9 +63,8 @@ func (f *PacketFilter) CloseChan() <-chan struct{} {
 }
 
 func (f *PacketFilter) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }

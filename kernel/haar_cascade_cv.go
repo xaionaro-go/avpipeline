@@ -13,7 +13,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"gocv.io/x/gocv"
 )
@@ -58,28 +58,22 @@ func NewHaarCascade(
 	}, nil
 }
 
-func (c *HaarCascade) SendInputPacket(
-	context.Context,
-	packet.Input,
-	chan<- packet.Output,
-	chan<- frame.Output,
-) error {
-	return fmt.Errorf("haar cascade supports only decoded frames")
-}
-
-func (c *HaarCascade) SendInputFrame(
+func (c *HaarCascade) SendInput(
 	ctx context.Context,
-	input frame.Input,
-	_ chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
+	_, frameInput := input.Unwrap()
+	if frameInput == nil {
+		return fmt.Errorf("haar cascade supports only decoded frames")
+	}
 
 	//c.Classifier.DetectMultiScale(mat)
-	outputFrame := frame.BuildOutput(input.Frame, input.StreamInfo)
+	outputFrame := frame.BuildOutput(frameInput.Frame, frameInput.StreamInfo)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case outputFramesCh <- outputFrame:
+	case outputCh <- packetorframe.OutputUnion{Frame: &outputFrame}:
 	}
 	return fmt.Errorf("not implemented, yet")
 }
@@ -98,9 +92,8 @@ func (c *HaarCascade) Close(ctx context.Context) error {
 }
 
 func (c *HaarCascade) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }

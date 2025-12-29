@@ -7,50 +7,32 @@ import (
 	"context"
 	"fmt"
 
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 )
 
-func (m *Monitor) asPacketFilterCondition() packetfiltercondition.Condition {
-	return (*monitorAsPacketFilterCondition)(m)
+func (m *Monitor) asInputFilterCondition() packetorframefiltercondition.Condition {
+	return (*monitorAsInputFilterCondition)(m)
 }
 
-func (m *Monitor) asFrameFilterCondition() framefiltercondition.Condition {
-	return (*monitorAsFrameFilterCondition)(m)
-}
+type monitorAsInputFilterCondition Monitor
 
-type monitorAsPacketFilterCondition Monitor
-
-func (m *monitorAsPacketFilterCondition) asMonitor() *Monitor {
+func (m *monitorAsInputFilterCondition) asMonitor() *Monitor {
 	return (*Monitor)(m)
 }
 
-func (m *monitorAsPacketFilterCondition) String() string {
+func (m *monitorAsInputFilterCondition) String() string {
 	return fmt.Sprintf("Monitor(%s)", m.Object)
 }
 
-func (m *monitorAsPacketFilterCondition) Match(
+func (m *monitorAsInputFilterCondition) Match(
 	ctx context.Context,
-	in packetfiltercondition.Input,
+	in packetorframefiltercondition.Input,
 ) bool {
-	m.asMonitor().ObserveInputPacket(ctx, in.Input)
-	return true
-}
-
-type monitorAsFrameFilterCondition Monitor
-
-func (m *monitorAsFrameFilterCondition) asMonitor() *Monitor {
-	return (*Monitor)(m)
-}
-
-func (m *monitorAsFrameFilterCondition) String() string {
-	return fmt.Sprintf("Monitor(%s)", m.Object)
-}
-
-func (m *monitorAsFrameFilterCondition) Match(
-	ctx context.Context,
-	in framefiltercondition.Input,
-) bool {
-	m.asMonitor().ObserveInputFrame(ctx, in.Input)
+	if in.Input.Packet != nil {
+		m.asMonitor().ObserveInputPacket(ctx, *in.Input.Packet)
+	}
+	if in.Input.Frame != nil {
+		m.asMonitor().ObserveInputFrame(ctx, *in.Input.Frame)
+	}
 	return true
 }

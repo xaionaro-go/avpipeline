@@ -8,11 +8,11 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/xaionaro-go/avpipeline/extradata"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/bitstreamfilter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
@@ -98,47 +98,54 @@ func (bsf *BitstreamFilter) getFilterChain(
 	return filterChain, nil
 }
 
-func (bsf *BitstreamFilter) SendInputPacket(
+func (bsf *BitstreamFilter) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	_ chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	logger.Tracef(ctx, "SendInputPacket: %s", input)
-	defer func() { logger.Tracef(ctx, "/SendInputPacket: %s: %v", input, _err) }()
-	return xsync.DoA3R1(ctx, &bsf.Mutex, bsf.sendInputPacket, ctx, input, outputPacketsCh)
+	return xsync.DoA3R1(ctx, &bsf.Mutex, bsf.sendInput, ctx, input, outputCh)
 }
 
-func (bsf *BitstreamFilter) sendInputPacket(
+func (bsf *BitstreamFilter) sendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	filterChain, err := bsf.getFilterChain(ctx, input)
-	if err != nil {
-		return fmt.Errorf("unable to get a filter for stream #%d: %w", input.StreamIndex(), err)
+	inputPkt, _ := input.Unwrap()
+	if inputPkt == nil {
+		return fmt.Errorf("BitstreamFilter could be used only for Packet-s, but not for Frame-s")
 	}
-	logger.Tracef(ctx, "filterChain for stream #%d: %d filters", input.StreamIndex(), len(filterChain))
+	filterChain, err := bsf.getFilterChain(ctx, *inputPkt)
+	if err != nil {
+		return fmt.Errorf("unable to get a filter for stream #%d: %w", inputPkt.GetStreamIndex(), err)
+	}
+	logger.Tracef(ctx, "filterChain for stream #%d: %d filters", inputPkt.GetStreamIndex(), len(filterChain))
 
 	if len(filterChain) == 0 {
 		bsf.Mutex.UDo(ctx, func() {
 			select {
 			case <-ctx.Done():
-			case outputPacketsCh <- packet.BuildOutput(
-				input.Packet,
-				input.StreamInfo,
-			):
+			case outputCh <- input.CloneAsReferencedOutput():
 			}
 		})
 		return ctx.Err()
 	}
 
+	return bsf.sendPacketToFilterChain(ctx, *inputPkt, filterChain, outputCh)
+}
+
+func (bsf *BitstreamFilter) sendPacketToFilterChain(
+	ctx context.Context,
+	input packet.Input,
+	filterChain []*InternalBitstreamFilterInstance,
+	outputCh chan<- packetorframe.OutputUnion,
+) error {
 	pkts := []*astiav.Packet{packet.CloneAsReferenced(input.Packet)}
 	for idx, filter := range filterChain {
 		for _, pkt := range pkts {
 			bsf.SentPacketsWithoutOutput++
-			logger.Tracef(ctx, "sending %s to %s", input, filter.Name())
-			err = filter.SendPacket(pkt)
+			logger.Tracef(ctx, "sending %s to %s", input, filter.BitStreamFilter.Name())
+			err := filter.BitStreamFilterContext.SendPacket(pkt)
 			packet.Pool.Put(pkt)
 			if err != nil {
 				if filter.Params.SkipOnFailure {
@@ -152,8 +159,8 @@ func (bsf *BitstreamFilter) sendInputPacket(
 
 		for {
 			pkt := packet.Pool.Get()
-			logger.Tracef(ctx, "receiving a packet from %s", filter.Name())
-			err := filter.ReceivePacket(pkt)
+			logger.Tracef(ctx, "receiving a packet from %s", filter.BitStreamFilter.Name())
+			err := filter.BitStreamFilterContext.ReceivePacket(pkt)
 			if err != nil {
 				isEOF := errors.Is(err, astiav.ErrEof)
 				isEAgain := errors.Is(err, astiav.ErrEagain)
@@ -174,7 +181,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 			if packetSideData := pkt.SideData(); packetSideData != nil {
 				if newExtraData, ok := packetSideData.NewExtraData().Get(); ok {
 					extraData := extradata.Raw(newExtraData)
-					logger.Tracef(ctx, "updating extra data for output stream #%d: %s", input.StreamIndex(), extraData)
+					logger.Tracef(ctx, "updating extra data for output stream #%d: %s", input.GetStreamIndex(), extraData)
 					outCodecParams.SetExtraData(newExtraData)
 					if idx < len(filterChain)-1 {
 						nextFilter := filterChain[idx+1]
@@ -189,15 +196,15 @@ func (bsf *BitstreamFilter) sendInputPacket(
 			logger.Tracef(ctx,
 				"received %s from %s",
 				pkt,
-				filter.Name(),
+				filter.BitStreamFilter.Name(),
 			)
 			pkts = append(pkts, pkt)
 		}
 
 		if enableAntiStucking {
 			if bsf.SentPacketsWithoutOutput > 30 {
-				logger.Errorf(ctx, "bitstream filter %s seems stuck (did not produce any output packets for %d input packets); resetting the filter chain", filter.Name(), bsf.SentPacketsWithoutOutput)
-				bsf.FilterChains[input.StreamIndex()] = nil
+				logger.Errorf(ctx, "bitstream filter %s seems stuck (did not produce any output packets for %d input packets); resetting the filter chain", filter.BitStreamFilter.Name(), bsf.SentPacketsWithoutOutput)
+				bsf.FilterChains[input.GetStreamIndex()] = nil
 			}
 		}
 	}
@@ -206,16 +213,16 @@ func (bsf *BitstreamFilter) sendInputPacket(
 	codecParams := latestFilter.BitStreamFilterContext.OutputCodecParameters()
 	logger.Tracef(ctx,
 		"stream #%d: bitstream filter chain %s produced %d output packets",
-		input.StreamIndex(),
+		input.GetStreamIndex(),
 		bsf.GetChainParamser,
 		len(pkts),
 	)
 
-	outputStream := bsf.getOutputStream(ctx, input.StreamIndex(), codecParams, input.Stream.TimeBase())
+	outputStream := bsf.getOutputStream(ctx, input.GetStreamIndex(), codecParams, input.GetTimeBase())
 	input.StreamInfo = &packet.StreamInfo{
 		Stream:           outputStream,
 		Source:           bsf,
-		PipelineSideData: input.PipelineSideData,
+		PipelineSideData: input.GetPipelineSideData(),
 	}
 
 	bsf.Mutex.UDo(ctx, func() {
@@ -227,7 +234,7 @@ func (bsf *BitstreamFilter) sendInputPacket(
 			select {
 			case <-ctx.Done():
 				return
-			case outputPacketsCh <- pkt:
+			case outputCh <- packetorframe.OutputUnion{Packet: &pkt}:
 			}
 		}
 	})
@@ -263,15 +270,6 @@ func (bsf *BitstreamFilter) getOutputStream(
 	return outputStream
 }
 
-func (bsf *BitstreamFilter) SendInputFrame(
-	context.Context,
-	frame.Input,
-	chan<- packet.Output,
-	chan<- frame.Output,
-) error {
-	return fmt.Errorf("BitstreamFilter could be used only for Packet-s, but not for Frame-s")
-}
-
 func (bsf *BitstreamFilter) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(bsf)
 }
@@ -286,9 +284,8 @@ func (bsf *BitstreamFilter) Close(ctx context.Context) error {
 }
 
 func (bsf *BitstreamFilter) Generate(
-	context.Context,
-	chan<- packet.Output,
-	chan<- frame.Output,
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return nil
 }

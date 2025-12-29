@@ -3,27 +3,21 @@ package kernel
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 type Dummy struct {
-	SendInputPacketFn func(
+	SendInputFn func(
 		ctx context.Context,
-		input packet.Input,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
+		input packetorframe.InputUnion,
+		outputCh chan<- packetorframe.OutputUnion,
 	) error
-	SendInputPacketCallCount int
+	SendInputCallCount int
 
-	SendInputFrameFn func(
-		ctx context.Context,
-		input frame.Input,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
-	) error
-	SendInputFrameCallCount int
+	SendPacketCallCount int
+	SendFrameCallCount  int
 
 	CloseFn        func(context.Context) error
 	CloseCallCount int
@@ -33,38 +27,31 @@ type Dummy struct {
 
 	GenerateFn func(
 		ctx context.Context,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
+		outputCh chan<- packetorframe.OutputUnion,
 	) error
 	GenerateCallCount int
 }
 
 var _ Abstract = (*Dummy)(nil)
 
-func (d *Dummy) SendInputPacket(
+func (d *Dummy) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	d.SendInputPacketCallCount++
-	if d.SendInputPacketFn == nil {
+	d.SendInputCallCount++
+	switch {
+	case input.Packet != nil:
+		d.SendPacketCallCount++
+	case input.Frame != nil:
+		d.SendFrameCallCount++
+	default:
+		return types.ErrUnexpectedInputType{}
+	}
+	if d.SendInputFn == nil {
 		return nil
 	}
-	return d.SendInputPacketFn(ctx, input, outputPacketsCh, outputFramesCh)
-}
-
-func (d *Dummy) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	d.SendInputFrameCallCount++
-	if d.SendInputFrameFn == nil {
-		return nil
-	}
-	return d.SendInputFrameFn(ctx, input, outputPacketsCh, outputFramesCh)
+	return d.SendInputFn(ctx, input, outputCh)
 }
 
 func (d *Dummy) GetObjectID() globaltypes.ObjectID {
@@ -93,12 +80,11 @@ func (d *Dummy) CloseChan() <-chan struct{} {
 
 func (d *Dummy) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	d.GenerateCallCount++
 	if d.GenerateFn == nil {
 		return nil
 	}
-	return d.GenerateFn(ctx, outputPacketsCh, outputFramesCh)
+	return d.GenerateFn(ctx, outputCh)
 }

@@ -3,14 +3,12 @@ package types
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 type Generator interface {
 	Generate(
 		ctx context.Context,
-		outputPacketsCh chan<- packet.Output,
-		outputFramesCh chan<- frame.Output,
+		outputCh chan<- packetorframe.OutputUnion,
 	) error
 }

@@ -11,11 +11,11 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/go-ng/xatomic"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
@@ -249,37 +249,19 @@ func (r *Retryable[K]) getKernel(
 	return r.Kernel, r.KernelError
 }
 
-func (r *Retryable[K]) SendInputPacket(
+func (r *Retryable[K]) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return r.retry(ctx, func(k K) (_err error) {
 		defer func() {
 			r := recover()
 			if r != nil {
-				_err = fmt.Errorf("panic in SendInputPacket: %v:\n%s", r, debug.Stack())
+				_err = fmt.Errorf("panic in SendInput: %v:\n%s", r, debug.Stack())
 			}
 		}()
-		return k.SendInputPacket(ctx, input, outputPacketsCh, outputFramesCh)
-	})
-}
-
-func (r *Retryable[K]) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) error {
-	return r.retry(ctx, func(k K) (_err error) {
-		defer func() {
-			r := recover()
-			if r != nil {
-				_err = fmt.Errorf("panic in SendInputFrame: %v:\n%s", r, debug.Stack())
-			}
-		}()
-		return k.SendInputFrame(ctx, input, outputPacketsCh, outputFramesCh)
+		return k.SendInput(ctx, input, outputCh)
 	})
 }
 
@@ -346,11 +328,10 @@ func (r *Retryable[K]) pauseLocked(ctx context.Context) error {
 
 func (r *Retryable[K]) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	return r.retry(ctx, func(k K) error {
-		return k.Generate(ctx, outputPacketsCh, outputFramesCh)
+		return k.Generate(ctx, outputCh)
 	})
 }
 

@@ -10,8 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
-	packetfiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetfilter/condition"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
@@ -75,7 +74,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 	fwd.CancelFunc = cancelFn
 
 	dstNode := fwd.outputAsNode()
-	for _, pushTo := range fwd.Input.GetPushPacketsTos(ctx) {
+	for _, pushTo := range fwd.Input.GetPushTos(ctx) {
 		if pushTo.Node == dstNode {
 			return fmt.Errorf("internal error: packets pushing is already added")
 		}
@@ -86,15 +85,12 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 		return fmt.Errorf("internal error: unable to notify about the packet source: %w", err)
 	}
 	if fwd.AutoFixer == nil {
-		fwd.Input.AddPushPacketsTo(ctx, dstNode)
-		fwd.Input.AddPushFramesTo(ctx, dstNode)
+		fwd.Input.AddPushTo(ctx, dstNode)
 		return nil
 	}
 
-	fwd.Input.AddPushPacketsTo(ctx, fwd.AutoFixerInput)
-	fwd.Input.AddPushFramesTo(ctx, fwd.AutoFixerInput)
-	fwd.AutoFixer.Output().AddPushPacketsTo(ctx, dstNode)
-	fwd.AutoFixer.Output().AddPushFramesTo(ctx, dstNode)
+	fwd.Input.AddPushTo(ctx, fwd.AutoFixerInput)
+	fwd.AutoFixer.Output().AddPushTo(ctx, dstNode)
 	errCh := make(chan node.Error, 100)
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range errCh {
@@ -127,30 +123,18 @@ func (fwd *StreamForwarderCopy[CS, PS]) removePushingFurther(
 	}
 	var errs []error
 	if fwd.AutoFixer != nil {
-		err := fwd.Input.RemovePushPacketsTo(ctx, fwd.AutoFixerInput)
+		err := fwd.Input.RemovePushTo(ctx, fwd.AutoFixerInput)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.AutoFixer))
+			errs = append(errs, fmt.Errorf("unable to remove pushing %s->%s", fwd.Input, fwd.AutoFixer))
 		}
-		err = fwd.AutoFixer.Output().RemovePushPacketsTo(ctx, fwd.outputAsNode())
+		err = fwd.AutoFixer.Output().RemovePushTo(ctx, fwd.outputAsNode())
 		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.AutoFixer, fwd.Output))
-		}
-		err = fwd.Input.RemovePushFramesTo(ctx, fwd.AutoFixerInput)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.Input, fwd.AutoFixer))
-		}
-		err = fwd.AutoFixer.Output().RemovePushFramesTo(ctx, fwd.outputAsNode())
-		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.AutoFixer, fwd.Output))
+			errs = append(errs, fmt.Errorf("unable to remove pushing %s->%s", fwd.AutoFixer, fwd.Output))
 		}
 	} else {
-		err := fwd.Input.RemovePushPacketsTo(ctx, fwd.outputAsNode())
+		err := fwd.Input.RemovePushTo(ctx, fwd.outputAsNode())
 		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove packet pushing %s->%s", fwd.Input, fwd.Output))
-		}
-		err = fwd.Input.RemovePushFramesTo(ctx, fwd.outputAsNode())
-		if err != nil {
-			errs = append(errs, fmt.Errorf("unable to remove frame pushing %s->%s", fwd.Input, fwd.Output))
+			errs = append(errs, fmt.Errorf("unable to remove pushing %s->%s", fwd.Input, fwd.Output))
 		}
 	}
 	fwd.CancelFunc()
@@ -221,74 +205,39 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) OriginalNodeAbstract() node.Abstra
 	return fwd.Output
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushPacketsTos(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushTos(
 	ctx context.Context,
-) node.PushPacketsTos {
-	return fwd.Output.GetPushPacketsTos(ctx)
+) node.PushTos {
+	return fwd.Output.GetPushTos(ctx)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) WithPushPacketsTos(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) WithPushTos(
 	ctx context.Context,
-	callback func(context.Context, *node.PushPacketsTos),
+	callback func(context.Context, *node.PushTos),
 ) {
-	fwd.Output.WithPushPacketsTos(ctx, callback)
+	fwd.Output.WithPushTos(ctx, callback)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushPacketsTo(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushTo(
 	ctx context.Context,
 	dst node.Abstract,
-	conds ...packetfiltercondition.Condition,
+	conds ...packetorframefiltercondition.Condition,
 ) {
-	fwd.Output.AddPushPacketsTo(ctx, dst, conds...)
+	fwd.Output.AddPushTo(ctx, dst, conds...)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetPushPacketsTos(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetPushTos(
 	ctx context.Context,
-	pushTos node.PushPacketsTos,
+	pushTos node.PushTos,
 ) {
-	fwd.Output.SetPushPacketsTos(ctx, pushTos)
+	fwd.Output.SetPushTos(ctx, pushTos)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) RemovePushPacketsTo(
-	ctx context.Context,
-	dst node.Abstract,
-) error {
-	return fwd.Output.RemovePushPacketsTo(ctx, dst)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetPushFramesTos(
-	ctx context.Context,
-) node.PushFramesTos {
-	return fwd.Output.GetPushFramesTos(ctx)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) WithPushFramesTos(
-	ctx context.Context,
-	callback func(context.Context, *node.PushFramesTos),
-) {
-	fwd.Output.WithPushFramesTos(ctx, callback)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) AddPushFramesTo(
-	ctx context.Context,
-	dst node.Abstract,
-	conds ...framefiltercondition.Condition,
-) {
-	fwd.Output.AddPushFramesTo(ctx, dst, conds...)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetPushFramesTos(
-	ctx context.Context,
-	pushTos node.PushFramesTos,
-) {
-	fwd.Output.SetPushFramesTos(ctx, pushTos)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) RemovePushFramesTo(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	return fwd.Output.RemovePushFramesTo(ctx, dst)
+	return fwd.Output.RemovePushTo(ctx, dst)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsServing() bool {
@@ -299,42 +248,25 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetProcessor() processor.Abstract 
 	return fwd.Output.GetProcessor()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputPacketFilter(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFilter(
 	ctx context.Context,
-) packetfiltercondition.Condition {
-	return fwd.Output.GetInputPacketFilter(ctx)
+) packetorframefiltercondition.Condition {
+	return fwd.Output.GetInputFilter(ctx)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputPacketFilter(
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFilter(
 	ctx context.Context,
-	cond packetfiltercondition.Condition,
+	cond packetorframefiltercondition.Condition,
 ) {
-	fwd.Output.SetInputPacketFilter(ctx, cond)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetInputFrameFilter(
-	ctx context.Context,
-) framefiltercondition.Condition {
-	return fwd.Output.GetInputFrameFilter(ctx)
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) SetInputFrameFilter(
-	ctx context.Context,
-	cond framefiltercondition.Condition,
-) {
-	fwd.Output.SetInputFrameFilter(ctx, cond)
+	fwd.Output.SetInputFilter(ctx, cond)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanIsServing() <-chan struct{} {
 	return fwd.Output.GetChangeChanIsServing()
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushPacketsTo() <-chan struct{} {
-	return fwd.Output.GetChangeChanPushPacketsTo()
-}
-
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushFramesTo() <-chan struct{} {
-	return fwd.Output.GetChangeChanPushFramesTo()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanPushTo() <-chan struct{} {
+	return fwd.Output.GetChangeChanPushTo()
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetChangeChanDrained() <-chan struct{} {

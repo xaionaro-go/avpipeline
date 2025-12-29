@@ -17,10 +17,8 @@ type Abstract interface {
 import (
 	"context"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/kernel"
-	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/kernel/types"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -28,20 +26,12 @@ func (k *MyFancyAbstractPlaceholder) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(k)
 }
 
-func (k *MyFancyAbstractPlaceholder) SendInputPacket(
+func (k *MyFancyAbstractPlaceholder) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-}
-
-func (k *MyFancyAbstractPlaceholder) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
+	return nil
 }
 
 func (k *MyFancyAbstractPlaceholder) String() string {
@@ -49,16 +39,18 @@ func (k *MyFancyAbstractPlaceholder) String() string {
 }
 
 func (k *MyFancyAbstractPlaceholder) Close(ctx context.Context) (_err error) {
+	return nil
 }
 
 func (k *MyFancyAbstractPlaceholder) CloseChan() <-chan struct{} {
+	return nil
 }
 
 func (k *MyFancyAbstractPlaceholder) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
+	return nil
 }
 
 == for a packet source also: ==
@@ -78,12 +70,4 @@ func (k *MyFancyAbstractPlaceholder) WithInputFormatContext(
 ) {
 
 }
-
-func (k *MyFancyAbstractPlaceholder) NotifyAboutPacketSource(
-	ctx context.Context,
-	source packet.Source,
-) (_err error) {
-
-}
-
 */

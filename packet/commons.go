@@ -10,6 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/avconv"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/extradata"
+	packetorframetypes "github.com/xaionaro-go/avpipeline/packetorframe/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -59,11 +60,7 @@ func () NotifyAboutPacketSource(
 }
 */
 
-type StreamInfo struct {
-	*astiav.Stream   // is never nil
-	Source           // is never nil
-	PipelineSideData types.PipelineSideData
-}
+type StreamInfo = packetorframetypes.StreamInfo
 
 func BuildStreamInfo(
 	stream *astiav.Stream,
@@ -78,7 +75,7 @@ func BuildStreamInfo(
 }
 
 type Commons struct {
-	*astiav.Packet // may be nil, if comes from NotifyAboutPacketSource instead of SendInputPacket
+	*astiav.Packet // may be nil, if comes from NotifyAboutPacketSource instead of SendInput
 	*StreamInfo    // is never nil
 }
 
@@ -135,6 +132,10 @@ func (pkt *Commons) GetStreamIndex() int {
 	return pkt.Stream.Index()
 }
 
+func (pkt *Commons) SetStreamIndex(v int) {
+	pkt.Packet.SetStreamIndex(v)
+}
+
 func (pkt *Commons) GetStream() *astiav.Stream {
 	return pkt.Stream
 }
@@ -142,7 +143,7 @@ func (pkt *Commons) GetStream() *astiav.Stream {
 func (pkt *Commons) GetStreamFromSource(ctx context.Context) *astiav.Stream {
 	streamIndex := pkt.GetStreamIndex()
 	var result *astiav.Stream
-	pkt.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	pkt.Source.(Source).WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		for _, stream := range fmtCtx.Streams() {
 			if stream.Index() == streamIndex {
 				result = stream
@@ -217,7 +218,7 @@ func (pkt *Commons) AddPipelineSideData(obj any) types.PipelineSideData {
 }
 
 func (pkt *Commons) GetSource() Source {
-	return pkt.StreamInfo.Source
+	return pkt.StreamInfo.Source.(Source)
 }
 
 func (pkt *Commons) GetResolution() *codectypes.Resolution {
@@ -244,6 +245,10 @@ func (pkt *Commons) IsKey() bool {
 	return pkt.Packet.Flags().Has(astiav.PacketFlagKey)
 }
 
+func (pkt *Commons) GetCodecParameters() *astiav.CodecParameters {
+	return pkt.Stream.CodecParameters()
+}
+
 func (pkt *Commons) GetPacketSource() Source {
-	return pkt.StreamInfo.Source
+	return pkt.StreamInfo.Source.(Source)
 }

@@ -9,10 +9,9 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
-	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
@@ -41,23 +40,17 @@ func (m *monitorAsKernel) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(m)
 }
 
-func (m *monitorAsKernel) SendInputPacket(
+func (m *monitorAsKernel) SendInput(
 	ctx context.Context,
-	input packet.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	input packetorframe.InputUnion,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	m.asMonitor().ObserveInputPacket(ctx, input)
-	return nil
-}
-
-func (m *monitorAsKernel) SendInputFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
-) (_err error) {
-	m.asMonitor().ObserveInputFrame(ctx, input)
+	if input.Packet != nil {
+		m.asMonitor().ObserveInputPacket(ctx, *input.Packet)
+	}
+	if input.Frame != nil {
+		m.asMonitor().ObserveInputFrame(ctx, *input.Frame)
+	}
 	return nil
 }
 
@@ -76,8 +69,7 @@ func (m *monitorAsKernel) CloseChan() <-chan struct{} {
 
 func (m *monitorAsKernel) Generate(
 	ctx context.Context,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	return nil
 }

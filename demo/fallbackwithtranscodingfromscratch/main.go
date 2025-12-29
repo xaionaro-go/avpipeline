@@ -20,12 +20,14 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
+	frameconditionextra "github.com/xaionaro-go/avpipeline/frame/condition/extra"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
 	framefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/framefilter/condition"
 	"github.com/xaionaro-go/avpipeline/node/filter/packetfilter/preset/monotonicpts"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/limitframerate"
 	"github.com/xaionaro-go/avpipeline/preset/autofix"
@@ -231,42 +233,44 @@ func main() {
 	inputMainSwitchNode := node.NewFromKernel(ctx, kernel.NewBarrier(ctx,
 		sw.Output(0),
 	))
-	inputMainNode.AddPushPacketsTo(ctx,
+	inputMainNode.AddPushTo(ctx,
 		inputMainSwitchNode,
-		monotonicPTS,
+		packetorframefiltercondition.PacketFilter{Condition: monotonicPTS},
 	)
-	inputMainSwitchNode.AddPushPacketsTo(ctx, decoderMainNode)
-	decoderMainNode.AddPushPacketsTo(ctx, encoderNode)
-	decoderMainNode.AddPushFramesTo(ctx, encoderNode)
+	inputMainSwitchNode.AddPushTo(ctx, decoderMainNode)
+	decoderMainNode.AddPushTo(ctx, encoderNode)
 
 	// fallback
 	inputFallbackSwitchNode := node.NewFromKernel(ctx, kernel.NewBarrier(ctx,
 		sw.Output(1),
 	))
-	inputFallbackNode.AddPushPacketsTo(ctx,
+	inputFallbackNode.AddPushTo(ctx,
 		inputFallbackSwitchNode,
-		monotonicPTS,
+		packetorframefiltercondition.PacketFilter{Condition: monotonicPTS},
 	)
-	inputFallbackSwitchNode.AddPushPacketsTo(ctx, decoderFallbackNode)
-	decoderFallbackNode.AddPushPacketsTo(ctx, encoderNode)
-	decoderFallbackNode.AddPushFramesTo(ctx, encoderNode)
+	inputFallbackSwitchNode.AddPushTo(ctx, decoderFallbackNode)
+	decoderFallbackNode.AddPushTo(ctx, encoderNode)
 
 	if *videoMaxFPS >= 0 {
 		r := globaltypes.RationalFromApproxFloat64(*videoMaxFPS)
-		encoderNode.SetInputFrameFilter(ctx, framefiltercondition.Frame{framecondition.Or{
-			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
-			framecondition.PacketOrFrame{
-				limitframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+		encoderNode.SetInputFilter(ctx, packetorframefiltercondition.FrameFilter{
+			Condition: framefiltercondition.Frame{
+				framecondition.Or{
+					framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
+					frameconditionextra.PacketOrFrame{
+						limitframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{StaticValue: r}),
+					},
+				},
 			},
-		}})
+		})
 	}
 
 	if outputBSFEnabled {
 		encoderBSF := autofix.New(ctx, output.Kernel)
-		encoderNode.AddPushPacketsTo(ctx, encoderBSF)
-		encoderBSF.AddPushPacketsTo(ctx, outputNode)
+		encoderNode.AddPushTo(ctx, encoderBSF)
+		encoderBSF.AddPushTo(ctx, outputNode)
 	} else {
-		encoderNode.AddPushPacketsTo(ctx, outputNode)
+		encoderNode.AddPushTo(ctx, outputNode)
 	}
 
 	pipelineInputs := node.Nodes[node.Abstract]{

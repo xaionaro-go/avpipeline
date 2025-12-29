@@ -5,3 +5,4 @@ import (
 )
 
 type ErrNotImplemented = typesnolibav.ErrNotImplemented
+type ErrUnexpectedInputType = typesnolibav.ErrUnexpectedInputType

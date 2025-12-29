@@ -16,11 +16,11 @@ type Frame struct {
 }
 
 func (f *Frame) MaxPosition(ctx context.Context) time.Duration {
-	if f.InputPacket == nil || f.InputPacket.Source == nil {
+	if f.InputPacket == nil || f.InputPacket.GetSource() == nil {
 		return 0
 	}
 	var dur int64
-	f.InputPacket.Source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	f.InputPacket.GetSource().WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		dur = fmtCtx.Duration()
 	})
 	return toDuration(dur, 1/float64(astiav.TimeBase))

@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/xaionaro-go/avpipeline/frame"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/packet"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
@@ -20,61 +19,38 @@ type Kernel interface {
 
 func readerLoop(
 	ctx context.Context,
-	inputPacketsChan <-chan packet.Input,
-	inputFramesChan <-chan frame.Input,
+	inputChan <-chan packetorframe.InputUnion,
 	kernel Kernel,
-	outputPacketsCh chan<- packet.Output,
-	outputFramesCh chan<- frame.Output,
+	outputCh chan<- packetorframe.OutputUnion,
 	countersPtr *Counters,
 ) (_err error) {
-	logger.Debugf(ctx, "ReaderLoop[%s]: chan %p", kernel, inputPacketsChan)
-	defer func() { logger.Debugf(ctx, "/ReaderLoop[%s]: chan %p: %v", kernel, inputPacketsChan, _err) }()
+	logger.Debugf(ctx, "ReaderLoop[%s]: chan %p", kernel, inputChan)
+	defer func() { logger.Debugf(ctx, "/ReaderLoop[%s]: chan %p: %v", kernel, inputChan, _err) }()
 
 	defer func() {
 		for {
 			select {
-			case pkt, ok := <-inputPacketsChan:
+			case input, ok := <-inputChan:
 				if !ok {
-					if inputFramesChan == nil {
-						return
-					}
-					inputPacketsChan = nil
-					continue
-				}
-				mediaType := pkt.GetMediaType()
-				objSize := uint64(pkt.GetSize())
-				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, pkt)
-				err := kernel.SendInputPacket(ctx, pkt, outputPacketsCh, outputFramesCh)
-				countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
-				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, pkt, err)
-				if err != nil {
-					if eofErr(err) {
-						logger.Debugf(ctx, "ReaderLoop[%s](closing): EOF reached", kernel)
-						return
-					}
-					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send packet: %v", kernel, err)
 					return
 				}
-			case f, ok := <-inputFramesChan:
-				if !ok {
-					if inputPacketsChan == nil {
-						return
-					}
-					inputFramesChan = nil
-					continue
+				mediaType := input.GetMediaType()
+				objSize := uint64(input.GetSize())
+				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, input)
+				err := kernel.SendInput(ctx, input, outputCh)
+				pkt, frame := input.Unwrap()
+				if pkt != nil {
+					countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+				} else if frame != nil {
+					countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
 				}
-				mediaType := f.GetMediaType()
-				objSize := uint64(f.GetSize())
-				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, f)
-				err := kernel.SendInputFrame(ctx, f, outputPacketsCh, outputFramesCh)
-				countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
-				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, f, err)
+				logger.Tracef(ctx, "ReaderLoop[%s](closing): sent %#+v: %v", kernel, input, err)
 				if err != nil {
 					if eofErr(err) {
 						logger.Debugf(ctx, "ReaderLoop[%s](closing): EOF reached", kernel)
 						return
 					}
-					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send frame: %v", kernel, err)
+					logger.Errorf(ctx, "ReaderLoop[%s](closing): unable to send input: %v", kernel, err)
 					return
 				}
 			default:
@@ -96,41 +72,24 @@ func readerLoop(
 		case <-ch:
 			logger.Debugf(ctx, "kernel is closed")
 			return io.EOF
-		case pkt, ok := <-inputPacketsChan:
+		case input, ok := <-inputChan:
 			if !ok {
-				if inputFramesChan == nil {
-					logger.Debugf(ctx, "the frames input channels is closed")
-					return io.EOF
-				}
-				inputPacketsChan = nil
-				continue
+				logger.Debugf(ctx, "the input channel is closed")
+				return io.EOF
 			}
-			mediaType := pkt.GetMediaType()
-			objSize := uint64(pkt.GetSize())
-			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, pkt)
-			err := kernel.SendInputPacket(ctx, pkt, outputPacketsCh, outputFramesCh)
-			countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
-			logger.Tracef(ctx, "ReaderLoop[%s]: sent %#+v: %v", kernel, pkt, err)
+			mediaType := input.GetMediaType()
+			objSize := uint64(input.GetSize())
+			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, input)
+			err := kernel.SendInput(ctx, input, outputCh)
+			pkt, frame := input.Unwrap()
+			if pkt != nil {
+				countersPtr.Processed.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+			} else if frame != nil {
+				countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
+			}
+			logger.Tracef(ctx, "ReaderLoop[%s]: sent %#+v: %v", kernel, input, err)
 			if err != nil {
-				return fmt.Errorf("unable to send packet: %w", err)
-			}
-		case f, ok := <-inputFramesChan:
-			if !ok {
-				if inputPacketsChan == nil {
-					logger.Debugf(ctx, "the packets input channels is closed")
-					return io.EOF
-				}
-				inputFramesChan = nil
-				continue
-			}
-			mediaType := f.GetMediaType()
-			objSize := uint64(f.GetSize())
-			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, f)
-			err := kernel.SendInputFrame(ctx, f, outputPacketsCh, outputFramesCh)
-			countersPtr.Processed.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
-			logger.Tracef(ctx, "ReaderLoop[%s]: sent %#+v: %v", kernel, f, err)
-			if err != nil {
-				return fmt.Errorf("unable to send frame: %w", err)
+				return fmt.Errorf("unable to send input: %w", err)
 			}
 		}
 	}
