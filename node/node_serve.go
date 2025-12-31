@@ -35,6 +35,8 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	serveConfig ServeConfig,
 	errCh chan<- Error,
 ) {
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
 	ctx = belt.WithField(ctx, "node_ptr", fmt.Sprintf("%p", n))
 	ctx = belt.WithField(ctx, "proc_ptr", fmt.Sprintf("%p", n.GetProcessor()))
 	ctx = belt.WithField(ctx, "processor", n.Processor.String())
