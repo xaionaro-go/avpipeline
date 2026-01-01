@@ -500,7 +500,7 @@ func (o *Output) updateOutputFormat(
 
 		outputStream, err := o.initOutputStreamFor(ctx, inputSource, inputStream)
 		if err != nil {
-			return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
+			return fmt.Errorf("(output) unable to initialize an output stream for input stream #%d: %w", inputStreamIndex, err)
 		}
 
 		if outputStream.CodecParameters().MediaType() == astiav.MediaTypeVideo {

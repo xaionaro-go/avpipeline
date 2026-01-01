@@ -74,22 +74,19 @@ func (h *AutoHeaders) sendInputLocked(
 			outputCh,
 		)
 	}
-	if input.Packet == nil {
-		return h.Processor.Kernel.SendInput(
-			ctx,
-			input,
-			outputCh,
-		)
-	}
 	if h.CallCount.Add(1) > 1 {
 		// there is no real reason to limit the amount of calls;
 		// but this is just for early misbehavior detection
 		return fmt.Errorf("this kernel is supposed to be used only once")
 	}
 
-	newKernel, err := h.detectAppropriateFixerKernel(ctx, *input.Packet)
-	if err != nil {
-		return fmt.Errorf("unable to detect appropriate fixer kernel: %w", err)
+	var newKernel kerneltypes.Abstract
+	if input.Packet != nil {
+		var err error
+		newKernel, err = h.detectAppropriateFixerKernel(ctx, *input.Packet)
+		if err != nil {
+			return fmt.Errorf("unable to detect appropriate fixer kernel: %w", err)
+		}
 	}
 	if newKernel == nil {
 		newKernel = &kernel.Passthrough{} // no fixing is needed

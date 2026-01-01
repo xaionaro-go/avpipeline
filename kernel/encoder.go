@@ -59,8 +59,10 @@ type Encoder[EF codec.EncoderFactory] struct {
 	isDirtyCache              atomic.Bool
 }
 
-var _ Abstract = (*Encoder[codec.EncoderFactory])(nil)
-var _ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
+var (
+	_ Abstract      = (*Encoder[codec.EncoderFactory])(nil)
+	_ packet.Source = (*Encoder[codec.EncoderFactory])(nil)
+)
 
 type streamEncoder struct {
 	Encoder         codec.Encoder
@@ -263,7 +265,7 @@ func (e *Encoder[EF]) initEncoderAndOutputFor(
 	}
 	err := e.initEncoderFor(ctx, streamIndex, params, timeBase, frameSource)
 	if err != nil {
-		return fmt.Errorf("unable to initialize an output stream for input stream #%d: %w", streamIndex, err)
+		return fmt.Errorf("(encoder) unable to initialize an output stream for input stream #%d: %w", streamIndex, err)
 	}
 
 	encoder := e.encoders[streamIndex]
@@ -306,12 +308,15 @@ func (e *Encoder[EF]) initEncoderFor(
 	}
 
 	var opts []codec.Option
-	if getDecoderer, ok := frameSource.(codec.GetDecoderer); ok {
-		opts = append(opts, codec.EncoderFactoryOptionGetDecoderer{GetDecoderer: getDecoderer})
-	} else {
-		if frameSource != nil {
+	if frameSource != nil {
+		if getDecoderer, ok := frameSource.(codec.GetDecoderer); ok {
+			logger.Debugf(ctx, "the frame source implements codec.GetDecoderer: %T", frameSource)
+			opts = append(opts, codec.EncoderFactoryOptionGetDecoderer{GetDecoderer: getDecoderer})
+		} else {
 			logger.Debugf(ctx, "the frame source does not implement codec.GetDecoderer: %T", frameSource)
 		}
+	} else {
+		logger.Debugf(ctx, "the frame source is nil")
 		opts = append(opts, codec.EncoderFactoryOptionOnlyDummy{OnlyDummy: true})
 	}
 
@@ -404,7 +409,6 @@ func (e *Encoder[EF]) sendPacket(
 		assert(ctx, streamEncoder != nil)
 		return streamEncoder, nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("unable to get the encoder for stream index %d: %w", input.GetStreamIndex(), err)
 	}
@@ -727,7 +731,7 @@ func (e *Encoder[EF]) drain(
 			pkt.RescaleTs(frameInfo.TimeBase, outputStream.TimeBase())
 		}
 
-		//pkt.SetPos(-1) // <- TODO: should this happen? why?
+		// pkt.SetPos(-1) // <- TODO: should this happen? why?
 		if pkt.Dts() > pkt.Pts() && pkt.Dts() != consts.NoPTSValue && pkt.Pts() != consts.NoPTSValue && (frameInfo.PictureType != astiav.PictureTypeB) {
 			if encoderDTSHigherPTSCorrect {
 				logger.Errorf(ctx, "DTS (%d) > PTS (%d) correcting DTS to %d (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), pkt.Pts(), int(frameInfo.PictureType))
@@ -1079,7 +1083,6 @@ func (e *Encoder[EF]) send(
 	outputStream *astiav.Stream,
 	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-
 	outPktWrapped := packet.BuildOutput(
 		outPkt,
 		packet.BuildStreamInfo(
