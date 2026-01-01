@@ -41,7 +41,8 @@ type InputConfig = kerneltypes.InputConfig
 
 type Input struct {
 	*closuresignaler.ClosureSignaler
-	initialized chan struct{}
+	openFinished chan struct{}
+	openError    error
 
 	*astiav.FormatContext
 	*astiav.IOInterrupter
@@ -73,8 +74,10 @@ type Input struct {
 	WaitGroup sync.WaitGroup
 }
 
-var _ Abstract = (*Input)(nil)
-var _ packet.Source = (*Input)(nil)
+var (
+	_ Abstract      = (*Input)(nil)
+	_ packet.Source = (*Input)(nil)
+)
 
 var nextInputID atomic.Uint64
 
@@ -96,7 +99,7 @@ func NewInputFromURL(
 		DefaultWidth:  inputDefaultWidth,
 		DefaultHeight: inputDefaultHeight,
 
-		initialized:     make(chan struct{}),
+		openFinished:    make(chan struct{}),
 		ClosureSignaler: closuresignaler.New(),
 
 		AutoClose:          cfg.AutoClose,
@@ -170,8 +173,14 @@ func NewInputFromURL(
 	}
 
 	if cfg.AsyncOpen {
+		i.WaitGroup.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
-			if err := i.doOpen(ctx, urlString, authKey, inputFormat, cfg); err != nil {
+			var err error
+			func() {
+				defer i.WaitGroup.Done()
+				err = i.doOpen(ctx, urlString, authKey, inputFormat, cfg)
+			}()
+			if err != nil {
 				logger.Errorf(ctx, "unable to open: %v", err)
 				i.Close(ctx)
 			}
@@ -194,6 +203,10 @@ func (i *Input) doOpen(
 ) (_err error) {
 	logger.Debugf(ctx, "doOpen(%q, <HIDDEN>, %q, %+#v)", urlString, inputFormat, cfg)
 	defer func() { logger.Debugf(ctx, "/doOpen(%q, <HIDDEN>, %q, %+#v): %v", urlString, inputFormat, cfg, _err) }()
+	defer func() {
+		i.openError = _err
+		close(i.openFinished)
+	}()
 	urlWithSecret := urlString
 	if authKey.Get() != "" {
 		urlWithSecret += authKey.Get()
@@ -293,7 +306,6 @@ func (i *Input) doOpen(
 	if cfg.OnPostOpen != nil {
 		cfg.OnPostOpen.FireHook(ctx, i)
 	}
-	close(i.initialized)
 
 	return nil
 }
@@ -312,10 +324,10 @@ func (i *Input) Close(
 	i.IOInterrupter.Interrupt()
 
 	select {
-	case <-i.initialized:
-		logger.Debugf(ctx, "doOpen completed, proceeding with close")
+	case <-i.openFinished:
+		logger.Debugf(ctx, "doOpen completed (%v), proceeding with close", i.openError)
 	default:
-		logger.Errorf(ctx, "closing before initialization is complete is not implemented yet; it may SEGFAULT")
+		logger.Debugf(ctx, "doOpen not completed yet, waiting for it to finish")
 	}
 
 	i.ClosureSignaler.Close(ctx)
@@ -467,7 +479,12 @@ func (i *Input) Generate(
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-i.initialized:
+	case <-i.CloseChan():
+		return io.EOF
+	case <-i.openFinished:
+	}
+	if i.openError != nil {
+		return i.openError
 	}
 
 	if i.AutoClose {
@@ -550,16 +567,15 @@ func (i *Input) Generate(
 	prevPkts := map[int]*packet.Output{}
 	defer func() {
 		for _, pkt := range prevPkts {
-			select {
-			case <-ctx.Done():
-			case <-i.CloseChan():
-			default:
+			if err := sendPkt(pkt); err != nil {
+				logger.Warnf(ctx, "unable to send remaining packet during cleanup: %v", err)
 			}
-			sendPkt(pkt)
 		}
 	}()
 	for {
 		select {
+		case <-i.CloseChan():
+			return io.EOF
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -688,10 +704,12 @@ func (i *Input) WithOutputFormatContext(
 	logger.Tracef(ctx, "WithFormatContext")
 	defer func() { logger.Tracef(ctx, "/WithFormatContext") }()
 	select {
+	case <-i.CloseChan():
+		return
 	case <-ctx.Done():
 		logger.Debugf(ctx, "context is closed")
 		return
-	case <-i.initialized:
+	case <-i.openFinished:
 	}
 	callback(i.FormatContext)
 }

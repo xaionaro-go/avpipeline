@@ -181,6 +181,13 @@ func (c *codecInternals) isMediaCodec() bool {
 	return strings.HasSuffix(c.codec.Name(), "_mediacodec")
 }
 
+func (c *codecInternals) isNVENC() bool {
+	if c.codec == nil {
+		return false
+	}
+	return strings.HasSuffix(c.codec.Name(), "_nvenc")
+}
+
 func (c *codecInternals) reset(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "reset")
 	defer func() { logger.Tracef(ctx, "/reset: %v", _err) }()
@@ -395,17 +402,11 @@ func newCodec(
 
 	var gopSize int64
 	var bFrames int64
-	var forcePixelFormat astiav.PixelFormat
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeVideo:
 		lazyInitOptions()
-		c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 
-		defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
 		if c.isMediaCodec() {
-			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
-				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
-			}
 			logger.Debugf(ctx, "MediaCodec: enforcing NDK codec")
 			customOptions.Set("ndk_codec", "1", 0) // NDK path
 			customOptions.Set("ndk_async", "0", 0) // disable async (avoid restart-after-flush issue)
@@ -485,27 +486,15 @@ func newCodec(
 					}
 				}
 
-				if customOptions.Get("pix_fmt", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
-					logIfError(customOptions.Set("pix_fmt", defaultMediaCodecPixelFormat.String(), 0))
-					forcePixelFormat = defaultMediaCodecPixelFormat
-				}
-
 				if customOptions.Get("sample_fmt", nil, 0) == nil {
 					if strings.HasPrefix(c.codec.Name(), "aac") {
-						logger.Warnf(ctx, "is AAC, but sample format is not set; forcing 'fltp' sample format", defaultMediaCodecPixelFormat)
+						logger.Warnf(ctx, "is AAC, but sample format is not set; forcing 'fltp' sample format")
 						logIfError(customOptions.Set("sample_fmt", "fltp", 0))
 					}
 				}
 			}
 		} else {
 			if c.isMediaCodec() {
-				if customOptions.Get("pixel_format", nil, 0) == nil {
-					logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
-					logIfError(customOptions.Set("pixel_format", defaultMediaCodecPixelFormat.String(), 0))
-					forcePixelFormat = defaultMediaCodecPixelFormat
-				}
-
 				height := codecParameters.Height()
 				alignedHeight := (height + 15) &^ 15
 				logger.Tracef(ctx, "MediaCodec aligned height: %d (current: %d)", alignedHeight, height)
@@ -561,25 +550,12 @@ func newCodec(
 		logger.Tracef(ctx, "resolution: %dx%d", codecParameters.Width(), codecParameters.Height())
 		c.codecContext.SetWidth(codecParameters.Width())
 		c.codecContext.SetHeight(codecParameters.Height())
-		if forcePixelFormat != 0 {
-			logger.Tracef(ctx, "forcing pixel format to %s", forcePixelFormat)
-			c.codecContext.SetPixelFormat(forcePixelFormat)
-		}
-		if c.codecContext.PixelFormat() == astiav.PixelFormatNone {
-			logger.Tracef(ctx, "pixel format is not set")
-			switch hardwareDeviceType {
-			case globaltypes.HardwareDeviceTypeCUDA:
-				logger.Debugf(ctx, "is CUDA, so applying NV12 pixel format")
-				c.codecContext.SetPixelFormat(astiav.PixelFormatNv12)
-			default:
-				c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
-			}
-		}
-		if c.codecContext.PixelFormat() == astiav.PixelFormatNone {
-			logger.Warnf(ctx, "pixel format is not set, so applying the first supported one")
-			if pixFmts := c.codec.PixelFormats(); len(pixFmts) > 0 {
-				c.codecContext.SetPixelFormat(pixFmts[0])
-			}
+		if err := c.setupPixelFormat(ctx,
+			isEncoder,
+			codecParameters, customOptions,
+			reusableResources,
+		); err != nil {
+			return nil, fmt.Errorf("unable to setup pixel format: %w", err)
 		}
 		c.codecContext.SetMaxBFrames(int(bFrames))
 		c.codecContext.SetGopSize(int(gopSize))
@@ -660,8 +636,8 @@ func newCodec(
 	if isEncoder && setPipelinishFlags {
 		flags2 |= 0 |
 			astiav.CodecContextFlags2(astiav.CodecFlag2LocalHeader) // to make sure we can route dynamically without issues
-		//astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
-		//astiav.CodecContextFlags2(astiav.CodecFlag2ShowAll) // to do not skip frames (pre the first key frame)
+		// astiav.CodecContextFlags2(astiav.CodecFlag2Chunks) // to make sure we can route dynamically without issues
+		// astiav.CodecContextFlags2(astiav.CodecFlag2ShowAll) // to do not skip frames (pre the first key frame)
 	}
 	c.codecContext.SetFlags(flags)
 	c.codecContext.SetFlags2(flags2)
@@ -762,6 +738,78 @@ func (c *Codec) initHardware(
 	}
 
 	c.platformSpecificHWSanityChecks(ctx)
+	return nil
+}
+
+func (c *codecInternals) setupPixelFormat(
+	ctx context.Context,
+	isEncoder bool,
+	codecParameters *astiav.CodecParameters,
+	customOptions *astiav.Dictionary,
+	reusableResources *Resources,
+) (_err error) {
+	logger.Debugf(ctx, "setupPixelFormat(%t, %s, %#+v, %#+v)", isEncoder, codecParameters.MediaType(), codecParameters, customOptions)
+	defer func() {
+		logger.Debugf(ctx, "/setupPixelFormat(%t, %s, %#+v, %#+v): %v", isEncoder, codecParameters.MediaType(), codecParameters, customOptions, _err)
+	}()
+	if codecParameters.MediaType() != astiav.MediaTypeVideo {
+		return nil
+	}
+
+	c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
+
+	var forcePixelFormat astiav.PixelFormat
+	defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
+	if c.isMediaCodec() {
+		if reusableResources != nil && reusableResources.HWDeviceContext != nil {
+			defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
+		}
+	}
+
+	pixelFormatOptionName := "pixel_format"
+	if isEncoder {
+		pixelFormatOptionName = "pix_fmt"
+	}
+	if c.isMediaCodec() {
+		if customOptions.Get(pixelFormatOptionName, nil, 0) == nil {
+			logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
+			if err := customOptions.Set(pixelFormatOptionName, defaultMediaCodecPixelFormat.String(), 0); err != nil {
+				return fmt.Errorf("unable to set %q option: %w", pixelFormatOptionName, err)
+			}
+			forcePixelFormat = defaultMediaCodecPixelFormat
+		}
+	}
+
+	if forcePixelFormat != 0 {
+		logger.Tracef(ctx, "forcing pixel format to %s", forcePixelFormat)
+		c.codecContext.SetPixelFormat(forcePixelFormat)
+	}
+
+	if c.codecContext.PixelFormat() != astiav.PixelFormatNone {
+		return nil
+	}
+
+	supportedPixFmts := map[astiav.PixelFormat]struct{}{}
+	for _, pixFmt := range c.codec.PixelFormats() {
+		logger.Debugf(ctx, "supported pixel format: %s", pixFmt)
+		supportedPixFmts[pixFmt] = struct{}{}
+	}
+
+	if _, ok := supportedPixFmts[codecParameters.PixelFormat()]; ok {
+		c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
+		return nil
+	}
+
+	logger.Warnf(ctx, "pixel format is not set, so applying the first supported one")
+	switch {
+	case c.isNVENC():
+		c.codecContext.SetPixelFormat(astiav.PixelFormatNv12)
+	default:
+		if pixFmts := c.codec.PixelFormats(); len(pixFmts) > 0 {
+			c.codecContext.SetPixelFormat(pixFmts[0])
+		}
+	}
+
 	return nil
 }
 
