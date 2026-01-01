@@ -156,8 +156,10 @@ type Output struct {
 	*astiav.Dictionary
 }
 
-var _ Abstract = (*Output)(nil)
-var _ packet.Sink = (*Output)(nil)
+var (
+	_ Abstract    = (*Output)(nil)
+	_ packet.Sink = (*Output)(nil)
+)
 
 func formatFromURL(url *url.URL) string {
 	switch url.Scheme {
@@ -908,7 +910,7 @@ func (o *Output) send(
 		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}
 	for _, pendingPkt := range o.pendingPackets {
-		//pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
+		// pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
 		err := o.doWritePacket(
 			belt.WithField(ctx, "reason", "pending_packet"),
 			pendingPkt.Packet,
@@ -1017,7 +1019,7 @@ func (o *Output) doWritePacket(
 		}
 	}
 
-	//pkt.SetPos(-1) // <- TODO: should this happen? why?
+	// pkt.SetPos(-1) // <- TODO: should this happen? why?
 	pkt.RescaleTs(inputStream.TimeBase(), outputStream.TimeBase())
 	isNoDTS := pkt.Dts() == consts.NoPTSValue
 	isNoPTS := pkt.Pts() == consts.NoPTSValue
@@ -1050,6 +1052,7 @@ func (o *Output) doWritePacket(
 	}
 
 	pos, dts, pts, dur := pkt.Pos(), pkt.Dts(), pkt.Pts(), pkt.Duration()
+	isKey := pkt.Flags().Has(astiav.PacketFlagKey)
 
 	var ptsDuration time.Duration
 	if pts == consts.NoPTSValue {
@@ -1079,8 +1082,8 @@ func (o *Output) doWritePacket(
 		channels := outputStream.CodecParameters().ChannelLayout().Channels()
 		dataLen = len(pkt.Data())
 		logger.Tracef(ctx,
-			"writing packet with pos:%v (pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (res: %s, sample_rate: %v, channels: %v, time_base: %v) with flags 0x%016X and data length %d",
-			pos, pts, ptsDuration, dts, dur, outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
+			"writing packet with pos:%v (is_key:%v, pts:%v(%v), dts:%v, dur:%v, dts_prev:%v; is_key:%v; source: %T) for %s stream %d (res: %s, sample_rate: %v, channels: %v, time_base: %v) with flags 0x%016X and data length %d",
+			pos, isKey, pts, ptsDuration, dts, dur, outputStream.LastDTS, pkt.Flags().Has(astiav.PacketFlagKey), source,
 			outputStream.CodecParameters().MediaType(),
 			pkt.StreamIndex(), resolution, sampleRate, channels, outputStream.TimeBase(),
 			pkt.Flags(),
@@ -1101,7 +1104,6 @@ func (o *Output) doWritePacket(
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
 	})
 	if err != nil {
-		isKey := pkt.Flags().Has(astiav.PacketFlagKey)
 		err = fmt.Errorf(
 			"unable to write the packet with pos:%v (is_key:%v, pts:%v, dts:%v, dur:%v, dts_prev:%v) for %s stream %d (sample_rate: %v, time_base: %v) with flags 0x%016X and data length %d: %w",
 			pos, isKey, pts, dts, dur, outputStream.LastDTS,

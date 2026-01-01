@@ -42,7 +42,6 @@ const (
 )
 
 func main() {
-
 	// parse the input
 
 	pflag.Usage = func() {
