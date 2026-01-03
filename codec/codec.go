@@ -753,6 +753,7 @@ func (c *codecInternals) setupPixelFormat(
 		logger.Debugf(ctx, "/setupPixelFormat(%t, %s, %#+v, %#+v): %v", isEncoder, codecParameters.MediaType(), codecParameters, customOptions, _err)
 	}()
 	if codecParameters.MediaType() != astiav.MediaTypeVideo {
+		logger.Tracef(ctx, "not a video stream, skipping pixel format setup")
 		return nil
 	}
 
@@ -786,6 +787,7 @@ func (c *codecInternals) setupPixelFormat(
 	}
 
 	if c.codecContext.PixelFormat() != astiav.PixelFormatNone {
+		logger.Tracef(ctx, "pixel format is already set to %s", c.codecContext.PixelFormat())
 		return nil
 	}
 
@@ -797,6 +799,7 @@ func (c *codecInternals) setupPixelFormat(
 
 	if _, ok := supportedPixFmts[codecParameters.PixelFormat()]; ok {
 		c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
+		logger.Tracef(ctx, "using pixel format from codec parameters: %s", codecParameters.PixelFormat())
 		return nil
 	}
 
@@ -807,9 +810,17 @@ func (c *codecInternals) setupPixelFormat(
 	default:
 		if pixFmts := c.codec.PixelFormats(); len(pixFmts) > 0 {
 			c.codecContext.SetPixelFormat(pixFmts[0])
+		} else {
+			defaultPixelFormat := codecParameters.PixelFormat()
+			if codecParameters.PixelFormat() != astiav.PixelFormatNone {
+				defaultPixelFormat = astiav.PixelFormatNv12
+			}
+			logger.Warnf(ctx, "codec doesn't report supported pixel formats, unable to select one; guessing %s should be fine", defaultPixelFormat)
+			c.codecContext.SetPixelFormat(defaultPixelFormat)
 		}
 	}
 
+	logger.Tracef(ctx, "selected pixel format: %s", c.codecContext.PixelFormat())
 	return nil
 }
 
