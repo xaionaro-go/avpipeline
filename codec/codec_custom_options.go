@@ -1,3 +1,5 @@
+// codec_custom_options.go provides low-latency option presets for various codecs.
+
 package codec
 
 import (

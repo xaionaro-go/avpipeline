@@ -1,3 +1,5 @@
+// encoder_copy.go implements a passthrough "copy" encoder.
+
 package codec
 
 import (
@@ -8,6 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 )
 
+// EncoderCopy is a passthrough "copy" encoder.
 // TODO: delete me
 type EncoderCopy struct{}
 

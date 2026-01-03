@@ -1,3 +1,5 @@
+// name.go provides codec name resolution and hardware-specific naming logic.
+
 package codec
 
 import (

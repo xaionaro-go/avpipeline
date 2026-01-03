@@ -1,3 +1,5 @@
+// encoder_full_locked.go implements a thread-safe internal version of the full encoder.
+
 package codec
 
 import (

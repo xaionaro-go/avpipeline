@@ -1,6 +1,8 @@
 //go:build mediacodec
 // +build mediacodec
 
+// decoder_mediacodec.go provides MediaCodec-specific decoder logic.
+
 package codec
 
 import (

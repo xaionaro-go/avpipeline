@@ -1,3 +1,5 @@
+// decoder.go provides the public Decoder API and initialization logic.
+
 package codec
 
 import (

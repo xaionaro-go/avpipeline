@@ -1,3 +1,5 @@
+// set_finalizer.go provides resource cleanup helpers using finalizers.
+
 package codec
 
 import (

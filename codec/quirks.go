@@ -1,3 +1,5 @@
+// quirks.go defines flags for handling codec-specific bugs and behaviors.
+
 package codec
 
 import "strings"

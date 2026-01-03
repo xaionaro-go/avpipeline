@@ -1,3 +1,5 @@
+// encoder_full_set_resolution.go provides resolution control methods for the full encoder.
+
 package codec
 
 import (

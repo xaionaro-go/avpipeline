@@ -1,3 +1,5 @@
+// encoder_raw.go implements a "raw" encoder.
+
 package codec
 
 import (

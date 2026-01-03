@@ -1,3 +1,5 @@
+// frame.go defines the Frame struct wrapping astiav.Frame with metadata and hardware-to-RAM transfer logic.
+
 package codec
 
 import (

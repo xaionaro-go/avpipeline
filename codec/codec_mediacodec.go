@@ -1,6 +1,8 @@
 //go:build mediacodec
 // +build mediacodec
 
+// codec_mediacodec.go provides Android MediaCodec specific Codec methods.
+
 package codec
 
 import (

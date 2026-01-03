@@ -1,3 +1,5 @@
+// encoder_full_get_resolution.go provides resolution retrieval methods for the full encoder.
+
 package codec
 
 import (

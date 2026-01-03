@@ -1,3 +1,5 @@
+// nil_packet.go provides global nil packet initialization.
+
 package codec
 
 import (

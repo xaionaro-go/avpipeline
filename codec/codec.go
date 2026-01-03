@@ -1,3 +1,9 @@
+// Package codec provides a high-level, thread-safe abstraction for audio and video codecs,
+// wrapping FFmpeg (via astiav) to provide unified interfaces for decoding and encoding.
+// It supports hardware acceleration (e.g., MediaCodec), dynamic quality/resolution
+// adjustments, and resource management.
+//
+// codec.go defines the core Codec struct and methods for interacting with astiav.Codec.
 package codec
 
 import (

@@ -1,3 +1,5 @@
+// encoder.go defines the Encoder interface and related types.
+
 package codec
 
 import (

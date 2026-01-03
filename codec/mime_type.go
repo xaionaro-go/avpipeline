@@ -1,3 +1,5 @@
+// mime_type.go provides mapping between FFmpeg codecs and MIME types.
+
 package codec
 
 import (

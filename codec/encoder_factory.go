@@ -1,3 +1,5 @@
+// encoder_factory.go defines the EncoderFactory interface and its naive implementation.
+
 package codec
 
 import (

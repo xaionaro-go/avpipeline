@@ -1,6 +1,8 @@
 //go:build !android
 // +build !android
 
+// platformspecific_other.go provides stub hardware sanity checks for non-Android platforms.
+
 package codec
 
 import (

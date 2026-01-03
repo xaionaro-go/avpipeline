@@ -1,3 +1,5 @@
+// codec_params.go defines the CodecParams struct used for codec initialization.
+
 package codec
 
 import (

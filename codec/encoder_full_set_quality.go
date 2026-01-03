@@ -1,3 +1,5 @@
+// encoder_full_set_quality.go provides quality control methods for the full encoder.
+
 package codec
 
 import (

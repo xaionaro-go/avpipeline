@@ -1,6 +1,8 @@
 //go:build android
 // +build android
 
+// platformspecific_android.go provides Android-specific hardware sanity checks.
+
 package codec
 
 import (

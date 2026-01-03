@@ -1,6 +1,8 @@
 //go:build mediacodec && patched_libav
 // +build mediacodec,patched_libav
 
+// mediacodec_patched_libav.go provides MediaCodec parameter setting logic for patched libav.
+
 package codec
 
 import (

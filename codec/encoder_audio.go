@@ -1,3 +1,5 @@
+// encoder_audio.go provides audio-specific encoder methods.
+
 package codec
 
 import (

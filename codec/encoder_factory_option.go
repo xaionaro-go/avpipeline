@@ -1,3 +1,5 @@
+// encoder_factory_option.go provides configuration options for encoder factories.
+
 package codec
 
 import (

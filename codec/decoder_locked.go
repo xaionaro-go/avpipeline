@@ -1,3 +1,5 @@
+// decoder_locked.go implements a thread-safe internal version of the Decoder.
+
 package codec
 
 import (

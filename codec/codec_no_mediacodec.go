@@ -1,6 +1,8 @@
 //go:build !mediacodec
 // +build !mediacodec
 
+// codec_no_mediacodec.go provides stub methods for Codec when MediaCodec is not available.
+
 package codec
 
 import (

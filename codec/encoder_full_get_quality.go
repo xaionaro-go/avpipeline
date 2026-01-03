@@ -1,3 +1,5 @@
+// encoder_full_get_quality.go provides quality retrieval methods for the full encoder.
+
 package codec
 
 import (

@@ -1,3 +1,5 @@
+// sample_format.go provides string-to-astiav.SampleFormat conversion logic.
+
 package codec
 
 import (

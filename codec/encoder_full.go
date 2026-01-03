@@ -1,3 +1,5 @@
+// encoder_full.go provides the main Encoder implementation wrapping a Codec.
+
 package codec
 
 import (

@@ -1,3 +1,5 @@
+// type_alias.go defines package-level type aliases for common types.
+
 package codec
 
 import (
