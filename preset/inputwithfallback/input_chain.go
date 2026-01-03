@@ -199,7 +199,7 @@ func (i *InputChain[K, DF, C]) String() string {
 		return fmt.Sprintf("InputChain(<unable to lock>; factory:%s)", i.InputFactory)
 	}
 	kernel := func() K {
-		defer i.Input.Processor.Kernel.KernelLocker.ManualUnlock()
+		defer i.Input.Processor.Kernel.KernelLocker.ManualUnlock(ctx)
 		return i.Input.Processor.Kernel.Kernel
 	}()
 	if i.Input.Processor.Kernel.KernelIsSet {

@@ -66,10 +66,12 @@ func NewRetryable[K Abstract](
 	return r
 }
 
-var _ Abstract = (*Retryable[Abstract])(nil)
-var _ packet.Source = (*Retryable[Abstract])(nil)
-var _ packet.Sink = (*Retryable[Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*Retryable[Abstract])(nil)
+var (
+	_ Abstract                    = (*Retryable[Abstract])(nil)
+	_ packet.Source               = (*Retryable[Abstract])(nil)
+	_ packet.Sink                 = (*Retryable[Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*Retryable[Abstract])(nil)
+)
 
 // OriginalPacketSource returns the underlying kernel as a packet.Source if it
 // implements that interface and is currently available. This allows downstream
@@ -189,8 +191,7 @@ func (r *Retryable[K]) retry(
 ) error {
 	var zeroValue K
 	ctx = xsync.WithEnableDeadlock(ctx, false)
-	// TODO: ctx = xsync.AllowUnlockNotLocked(ctx, true)  (to handle panic: 'not locked!')
-	return xsync.DoR1(ctx, &r.KernelLocker, func() error {
+	return xsync.DoR1(xsync.WithAllowUnlockNotLocked(ctx, true), &r.KernelLocker, func() error {
 		for {
 			k, err := r.getKernel(ctx)
 			if err != nil {
@@ -204,7 +205,7 @@ func (r *Retryable[K]) retry(
 				defer func() {
 					isLocked = r.KernelLocker.ManualLock(ctx)
 				}()
-				r.KernelLocker.ManualUnlock()
+				r.KernelLocker.ManualUnlock(ctx)
 				err = callback(k)
 				return
 			}()

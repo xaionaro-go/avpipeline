@@ -134,8 +134,8 @@ github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e h1:FV+/FVP
 github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e/go.mod h1:ERewyGVM0zYnWA9nxdHPIC3xc9Yrf5CgAnBITuP3FRE=
 github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c h1://sE/WLpO7wpcVsp1FfTNAG9JmL60KfXiogNVKYivTA=
 github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c/go.mod h1:MGRT1+2m2adVRc4aAn0RVGysjsSRKN9VCyBJLHvQd4k=
-github.com/xaionaro-go/xsync v0.0.0-20250928140805-f801683b71ba h1:eRxxULTIaR7PSHMrj4yRDZd1trSZSDl4hcxRxzd+AJg=
-github.com/xaionaro-go/xsync v0.0.0-20250928140805-f801683b71ba/go.mod h1:FCpywNAl4a4hgzE8j7Z+TpdhBQi5WHxnI35jOrFpoQw=
+github.com/xaionaro-go/xsync v0.0.0-20260103200624-2cd14b984747 h1:jzmxq5gnbby7en3Rz3QoUgEVNpFQr9EWBo0XXgrcKok=
+github.com/xaionaro-go/xsync v0.0.0-20260103200624-2cd14b984747/go.mod h1:FCpywNAl4a4hgzE8j7Z+TpdhBQi5WHxnI35jOrFpoQw=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
 go.opentelemetry.io/auto/sdk v1.1.0/go.mod h1:3wSPjt5PWp2RhlCcmmOial7AvC4DQqZb7a7wCow3W8A=
