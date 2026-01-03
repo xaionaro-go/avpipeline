@@ -309,6 +309,7 @@ func (e *Encoder[EF]) initEncoderFor(
 
 	var opts []codec.Option
 	if frameSource != nil {
+		// TODO: use PipelineSideData to pass the decoder getter
 		if getDecoderer, ok := frameSource.(codec.GetDecoderer); ok {
 			logger.Debugf(ctx, "the frame source implements codec.GetDecoderer: %T", frameSource)
 			opts = append(opts, codec.EncoderFactoryOptionGetDecoderer{GetDecoderer: getDecoderer})

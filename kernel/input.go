@@ -132,7 +132,7 @@ func NewInputFromURL(
 				var w, h int
 				_, err := fmt.Sscanf(opt.Value, "%dx%d", &w, &h)
 				if err != nil {
-					return nil, fmt.Errorf("unable to parse input size '%s': %w", opt.Value, err)
+					return nil, fmt.Errorf("unable to parse video_size '%s': %w", opt.Value, err)
 				}
 				i.DefaultWidth = w
 				i.DefaultHeight = h
