@@ -1,3 +1,5 @@
+// chan_struct.go defines ChanStruct, a helper struct that bundles input, output, and error channels.
+
 package processor
 
 import (

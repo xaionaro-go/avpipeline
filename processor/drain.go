@@ -1,3 +1,5 @@
+// drain.go provides utilities to check if a processor's input queue is empty and to wait for it to drain.
+
 package processor
 
 import (

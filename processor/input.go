@@ -1,3 +1,5 @@
+// input.go provides factory functions to instantiate FromKernel processors for input sources.
+
 package processor
 
 import (

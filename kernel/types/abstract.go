@@ -1,3 +1,7 @@
+// Package types defines the core interfaces for the audio/video pipeline kernel.
+//
+// This file specifically defines the Abstract interface, which is the primary
+// interface for pipeline components that can both receive input and generate output.
 package types
 
 import (

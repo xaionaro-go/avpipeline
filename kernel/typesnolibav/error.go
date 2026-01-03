@@ -1,3 +1,5 @@
+// error.go contains common error types for the typesnolibav package.
+
 package typesnolibav
 
 type ErrNotImplemented struct{}

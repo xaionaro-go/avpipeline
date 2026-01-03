@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -17,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/net/sockinfo"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/quality"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -24,12 +26,14 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type AutoBitRateCalculator = types.AutoBitRateCalculator
-type AutoBitRateVideoConfig = types.AutoBitRateVideoConfig
-type AutoBitRateResolutionAndBitRateConfig = types.AutoBitRateResolutionAndBitRateConfig
-type AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
-type BitRateChangeRequest = types.BitRateChangeRequest
-type CalculateBitRateRequest = types.CalculateBitRateRequest
+type (
+	AutoBitRateCalculator                  = types.AutoBitRateCalculator
+	AutoBitRateVideoConfig                 = types.AutoBitRateVideoConfig
+	AutoBitRateResolutionAndBitRateConfig  = types.AutoBitRateResolutionAndBitRateConfig
+	AutoBitRateResolutionAndBitRateConfigs = types.AutoBitRateResolutionAndBitRateConfigs
+	BitRateChangeRequest                   = types.BitRateChangeRequest
+	CalculateBitRateRequest                = types.CalculateBitRateRequest
+)
 
 func multiplyBitRates(
 	resolutions []AutoBitRateResolutionAndBitRateConfig,
@@ -86,10 +90,12 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 	}
 }
 
-type AutoBitrateCalculatorThresholds = types.AutoBitrateCalculatorThresholds
-type AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorLogK
-type AutoBitrateCalculatorQueueSizeGapDecay = types.AutoBitrateCalculatorQueueSizeGapDecay
-type FPSReducerConfig = types.FPSReducerConfig
+type (
+	AutoBitrateCalculatorThresholds        = types.AutoBitrateCalculatorThresholds
+	AutoBitrateCalculatorConstantQueueSize = types.AutoBitrateCalculatorLogK
+	AutoBitrateCalculatorQueueSizeGapDecay = types.AutoBitrateCalculatorQueueSizeGapDecay
+	FPSReducerConfig                       = types.FPSReducerConfig
+)
 
 func DefaultAutoBitrateCalculatorThresholds() *AutoBitrateCalculatorThresholds {
 	return types.DefaultAutoBitrateCalculatorThresholds()
@@ -228,6 +234,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
 	var activeVideoOutput *Output[C]
+	var getRawConners []kernel.GetSyscallRawConner
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	err := h.StreamMux.withActiveVideoOutput(ctx, func(output *Output[C]) error {
 		activeVideoOutput = output
@@ -236,12 +243,18 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				return true
 			}
 			outputProc := o.SendingNode.GetProcessor()
-			getQueueSizer, ok := outputProc.(kernel.GetInternalQueueSizer)
-			if !ok {
-				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", outputProc)
-				return true
+			getRawConner, ok := outputProc.(kernel.GetSyscallRawConner)
+			if ok {
+				getRawConners = append(getRawConners, getRawConner)
+			} else {
+				logger.Errorf(ctx, "processor %s does not implement GetSyscallRawConner", outputProc)
 			}
-			getQueueSizers = append(getQueueSizers, getQueueSizer)
+			getQueueSizer, ok := outputProc.(kernel.GetInternalQueueSizer)
+			if ok {
+				getQueueSizers = append(getQueueSizers, getQueueSizer)
+			} else {
+				logger.Errorf(ctx, "processor %s does not implement GetInternalQueueSizer", outputProc)
+			}
 			return true
 		})
 		return nil
@@ -253,6 +266,29 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	if activeVideoOutput == nil {
 		logger.Warnf(ctx, "no active output; skipping bitrate check")
 		return
+	}
+
+	logger.Tracef(ctx, "checking bitrate with %d raw conners and %d queue sizers", len(getRawConners), len(getQueueSizers))
+
+	for _, proc := range getRawConners {
+		err := proc.UnsafeWithRawNetworkConn(
+			ctx,
+			func(
+				ctx context.Context,
+				rawConn syscall.RawConn,
+				networkName string,
+			) error {
+				connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
+				if err != nil {
+					return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
+				}
+				logger.Tracef(ctx, "connInfo: %s", connInfo)
+				return nil
+			})
+		if err != nil {
+			logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
+			continue
+		}
 	}
 
 	now := time.Now()

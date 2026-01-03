@@ -8,4 +8,8 @@ type GetKerneler interface {
 	GetKernel() Abstract
 }
 
-type GetInternalQueueSizer = typesnolibav.GetInternalQueueSizer
+type (
+	GetInternalQueueSizer = typesnolibav.GetInternalQueueSizer
+	GetNetConner          = typesnolibav.GetNetConner
+	GetSyscallRawConner   = typesnolibav.GetSyscallRawConner
+)

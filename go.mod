@@ -22,7 +22,8 @@ require (
 	github.com/xaionaro-go/polyjson v0.0.0-20250825191950-a2ce35ee07f0
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
-	github.com/xaionaro-go/sockopt v0.0.0-20250823181757-5c02c9cd7b51
+	github.com/xaionaro-go/sockopt v0.0.0-20260103194101-61181aff0f9e
+	github.com/xaionaro-go/tcp v0.0.0-20260103194940-f10157ebd88d
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
@@ -48,8 +49,8 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
 	golang.org/x/image v0.27.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -75,9 +76,9 @@ require (
 	github.com/xaionaro-go/object v0.0.0-20241026212449-753ce10ec94c // indirect
 	github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
-	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.39.0
 	lukechampine.com/blake3 v1.4.0 // indirect
 	tailscale.com v1.86.5
 )

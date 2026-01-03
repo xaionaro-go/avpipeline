@@ -1,4 +1,4 @@
- // Package types provides configuration types for transcoder with passthrough functionality.
+// Package types provides configuration types for transcoder with passthrough functionality.
 package types
 
 import (

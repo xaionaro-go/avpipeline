@@ -1,3 +1,5 @@
+// output.go defines interfaces for inspecting output queue timing and state.
+
 package typesnolibav
 
 import (

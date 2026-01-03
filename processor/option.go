@@ -1,3 +1,5 @@
+// option.go defines functional options for configuring processors.
+
 package processor
 
 type config struct {

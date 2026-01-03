@@ -17,6 +17,8 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// ChainOfTwo is a kernel that chains two kernels together.
+//
 // Note: ChainOfTwo is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel.
 type ChainOfTwo[A, B Abstract] struct {
@@ -26,10 +28,12 @@ type ChainOfTwo[A, B Abstract] struct {
 	Kernel1 B
 }
 
-var _ Abstract = (*ChainOfTwo[Abstract, Abstract])(nil)
-var _ packet.Source = (*ChainOfTwo[Abstract, Abstract])(nil)
-var _ packet.Sink = (*ChainOfTwo[Abstract, Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*ChainOfTwo[Abstract, Abstract])(nil)
+var (
+	_ Abstract                    = (*ChainOfTwo[Abstract, Abstract])(nil)
+	_ packet.Source               = (*ChainOfTwo[Abstract, Abstract])(nil)
+	_ packet.Sink                 = (*ChainOfTwo[Abstract, Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*ChainOfTwo[Abstract, Abstract])(nil)
+)
 
 // OriginalPacketSource returns the latest kernel in the chain that is a packet source.
 // It checks Kernel1 first, then Kernel0.

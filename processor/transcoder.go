@@ -1,3 +1,5 @@
+// transcoder.go provides factory functions to instantiate FromKernel processors for transcoding.
+
 package processor
 
 import (

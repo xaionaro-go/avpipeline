@@ -17,6 +17,8 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// ChainOfThree is a kernel that chains three kernels together.
+//
 // Note: ChainOfThree is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel.
 type ChainOfThree[A, B, C Abstract] struct {
@@ -27,10 +29,12 @@ type ChainOfThree[A, B, C Abstract] struct {
 	Kernel2 C
 }
 
-var _ Abstract = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
-var _ packet.Source = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
-var _ packet.Sink = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+var (
+	_ Abstract                    = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+	_ packet.Source               = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+	_ packet.Sink                 = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*ChainOfThree[Abstract, Abstract, Abstract])(nil)
+)
 
 // OriginalPacketSource returns the latest kernel in the chain that is a packet source.
 // It checks Kernel2 first, then Kernel1, then Kernel0.

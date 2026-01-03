@@ -1,3 +1,5 @@
+// output.go contains internal type definitions related to queue monitoring.
+
 package types
 
 import (

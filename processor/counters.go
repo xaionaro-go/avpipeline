@@ -1,3 +1,5 @@
+// counters.go defines Counters for tracking processed, generated, and omitted packets/frames.
+
 package processor
 
 import (

@@ -1,12 +1,16 @@
+// from_kernel.go is the primary implementation of Abstract that wraps a kernel and manages asynchronous communication.
+
 package processor
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/asticode/go-astikit"
@@ -46,9 +50,11 @@ type GetPacketSinker interface {
 	GetPacketSink() packet.Sink
 }
 
-var _ Abstract = (*FromKernel[kernel.Abstract])(nil)
-var _ GetPacketSourcer = (*FromKernel[kernel.Abstract])(nil)
-var _ GetPacketSinker = (*FromKernel[kernel.Abstract])(nil)
+var (
+	_ Abstract         = (*FromKernel[kernel.Abstract])(nil)
+	_ GetPacketSourcer = (*FromKernel[kernel.Abstract])(nil)
+	_ GetPacketSinker  = (*FromKernel[kernel.Abstract])(nil)
+)
 
 func NewFromKernel[T kernel.Abstract](
 	ctx context.Context,
@@ -292,6 +298,36 @@ func (p *FromKernel[T]) GetInternalQueueSize(
 		return nil
 	}
 	return queuer.GetInternalQueueSize(ctx)
+}
+
+var _ kerneltypes.GetNetConner = (*FromKernel[kernel.Abstract])(nil)
+
+func (p *FromKernel[T]) UnsafeWithNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, net.Conn) error,
+) error {
+	getter, ok := any(p.Kernel).(kerneltypes.GetNetConner)
+	if !ok {
+		return ErrNotImplemented{
+			Err: fmt.Errorf("kernel %T does not implement GetNetConner", p.Kernel),
+		}
+	}
+	return getter.UnsafeWithNetworkConn(ctx, callback)
+}
+
+var _ kerneltypes.GetSyscallRawConner = (*FromKernel[kernel.Abstract])(nil)
+
+func (p *FromKernel[T]) UnsafeWithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) error {
+	getter, ok := any(p.Kernel).(kerneltypes.GetSyscallRawConner)
+	if !ok {
+		return ErrNotImplemented{
+			Err: fmt.Errorf("kernel %T does not implement GetSyscallRawConner", p.Kernel),
+		}
+	}
+	return getter.UnsafeWithRawNetworkConn(ctx, callback)
 }
 
 type GetKerneler = kernel.GetKerneler

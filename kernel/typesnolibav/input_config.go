@@ -1,3 +1,5 @@
+// input_config.go defines the InputConfig structure and lifecycle hooks for inputs.
+
 package typesnolibav
 
 import (

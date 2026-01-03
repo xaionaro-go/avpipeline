@@ -1,3 +1,5 @@
+// Package kernel provides the core functionality for the audio/video pipeline.
+// This file defines abstract types and interfaces used throughout the kernel.
 package kernel
 
 import (

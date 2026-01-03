@@ -3,61 +3,79 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime/debug"
 	"slices"
+	"syscall"
 	"time"
 
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/sockopt"
+	"github.com/xaionaro-go/avpipeline/net/raw"
 	"github.com/xaionaro-go/xsync"
 )
 
-func (o *Output) UnsafeSetSendBufferSize(
+func (o *Output) UnsafeWithNetworkConn(
 	ctx context.Context,
-	size uint,
+	callback func(context.Context, net.Conn) error,
 ) (_err error) {
-	logger.Debugf(ctx, "UnsafeSetSendBufferSize(ctx, %d)", size)
-	defer func() { logger.Debugf(ctx, "/UnsafeSetSendBufferSize(ctx, %d): %v", size, _err) }()
-
-	fd, err := o.UnsafeGetFileDescriptor(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to get file descriptor: %w", err)
-	}
-
-	err = sockopt.SetWriteBuffer(fd, int(size))
-	if err != nil {
-		return fmt.Errorf("unable to set the buffer size of file descriptor %d to %d", fd, int(size))
-	}
-
-	return nil
+	logger.Debugf(ctx, "UnsafeWithNetworkConn")
+	defer func() { logger.Debugf(ctx, "/UnsafeWithNetworkConn: %v", _err) }()
+	return xsync.DoA2R1(ctx, &o.formatContextLocker, o.unsafeWithNetworkConn, ctx, callback)
 }
 
-func (o *Output) UnsafeSetLinger(
+func (o *Output) unsafeWithNetworkConn(
 	ctx context.Context,
-	onOff int32,
-	linger int32,
+	callback func(context.Context, net.Conn) error,
 ) (_err error) {
-	logger.Debugf(ctx, "UnsafeSetLinger(ctx, %d, %d)", onOff, linger)
-	defer func() { logger.Debugf(ctx, "/UnsafeSetLinger(ctx, %d, %d): %v", onOff, linger, _err) }()
-
-	fd, err := o.UnsafeGetFileDescriptor(ctx)
+	fd, err := o.unsafeGetFileDescriptor(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get file descriptor: %w", err)
 	}
 
-	err = sockSetLinger(fd, onOff, linger)
-	if err != nil {
-		return fmt.Errorf("unable to set the linger of file descriptor %d to %d/%d: %w", fd, onOff, linger, err)
-	}
+	return raw.WithTCPConnFromFD(fd, func(conn net.Conn) error {
+		return callback(ctx, conn)
+	})
+}
 
-	return nil
+func (r *Output) UnsafeWithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) (_err error) {
+	logger.Debugf(ctx, "UnsafeWithRawNetworkConn")
+	defer func() { logger.Debugf(ctx, "/UnsafeWithRawNetworkConn: %v", _err) }()
+	return xsync.DoA2R1(ctx, &r.formatContextLocker, r.unsafeWithRawNetworkConn, ctx, callback)
+}
+
+func (r *Output) unsafeWithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) (_err error) {
+	return r.unsafeWithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+		rawConner, ok := conn.(syscall.Conn)
+		if !ok {
+			return fmt.Errorf("unable to get syscall.Conn from net.Conn (%T)", conn)
+		}
+		rawConn, err := rawConner.SyscallConn()
+		if err != nil {
+			return fmt.Errorf("unable to get RawConn from syscall.Conn: %w", err)
+		}
+		networkName := "tcp"
+		if conn.RemoteAddr() != nil {
+			networkName = conn.RemoteAddr().Network()
+		}
+		return callback(ctx, rawConn, networkName)
+	})
 }
 
 var _ GetInternalQueueSizer = (*Output)(nil)
+var _ GetNetConner = (*Output)(nil)
+var _ GetSyscallRawConner = (*Output)(nil)
 
+// GetInternalQueueSize returns the size of internal queues used by the output.
+//
 // Warning! The implementation intrudes into private structures, which is unsafe.
 func (r *Output) GetInternalQueueSize(
 	ctx context.Context,

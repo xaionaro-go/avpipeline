@@ -1,3 +1,5 @@
+// dummy.go provides a minimal, "no-op" implementation of the Abstract interface.
+
 package processor
 
 import (
@@ -22,18 +24,23 @@ func NewDummy() *Dummy {
 func (p *Dummy) String() string {
 	return "Dummy"
 }
+
 func (p *Dummy) Close(ctx context.Context) error {
 	return nil
 }
+
 func (p *Dummy) InputChan() chan<- packetorframe.InputUnion {
 	return DiscardInputChan
 }
+
 func (p *Dummy) OutputChan() <-chan packetorframe.OutputUnion {
 	return nil
 }
+
 func (p *Dummy) ErrorChan() <-chan error {
 	return nil
 }
+
 func (p *Dummy) CountersPtr() *Counters {
 	return p.CountersStorage
 }

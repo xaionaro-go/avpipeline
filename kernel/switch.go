@@ -20,6 +20,8 @@ import (
 	"github.com/xaionaro-go/observability"
 )
 
+// Switch is a kernel that can switch between multiple kernels based on conditions.
+//
 // Note: Switch is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel. You may use
 // condition.Switch if you need similar functionality.
@@ -35,10 +37,12 @@ type Switch[T Abstract] struct {
 	VerifySwitchOutputCond *packetorframecondition.Condition
 }
 
-var _ Abstract = (*Switch[Abstract])(nil)
-var _ packet.Source = (*Switch[Abstract])(nil)
-var _ packet.Sink = (*Switch[Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*Switch[Abstract])(nil)
+var (
+	_ Abstract                    = (*Switch[Abstract])(nil)
+	_ packet.Source               = (*Switch[Abstract])(nil)
+	_ packet.Sink                 = (*Switch[Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*Switch[Abstract])(nil)
+)
 
 // OriginalPacketSource returns the currently active kernel's original packet source.
 func (sw *Switch[T]) OriginalPacketSource() packet.Source {

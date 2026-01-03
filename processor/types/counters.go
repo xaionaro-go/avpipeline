@@ -1,3 +1,6 @@
+// Package types defines the internal types used by the processor package.
+//
+// counters.go defines the internal Counter types for tracking data flow.
 package types
 
 import (

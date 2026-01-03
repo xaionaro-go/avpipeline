@@ -3,11 +3,60 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"net"
+	"syscall"
 
 	"github.com/xaionaro-go/avcommon"
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/net/raw"
 	"github.com/xaionaro-go/sockopt"
+)
+
+func (i *Input) UnsafeWithNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, net.Conn) error,
+) (_err error) {
+	logger.Debugf(ctx, "UnsafeWithNetworkConn")
+	defer func() { logger.Debugf(ctx, "/UnsafeWithNetworkConn: %v", _err) }()
+
+	fd, err := i.UnsafeGetFileDescriptor(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get file descriptor: %w", err)
+	}
+
+	return raw.WithTCPConnFromFD(fd, func(conn net.Conn) error {
+		return callback(ctx, conn)
+	})
+}
+
+func (i *Input) UnsafeWithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) (_err error) {
+	logger.Debugf(ctx, "UnsafeWithRawNetworkConn")
+	defer func() { logger.Debugf(ctx, "/UnsafeWithRawNetworkConn: %v", _err) }()
+
+	return i.UnsafeWithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+		rawConner, ok := conn.(syscall.Conn)
+		if !ok {
+			return fmt.Errorf("unable to get syscall.Conn from net.Conn (%T)", conn)
+		}
+		rawConn, err := rawConner.SyscallConn()
+		if err != nil {
+			return fmt.Errorf("unable to get RawConn from syscall.Conn: %w", err)
+		}
+		networkName := "tcp"
+		if conn.RemoteAddr() != nil {
+			networkName = conn.RemoteAddr().Network()
+		}
+		return callback(ctx, rawConn, networkName)
+	})
+}
+
+var (
+	_ GetNetConner        = (*Input)(nil)
+	_ GetSyscallRawConner = (*Input)(nil)
 )
 
 func (i *Input) UnsafeSetRecvBufferSize(

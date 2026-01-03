@@ -1,3 +1,5 @@
+// output.go provides factory functions to instantiate FromKernel processors for output destinations.
+
 package processor
 
 import (

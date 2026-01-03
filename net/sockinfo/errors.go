@@ -1,15 +1,14 @@
-// error.go defines processor-specific error types.
-
-package processor
-
-import "fmt"
+package sockinfo
 
 type ErrNotImplemented struct {
 	Err error
 }
 
 func (e ErrNotImplemented) Error() string {
-	return fmt.Sprintf("method not implemented: %s", e.Err)
+	if e.Err == nil {
+		return "not implemented"
+	}
+	return "not implemented: " + e.Err.Error()
 }
 
 func (e ErrNotImplemented) Unwrap() error {

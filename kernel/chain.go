@@ -19,6 +19,8 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// Chain is a kernel that chains multiple kernels together.
+//
 // Note: Chain is a very hacky thing, try to never use it. Pipelining
 // should be handled by pipeline, not by a Kernel.
 type Chain[T Abstract] struct {
@@ -27,10 +29,12 @@ type Chain[T Abstract] struct {
 	Kernels []T
 }
 
-var _ Abstract = (*Chain[Abstract])(nil)
-var _ packet.Source = (*Chain[Abstract])(nil)
-var _ packet.Sink = (*Chain[Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*Chain[Abstract])(nil)
+var (
+	_ Abstract                    = (*Chain[Abstract])(nil)
+	_ packet.Source               = (*Chain[Abstract])(nil)
+	_ packet.Sink                 = (*Chain[Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*Chain[Abstract])(nil)
+)
 
 // OriginalPacketSource returns the latest kernel in the chain that is a packet source.
 // It iterates backwards through the chain to find the last actual source.

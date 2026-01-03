@@ -27,6 +27,9 @@ const (
 	transcoderWaitForStreamsStart      = true
 )
 
+// Transcoder is a kernel that decodes and then encodes packets/frames.
+// It effectively combines a Decoder and an Encoder into a single unit.
+//
 // See also https://github.com/namndev/FFmpegTutorial/blob/master/learn-ffmpeg-libav-the-hard-way.md
 // Note: Transcoder is a somewhat hacky thing, try to not use it. Pipelining
 // should be handled by pipeline, not by a Kernel. Use separately Decoder and Encoder, instead.
@@ -44,9 +47,11 @@ type Transcoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	pendingPacketsAndFrames []packetorframe.OutputUnion
 }
 
-var _ Abstract = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
-var _ packet.Source = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
-var _ packet.Sink = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+var (
+	_ Abstract      = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+	_ packet.Source = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+	_ packet.Sink   = (*Transcoder[codec.DecoderFactory, codec.EncoderFactory])(nil)
+)
 
 func NewTranscoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
@@ -298,7 +303,6 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 	}
 
 	return nil
-
 }
 
 func (r *Transcoder[DF, EF]) sendFrame(

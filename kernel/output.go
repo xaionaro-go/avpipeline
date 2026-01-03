@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -26,6 +27,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
+	netraw "github.com/xaionaro-go/avpipeline/net/raw"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -34,6 +36,7 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/proxy"
 	"github.com/xaionaro-go/secret"
+	tcpopt "github.com/xaionaro-go/tcp/opt"
 	"github.com/xaionaro-go/xsync"
 	"tailscale.com/util/ringbuffer"
 )
@@ -117,6 +120,8 @@ type outTS struct {
 	DTS        time.Duration
 }
 
+// Output represents an output kernel that sends packets/frames to a specified destination.
+//
 // Note: it is strongly recommended to put MonotonicDTS before Output.
 type Output struct {
 	ID            OutputID
@@ -396,7 +401,14 @@ func (o *Output) doOpen(
 	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
 	if cfg.SendBufferSize != 0 {
-		if err := o.UnsafeSetSendBufferSize(ctx, cfg.SendBufferSize); err != nil {
+		err := o.UnsafeWithRawNetworkConn(ctx, func(
+			ctx context.Context,
+			rawConn syscall.RawConn,
+			_ string,
+		) error {
+			return netraw.SetOption(rawConn, tcpopt.SendBuffer(cfg.SendBufferSize))
+		})
+		if err != nil {
 			return ErrUnableToSetSendBufferSize{
 				Size: cfg.SendBufferSize,
 				Err:  err,

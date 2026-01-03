@@ -1,3 +1,5 @@
+// reader_loop.go contains the core execution logic for FromKernel, reading from input and passing to the kernel.
+
 package processor
 
 import (

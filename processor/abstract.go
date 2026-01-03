@@ -1,3 +1,6 @@
+// Package processor provides the high-level, channel-based processing layer of the AV pipeline.
+//
+// abstract.go defines the Abstract interface, which is the core contract for all processors.
 package processor
 
 import (

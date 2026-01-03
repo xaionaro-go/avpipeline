@@ -1,3 +1,4 @@
+// Package streammux provides a handler that routes audio and video streams to different outputs.
 package streammux
 
 import (
@@ -40,9 +41,7 @@ const (
 	switchTimeout = time.Hour
 )
 
-var (
-	EnableDraining = false // TODO: enable this (currently it causes bugs with mediacodec)
-)
+var EnableDraining = false // TODO: enable this (currently it causes bugs with mediacodec)
 
 type StreamMux[C any] struct {
 	MuxMode            types.MuxMode
