@@ -1,3 +1,5 @@
+// mama.go implements the MESA Adaptive Moving Average (MAMA) indicator.
+
 package indicator
 
 import (

@@ -1,6 +1,8 @@
 //go:build with_libav
 // +build with_libav
 
+// monitor_send.go implements the monitoring logic for sending packets and frames.
+
 package monitor
 
 import (

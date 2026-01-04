@@ -1,3 +1,6 @@
+// audio_normalize.go implements an audio normalization filter for media frames.
+
+// Package audionormalize provides an audio normalization filter for media frames.
 package audionormalize
 
 import (

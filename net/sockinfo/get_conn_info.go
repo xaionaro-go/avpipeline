@@ -1,3 +1,5 @@
+// get_conn_info.go provides functionality for retrieving socket information from raw connections.
+
 package sockinfo
 
 import (

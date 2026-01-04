@@ -1,3 +1,5 @@
+// consts.go defines log level constants for the logger package.
+
 package logger
 
 import (

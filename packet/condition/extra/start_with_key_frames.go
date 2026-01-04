@@ -1,3 +1,5 @@
+// start_with_key_frames.go implements a condition that waits for a keyframe before allowing packets through.
+
 package extra
 
 import (

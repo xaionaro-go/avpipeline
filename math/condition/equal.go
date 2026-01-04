@@ -1,3 +1,5 @@
+// equal.go implements an "equal to" condition for mathematical comparisons.
+
 package condition
 
 import (

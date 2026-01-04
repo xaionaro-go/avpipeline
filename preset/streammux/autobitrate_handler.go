@@ -12,6 +12,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/facebookincubator/go-belt/tool/experimental/errmon"
 	"github.com/go-ng/xatomic"
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -234,6 +235,10 @@ func (h *AutoBitRateHandler[C]) ServeContext(
 func (h *AutoBitRateHandler[C]) checkOnce(
 	ctx context.Context,
 ) {
+	defer func() {
+		errmon.ObserveRecoverCtx(ctx, recover())
+	}()
+
 	var activeVideoOutput *Output[C]
 	var getRawConners []kernel.GetSyscallRawConner
 	var getQueueSizers []kernel.GetInternalQueueSizer
@@ -280,6 +285,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				rawConn syscall.RawConn,
 				networkName string,
 			) error {
+				logger.Tracef(ctx, "getting connection info from %T", rawConn)
 				connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
 				if err != nil {
 					return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
@@ -288,8 +294,11 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				return nil
 			})
 		if err != nil {
-			logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
-			continue
+			if errors.As(err, &kernel.ErrNotImplemented{}) {
+				logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
+			} else {
+				logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
+			}
 		}
 	}
 

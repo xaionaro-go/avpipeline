@@ -1,3 +1,5 @@
+// set_finalizer.go provides utilities for setting finalizers on objects.
+
 package internal
 
 import (

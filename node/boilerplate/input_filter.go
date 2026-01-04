@@ -1,3 +1,6 @@
+// input_filter.go provides boilerplate code for managing input filters in nodes.
+
+// Package boilerplate provides common boilerplate code for node implementations.
 package boilerplate
 
 import (

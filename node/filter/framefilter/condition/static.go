@@ -1,3 +1,5 @@
+// static.go implements a condition that always returns a static boolean value for frame input filtering.
+
 package condition
 
 import (

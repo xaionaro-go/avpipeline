@@ -1,3 +1,5 @@
+// getter_atomic_integer.go implements a getter for atomic integer values.
+
 package condition
 
 import (

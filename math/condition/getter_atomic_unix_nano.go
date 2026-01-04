@@ -1,3 +1,5 @@
+// getter_atomic_unix_nano.go implements a getter for atomic Unix nanosecond timestamps.
+
 package condition
 
 import (

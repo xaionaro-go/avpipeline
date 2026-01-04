@@ -1,3 +1,5 @@
+// greater.go implements a "greater than" condition for mathematical comparisons.
+
 package condition
 
 import (

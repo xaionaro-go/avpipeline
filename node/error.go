@@ -1,3 +1,5 @@
+// error.go defines error types for nodes in the media pipeline.
+
 package node
 
 import "fmt"

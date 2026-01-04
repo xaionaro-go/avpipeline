@@ -1,3 +1,5 @@
+// av1c.go provides functionality for parsing and representing AV1CodecConfigurationRecord (AV1C).
+
 package extradata
 
 import (

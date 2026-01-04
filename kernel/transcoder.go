@@ -1,4 +1,5 @@
 // transcoder.go implements the Transcoder kernel for decoding and then re-encoding media streams.
+// In other words, it combines a Decoder and an Encoder into a single unit "Transcoder".
 
 package kernel
 

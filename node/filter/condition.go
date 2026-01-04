@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for filtering inputs to nodes.
+
+// Package filter provides various filters for node inputs.
 package filter
 
 import (

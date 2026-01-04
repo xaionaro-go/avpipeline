@@ -1,3 +1,5 @@
+// strings.go provides string manipulation utilities for the extradata package.
+
 package extradata
 
 import (

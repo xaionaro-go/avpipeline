@@ -1,3 +1,5 @@
+// input.go defines the Input type for media frames received from a source.
+
 package frame
 
 import (
@@ -37,6 +39,7 @@ func (f *Input) SetTimeBase(v astiav.Rational)  { (*Commons)(f).SetTimeBase(v) }
 func (f *Input) GetPipelineSideData() types.PipelineSideData {
 	return (*Commons)(f).GetPipelineSideData()
 }
+
 func (f *Input) AddPipelineSideData(obj any) types.PipelineSideData {
 	return (*Commons)(f).AddPipelineSideData(obj)
 }

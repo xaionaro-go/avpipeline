@@ -1,3 +1,5 @@
+// panic.go implements a condition that panics with a formatted message.
+
 package condition
 
 import (

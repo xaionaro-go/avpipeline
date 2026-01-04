@@ -1,3 +1,6 @@
+// on_stream_source_change.go implements a condition that triggers a handler when the source of a stream changes.
+
+// Package extra provides additional conditions for packet filtering.
 package extra
 
 import (

@@ -1,3 +1,6 @@
+// cache_handler.go implements a cache handler for nodes to store and replay packets.
+
+// Package cachehandler provides a cache handler for nodes to store and replay packets.
 package cachehandler
 
 import (
@@ -107,6 +110,7 @@ func (h *CacheHandler) OnAddPushTo(
 	logger.Debugf(ctx, "OnAddPushTo: %s", pushTo.Node)
 	h.needsSendingTo.Store(pushTo.Node, struct{}{})
 }
+
 func (h *CacheHandler) OnRemovePushTo(
 	ctx context.Context,
 	pushTo node.PushTo,

@@ -1,3 +1,6 @@
+// extra_data.go provides types and functions for parsing and handling codec extradata.
+
+// Package extradata provides types and functions for parsing and handling codec extradata.
 package extradata
 
 import (
@@ -24,7 +27,7 @@ type Parsed interface {
 	fmt.Stringer
 }
 
-// ParseExtradata tries known formats (H.264 AVCC, AAC ASC, H.264 Annex-B)
+// Parse tries known formats (H.264 AVCC, AAC ASC, H.264 Annex-B)
 // and falls back to Unknown.
 func (b Raw) Parse() Parsed {
 	if len(b) == 0 {

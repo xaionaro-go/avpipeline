@@ -1,3 +1,5 @@
+// quality.go implements a condition that measures the quality of the media stream.
+
 package extra
 
 import (

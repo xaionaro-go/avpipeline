@@ -112,8 +112,10 @@ type Decoder[DF codec.DecoderFactory] struct {
 	SentPacketsWithoutDecodingFrames uint64
 }
 
-var _ Abstract = (*Decoder[codec.DecoderFactory])(nil)
-var _ packet.Sink = (*Decoder[codec.DecoderFactory])(nil)
+var (
+	_ Abstract    = (*Decoder[codec.DecoderFactory])(nil)
+	_ packet.Sink = (*Decoder[codec.DecoderFactory])(nil)
+)
 
 func NewDecoder[DF codec.DecoderFactory](
 	ctx context.Context,
@@ -471,8 +473,10 @@ type decoderAsSource[DF codec.DecoderFactory] struct {
 	Decoder *codec.Decoder
 }
 
-var _ frame.Source = (*decoderAsSource[codec.DecoderFactory])(nil)
-var _ codec.GetDecoderer = (*decoderAsSource[codec.DecoderFactory])(nil)
+var (
+	_ frame.Source       = (*decoderAsSource[codec.DecoderFactory])(nil)
+	_ codec.GetDecoderer = (*decoderAsSource[codec.DecoderFactory])(nil)
+)
 
 func (d *decoderAsSource[DF]) String() string {
 	return d.Decoder.String()

@@ -1,3 +1,5 @@
+// h264_avcc.go provides functionality for parsing and representing H.264 AVCC configuration records.
+
 package extradata
 
 import (

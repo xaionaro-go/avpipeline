@@ -70,7 +70,7 @@ func (c *HaarCascade) SendInput(
 		return fmt.Errorf("haar cascade supports only decoded frames")
 	}
 
-	//c.Classifier.DetectMultiScale(mat)
+	// c.Classifier.DetectMultiScale(mat)
 	outputFrame := frame.BuildOutput(frameInput.Frame, frameInput.StreamInfo)
 	select {
 	case <-ctx.Done():

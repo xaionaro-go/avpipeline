@@ -6,10 +6,12 @@ import (
 	"context"
 )
 
-type RetryableFuncOnInit[K Abstract] func(context.Context, *Retryable[K])
-type RetryableFuncOnPreKernelOpen[K Abstract] func(context.Context, *Retryable[K]) error
-type RetryableFuncOnKernelOpen[K Abstract] func(context.Context, K) error
-type RetryableFuncOnError[K Abstract] func(context.Context, K, error) error
+type (
+	RetryableFuncOnInit[K Abstract]          func(context.Context, *Retryable[K])
+	RetryableFuncOnPreKernelOpen[K Abstract] func(context.Context, *Retryable[K]) error
+	RetryableFuncOnKernelOpen[K Abstract]    func(context.Context, K) error
+	RetryableFuncOnError[K Abstract]         func(context.Context, K, error) error
+)
 
 type RetryableConfig[K Abstract] struct {
 	OnInit          RetryableFuncOnInit[K]

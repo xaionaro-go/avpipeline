@@ -143,6 +143,7 @@ func (d *DecoderLocked) Flush(
 
 	if caps&astiav.CodecCapabilityDelay == 0 {
 		logger.Tracef(ctx, "the decoder has no delay, nothing to flush")
+		d.isDirty = false
 		return nil
 	}
 

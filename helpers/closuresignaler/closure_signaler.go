@@ -1,3 +1,6 @@
+// closure_signaler.go provides a utility for signaling the closure of a resource.
+
+// Package closuresignaler provides a utility for signaling the closure of a resource.
 package closuresignaler
 
 import (

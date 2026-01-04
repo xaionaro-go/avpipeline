@@ -1,6 +1,8 @@
 //go:build with_libav
 // +build with_libav
 
+// assert.go provides internal assertion helpers for the monitor package.
+
 package monitor
 
 import (

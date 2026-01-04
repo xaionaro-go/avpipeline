@@ -1,3 +1,5 @@
+// media_type.go implements a condition that checks the media type of a frame.
+
 package condition
 
 import (

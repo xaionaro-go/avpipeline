@@ -1,3 +1,6 @@
+// logger.go provides logging utilities and type aliases for the avpipeline project.
+
+// Package logger provides logging utilities for the avpipeline project.
 package logger
 
 import (

@@ -1,3 +1,6 @@
+// node.go defines the Node structure and its core methods.
+
+// Package node provides the core building blocks for the media processing pipeline.
 package node
 
 import (
@@ -195,9 +198,11 @@ type NodeWithCustomData[C any, T processor.Abstract] struct {
 
 type Node[T processor.Abstract] = NodeWithCustomData[struct{}, T]
 
-var _ Abstract = (*Node[processor.Abstract])(nil)
-var _ DotBlockContentStringWriteToer = (*Node[processor.Abstract])(nil)
-var _ GetCustomDataer[struct{}] = (*Node[processor.Abstract])(nil)
+var (
+	_ Abstract                       = (*Node[processor.Abstract])(nil)
+	_ DotBlockContentStringWriteToer = (*Node[processor.Abstract])(nil)
+	_ GetCustomDataer[struct{}]      = (*Node[processor.Abstract])(nil)
+)
 
 func New[T processor.Abstract](
 	processor T,

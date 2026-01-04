@@ -1,6 +1,8 @@
 //go:build with_libav
 // +build with_libav
 
+// monitor_kernel_output.go implements the kernel output packet monitor interface.
+
 package monitor
 
 import (

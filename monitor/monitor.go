@@ -1,6 +1,9 @@
 //go:build with_libav
 // +build with_libav
 
+// monitor.go implements the main monitoring logic for the media pipeline.
+
+// Package monitor provides monitoring and event reporting for the media pipeline.
 package monitor
 
 import (

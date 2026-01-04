@@ -1,3 +1,5 @@
+// pool.go implements a pool for reusing astiav.Frame objects.
+
 package frame
 
 import (

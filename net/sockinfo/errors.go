@@ -1,3 +1,5 @@
+// errors.go defines error types for the sockinfo package.
+
 package sockinfo
 
 type ErrNotImplemented struct {

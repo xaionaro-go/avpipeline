@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for mathematical comparisons.
+
+// Package condition provides various mathematical conditions for filtering.
 package condition
 
 import (

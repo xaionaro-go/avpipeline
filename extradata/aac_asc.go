@@ -1,3 +1,5 @@
+// aac_asc.go provides functionality for parsing and representing AAC AudioSpecificConfig (ASC).
+
 package extradata
 
 import (

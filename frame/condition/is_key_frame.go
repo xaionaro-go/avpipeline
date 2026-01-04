@@ -1,3 +1,5 @@
+// is_key_frame.go implements a condition that checks if a frame is a keyframe.
+
 package condition
 
 import (

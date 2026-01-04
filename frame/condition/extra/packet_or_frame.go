@@ -1,3 +1,6 @@
+// packet_or_frame.go implements a condition that works on both packets and frames.
+
+// Package extra provides additional conditions for frame filtering.
 package extra
 
 import (

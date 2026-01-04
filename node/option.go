@@ -1,3 +1,5 @@
+// option.go defines configuration options for nodes.
+
 package node
 
 type Config struct {

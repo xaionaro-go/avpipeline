@@ -1,3 +1,5 @@
+// h264_annexb.go provides functionality for parsing and representing H.264 Annex-B sequences.
+
 package extradata
 
 import (

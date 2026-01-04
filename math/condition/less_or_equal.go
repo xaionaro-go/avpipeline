@@ -1,3 +1,5 @@
+// less_or_equal.go implements a "less than or equal to" condition for mathematical comparisons.
+
 package condition
 
 import (

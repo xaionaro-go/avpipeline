@@ -1,3 +1,5 @@
+// assert.go provides internal assertion helpers for the avpipeline package.
+
 package avpipeline
 
 import (

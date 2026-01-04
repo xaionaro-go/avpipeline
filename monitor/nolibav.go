@@ -1,6 +1,8 @@
 //go:build !with_libav
 // +build !with_libav
 
+// nolibav.go provides a stub implementation of the monitor when libav is not available.
+
 package monitor
 
 import (

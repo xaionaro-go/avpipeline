@@ -1,3 +1,5 @@
+// new.go provides functionality for creating new media frames.
+
 package frame
 
 import (

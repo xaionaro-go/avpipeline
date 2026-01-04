@@ -1,3 +1,5 @@
+// find_stream.go provides a helper function to find a stream by its index in a format context.
+
 package avconv
 
 import (

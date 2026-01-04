@@ -1,3 +1,5 @@
+// output.go defines the Output type for media frames to be sent to a sink.
+
 package frame
 
 import (
@@ -35,6 +37,7 @@ func (f *Output) SetTimeBase(v astiav.Rational)  { (*Commons)(f).SetTimeBase(v) 
 func (f *Output) GetPipelineSideData() types.PipelineSideData {
 	return (*Commons)(f).GetPipelineSideData()
 }
+
 func (f *Output) AddPipelineSideData(obj any) types.PipelineSideData {
 	return (*Commons)(f).AddPipelineSideData(obj)
 }

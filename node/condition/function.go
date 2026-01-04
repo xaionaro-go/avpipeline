@@ -1,3 +1,5 @@
+// function.go implements a condition based on a custom function for node filtering.
+
 package condition
 
 import (

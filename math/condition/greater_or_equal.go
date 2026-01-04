@@ -1,3 +1,5 @@
+// greater_or_equal.go implements a "greater than or equal to" condition for mathematical comparisons.
+
 package condition
 
 import (

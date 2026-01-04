@@ -1,3 +1,5 @@
+// hardware_device_type.go provides a helper to convert a string to an astiav.HardwareDeviceType.
+
 package avconv
 
 import (

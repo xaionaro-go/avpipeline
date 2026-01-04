@@ -1,3 +1,6 @@
+// serve.go provides functionality for serving and managing the media pipeline.
+
+// Package avpipeline provides a framework for building and managing media processing pipelines.
 package avpipeline
 
 import (
@@ -35,6 +38,7 @@ func Serve[T node.Abstract](
 	dstAlreadyVisited := map[node.Abstract]struct{}{}
 	serve(ctx, serveConfig, errCh, &nodesWG, &dstAlreadyVisited, nodes...)
 }
+
 func serve[T node.Abstract](
 	ctx context.Context,
 	serveConfig ServeConfig,

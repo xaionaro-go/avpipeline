@@ -1,3 +1,5 @@
+// traverse.go provides functionality for traversing the nodes in the media pipeline.
+
 package avpipeline
 
 import (

@@ -1,3 +1,5 @@
+// dummy.go defines a dummy node type for testing and placeholders.
+
 package node
 
 import (

@@ -1,3 +1,5 @@
+// getter.go defines the Getter interface for retrieving values for comparison.
+
 package condition
 
 import (

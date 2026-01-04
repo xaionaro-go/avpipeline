@@ -1,3 +1,6 @@
+// moving_average.go defines the MovingAverage interface for technical indicators.
+
+// Package indicator provides various technical indicators for data analysis.
 package indicator
 
 import (

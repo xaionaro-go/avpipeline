@@ -1,3 +1,5 @@
+// or.go implements a logical OR condition for frame filtering.
+
 package condition
 
 import (

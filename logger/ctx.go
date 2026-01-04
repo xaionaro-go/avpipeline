@@ -1,3 +1,5 @@
+// ctx.go provides utilities for working with loggers in contexts.
+
 package logger
 
 import (

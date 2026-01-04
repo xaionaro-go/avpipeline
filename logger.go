@@ -1,3 +1,5 @@
+// logger.go provides logging utilities and conversion functions for the avpipeline package.
+
 package avpipeline
 
 import (

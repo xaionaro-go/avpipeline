@@ -1,3 +1,5 @@
+// drain.go provides functionality for draining nodes in the media pipeline.
+
 package avpipeline
 
 import (

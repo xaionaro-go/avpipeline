@@ -1,3 +1,5 @@
+// commons.go provides common structures and methods for media frames.
+
 package frame
 
 import (
@@ -66,7 +68,6 @@ func (f *Commons) GetDTSAsDuration() time.Duration {
 		return 0
 	}
 	return avconv.Duration(f.PktDts(), f.StreamInfo.TimeBase)
-
 }
 
 func (f *Commons) SetTimeBase(v astiav.Rational) {

@@ -1,3 +1,5 @@
+// tcp.go implements the SockInfo interface for TCP connections.
+
 package sockinfo
 
 import (

@@ -1,3 +1,5 @@
+// seen_streams_count.go implements a condition that checks the number of streams seen.
+
 package condition
 
 import (

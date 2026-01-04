@@ -1,3 +1,5 @@
+// cache_handler.go defines the CachingHandler interface for nodes.
+
 package node
 
 import (

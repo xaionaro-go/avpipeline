@@ -1,3 +1,5 @@
+// statistics.go provides boilerplate code for managing node statistics.
+
 package boilerplate
 
 import (

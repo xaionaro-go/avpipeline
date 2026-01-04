@@ -1,3 +1,5 @@
+// and.go implements a logical AND condition for node filtering.
+
 package condition
 
 import (

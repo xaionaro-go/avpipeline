@@ -1,3 +1,5 @@
+// push_to.go defines the PushTo structure for connecting nodes.
+
 package node
 
 import (

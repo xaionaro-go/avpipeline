@@ -1,3 +1,5 @@
+// in.go implements a condition that checks if a node is in a given set.
+
 package condition
 
 import (

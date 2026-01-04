@@ -1,3 +1,5 @@
+// serve_config.go defines the configuration for serving a node.
+
 package node
 
 type ServeConfig struct {

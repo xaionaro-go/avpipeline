@@ -1,6 +1,8 @@
 //go:build with_libav
 // +build with_libav
 
+// monitor_receive.go implements the input filter condition for monitoring received packets and frames.
+
 package monitor
 
 import (

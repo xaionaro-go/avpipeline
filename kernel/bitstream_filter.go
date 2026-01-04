@@ -36,8 +36,10 @@ type BitstreamFilter struct {
 	SentPacketsWithoutOutput uint64
 }
 
-var _ Abstract = (*BitstreamFilter)(nil)
-var _ packet.Source = (*BitstreamFilter)(nil)
+var (
+	_ Abstract      = (*BitstreamFilter)(nil)
+	_ packet.Source = (*BitstreamFilter)(nil)
+)
 
 func NewBitstreamFilter(
 	ctx context.Context,

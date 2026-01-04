@@ -1,3 +1,5 @@
+// find.go provides functionality for finding nodes in the media pipeline.
+
 package avpipeline
 
 import (

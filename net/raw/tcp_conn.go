@@ -1,41 +1,17 @@
+// tcp_conn.go provides utilities for working with TCP connections from file descriptors.
+
 // Package raw provides utilities for working with raw network connections.
 package raw
 
 import (
 	"context"
 	"fmt"
-	"net"
-	"os"
 	"syscall"
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	tcpopt "github.com/xaionaro-go/tcp/opt"
 	tcpsyscall "github.com/xaionaro-go/tcp/syscall"
 )
-
-func WithTCPConnFromFD(
-	ctx context.Context,
-	fd int,
-	callback func(net.Conn) error,
-) (_err error) {
-	logger.Tracef(ctx, "WithTCPConnFromFD: %d", fd)
-	defer func() { logger.Tracef(ctx, "/WithTCPConnFromFD: %d: %v", fd, _err) }()
-
-	f := os.NewFile(uintptr(fd), "socketfd")
-	defer f.Close()
-
-	conn, err := net.FileConn(f)
-	if err != nil {
-		return fmt.Errorf("unable to build net.Conn from file descriptor %d: %w", fd, err)
-	}
-
-	err = callback(conn)
-	if err != nil {
-		return fmt.Errorf("callback failed: %w", err)
-	}
-
-	return nil
-}
 
 func SetOption(
 	ctx context.Context,

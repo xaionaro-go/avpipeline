@@ -1,3 +1,6 @@
+// duration.go provides utilities for converting between FFmpeg timestamps and time.Duration.
+
+// Package avconv provides conversion utilities for media types and values.
 package avconv
 
 import (

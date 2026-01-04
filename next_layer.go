@@ -1,3 +1,5 @@
+// next_layer.go provides functionality for traversing the next layer of nodes in the media pipeline.
+
 package avpipeline
 
 import (

@@ -1,3 +1,5 @@
+// input_filter.go provides utilities for managing input filters on nodes.
+
 package node
 
 import (

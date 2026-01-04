@@ -1,3 +1,5 @@
+// notify.go provides functionality for notifying nodes about packet sources.
+
 package avpipeline
 
 import (

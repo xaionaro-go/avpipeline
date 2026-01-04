@@ -1,6 +1,8 @@
 //go:build debug_trace
 // +build debug_trace
 
+// logger_trace.go provides trace logging functions when the debug_trace build tag is set.
+
 package logger
 
 import (

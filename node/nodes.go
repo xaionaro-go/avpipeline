@@ -1,3 +1,5 @@
+// nodes.go defines a collection type for nodes.
+
 package node
 
 import (

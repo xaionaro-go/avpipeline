@@ -1,3 +1,5 @@
+// getter_rpn.go implements a getter that evaluates Reverse Polish Notation (RPN) expressions.
+
 package condition
 
 import (

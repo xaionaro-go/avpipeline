@@ -1,6 +1,8 @@
 //go:build !debug_trace
 // +build !debug_trace
 
+// logger_notrace.go provides no-op trace logging functions when the debug_trace build tag is not set.
+
 package logger
 
 import (

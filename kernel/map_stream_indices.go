@@ -28,9 +28,11 @@ type MapStreamIndices struct {
 	outputStreams map[int]*astiav.Stream
 }
 
-var _ Abstract = (*MapStreamIndices)(nil)
-var _ packet.Source = (*MapStreamIndices)(nil)
-var _ packet.Sink = (*MapStreamIndices)(nil)
+var (
+	_ Abstract      = (*MapStreamIndices)(nil)
+	_ packet.Source = (*MapStreamIndices)(nil)
+	_ packet.Sink   = (*MapStreamIndices)(nil)
+)
 
 type StreamIndexAssigner interface {
 	StreamIndexAssign(context.Context, packetorframe.InputUnion) ([]int, error)

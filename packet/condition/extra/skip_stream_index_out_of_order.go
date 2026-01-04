@@ -1,3 +1,5 @@
+// skip_stream_index_out_of_order.go implements a condition that skips packets with stream indices that are out of order.
+
 package extra
 
 import (

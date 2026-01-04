@@ -1,3 +1,5 @@
+// node_serve.go implements the serving logic for nodes.
+
 package node
 
 import (

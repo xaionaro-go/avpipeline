@@ -1,3 +1,5 @@
+// and.go implements a logical AND condition for frame filtering.
+
 package condition
 
 import (

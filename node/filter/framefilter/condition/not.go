@@ -1,3 +1,5 @@
+// not.go implements a logical NOT condition for frame input filtering.
+
 package condition
 
 import (
