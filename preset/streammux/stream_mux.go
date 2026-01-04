@@ -312,13 +312,14 @@ func (s *StreamMux[C]) initSwitches(
 					}
 				}
 
-				err := outputPrev.CloseNoDrain(ctx)
-				if err != nil {
-					logger.Errorf(ctx, "Switch[%s]: unable to close the output %d: %v", inputType, from, err)
-				}
-
 				outputPrev.FirstNodeAfterFilter().SetInputFilter(ctx, packetorframefiltercondition.Panic("Switch["+inputType.String()+"]: somehow received a packet, while the output is closed"))
 
+				observability.Go(ctx, func(ctx context.Context) {
+					err := outputPrev.CloseNoDrain(ctx)
+					if err != nil {
+						logger.Errorf(ctx, "Switch[%s]: unable to close the output %d: %v", inputType, from, err)
+					}
+				})
 				observability.Go(ctx, func(ctx context.Context) {
 					s.Locker.Do(ctx, func() {
 						err := s.createAndConfigureOutputs(ctx, outputPrev.GetKey(), s.CurrentOutputProps.TranscoderConfig)
@@ -876,15 +877,18 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, senderKey, err)
 	}
 
-	logger.Debugf(ctx, "notifying about the sources")
-	err = avpipeline.NotifyAboutPacketSources(ctx,
-		input.Node.Processor.Kernel,
-		output.InputFilter,
-	)
-	if err != nil {
-		return fmt.Errorf("received an error while notifying nodes about packet sources (%s -> %s): %w", input.Node.Processor.Kernel, output.InputFilter, err)
-	}
-
+	output.InputFilter.Locker.ManualLock(ctx)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer output.InputFilter.Locker.ManualUnlock(ctx)
+		logger.Debugf(ctx, "notifying about the sources")
+		err := avpipeline.NotifyAboutPacketSources(ctx,
+			input.Node.Processor.Kernel,
+			output.FirstNodeAfterFilter(),
+		)
+		if err != nil {
+			logger.Errorf(ctx, "received an error while notifying nodes about packet sources (%s -> %s): %v", input.Node.Processor.Kernel, output.InputFilter, err)
+		}
+	})
 	return nil
 }
 
