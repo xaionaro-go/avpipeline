@@ -16,7 +16,6 @@ import (
 	xastiav "github.com/xaionaro-go/avcommon/astiav"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
-	"github.com/xaionaro-go/avpipeline/net/raw"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -60,9 +59,8 @@ func (o *Output) unsafeWithNetworkConn(
 		}
 	}
 
-	fd, err := o.unsafeGetFileDescriptor(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to get file descriptor: %w", err)
+	if o.netConn != nil {
+		return callback(ctx, o.netConn)
 	}
 
 	if o.URLParsed.Scheme == "srt" {
@@ -71,15 +69,7 @@ func (o *Output) unsafeWithNetworkConn(
 		}
 	}
 
-	logger.Tracef(ctx, "obtained file descriptor %d", fd)
-
-	err = raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
-		return callback(ctx, conn)
-	})
-	if err != nil {
-		return fmt.Errorf("WithTCPConnFromFD(ctx, %d, ...) failed: %w", fd, err)
-	}
-	return nil
+	return fmt.Errorf("network connection is not available")
 }
 
 func (o *Output) UnsafeWithRawNetworkConn(
@@ -95,6 +85,21 @@ func (o *Output) unsafeWithRawNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, syscall.RawConn, string) error,
 ) (_err error) {
+	if _, ok := ctx.Value(ctxKeyBypassIsOpenCheck).(struct{}); !ok {
+		logger.Tracef(ctx, "checking whether the output is opened")
+		if err := o.verifyOpen(ctx); err != nil {
+			return fmt.Errorf("output is not opened: %w", err)
+		}
+	}
+
+	if o.rawConn != nil {
+		networkName := "tcp"
+		if o.netConn != nil && o.netConn.RemoteAddr() != nil {
+			networkName = o.netConn.RemoteAddr().Network()
+		}
+		return callback(ctx, o.rawConn, networkName)
+	}
+
 	return o.unsafeWithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
 		rawConner, ok := conn.(syscall.Conn)
 		if !ok {

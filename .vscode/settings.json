@@ -1,4 +1,8 @@
 {
+    "go.toolsEnvVars": {
+        "GOOS": "linux",
+        "GOARCH": "amd64"
+    },
     "go.buildTags": "debug_trace,mediacodec,patched_libav,with_libsrt,with_cv,ffmpeg7,with_libav",
     "protoc": {
         "options": [

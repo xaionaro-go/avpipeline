@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -140,6 +142,9 @@ type Output struct {
 	headerSent bool
 	ioContext  *astiav.IOContext
 	proxy      *proxy.TCPProxy
+	netConn    net.Conn
+	netFile    *os.File
+	rawConn    syscall.RawConn
 
 	formatContextLocker xsync.CtxLocker
 
@@ -331,6 +336,7 @@ func NewOutputFromURL(
 		})
 	} else {
 		if err := o.doOpen(ctx, url, formatNameRequest, cfg); err != nil {
+			o.Close(ctx)
 			return nil, err
 		}
 	}
@@ -410,6 +416,9 @@ func (o *Output) doOpen(
 	o.ioContext = ioContext
 	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
+
+	o.initNetworkConn(ctx)
+
 	if cfg.SendBufferSize != 0 {
 		err := o.UnsafeWithRawNetworkConn(
 			context.WithValue(ctx, ctxKeyBypassIsOpenCheck, struct{}{}),
@@ -431,6 +440,40 @@ func (o *Output) doOpen(
 	}
 
 	return nil
+}
+
+func (o *Output) initNetworkConn(ctx context.Context) {
+	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
+		return
+	}
+
+	fd, err := o.unsafeGetFileDescriptor(ctx)
+	if err != nil {
+		logger.Debugf(ctx, "unable to get FD: %v", err)
+		return
+	}
+
+	switch o.URLParsed.Scheme {
+	case "rtmp", "rtmps":
+	default:
+		logger.Errorf(ctx, "unsupported scheme for network connection: '%s'", o.URLParsed.Scheme)
+		return
+	}
+
+	conn, f, err := netraw.TCPConnFromFD(ctx, fd)
+	if err != nil {
+		logger.Debugf(ctx, "unable to get net.Conn from FD %d: %v", fd, err)
+		return
+	}
+
+	o.netConn = conn
+	o.netFile = f
+	if rawConner, ok := conn.(syscall.Conn); ok {
+		rawConn, err := rawConner.SyscallConn()
+		if err == nil {
+			o.rawConn = rawConn
+		}
+	}
 }
 
 func (o *Output) Close(
@@ -473,6 +516,14 @@ func (o *Output) Close(
 			}
 			o.ioContext = nil
 		}
+		if o.netFile != nil {
+			if err := o.netFile.Close(); err != nil {
+				result = append(result, fmt.Errorf("unable to close the network file: %w", err))
+			}
+			o.netFile = nil
+		}
+		o.netConn = nil
+		o.rawConn = nil
 		o.FormatContext = nil
 	})
 	if o.proxy != nil {

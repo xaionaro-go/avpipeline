@@ -278,31 +278,42 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	logger.Tracef(ctx, "checking bitrate with %d raw conners and %d queue sizers", len(getRawConners), len(getQueueSizers))
 
-	for _, proc := range getRawConners {
-		logger.Tracef(ctx, "getting raw connection from %s", proc)
-		err := proc.UnsafeWithRawNetworkConn(
-			ctx,
-			func(
-				ctx context.Context,
-				rawConn syscall.RawConn,
-				networkName string,
-			) error {
-				logger.Tracef(ctx, "getting connection info from %T", rawConn)
-				connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
+	func() {
+		var wg sync.WaitGroup
+		defer wg.Wait()
+		ctx, cancelFn := context.WithTimeout(ctx, h.AutoBitRateVideoConfig.CheckInterval/4)
+		defer cancelFn()
+		for _, proc := range getRawConners {
+			logger.Tracef(ctx, "getting raw connection from %s", proc)
+			proc := proc
+			wg.Add(1)
+			observability.Go(ctx, func(ctx context.Context) {
+				defer wg.Done()
+				err := proc.UnsafeWithRawNetworkConn(
+					ctx,
+					func(
+						ctx context.Context,
+						rawConn syscall.RawConn,
+						networkName string,
+					) error {
+						logger.Tracef(ctx, "getting connection info from %T", rawConn)
+						connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
+						if err != nil {
+							return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
+						}
+						logger.Tracef(ctx, "connInfo: %s", spew.Sdump(connInfo))
+						return nil
+					})
 				if err != nil {
-					return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
+					if errors.As(err, &kernel.ErrNotImplemented{}) {
+						logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
+					} else {
+						logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
+					}
 				}
-				logger.Tracef(ctx, "connInfo: %s", spew.Sdump(connInfo))
-				return nil
 			})
-		if err != nil {
-			if errors.As(err, &kernel.ErrNotImplemented{}) {
-				logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
-			} else {
-				logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
-			}
 		}
-	}
+	}()
 
 	now := time.Now()
 	tsDiff := now.Sub(h.lastCheckTS)
