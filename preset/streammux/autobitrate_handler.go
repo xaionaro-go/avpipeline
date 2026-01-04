@@ -241,6 +241,71 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		errmon.ObserveRecoverCtx(ctx, recover())
 	}()
 
+	activeVideoOutput, getRawConners, getQueueSizers, err := h.getOutputsInfo(ctx)
+	if err != nil {
+		logger.Errorf(ctx, "unable to get outputs info: %v", err)
+		return
+	}
+	if activeVideoOutput == nil {
+		logger.Warnf(ctx, "no active output; skipping bitrate check")
+		return
+	}
+
+	h.logRawConnInfo(ctx, getRawConners)
+
+	now := time.Now()
+	tsDiff := now.Sub(h.lastCheckTS)
+	h.lastCheckTS = now
+
+	totalQueue, haveAnError := h.calculateTotalQueueSize(ctx, activeVideoOutput, getQueueSizers, tsDiff)
+	logger.Tracef(ctx, "total queue size: %d", totalQueue)
+	if !haveAnError {
+		h.lastVideoBitRate = h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).OutputBitRate.Load()
+	}
+
+	encoderV, _ := h.StreamMux.GetEncoders(ctx)
+	if encoderV == nil {
+		logger.Warnf(ctx, "unable to get encoder")
+		return
+	}
+
+	curReqBitRate := h.getCurrentBitrate(ctx, encoderV)
+	if curReqBitRate == 0 {
+		logger.Debugf(ctx, "current bitrate is 0; skipping this check")
+		return
+	}
+
+	curMeasurements := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo)
+	actualOutputBitrate := types.Ubps(curMeasurements.OutputBitRate.Load())
+	totalQueueSizeDerivative := (float64(totalQueue) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
+	h.lastTotalQueueSize = totalQueue
+	bitRateRequest := h.Calculator.CalculateBitRate(
+		ctx,
+		CalculateBitRateRequest{
+			CurrentBitrateSetting: types.Ubps(curReqBitRate),
+			InputBitrate:          types.Ubps(curMeasurements.InputBitRate.Load()),
+			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
+			QueueDuration:         nanosecondsToDuration(curMeasurements.SendingLatency.Load()),
+			QueueSize:             types.UB(totalQueue),
+			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
+			Config:                &h.AutoBitRateVideoConfig,
+		},
+	)
+	if bitRateRequest.BitRate == 0 {
+		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
+		return
+	}
+	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); isCritical: %t; queue size: %d", bitRateRequest.BitRate, curReqBitRate, bitRateRequest.IsCritical, totalQueue)
+
+	if err := h.trySetVideoBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
+		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
+		return
+	}
+}
+
+func (h *AutoBitRateHandler[C]) getOutputsInfo(
+	ctx context.Context,
+) (*Output[C], []kernel.WithRawNetworkConner, []kernel.GetInternalQueueSizer, error) {
 	var activeVideoOutput *Output[C]
 	var getRawConners []kernel.WithRawNetworkConner
 	var getQueueSizers []kernel.GetInternalQueueSizer
@@ -267,58 +332,59 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		})
 		return nil
 	})
-	if err != nil {
-		logger.Errorf(ctx, "unable to get active video output: %v", err)
-		return
-	}
-	if activeVideoOutput == nil {
-		logger.Warnf(ctx, "no active output; skipping bitrate check")
+	return activeVideoOutput, getRawConners, getQueueSizers, err
+}
+
+func (h *AutoBitRateHandler[C]) logRawConnInfo(
+	ctx context.Context,
+	getRawConners []kernel.WithRawNetworkConner,
+) {
+	if len(getRawConners) == 0 {
 		return
 	}
 
-	logger.Tracef(ctx, "checking bitrate with %d raw conners and %d queue sizers", len(getRawConners), len(getQueueSizers))
-
-	func() {
-		var wg sync.WaitGroup
-		defer wg.Wait()
-		ctx, cancelFn := context.WithTimeout(ctx, h.AutoBitRateVideoConfig.CheckInterval/4)
-		defer cancelFn()
-		for _, proc := range getRawConners {
-			logger.Tracef(ctx, "getting raw connection from %s", proc)
-			proc := proc
-			wg.Add(1)
-			observability.Go(ctx, func(ctx context.Context) {
-				defer wg.Done()
-				err := proc.WithRawNetworkConn(
-					ctx,
-					func(
-						ctx context.Context,
-						rawConn syscall.RawConn,
-						networkName string,
-					) error {
-						logger.Tracef(ctx, "getting connection info from %T", rawConn)
-						connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
-						if err != nil {
-							return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
-						}
-						logger.Tracef(ctx, "connInfo: %s", spew.Sdump(connInfo))
-						return nil
-					})
-				if err != nil {
-					if errors.As(err, &kernel.ErrNotImplemented{}) {
-						logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
-					} else {
-						logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancelFn := context.WithTimeout(ctx, h.AutoBitRateVideoConfig.CheckInterval/4)
+	defer cancelFn()
+	for _, proc := range getRawConners {
+		logger.Tracef(ctx, "getting raw connection from %s", proc)
+		proc := proc
+		wg.Add(1)
+		observability.Go(ctx, func(ctx context.Context) {
+			defer wg.Done()
+			err := proc.WithRawNetworkConn(
+				ctx,
+				func(
+					ctx context.Context,
+					rawConn syscall.RawConn,
+					networkName string,
+				) error {
+					logger.Tracef(ctx, "getting connection info from %T", rawConn)
+					connInfo, err := sockinfo.GetRawConnInfo(ctx, rawConn, networkName)
+					if err != nil {
+						return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
 					}
+					logger.Debugf(ctx, "connInfo: %s", spew.Sdump(connInfo))
+					return nil
+				})
+			if err != nil {
+				if errors.As(err, &kernel.ErrNotImplemented{}) {
+					logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
+				} else {
+					logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
 				}
-			})
-		}
-	}()
+			}
+		})
+	}
+}
 
-	now := time.Now()
-	tsDiff := now.Sub(h.lastCheckTS)
-	h.lastCheckTS = now
-
+func (h *AutoBitRateHandler[C]) calculateTotalQueueSize(
+	ctx context.Context,
+	activeVideoOutput *Output[C],
+	getQueueSizers []kernel.GetInternalQueueSizer,
+	tsDiff time.Duration,
+) (uint64, bool) {
 	var haveAnError atomic.Bool
 	var totalQueue atomic.Uint64
 	assert(ctx, activeVideoOutput.SendingNode != nil)
@@ -362,60 +428,24 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 		})
 	}
 	wg.Wait()
-	logger.Tracef(ctx, "total queue size: %d", totalQueue.Load())
-	if !haveAnError.Load() {
-		h.lastVideoBitRate = h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).OutputBitRate.Load()
-	}
+	return totalQueue.Load(), haveAnError.Load()
+}
 
-	encoderV, _ := h.StreamMux.GetEncoders(ctx)
-	if encoderV == nil {
-		logger.Warnf(ctx, "unable to get encoder")
-		return
-	}
-
-	var curReqBitRate types.Ubps
+func (h *AutoBitRateHandler[C]) getCurrentBitrate(
+	ctx context.Context,
+	encoderV codec.Encoder,
+) types.Ubps {
 	if codec.IsEncoderCopy(encoderV) {
 		logger.Tracef(ctx, "encoder is in copy mode; using the input bitrate as the current bitrate")
-		curReqBitRate = types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load())
-	} else {
-		logger.Tracef(ctx, "getting current bitrate from the encoder")
-		q := encoderV.GetQuality(ctx)
-		if q, ok := q.(quality.ConstantBitrate); ok {
-			curReqBitRate = types.Ubps(q)
-		} else {
-			logger.Debugf(ctx, "unable to get current bitrate")
-		}
+		return types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load())
 	}
-
-	if curReqBitRate == 0 {
-		logger.Debugf(ctx, "current bitrate is 0; skipping this check")
-		return
+	logger.Tracef(ctx, "getting current bitrate from the encoder")
+	q := encoderV.GetQuality(ctx)
+	if q, ok := q.(quality.ConstantBitrate); ok {
+		return types.Ubps(q)
 	}
-
-	actualOutputBitrate := types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).OutputBitRate.Load())
-	totalQueueSizeDerivative := (float64(totalQueue.Load()) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
-	h.lastTotalQueueSize = totalQueue.Load()
-	bitRateRequest := h.Calculator.CalculateBitRate(
-		ctx,
-		CalculateBitRateRequest{
-			CurrentBitrateSetting: types.Ubps(curReqBitRate),
-			InputBitrate:          types.Ubps(h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).InputBitRate.Load()),
-			ActualOutputBitrate:   types.Ubps(actualOutputBitrate),
-			QueueSize:             types.UB(totalQueue.Load()),
-			QueueSizeDerivative:   types.UBps(totalQueueSizeDerivative),
-			Config:                &h.AutoBitRateVideoConfig,
-		},
-	)
-	if bitRateRequest.BitRate == 0 {
-		logger.Errorf(ctx, "calculated bitrate is 0; ignoring the calculators result")
-		return
-	}
-	logger.Debugf(ctx, "calculated new bitrate: %v (current: %v); isCritical: %t; queue size: %d", bitRateRequest.BitRate, curReqBitRate, bitRateRequest.IsCritical, totalQueue.Load())
-
-	if err := h.trySetVideoBitrate(ctx, curReqBitRate, bitRateRequest, actualOutputBitrate); err != nil {
-		logger.Errorf(ctx, "unable to set new bitrate: %v", err)
-		return
-	}
+	logger.Debugf(ctx, "unable to get current bitrate")
+	return 0
 }
 
 func (h *AutoBitRateHandler[C]) isBypassEnabled(

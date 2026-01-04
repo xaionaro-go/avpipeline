@@ -50,11 +50,7 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
 
-	queueDuration := US(time.Duration(
-		float64(req.QueueSize) * 8 /
-			float64(req.ActualOutputBitrate) *
-			float64(time.Second),
-	)) // s
+	queueDuration := US(req.QueueDuration) // s
 
 	queueDurationOptimal := max(
 		US(d.QueueDurationOptimal),

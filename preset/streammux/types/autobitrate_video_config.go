@@ -19,6 +19,7 @@ type CalculateBitRateRequest struct {
 	CurrentBitrateSetting Ubps
 	InputBitrate          Ubps
 	ActualOutputBitrate   Ubps
+	QueueDuration         time.Duration
 	QueueSize             UB
 	QueueSizeDerivative   UBps
 	Config                *AutoBitRateVideoConfig
