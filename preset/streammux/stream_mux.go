@@ -1220,48 +1220,55 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 
 			inputCounters := s.InputAll.Node.GetCountersPtr()
 			bytesInputReadNext := map[astiav.MediaType]uint64{
-				astiav.MediaTypeVideo:   inputCounters.Received.Packets.Video.Bytes.Load(),
-				astiav.MediaTypeAudio:   inputCounters.Received.Packets.Audio.Bytes.Load(),
-				astiav.MediaTypeUnknown: inputCounters.Received.Packets.Other.Bytes.Load(),
+				astiav.MediaTypeVideo:   inputCounters.Sent.Packets.Video.Bytes.Load() + inputCounters.Sent.Frames.Video.Bytes.Load(),
+				astiav.MediaTypeAudio:   inputCounters.Sent.Packets.Audio.Bytes.Load() + inputCounters.Sent.Frames.Audio.Bytes.Load(),
+				astiav.MediaTypeUnknown: inputCounters.Sent.Packets.Other.Bytes.Load() + inputCounters.Sent.Frames.Other.Bytes.Load(),
 			}
 
 			bytesEncodedGenNext := map[astiav.MediaType]uint64{}
 			bytesOutputReadNext := map[astiav.MediaType]uint64{}
 			s.OutputsMap.Range(func(outputKey SenderKey, output *Output[C]) bool {
 				encoderCounters := output.TranscoderNode.Processor.CountersPtr()
-				bytesEncodedGenNext[astiav.MediaTypeVideo] += encoderCounters.Generated.Packets.Video.Bytes.Load() - encoderCounters.Omitted.Packets.Video.Bytes.Load()
-				bytesEncodedGenNext[astiav.MediaTypeAudio] += encoderCounters.Generated.Packets.Audio.Bytes.Load() - encoderCounters.Omitted.Packets.Audio.Bytes.Load()
-				bytesEncodedGenNext[astiav.MediaTypeUnknown] += encoderCounters.Generated.Packets.Other.Bytes.Load() - encoderCounters.Omitted.Packets.Other.Bytes.Load()
+				bytesEncodedGenNext[astiav.MediaTypeVideo] += encoderCounters.Generated.Packets.Video.Bytes.Load() + encoderCounters.Generated.Frames.Video.Bytes.Load() - (encoderCounters.Omitted.Packets.Video.Bytes.Load() + encoderCounters.Omitted.Frames.Video.Bytes.Load())
+				bytesEncodedGenNext[astiav.MediaTypeAudio] += encoderCounters.Generated.Packets.Audio.Bytes.Load() + encoderCounters.Generated.Frames.Audio.Bytes.Load() - (encoderCounters.Omitted.Packets.Audio.Bytes.Load() + encoderCounters.Omitted.Frames.Audio.Bytes.Load())
+				bytesEncodedGenNext[astiav.MediaTypeUnknown] += encoderCounters.Generated.Packets.Other.Bytes.Load() + encoderCounters.Generated.Frames.Other.Bytes.Load() - (encoderCounters.Omitted.Packets.Other.Bytes.Load() + encoderCounters.Omitted.Frames.Other.Bytes.Load())
 				outputCounters := output.SendingNode.GetCountersPtr()
-				bytesOutputReadNext[astiav.MediaTypeVideo] += outputCounters.Received.Packets.Video.Bytes.Load()
-				bytesOutputReadNext[astiav.MediaTypeAudio] += outputCounters.Received.Packets.Audio.Bytes.Load()
-				bytesOutputReadNext[astiav.MediaTypeUnknown] += outputCounters.Received.Packets.Other.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeVideo] += outputCounters.Received.Packets.Video.Bytes.Load() + outputCounters.Received.Frames.Video.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeAudio] += outputCounters.Received.Packets.Audio.Bytes.Load() + outputCounters.Received.Frames.Audio.Bytes.Load()
+				bytesOutputReadNext[astiav.MediaTypeUnknown] += outputCounters.Received.Packets.Other.Bytes.Load() + outputCounters.Received.Frames.Other.Bytes.Load()
 				return true
 			})
 
 			for _, mediaType := range []astiav.MediaType{astiav.MediaTypeVideo, astiav.MediaTypeAudio, astiav.MediaTypeUnknown} {
 				m := s.getTrackMeasurements(mediaType)
-				bytesInputRead := bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				bytesInputRead := uint64(0)
+				if bytesInputReadNext[mediaType] >= bytesInputReadPrev[mediaType] {
+					bytesInputRead = bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				}
 				bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
 				oldInputValue := m.InputBitRate.Load()
 				newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
 				m.InputBitRate.Store(newInputValue)
 
-				bytesEncodedGen := int64(bytesEncodedGenNext[mediaType]) - int64(bytesEncodedGenPrev[mediaType])
-				if bytesEncodedGen >= 0 {
-					bitRateEncoded := int(float64(bytesEncodedGen*8) / duration.Seconds())
-					oldEncodedValue := m.EncodedBitRate.Load()
-					newEncodedValue := updateWithInertialValue(oldEncodedValue, uint64(bitRateEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-					m.EncodedBitRate.Store(newEncodedValue)
+				bytesEncodedGen := uint64(0)
+				if bytesEncodedGenNext[mediaType] >= bytesEncodedGenPrev[mediaType] {
+					bytesEncodedGen = bytesEncodedGenNext[mediaType] - bytesEncodedGenPrev[mediaType]
 				}
+				bitRateEncoded := int(float64(bytesEncodedGen*8) / duration.Seconds())
+				oldEncodedValue := m.EncodedBitRate.Load()
+				newEncodedValue := updateWithInertialValue(oldEncodedValue, uint64(bitRateEncoded), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				m.EncodedBitRate.Store(newEncodedValue)
 
-				bytesOutputRead := int64(bytesOutputReadNext[mediaType]) - int64(bytesOutputReadPrev[mediaType])
-				if bytesOutputRead >= 0 {
-					bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
-					oldOutputValue := m.OutputBitRate.Load()
-					newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
-					m.OutputBitRate.Store(newOutputValue)
+				bytesOutputRead := uint64(0)
+				if bytesOutputReadNext[mediaType] >= bytesOutputReadPrev[mediaType] {
+					bytesOutputRead = bytesOutputReadNext[mediaType] - bytesOutputReadPrev[mediaType]
 				}
+				bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
+				oldOutputValue := m.OutputBitRate.Load()
+				newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, s.CurrentBitRateMeasurementsCount.Load())
+				m.OutputBitRate.Store(newOutputValue)
+
+				logger.Tracef(ctx, "inputBitRateMeasurerLoop: mediaType:%v, duration:%v, bytesInputRead:%v, bitRateInput:%v, oldInputBitRate:%v, newInputBitRate:%v, bytesEncodedGen:%v, bitRateEncoded:%v, oldEncodedBitRate:%v, newEncodedBitRate:%v, bytesOutputRead:%v, bitRateOutput:%v, oldOutputBitRate:%v, newOutputBitRate:%v (raw: inputNext:%v, inputPrev:%v, encodedNext:%v, encodedPrev:%v, outputNext:%v, outputPrev:%v)", mediaType, duration, bytesInputRead, bitRateInput, oldInputValue, newInputValue, bytesEncodedGen, bitRateEncoded, oldEncodedValue, newEncodedValue, bytesOutputRead, bitRateOutput, oldOutputValue, newOutputValue, bytesInputReadNext[mediaType], bytesInputReadPrev[mediaType], bytesEncodedGenNext[mediaType], bytesEncodedGenPrev[mediaType], bytesOutputReadNext[mediaType], bytesOutputReadPrev[mediaType])
 			}
 
 			// DONE

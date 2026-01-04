@@ -503,32 +503,40 @@ func (i *InputWithFallback[K, DF, C]) inputBitRateMeasurerLoop(
 			i.InputChainsLocker.Do(ctx, func() {
 				for _, inputChain := range i.InputChains {
 					inputCounters := inputChain.Input.GetCountersPtr()
-					bytesInputReadNext[astiav.MediaTypeVideo] += inputCounters.Received.Packets.Video.Bytes.Load()
-					bytesInputReadNext[astiav.MediaTypeAudio] += inputCounters.Received.Packets.Audio.Bytes.Load()
-					bytesInputReadNext[astiav.MediaTypeUnknown] += inputCounters.Received.Packets.Other.Bytes.Load()
+					bytesInputReadNext[astiav.MediaTypeVideo] += inputCounters.Sent.Packets.Video.Bytes.Load() + inputCounters.Sent.Frames.Video.Bytes.Load()
+					bytesInputReadNext[astiav.MediaTypeAudio] += inputCounters.Sent.Packets.Audio.Bytes.Load() + inputCounters.Sent.Frames.Audio.Bytes.Load()
+					bytesInputReadNext[astiav.MediaTypeUnknown] += inputCounters.Sent.Packets.Other.Bytes.Load() + inputCounters.Sent.Frames.Other.Bytes.Load()
 				}
 			})
 
 			outputCounters := i.Output.GetCountersPtr()
 			bytesOutputReadNext := map[astiav.MediaType]uint64{
-				astiav.MediaTypeVideo:   outputCounters.Received.Packets.Video.Bytes.Load(),
-				astiav.MediaTypeAudio:   outputCounters.Received.Packets.Audio.Bytes.Load(),
-				astiav.MediaTypeUnknown: outputCounters.Received.Packets.Other.Bytes.Load(),
+				astiav.MediaTypeVideo:   outputCounters.Received.Packets.Video.Bytes.Load() + outputCounters.Received.Frames.Video.Bytes.Load(),
+				astiav.MediaTypeAudio:   outputCounters.Received.Packets.Audio.Bytes.Load() + outputCounters.Received.Frames.Audio.Bytes.Load(),
+				astiav.MediaTypeUnknown: outputCounters.Received.Packets.Other.Bytes.Load() + outputCounters.Received.Frames.Other.Bytes.Load(),
 			}
 
 			for _, mediaType := range []astiav.MediaType{astiav.MediaTypeVideo, astiav.MediaTypeAudio, astiav.MediaTypeUnknown} {
 				m := i.getTrackMeasurements(mediaType)
-				bytesInputRead := bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				bytesInputRead := uint64(0)
+				if bytesInputReadNext[mediaType] >= bytesInputReadPrev[mediaType] {
+					bytesInputRead = bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				}
 				bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
 				oldInputValue := m.InputBitRate.Load()
 				newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, i.CurrentBitRateMeasurementsCount.Load())
 				m.InputBitRate.Store(newInputValue)
 
-				bytesOutputRead := bytesOutputReadNext[mediaType] - bytesOutputReadPrev[mediaType]
+				bytesOutputRead := uint64(0)
+				if bytesOutputReadNext[mediaType] >= bytesOutputReadPrev[mediaType] {
+					bytesOutputRead = bytesOutputReadNext[mediaType] - bytesOutputReadPrev[mediaType]
+				}
 				bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
 				oldOutputValue := m.OutputBitRate.Load()
 				newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, i.CurrentBitRateMeasurementsCount.Load())
 				m.OutputBitRate.Store(newOutputValue)
+
+				logger.Tracef(ctx, "inputBitRateMeasurerLoop: mediaType:%v, duration:%v, bytesInputRead:%v, bitRateInput:%v, oldInputBitRate:%v, newInputBitRate:%v, bytesOutputRead:%v, bitRateOutput:%v, oldOutputBitRate:%v, newOutputBitRate:%v (raw: inputNext:%v, inputPrev:%v, outputNext:%v, outputPrev:%v)", mediaType, duration, bytesInputRead, bitRateInput, oldInputValue, newInputValue, bytesOutputRead, bitRateOutput, oldOutputValue, newOutputValue, bytesInputReadNext[mediaType], bytesInputReadPrev[mediaType], bytesOutputReadNext[mediaType], bytesOutputReadPrev[mediaType])
 			}
 
 			bytesInputReadPrev = bytesInputReadNext
@@ -539,13 +547,18 @@ func (i *InputWithFallback[K, DF, C]) inputBitRateMeasurerLoop(
 	}
 }
 
+type BitRates struct {
+	Input  globaltypes.BitRateInfo
+	Output globaltypes.BitRateInfo
+}
+
 func (i *InputWithFallback[K, DF, C]) GetBitRates(
 	ctx context.Context,
-) *globaltypes.BitRates {
+) *BitRates {
 	video := i.getTrackMeasurements(astiav.MediaTypeVideo)
 	audio := i.getTrackMeasurements(astiav.MediaTypeAudio)
 	other := i.getTrackMeasurements(astiav.MediaTypeUnknown)
-	return &globaltypes.BitRates{
+	return &BitRates{
 		Input: globaltypes.BitRateInfo{
 			Video: globaltypes.Ubps(video.InputBitRate.Load()),
 			Audio: globaltypes.Ubps(audio.InputBitRate.Load()),

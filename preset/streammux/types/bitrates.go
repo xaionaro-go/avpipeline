@@ -5,4 +5,9 @@ package types
 import globaltypes "github.com/xaionaro-go/avpipeline/types"
 
 type BitRateInfo = globaltypes.BitRateInfo
-type BitRates = globaltypes.BitRates
+
+type BitRates struct {
+	Input   BitRateInfo
+	Encoded BitRateInfo
+	Output  BitRateInfo
+}

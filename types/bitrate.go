@@ -7,9 +7,3 @@ type BitRateInfo struct {
 	Audio Ubps
 	Other Ubps
 }
-
-type BitRates struct {
-	Input   BitRateInfo
-	Encoded BitRateInfo
-	Output  BitRateInfo
-}
