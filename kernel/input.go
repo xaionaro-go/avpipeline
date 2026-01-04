@@ -29,6 +29,7 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
+	"github.com/xaionaro-go/xsync"
 )
 
 const (
@@ -71,7 +72,8 @@ type Input struct {
 
 	OutputFilters []packetcondition.Condition
 
-	WaitGroup sync.WaitGroup
+	FormatContextLocker xsync.CtxLocker
+	WaitGroup           sync.WaitGroup
 }
 
 var (

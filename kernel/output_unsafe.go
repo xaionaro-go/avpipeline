@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"runtime/debug"
 	"slices"
@@ -17,6 +18,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+type ctxKeyBypassIsOpenCheckT struct{}
+
+var ctxKeyBypassIsOpenCheck = ctxKeyBypassIsOpenCheckT{}
+
 func (o *Output) UnsafeWithNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, net.Conn) error,
@@ -30,12 +35,29 @@ func (o *Output) unsafeWithNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, net.Conn) error,
 ) (_err error) {
+	if _, ok := ctx.Value(ctxKeyBypassIsOpenCheck).(struct{}); !ok {
+		logger.Tracef(ctx, "checking whether the output is opened")
+		select {
+		case <-o.openFinished:
+			if o.openError != nil {
+				return fmt.Errorf("output is not opened successfully: %w", o.openError)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-o.CloseChan():
+			return io.EOF
+		default:
+			return fmt.Errorf("output is not opened, yet")
+		}
+	}
+
 	fd, err := o.unsafeGetFileDescriptor(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get file descriptor: %w", err)
 	}
+	logger.Tracef(ctx, "obtained file descriptor %d", fd)
 
-	return raw.WithTCPConnFromFD(fd, func(conn net.Conn) error {
+	return raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
 		return callback(ctx, conn)
 	})
 }
@@ -70,9 +92,11 @@ func (r *Output) unsafeWithRawNetworkConn(
 	})
 }
 
-var _ GetInternalQueueSizer = (*Output)(nil)
-var _ GetNetConner = (*Output)(nil)
-var _ GetSyscallRawConner = (*Output)(nil)
+var (
+	_ GetInternalQueueSizer = (*Output)(nil)
+	_ GetNetConner          = (*Output)(nil)
+	_ GetSyscallRawConner   = (*Output)(nil)
+)
 
 // GetInternalQueueSize returns the size of internal queues used by the output.
 //

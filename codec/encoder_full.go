@@ -11,8 +11,10 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type EncoderFullBackend = Codec
-type EncoderFull EncoderFullLocked
+type (
+	EncoderFullBackend = Codec
+	EncoderFull        EncoderFullLocked
+)
 
 var _ Encoder = (*EncoderFull)(nil)
 

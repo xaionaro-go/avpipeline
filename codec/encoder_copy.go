@@ -79,6 +79,7 @@ func (EncoderCopy) SetQuality(context.Context, Quality, condition.Condition) err
 func (EncoderCopy) GetResolution(ctx context.Context) *Resolution {
 	return nil
 }
+
 func (EncoderCopy) SetResolution(context.Context, Resolution, condition.Condition) error {
 	return ErrCopyEncoder{}
 }

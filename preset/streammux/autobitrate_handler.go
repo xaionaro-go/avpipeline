@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/go-ng/xatomic"
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -271,6 +272,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	logger.Tracef(ctx, "checking bitrate with %d raw conners and %d queue sizers", len(getRawConners), len(getQueueSizers))
 
 	for _, proc := range getRawConners {
+		logger.Tracef(ctx, "getting raw connection from %s", proc)
 		err := proc.UnsafeWithRawNetworkConn(
 			ctx,
 			func(
@@ -282,7 +284,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				if err != nil {
 					return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
 				}
-				logger.Tracef(ctx, "connInfo: %s", connInfo)
+				logger.Tracef(ctx, "connInfo: %s", spew.Sdump(connInfo))
 				return nil
 			})
 		if err != nil {

@@ -150,7 +150,9 @@ type Output struct {
 	PreallocatedAudioStreams []*OutputStream
 	PreallocatedVideoStreams []*OutputStream
 
-	started          bool
+	sendingAllowed   bool
+	openFinished     chan struct{}
+	openError        error
 	pendingPackets   []pendingPacket
 	waitingKeyFrames map[int]struct{}
 	outputFormatName string
@@ -223,6 +225,7 @@ func NewOutputFromURL(
 		Config:          cfg,
 		ClosureSignaler: closuresignaler.New(),
 
+		openFinished:        make(chan struct{}),
 		formatContextLocker: make(xsync.CtxLocker, 1),
 		waitingKeyFrames:    make(map[int]struct{}),
 		outTSs:              ringbuffer.New[outTS](10000),
@@ -342,6 +345,11 @@ func (o *Output) doOpen(
 	logger.Debugf(ctx, "doOpen(ctx, url, '%s', %#+v)", formatNameRequest, cfg)
 	defer func() { logger.Debugf(ctx, "/doOpen(ctx, url, '%s', %#+v): %v", formatNameRequest, cfg, _err) }()
 
+	defer func() {
+		o.openError = _err
+		close(o.openFinished)
+	}()
+
 	logger.Debugf(observability.OnInsecureDebug(ctx), "URL: %s", url)
 	formatContext, err := astiav.AllocOutputFormatContext(
 		nil,
@@ -401,13 +409,16 @@ func (o *Output) doOpen(
 	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
 	if cfg.SendBufferSize != 0 {
-		err := o.UnsafeWithRawNetworkConn(ctx, func(
-			ctx context.Context,
-			rawConn syscall.RawConn,
-			_ string,
-		) error {
-			return netraw.SetOption(rawConn, tcpopt.SendBuffer(cfg.SendBufferSize))
-		})
+		err := o.UnsafeWithRawNetworkConn(
+			context.WithValue(ctx, ctxKeyBypassIsOpenCheck, struct{}{}),
+			func(
+				ctx context.Context,
+				rawConn syscall.RawConn,
+				_ string,
+			) error {
+				return netraw.SetOption(ctx, rawConn, tcpopt.SendBuffer(cfg.SendBufferSize))
+			},
+		)
 		if err != nil {
 			return ErrUnableToSetSendBufferSize{
 				Size: cfg.SendBufferSize,
@@ -433,7 +444,7 @@ func (o *Output) Close(
 			logger.Debugf(ctx, "already closed")
 			return
 		}
-		if o.started && len(o.FormatContext.Streams()) != 0 {
+		if o.sendingAllowed && len(o.FormatContext.Streams()) != 0 {
 			err := func() error {
 				defer func() {
 					r := recover()
@@ -684,14 +695,14 @@ func (o *Output) getOutputStream(
 func (o *Output) SendInput(
 	ctx context.Context,
 	input packetorframe.InputUnion,
-	outputCh chan<- packetorframe.OutputUnion,
+	_ chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	pkt, frame := input.Unwrap()
 	switch {
 	case pkt != nil:
-		return o.sendPacket(ctx, *pkt, outputCh)
+		return o.sendPacket(ctx, *pkt)
 	case frame != nil:
-		return o.sendFrame(ctx, *frame, outputCh)
+		return o.sendFrame(ctx, *frame)
 	default:
 		return types.ErrUnexpectedInputType{}
 	}
@@ -700,7 +711,6 @@ func (o *Output) SendInput(
 func (o *Output) sendPacket(
 	ctx context.Context,
 	inputPkt packet.Input,
-	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	pkt := inputPkt.Packet
 	if pkt == nil {
@@ -769,9 +779,8 @@ func (e ErrNoSourceFormatContext) Error() string {
 }
 
 func (o *Output) sendFrame(
-	ctx context.Context,
-	input frame.Input,
-	outputCh chan<- packetorframe.OutputUnion,
+	context.Context,
+	frame.Input,
 ) error {
 	return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
 }
@@ -792,7 +801,7 @@ func (o *Output) send(
 	inputStream *astiav.Stream,
 	outputStream *OutputStream,
 ) error {
-	if o.started {
+	if o.sendingAllowed {
 		return o.doWritePacket(ctx, pkt, frameInfo, source, inputStream, outputStream)
 	}
 
@@ -890,7 +899,7 @@ func (o *Output) send(
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), mediaType)
 		return nil
 	}
-	o.started = true
+	o.sendingAllowed = true
 
 	var err error
 	if outputWriteHeaders {

@@ -8,10 +8,12 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type Closer = types.Closer
-type HardwareDeviceType = types.HardwareDeviceType
-type HardwareDeviceName = types.HardwareDeviceName
-type DictionaryItem = types.DictionaryItem
-type DictionaryItems = types.DictionaryItems
-type InputPacket = packet.Input
-type Quality = quality.Quality
+type (
+	Closer             = types.Closer
+	HardwareDeviceType = types.HardwareDeviceType
+	HardwareDeviceName = types.HardwareDeviceName
+	DictionaryItem     = types.DictionaryItem
+	DictionaryItems    = types.DictionaryItems
+	InputPacket        = packet.Input
+	Quality            = quality.Quality
+)
