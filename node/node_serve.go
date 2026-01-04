@@ -220,7 +220,7 @@ func pushFurther[
 		pushTo := pushTos[0]
 		n.Locker.ManualUnlock(ctx)
 		defer n.Locker.ManualLock(ctx)
-		pushToDestination[P, O, OP, CD](
+		pushToDestination[P, O, OP](
 			ctx,
 			n,
 			outputObj,
@@ -241,7 +241,7 @@ func pushFurther[
 		wg.Add(1)
 		observability.Go(ctx, func(ctx context.Context) {
 			defer wg.Done()
-			pushToDestination[P, O, OP, CD](
+			pushToDestination[P, O, OP](
 				ctx,
 				n,
 				outputObj,
@@ -412,16 +412,8 @@ func poolPutInput(in packetorframe.InputUnion) {
 	}
 }
 
-func poolPutPacketInput(p packet.Input) {
-	packet.Pool.Put(p.Packet)
-}
-
 func poolPutPacketOutput(p packet.Output) {
 	packet.Pool.Put(p.Packet)
-}
-
-func poolPutFrameInput(f frame.Input) {
-	frame.Pool.Put(f.Frame)
 }
 
 func poolPutFrameOutput(f frame.Output) {
