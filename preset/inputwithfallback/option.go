@@ -1,3 +1,5 @@
+// option.go defines options for the InputWithFallback preset.
+
 package inputwithfallback
 
 import (

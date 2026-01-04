@@ -1,3 +1,5 @@
+// not.go implements a logical NOT condition for packet input filtering.
+
 package condition
 
 import (

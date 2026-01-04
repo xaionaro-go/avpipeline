@@ -1,3 +1,6 @@
+// quality.go defines the quality metrics for media streams.
+
+// Package quality provides tools for measuring the quality of media streams.
 package quality
 
 import (
@@ -54,5 +57,7 @@ func (q Quality) Aggregate() *QualityAggregated {
 	}
 }
 
-type StreamQuality = types.StreamQuality
-type QualityAggregated = types.QualityAggregated
+type (
+	StreamQuality     = types.StreamQuality
+	QualityAggregated = types.QualityAggregated
+)

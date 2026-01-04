@@ -1,3 +1,5 @@
+// rational.go provides conversion functions for rational numbers between Protobuf and Go.
+
 package libav
 
 import (

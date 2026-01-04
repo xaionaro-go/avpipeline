@@ -1,3 +1,6 @@
+// custom_options.go provides conversion functions between types.DictionaryItems and astiav.Dictionary.
+
+// Package astiav provides conversion utilities between internal types and astiav types.
 package astiav
 
 import (

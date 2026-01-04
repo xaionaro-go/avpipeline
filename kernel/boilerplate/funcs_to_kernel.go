@@ -1,3 +1,5 @@
+// funcs_to_kernel.go provides a wrapper to convert functions into a kernel.
+
 package boilerplate
 
 import (

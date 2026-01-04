@@ -1,3 +1,5 @@
+// transcoder_config.go defines the configuration for the transcoder with passthrough.
+
 // Package types provides configuration types for transcoder with passthrough functionality.
 package types
 
@@ -6,15 +8,17 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type AudioTrackConfig = streammuxtypes.OutputAudioTrackConfig
-type VideoTrackConfig = streammuxtypes.OutputVideoTrackConfig
-type TranscoderConfig = streammuxtypes.TranscoderConfig
-type TranscoderInputConfig = streammuxtypes.TranscoderInputConfig
-type TranscoderOutputConfig = streammuxtypes.TranscoderOutputConfig
-type DictionaryItem = types.DictionaryItem
-type DictionaryItems = types.DictionaryItems
-type HardwareDeviceName = types.HardwareDeviceName
-type HardwareDeviceType = types.HardwareDeviceType
+type (
+	AudioTrackConfig       = streammuxtypes.OutputAudioTrackConfig
+	VideoTrackConfig       = streammuxtypes.OutputVideoTrackConfig
+	TranscoderConfig       = streammuxtypes.TranscoderConfig
+	TranscoderInputConfig  = streammuxtypes.TranscoderInputConfig
+	TranscoderOutputConfig = streammuxtypes.TranscoderOutputConfig
+	DictionaryItem         = types.DictionaryItem
+	DictionaryItems        = types.DictionaryItems
+	HardwareDeviceName     = types.HardwareDeviceName
+	HardwareDeviceType     = types.HardwareDeviceType
+)
 
 const (
 	// the constants are copied from libav's enum AVHWDeviceType:

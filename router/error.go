@@ -1,3 +1,5 @@
+// error.go defines router-specific error types.
+
 package router
 
 type ErrAlreadyClosed struct{}

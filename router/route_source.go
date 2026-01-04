@@ -1,3 +1,5 @@
+// route_source.go defines the RouteSource struct for connecting external nodes to the router.
+
 package router
 
 import (

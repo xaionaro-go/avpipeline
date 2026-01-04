@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for filtering packet inputs to nodes.
+
+// Package condition provides various conditions for filtering packet inputs to nodes.
 package condition
 
 import (
@@ -5,8 +8,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type Input = filter.Input[packet.Input]
-type Condition = filter.Condition[packet.Input]
+type (
+	Input     = filter.Input[packet.Input]
+	Condition = filter.Condition[packet.Input]
+)
 
 /* for easier copy&paste:
 

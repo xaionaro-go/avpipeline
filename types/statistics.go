@@ -1,3 +1,5 @@
+// statistics.go defines types for tracking pipeline statistics and counters.
+
 package types
 
 import (

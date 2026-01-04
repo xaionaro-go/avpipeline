@@ -1,3 +1,6 @@
+// name.go defines the Name type for bitstream filters.
+
+// Package bitstreamfilter provides bitstream filter kernels.
 package bitstreamfilter
 
 type Name string

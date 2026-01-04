@@ -1,6 +1,9 @@
 //go:build with_libav
 // +build with_libav
 
+// server.go implements a server for kernels.
+
+// Package server provides a server for kernels.
 package server
 
 import (

@@ -1,3 +1,5 @@
+// error.go defines error types for the stream muxer.
+
 package streammux
 
 import (

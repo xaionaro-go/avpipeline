@@ -1,3 +1,5 @@
+// node.go implements the node interface for the InputWithFallback preset.
+
 package inputwithfallback
 
 import (

@@ -1,3 +1,5 @@
+// custom_option_test.go provides tests for the DictionaryItems type.
+
 package types
 
 import (

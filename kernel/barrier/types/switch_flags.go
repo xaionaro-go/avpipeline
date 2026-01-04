@@ -1,3 +1,5 @@
+// switch_flags.go defines the SwitchFlags type and its flags.
+
 package types
 
 type SwitchFlags uint64

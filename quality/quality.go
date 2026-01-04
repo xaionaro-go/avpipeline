@@ -1,3 +1,6 @@
+// quality.go defines the interface for quality settings.
+
+// Package quality provides tools for managing quality settings.
 package quality
 
 import (

@@ -1,3 +1,4 @@
+// silly_alternator.go silly alternator for demonstration purposes.
 package main
 
 import (

@@ -1,3 +1,5 @@
+// set_finalizer.go provides a helper function to set finalizers for objects that need to be freed.
+
 package scaler
 
 import (

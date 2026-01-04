@@ -1,3 +1,6 @@
+// passthrough_mode.go defines the passthrough modes for the transcoder.
+
+// Package types provides configuration types for transcoder with passthrough functionality.
 package types
 
 import (

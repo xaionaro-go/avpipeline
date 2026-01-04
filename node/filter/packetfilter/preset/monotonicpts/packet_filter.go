@@ -1,3 +1,6 @@
+// packet_filter.go implements a packet filter preset that ensures monotonic PTS.
+
+// Package monotonicpts provides a packet filter preset that ensures monotonic PTS.
 package monotonicpts
 
 import (

@@ -1,3 +1,5 @@
+// pipelinetest_no_source_format_context_test.go contains tests for the pipeline without source format context.
+
 package kernel_test
 
 import (

@@ -1,3 +1,5 @@
+// autobitrate_video_config.go defines the configuration for automatic video bitrate adjustment.
+
 package types
 
 import (

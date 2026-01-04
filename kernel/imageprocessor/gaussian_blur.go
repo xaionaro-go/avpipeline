@@ -1,3 +1,5 @@
+// gaussian_blur.go implements a Gaussian blur image processor.
+
 package imageprocessor
 
 import (

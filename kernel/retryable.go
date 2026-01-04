@@ -1,3 +1,5 @@
+// retryable.go implements a wrapper kernel that automatically retries underlying kernel operations on failure.
+
 package kernel
 
 import (

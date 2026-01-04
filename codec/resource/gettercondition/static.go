@@ -1,3 +1,5 @@
+// static.go implements a static boolean condition for resource getters.
+
 package gettercondition
 
 import (

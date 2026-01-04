@@ -1,3 +1,5 @@
+// constant_quality.go defines the constant quality type.
+
 package quality
 
 import (

@@ -1,3 +1,5 @@
+// custom_option.go defines types for handling custom options in a dictionary format.
+
 package types
 
 import (

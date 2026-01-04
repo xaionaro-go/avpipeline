@@ -1,3 +1,5 @@
+// media_type.go defines the MediaType enum and its methods.
+
 package types
 
 import "fmt"

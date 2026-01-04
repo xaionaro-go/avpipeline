@@ -1,3 +1,5 @@
+// option.go defines the Option interface for codecs.
+
 package types
 
 type OptionCommons struct{}

@@ -1,3 +1,6 @@
+// Package symbolresolver provides RPN symbol resolution for the AV pipeline.
+//
+// variable.go defines a variable-based symbol resolver.
 package symbolresolver
 
 import (

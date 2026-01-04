@@ -1,3 +1,5 @@
+// pause.go implements a condition that can pause packet processing.
+
 package condition
 
 import (

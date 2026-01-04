@@ -1,4 +1,4 @@
-// drain.go provides utilities to check if a processor's input queue is empty and to wait for it to drain.
+// drain.go provides utilities for draining processors and managing their processing state.
 
 package processor
 

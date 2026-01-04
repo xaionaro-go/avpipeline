@@ -1,3 +1,5 @@
+// resources.go defines the Resources structure for holding codec resources.
+
 package resource
 
 import (

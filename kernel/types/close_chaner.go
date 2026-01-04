@@ -1,3 +1,5 @@
+// close_chaner.go defines the CloseChaner interface.
+
 package types
 
 import (

@@ -1,3 +1,5 @@
+// stream_index_assigner_input.go implements a stream index assigner for the input side of the transcoder.
+
 package transcoderwithpassthrough
 
 import (

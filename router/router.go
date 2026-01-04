@@ -1,3 +1,6 @@
+// Package router provides a routing mechanism for AV streams, allowing dynamic connection of sources and destinations.
+//
+// router.go defines the Router struct and its core management logic.
 package router
 
 import (

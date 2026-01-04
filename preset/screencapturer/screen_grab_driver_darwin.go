@@ -1,3 +1,5 @@
+// screen_grab_driver_darwin.go provides the screen grab driver for macOS.
+
 package screencapturer
 
 import (

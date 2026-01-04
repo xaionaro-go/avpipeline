@@ -1,3 +1,5 @@
+// rational.go defines the Rational type and related utilities for handling fractions.
+
 package types
 
 import (

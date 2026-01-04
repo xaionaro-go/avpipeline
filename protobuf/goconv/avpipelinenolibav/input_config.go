@@ -1,3 +1,5 @@
+// input_config.go provides conversion functions for input configuration between Protobuf and Go.
+
 package avpipelinenolibav
 
 import (

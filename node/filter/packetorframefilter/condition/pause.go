@@ -1,3 +1,5 @@
+// pause.go implements a condition that pauses execution until released.
+
 package condition
 
 import (

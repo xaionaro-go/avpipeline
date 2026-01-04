@@ -1,3 +1,6 @@
+// counters.go defines the counters for nodes.
+
+// Package types provides common types for nodes.
 package types
 
 import (

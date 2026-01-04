@@ -1,3 +1,5 @@
+// transcoder_config.go defines the configuration for transcoding audio and video tracks.
+
 package types
 
 import (
@@ -69,7 +71,9 @@ type TranscoderOutputConfig struct {
 	VideoTrackConfigs []OutputVideoTrackConfig `yaml:"video_track_configs"`
 }
 
-type DictionaryItem = types.DictionaryItem
-type DictionaryItems = types.DictionaryItems
-type HardwareDeviceName = types.HardwareDeviceName
-type HardwareDeviceType = types.HardwareDeviceType
+type (
+	DictionaryItem     = types.DictionaryItem
+	DictionaryItems    = types.DictionaryItems
+	HardwareDeviceName = types.HardwareDeviceName
+	HardwareDeviceType = types.HardwareDeviceType
+)

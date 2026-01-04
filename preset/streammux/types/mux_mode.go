@@ -1,3 +1,6 @@
+// mux_mode.go defines the muxing modes for the stream muxer.
+
+// Package types provides common types for the stream muxer.
 package types
 
 import (

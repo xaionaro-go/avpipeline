@@ -1,3 +1,5 @@
+// custom_options.go provides helpers to convert custom options for the transcoder.
+
 package transcoderwithpassthrough
 
 import (

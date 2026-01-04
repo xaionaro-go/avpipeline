@@ -1,3 +1,5 @@
+// autobitrate_calculator_static.go implements a static bitrate calculator.
+
 package types
 
 import (

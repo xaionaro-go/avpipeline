@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for kernels.
+
+// Package condition provides conditions for kernels.
 package condition
 
 import (

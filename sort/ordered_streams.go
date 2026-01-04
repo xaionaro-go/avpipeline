@@ -1,3 +1,6 @@
+// Package sort provides sorting utilities for streams, packets, and frames.
+//
+// ordered_streams.go defines a sortable collection of streams.
 package sort
 
 import (

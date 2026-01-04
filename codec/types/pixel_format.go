@@ -1,3 +1,5 @@
+// pixel_format.go defines the PixelFormat type for codecs.
+
 package types
 
 type PixelFormat string

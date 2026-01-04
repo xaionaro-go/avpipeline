@@ -1,3 +1,5 @@
+// constant_bitrate.go defines the constant bitrate type.
+
 package quality
 
 import (

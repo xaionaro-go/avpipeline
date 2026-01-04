@@ -1,3 +1,5 @@
+// has_pipeline_side_data.go implements a condition that checks for pipeline side data.
+
 package condition
 
 import (

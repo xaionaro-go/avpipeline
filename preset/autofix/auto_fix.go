@@ -1,3 +1,6 @@
+// auto_fix.go implements a preset that automatically fixes common stream issues.
+
+// Package autofix provides a preset that automatically fixes common stream issues.
 package autofix
 
 import (

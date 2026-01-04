@@ -1,3 +1,5 @@
+// panic.go implements a condition that panics with a message for packet input filtering.
+
 package condition
 
 import (

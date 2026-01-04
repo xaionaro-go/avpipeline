@@ -1,3 +1,5 @@
+// packet_or_frame.go provides sorting utilities for packets and frames based on PTS or DTS.
+
 package sort
 
 import (

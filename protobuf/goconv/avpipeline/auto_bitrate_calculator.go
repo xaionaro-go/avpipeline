@@ -1,3 +1,5 @@
+// auto_bitrate_calculator.go provides conversion functions for AutoBitRateCalculator between Protobuf and Go.
+
 package avpipeline
 
 import (

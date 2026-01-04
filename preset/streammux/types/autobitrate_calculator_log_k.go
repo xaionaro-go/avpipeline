@@ -1,3 +1,5 @@
+// autobitrate_calculator_log_k.go implements a bitrate calculator based on logarithmic queue size gap.
+
 package types
 
 import (

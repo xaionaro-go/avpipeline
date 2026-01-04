@@ -1,3 +1,6 @@
+// transcoder_with_passthrough.go implements a preset for transcoding with a passthrough fallback.
+
+// Package transcoderwithpassthrough provides a preset for transcoding with a passthrough fallback.
 package transcoderwithpassthrough
 
 import (
@@ -256,7 +259,6 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 		),
 		nil,
 	)
-
 	if err != nil {
 		return fmt.Errorf("unable to initialize a transcoder: %w", err)
 	}

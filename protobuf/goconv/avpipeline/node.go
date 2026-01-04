@@ -1,3 +1,6 @@
+// node.go provides conversion functions for node between Protobuf and Go.
+
+// Package avpipeline provides conversion functions between Protobuf and Go for avpipeline types.
 package avpipeline
 
 import (

@@ -1,3 +1,5 @@
+// input_chain.go implements a single input chain in the fallback preset.
+
 package inputwithfallback
 
 import (
@@ -41,6 +43,7 @@ type InputKernel interface {
 
 var _ InputKernel = (*kernel.Input)(nil)
 
+// InputChain represents a single input chain in the fallback preset.
 // retryable:input -> filter (-> autoheaders -> decoder) -> syncBarrier
 type InputChain[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	ID           InputID

@@ -1,3 +1,5 @@
+// packet_sidedata.go provides conversion functions for packet side data between Protobuf and Go.
+
 package libav
 
 import (

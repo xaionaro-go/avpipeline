@@ -1,3 +1,5 @@
+// rational_test.go provides tests for the Rational type.
+
 package types
 
 import (

@@ -1,3 +1,5 @@
+// function.go implements a condition based on a custom function for frame input filtering.
+
 package condition
 
 import (

@@ -1,3 +1,4 @@
+// assert.go simple assertion function.
 package main
 
 import (

@@ -1,3 +1,5 @@
+// moving_average.go provides conversion functions for moving average between Protobuf and Go.
+
 package avpipeline
 
 import (

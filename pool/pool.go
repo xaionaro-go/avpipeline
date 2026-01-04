@@ -1,3 +1,6 @@
+// pool.go implements a generic object pool with finalizers.
+
+// Package pool provides a generic object pool with finalizers.
 package pool
 
 import (

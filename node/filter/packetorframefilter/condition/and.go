@@ -1,3 +1,5 @@
+// and.go implements a logical AND condition for packet-or-frame filters.
+
 package condition
 
 import (

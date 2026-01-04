@@ -1,3 +1,5 @@
+// bitrates.go defines structures for tracking bitrates of different stream types.
+
 package types
 
 type BitRateInfo struct {

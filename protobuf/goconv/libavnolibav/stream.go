@@ -1,3 +1,5 @@
+// stream.go provides conversion functions for stream between Protobuf and Go.
+
 package libavnolibav
 
 import (

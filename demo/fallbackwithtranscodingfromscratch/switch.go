@@ -1,3 +1,5 @@
+// switch.go provides switching logic for the fallback with transcoding demo.
+
 package main
 
 import (

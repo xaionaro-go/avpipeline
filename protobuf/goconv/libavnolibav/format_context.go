@@ -1,3 +1,5 @@
+// format_context.go provides conversion functions for format context between Protobuf and Go.
+
 package libavnolibav
 
 import (

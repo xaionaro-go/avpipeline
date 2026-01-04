@@ -1,3 +1,5 @@
+// dts.go implements a condition based on the DTS of a packet or frame.
+
 package condition
 
 import (

@@ -1,3 +1,5 @@
+// media_type.go implements a condition that matches the media type.
+
 package condition
 
 import (

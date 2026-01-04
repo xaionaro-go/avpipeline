@@ -1,3 +1,5 @@
+// stream_index_assigner_rtmp.go implements a stream index assigner for FLV/RTMP.
+
 package autofix
 
 import (

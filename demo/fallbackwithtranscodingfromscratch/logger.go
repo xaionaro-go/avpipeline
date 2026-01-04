@@ -1,3 +1,5 @@
+// logger.go provides logging utilities for the fallback with transcoding demo.
+
 package main
 
 import (

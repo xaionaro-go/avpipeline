@@ -1,3 +1,5 @@
+// stream_mux_node.go implements the node interface for the stream muxer.
+
 package streammux
 
 import (

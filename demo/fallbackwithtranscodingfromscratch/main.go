@@ -1,3 +1,6 @@
+// main.go is the main entry point for the fallback with transcoding demo.
+
+// Package main is a demo application.
 package main
 
 import (
@@ -44,7 +47,6 @@ const (
 )
 
 func main() {
-
 	// parse the input
 
 	pflag.Usage = func() {

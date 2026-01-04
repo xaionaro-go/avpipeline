@@ -1,3 +1,6 @@
+// auto_bitrate_calculator.go provides conversion functions for auto bitrate calculator between Protobuf and Go.
+
+// Package avpipelinenolibav provides conversion functions between Protobuf and Go for avpipeline types without libav dependency.
 package avpipelinenolibav
 
 import (
@@ -47,6 +50,7 @@ func AutoBitRateCalculatorFromProto(
 		return nil, fmt.Errorf("unknown AutoBitRateCalculator type: %T", calculator)
 	}
 }
+
 func AutoBitRateCalculatorToProto(
 	in smtypes.AutoBitRateCalculator,
 ) (*avpipelinegrpc.AutoBitrateCalculator, error) {

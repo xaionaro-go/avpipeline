@@ -1,3 +1,5 @@
+// packet.go implements a condition that wraps packet-specific conditions for node input filtering.
+
 package condition
 
 import (

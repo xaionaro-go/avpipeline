@@ -1,3 +1,5 @@
+// kernel.go implements the kernel for the autoheaders preset.
+
 package autoheaders
 
 import (

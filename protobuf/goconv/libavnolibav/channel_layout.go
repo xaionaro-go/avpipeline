@@ -1,3 +1,5 @@
+// channel_layout.go provides conversion functions for channel layout between Protobuf and Go.
+
 package libavnolibav
 
 import (

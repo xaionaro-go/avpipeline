@@ -1,3 +1,5 @@
+// panic.go implements a condition that panics when matched.
+
 package condition
 
 import (

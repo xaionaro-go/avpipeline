@@ -1,3 +1,5 @@
+// fps_reducer.go provides conversion functions for FPS reducer configurations between Protobuf and Go.
+
 package avpipelinenolibav
 
 import (

@@ -1,3 +1,6 @@
+// manager.go defines the ResourceManager interface for managing codec resources.
+
+// Package resource provides utilities for managing codec resources like hardware devices.
 package resource
 
 import (

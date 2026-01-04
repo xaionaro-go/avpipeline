@@ -22,5 +22,5 @@ func (v DataHasSuffix) Match(
 	_ context.Context,
 	input packet.Input,
 ) bool {
-	return bytes.HasPrefix(input.Data(), v)
+	return bytes.HasSuffix(input.Data(), v)
 }

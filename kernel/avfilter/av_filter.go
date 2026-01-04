@@ -1,3 +1,6 @@
+// av_filter.go defines the AVFilter struct and Kernel interface for libavfilter.
+
+// Package avfilter provides libavfilter-based kernels.
 package avfilter
 
 import (

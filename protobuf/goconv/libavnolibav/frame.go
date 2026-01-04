@@ -1,3 +1,5 @@
+// frame.go provides conversion functions for frame between Protobuf and Go.
+
 package libavnolibav
 
 import (

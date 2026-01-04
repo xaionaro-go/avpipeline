@@ -1,3 +1,5 @@
+// autobitrate_calculator_thresholds.go implements a bitrate calculator based on queue duration thresholds.
+
 package types
 
 import (

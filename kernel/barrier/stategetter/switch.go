@@ -1,3 +1,4 @@
+// switch.go implements a switch state getter.
 package stategetter
 
 import (
@@ -14,10 +15,12 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-type FuncOnSwitchRequest func(ctx context.Context, pkt packetorframe.InputUnion, to int32) error
-type FuncOnBeforeSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
-type FuncOnInterruptedSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
-type FuncOnAfterSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
+type (
+	FuncOnSwitchRequest     func(ctx context.Context, pkt packetorframe.InputUnion, to int32) error
+	FuncOnBeforeSwitch      func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
+	FuncOnInterruptedSwitch func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
+	FuncOnAfterSwitch       func(ctx context.Context, pkt packetorframe.InputUnion, from int32, to int32)
+)
 
 type SwitchFlags = types.SwitchFlags
 

@@ -1,3 +1,5 @@
+// sample_format_test.go provides tests for sample format conversions.
+
 package codec
 
 import (

@@ -1,3 +1,5 @@
+// packet_or_frame.go implements a condition that works on both packets and frames for node input filtering.
+
 package condition
 
 import (

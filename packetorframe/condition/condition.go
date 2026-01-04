@@ -1,3 +1,6 @@
+// condition.go defines the condition interface for packet-or-frame unions.
+
+// Package condition provides conditions for packet-or-frame unions.
 package condition
 
 import (

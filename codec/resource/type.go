@@ -1,3 +1,5 @@
+// type.go defines the resource Type enum.
+
 package resource
 
 import (

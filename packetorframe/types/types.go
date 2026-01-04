@@ -1,3 +1,6 @@
+// types.go defines common types for packet-or-frame operations.
+
+// Package packetorframetypes provides common types for packet-or-frame operations.
 package packetorframetypes
 
 import (

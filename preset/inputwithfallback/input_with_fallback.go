@@ -1,3 +1,6 @@
+// input_with_fallback.go implements a preset for an input with fallback sources.
+
+// Package inputwithfallback provides a preset for an input with fallback sources.
 package inputwithfallback
 
 import (

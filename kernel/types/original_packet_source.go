@@ -1,3 +1,5 @@
+// original_packet_source.go defines the OriginalPacketSourcer interface.
+
 package types
 
 import (

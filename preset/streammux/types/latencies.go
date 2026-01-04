@@ -1,3 +1,5 @@
+// latencies.go defines structures for tracking latencies of different stream types.
+
 package types
 
 import (

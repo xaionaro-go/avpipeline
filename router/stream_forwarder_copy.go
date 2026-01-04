@@ -1,3 +1,5 @@
+// stream_forwarder_copy.go provides a StreamForwarder implementation that copies streams without transcoding.
+
 package router
 
 import (
@@ -170,8 +172,10 @@ func (fwd *StreamForwarderCopy[CS, PS]) outputAsNode() *forwarderCopyOutputAsNod
 
 type forwarderCopyOutputAsNode[CS any, PS processor.Abstract] StreamForwarderCopy[CS, PS]
 
-var _ node.Abstract = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
-var _ node.DotBlockContentStringWriteToer = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
+var (
+	_ node.Abstract                       = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
+	_ node.DotBlockContentStringWriteToer = (*forwarderCopyOutputAsNode[any, processor.Abstract])(nil)
+)
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) Serve(
 	ctx context.Context,

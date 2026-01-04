@@ -1,3 +1,5 @@
+// assert.go provides a helper function for panicking on errors.
+
 package router
 
 func must[T any](in T, err error) T {

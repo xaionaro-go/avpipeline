@@ -1,3 +1,5 @@
+// node.go implements the node for the autoheaders preset.
+
 package autoheaders
 
 import (

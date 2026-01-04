@@ -1,3 +1,5 @@
+// chain_of_two_test.go contains tests for the chain_of_two kernel.
+
 package kernel
 
 import (

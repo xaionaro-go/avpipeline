@@ -1,3 +1,5 @@
+// math.go implements a condition based on a mathematical expression.
+
 package condition
 
 import (

@@ -1,3 +1,6 @@
+// Package scaler provides video scaling capabilities using libav.
+//
+// scaler.go defines the Scaler interface for video scaling.
 package scaler
 
 import (

@@ -1,3 +1,5 @@
+// stream.go provides conversion functions for streams between Protobuf and Go.
+
 package libav
 
 import (
@@ -26,12 +28,12 @@ func StreamFromGo(input *astiav.Stream) *Stream {
 		Disposition:       int32(input.DispositionFlags()),
 		Discard:           int32(input.Discard()),
 		SampleAspectRatio: RationalFromGo(ptr(input.SampleAspectRatio())).Protobuf(),
-		//Metadata:          DictionaryFromGo(input.Metadata()).Protobuf(),
+		// Metadata:          DictionaryFromGo(input.Metadata()).Protobuf(),
 		AvgFrameRate: RationalFromGo(ptr(input.AvgFrameRate())).Protobuf(),
-		//AttachedPic: PacketFromGo(input.AttachedPic(), false).Protobuf(),
-		//SideData: StreamSideDataFromGo(input.SideData()).Protobuf(),
+		// AttachedPic: PacketFromGo(input.AttachedPic(), false).Protobuf(),
+		// SideData: StreamSideDataFromGo(input.SideData()).Protobuf(),
 		EventFlags: int32(input.EventFlags()),
 		RFrameRate: RationalFromGo(ptr(input.RFrameRate())).Protobuf(),
-		//PtsWrapBits: int32(input.PtsWrapBits()),
+		// PtsWrapBits: int32(input.PtsWrapBits()),
 	}
 }

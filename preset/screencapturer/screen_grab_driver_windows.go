@@ -1,3 +1,5 @@
+// screen_grab_driver_windows.go provides the screen grab driver for Windows.
+
 package screencapturer
 
 import (

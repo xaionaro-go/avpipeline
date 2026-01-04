@@ -1,3 +1,6 @@
+// reduce_framerate_fraction.go implements a filter that reduces the frame rate by a fraction.
+
+// Package reduceframerate provides a filter that reduces the frame rate.
 package reduceframerate
 
 import (

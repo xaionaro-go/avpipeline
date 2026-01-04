@@ -1,3 +1,5 @@
+// set_finalizer.go provides internal helpers for setting finalizers on astiav objects.
+
 package astiav
 
 import (

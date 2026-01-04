@@ -1,3 +1,5 @@
+// channel_layout.go provides conversion functions for channel layouts between Protobuf and Go.
+
 package libav
 
 import (
@@ -17,8 +19,8 @@ func ChannelLayoutFromGo(input *astiav.ChannelLayout) *ChannelLayout {
 		return nil
 	}
 	return &ChannelLayout{
-		//Order:      input.Order(),
+		// Order:      input.Order(),
 		NbChannels: int32(input.Channels()),
-		//U:          int64(input.U()),
+		// U:          int64(input.U()),
 	}
 }

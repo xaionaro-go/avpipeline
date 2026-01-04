@@ -1,3 +1,5 @@
+// reduce_framerate_fraction_test.go provides tests for reduce framerate fraction filter.
+
 package reduceframerate
 
 import (

@@ -1,3 +1,4 @@
+// input_factory.go implements the input factory for the fallback demo.
 package main
 
 import (

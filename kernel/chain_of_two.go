@@ -1,3 +1,5 @@
+// chain_of_two.go implements the chain_of_two kernel.
+
 package kernel
 
 import (

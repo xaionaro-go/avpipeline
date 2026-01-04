@@ -1,3 +1,6 @@
+// abstract.go defines the Abstract interface for image processors.
+
+// Package imageprocessor provides image processing kernels.
 package imageprocessor
 
 import (

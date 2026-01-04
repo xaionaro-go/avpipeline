@@ -1,3 +1,5 @@
+// frame.go provides conversion functions for frames between Protobuf and Go.
+
 package libav
 
 import (
@@ -30,32 +32,32 @@ func FrameFromGo(input *astiav.Frame, includePayload bool) *Frame {
 		PktDts:            input.PktDts(),
 		TimeBase:          RationalFromGo(ptr(input.TimeBase())).Protobuf(),
 		Quality:           int32(input.Quality()),
-		//RepeatPict:        input.RepeatPicture(),
-		//InterlacedFrame:   input.InterlacedFrame(),
-		//TopFieldFirst:     input.TopFieldFirst(),
-		//PaletteHasChanged: input.PaletteHasChanged(),
+		// RepeatPict:        input.RepeatPicture(),
+		// InterlacedFrame:   input.InterlacedFrame(),
+		// TopFieldFirst:     input.TopFieldFirst(),
+		// PaletteHasChanged: input.PaletteHasChanged(),
 		SampleRate: int32(input.SampleRate()),
-		//SideData:   FrameSideDataFromGo(input.SideData()).Protobuf(),
+		// SideData:   FrameSideDataFromGo(input.SideData()).Protobuf(),
 		Flags:      int32(input.Flags()),
 		ColorRange: uint32(input.ColorRange()),
-		//ColorTRC:          input.ColorTRC(),
+		// ColorTRC:          input.ColorTRC(),
 		ColorSpace: uint32(input.ColorSpace()),
-		//ChromaLocation:      uint32(input.ChromaLocation()),
-		//BestEffortTimestamp: input.BestEffortTimestamp(),
-		//PktPos:              input.PktPos(),
-		//Metadata:            DictionaryFromGo(input.Metadata()).Protobuf(),
-		//DecodeErrorFlags:    input.DecodeErrorFlags(),
-		//PktSize:             input.PktSize(),
-		//CropTop:             input.CropTop(),
-		//CropBottom:          input.CropBottom(),
-		//CropLeft:            input.CropLeft(),
-		//CropRight:           input.CropRight(),
+		// ChromaLocation:      uint32(input.ChromaLocation()),
+		// BestEffortTimestamp: input.BestEffortTimestamp(),
+		// PktPos:              input.PktPos(),
+		// Metadata:            DictionaryFromGo(input.Metadata()).Protobuf(),
+		// DecodeErrorFlags:    input.DecodeErrorFlags(),
+		// PktSize:             input.PktSize(),
+		// CropTop:             input.CropTop(),
+		// CropBottom:          input.CropBottom(),
+		// CropLeft:            input.CropLeft(),
+		// CropRight:           input.CropRight(),
 		ChLayout: ChannelLayoutFromGo(ptr(input.ChannelLayout())).Protobuf(),
 		Duration: input.Duration(),
 	}
 	if includePayload {
 		f.Data = data
-		//f.ExtendedData = input.ExtendedData()
+		// f.ExtendedData = input.ExtendedData()
 	}
 	return f
 }

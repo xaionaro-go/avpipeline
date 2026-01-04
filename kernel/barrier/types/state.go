@@ -1,3 +1,6 @@
+// state.go defines the State type for barriers.
+
+// Package types provides common types for barriers.
 package types
 
 import (

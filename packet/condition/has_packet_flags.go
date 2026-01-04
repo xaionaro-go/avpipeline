@@ -12,7 +12,7 @@ import (
 
 type HasPacketFlags astiav.PacketFlags
 
-var _ Condition = (IsKeyFrame)(false)
+var _ Condition = (HasPacketFlags)(0)
 
 func (v HasPacketFlags) String() string {
 	return fmt.Sprintf("HasPacketFlags(0x%X)", astiav.PacketFlags(v))

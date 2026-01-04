@@ -1,3 +1,5 @@
+// software.go provides a software-based implementation of the Scaler interface.
+
 package scaler
 
 import (

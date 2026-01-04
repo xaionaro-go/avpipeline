@@ -1,3 +1,5 @@
+// reorder_monotonic_dts.go implements a kernel that reorders packets/frames to ensure monotonic DTS.
+
 package kernel
 
 import (

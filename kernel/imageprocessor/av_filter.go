@@ -1,3 +1,5 @@
+// av_filter.go implements an image processor using libavfilter.
+
 package imageprocessor
 
 import (

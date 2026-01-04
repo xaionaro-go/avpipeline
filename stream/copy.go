@@ -1,3 +1,6 @@
+// Package stream provides utilities for managing and manipulating AV streams.
+//
+// copy.go provides functions to copy parameters between streams.
 package stream
 
 import (

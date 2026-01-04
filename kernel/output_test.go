@@ -1,3 +1,5 @@
+// output_test.go contains tests for the output kernel.
+
 package kernel
 
 import (

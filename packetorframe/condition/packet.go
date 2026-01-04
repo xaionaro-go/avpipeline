@@ -1,3 +1,5 @@
+// packet.go implements a condition that wraps a packet condition.
+
 package condition
 
 import (

@@ -1,3 +1,6 @@
+// consts.go defines various constants for Android MediaCodec.
+
+// Package mediacodec provides constants and utilities for working with Android MediaCodec.
 package mediacodec
 
 // see: https://android.googlesource.com/platform/frameworks/base/+/master/media/java/android/media/MediaFormat.java

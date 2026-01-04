@@ -1,3 +1,5 @@
+// input_config.go defines the InputConfig type.
+
 package types
 
 import (

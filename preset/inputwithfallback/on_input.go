@@ -1,3 +1,5 @@
+// on_input.go implements a condition that adds pipeline side data to inputs.
+
 package inputwithfallback
 
 import (

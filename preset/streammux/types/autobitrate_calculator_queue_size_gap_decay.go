@@ -1,3 +1,5 @@
+// autobitrate_calculator_queue_size_gap_decay.go implements a bitrate calculator based on queue size gap decay.
+
 package types
 
 import (

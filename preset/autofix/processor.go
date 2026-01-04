@@ -1,3 +1,5 @@
+// processor.go implements the processor interface for the AutoFixer.
+
 package autofix
 
 import (
@@ -12,10 +14,12 @@ import (
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
-var _ processor.Abstract = (*AutoFixerWithCustomData[struct{}])(nil)
-var _ packet.Source = (*AutoFixerWithCustomData[struct{}])(nil)
-var _ packet.Sink = (*AutoFixerWithCustomData[struct{}])(nil)
-var _ types.OriginalPacketSourcer = (*AutoFixerWithCustomData[struct{}])(nil)
+var (
+	_ processor.Abstract          = (*AutoFixerWithCustomData[struct{}])(nil)
+	_ packet.Source               = (*AutoFixerWithCustomData[struct{}])(nil)
+	_ packet.Sink                 = (*AutoFixerWithCustomData[struct{}])(nil)
+	_ types.OriginalPacketSourcer = (*AutoFixerWithCustomData[struct{}])(nil)
+)
 
 // OriginalPacketSource returns the underlying MapStreamIndices kernel as the original packet source.
 func (a *AutoFixerWithCustomData[T]) OriginalPacketSource() packet.Source {

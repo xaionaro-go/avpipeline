@@ -1,3 +1,4 @@
+// switch_test.go contains tests for the switch state getter.
 package stategetter
 
 import (

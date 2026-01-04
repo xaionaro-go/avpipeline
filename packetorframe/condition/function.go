@@ -1,3 +1,5 @@
+// function.go implements a condition that uses a custom function.
+
 package condition
 
 import (

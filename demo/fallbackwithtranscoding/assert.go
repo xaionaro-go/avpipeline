@@ -1,3 +1,5 @@
+// assert.go provides an assertion function.
+
 package main
 
 import (

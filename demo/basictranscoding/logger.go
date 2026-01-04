@@ -1,3 +1,4 @@
+// logger.go provides logging utilities for the demo.
 package main
 
 import (

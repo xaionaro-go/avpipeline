@@ -1,3 +1,6 @@
+// libav.go defines constants related to libav.
+
+// Package consts provides common constants for the codec package.
 package consts
 
 import (

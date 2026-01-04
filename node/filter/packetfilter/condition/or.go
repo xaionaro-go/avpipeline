@@ -1,3 +1,5 @@
+// or.go implements a logical OR condition for packet input filtering.
+
 package condition
 
 import (

@@ -1,3 +1,5 @@
+// condition.go defines the Condition interface and input types for resource getters.
+
 package resource
 
 import (

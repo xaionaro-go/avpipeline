@@ -1,3 +1,5 @@
+// custom_options.go provides helpers to convert custom options for the stream muxer.
+
 package streammux
 
 import (

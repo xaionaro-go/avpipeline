@@ -1,3 +1,5 @@
+// transcoder_test.go contains tests for the transcoder kernel.
+
 package kernel_test
 
 import (

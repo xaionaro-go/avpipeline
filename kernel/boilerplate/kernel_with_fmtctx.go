@@ -1,3 +1,5 @@
+// kernel_with_fmtctx.go provides a base implementation for a kernel that uses an astiav.FormatContext.
+
 package boilerplate
 
 import (
@@ -25,9 +27,11 @@ type BaseWithFormatContext[H CustomHandlerWithContextFormat] struct {
 	OutputStreams map[int]*astiav.Stream
 }
 
-var _ types.Abstract = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
-var _ packet.Source = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
-var _ packet.Sink = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+var (
+	_ types.Abstract = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+	_ packet.Source  = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+	_ packet.Sink    = (*BaseWithFormatContext[CustomHandlerWithContextFormat])(nil)
+)
 
 func NewKernelWithFormatContext[H CustomHandlerWithContextFormat](
 	ctx context.Context,

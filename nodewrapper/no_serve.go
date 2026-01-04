@@ -1,3 +1,6 @@
+// no_serve.go provides a wrapper for nodes that do not need to be served.
+
+// Package nodewrapper provides wrappers for nodes.
 package nodewrapper
 
 import (
@@ -18,8 +21,10 @@ type NoServe[N node.Abstract] struct {
 	Node N
 }
 
-var _ node.Abstract = (*NoServe[node.Abstract])(nil)
-var _ node.DotBlockContentStringWriteToer = (*NoServe[node.Abstract])(nil)
+var (
+	_ node.Abstract                       = (*NoServe[node.Abstract])(nil)
+	_ node.DotBlockContentStringWriteToer = (*NoServe[node.Abstract])(nil)
+)
 
 func (n *NoServe[N]) Serve(
 	ctx context.Context,

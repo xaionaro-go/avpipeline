@@ -1,3 +1,6 @@
+// packet_filter.go implements a packet filter preset that drops non-key video frames.
+
+// Package videodropnonkeyframes provides a packet filter preset that drops non-key video frames.
 package videodropnonkeyframes
 
 import (

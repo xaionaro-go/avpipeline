@@ -1,3 +1,5 @@
+// chain_test.go contains tests for the chain kernel.
+
 package kernel
 
 import (

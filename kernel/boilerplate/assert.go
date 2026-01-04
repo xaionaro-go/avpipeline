@@ -1,3 +1,5 @@
+// assert.go provides a simple assertion helper.
+
 package boilerplate
 
 import (

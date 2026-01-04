@@ -1,3 +1,5 @@
+// boxblur.go implements a boxblur filter.
+
 package avfilter
 
 import (

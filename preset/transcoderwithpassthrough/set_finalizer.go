@@ -1,3 +1,5 @@
+// set_finalizer.go provides a helper to set a finalizer for freeing resources.
+
 package transcoderwithpassthrough
 
 import (

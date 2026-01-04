@@ -1,3 +1,5 @@
+// getters.go defines various getter interfaces for kernels.
+
 package types
 
 import (

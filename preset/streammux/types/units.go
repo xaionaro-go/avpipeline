@@ -1,3 +1,5 @@
+// units.go defines custom types for time, data size, and bitrate units.
+
 package types
 
 import (
@@ -6,11 +8,13 @@ import (
 	"github.com/dustin/go-humanize"
 )
 
-type US time.Duration // s
-type UB int64         // B
-type Ub int64         // b
-type UBps float64     // B/s
-type Ubps float64     // b/s
+type (
+	US   time.Duration // s
+	UB   int64         // B
+	Ub   int64         // b
+	UBps float64       // B/s
+	Ubps float64       // b/s
+)
 
 func (v UB) Tob() Ub {
 	return Ub(v * 8)

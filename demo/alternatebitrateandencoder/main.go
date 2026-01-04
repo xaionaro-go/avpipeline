@@ -1,3 +1,6 @@
+// main.go demo of alternating bitrate and encoder.
+
+// Package main is a demo application.
 package main
 
 import (

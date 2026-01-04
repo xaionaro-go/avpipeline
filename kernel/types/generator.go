@@ -1,3 +1,5 @@
+// generator.go defines the Generator interface.
+
 package types
 
 import (

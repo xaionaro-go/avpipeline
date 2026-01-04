@@ -1,3 +1,6 @@
+// screen_capturer.go implements a preset for capturing the screen.
+
+// Package screencapturer provides a preset for capturing the screen.
 package screencapturer
 
 import (
@@ -19,8 +22,10 @@ type ScreenCapturer[C any] struct {
 	DecoderNode *node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Decoder[*codec.NaiveDecoderFactory]]]
 }
 
-var _ node.DotBlockContentStringWriteToer = (*ScreenCapturer[any])(nil)
-var _ node.Abstract = (*ScreenCapturer[any])(nil)
+var (
+	_ node.DotBlockContentStringWriteToer = (*ScreenCapturer[any])(nil)
+	_ node.Abstract                       = (*ScreenCapturer[any])(nil)
+)
 
 type Params struct {
 	Area image.Rectangle

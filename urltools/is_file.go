@@ -1,3 +1,6 @@
+// Package urltools provides utilities for parsing and analyzing URLs in the context of AV streams.
+//
+// is_file.go provides a function to determine if a URL refers to a local file.
 package urltools
 
 import (

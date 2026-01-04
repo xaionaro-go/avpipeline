@@ -1,3 +1,6 @@
+// hardware_device_type.go defines the HardwareDeviceType enum and its methods.
+
+// Package types provides common types and interfaces used throughout the avpipeline project.
 package types
 
 import (
@@ -36,7 +39,7 @@ func (r HardwareDeviceType) String() string {
 		return "dxva2"
 	case HardwareDeviceTypeD3D11VA:
 		return "d3d11va"
-	//case HardwareDeviceTypeD3D12VA:
+	// case HardwareDeviceTypeD3D12VA:
 	//	return "d3d12va"
 	case HardwareDeviceTypeOpenCL:
 		return "opencl"

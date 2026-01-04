@@ -1,3 +1,5 @@
+// stream_measurements.go implements the quality measurements for a single media stream.
+
 package quality
 
 import (

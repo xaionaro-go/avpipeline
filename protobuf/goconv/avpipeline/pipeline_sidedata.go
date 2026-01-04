@@ -1,3 +1,5 @@
+// pipeline_sidedata.go provides conversion functions for PipelineSideData between Protobuf and Go.
+
 package avpipeline
 
 import (

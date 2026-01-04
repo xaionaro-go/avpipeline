@@ -1,3 +1,5 @@
+// route_reset_node.go provides a method to reset the node of a route.
+
 package router
 
 import (

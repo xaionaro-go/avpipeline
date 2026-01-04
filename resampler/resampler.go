@@ -1,3 +1,6 @@
+// resampler.go defines the Resampler struct and its methods for audio resampling.
+
+// Package resampler provides audio resampling capabilities using libav.
 package resampler
 
 import (

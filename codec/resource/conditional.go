@@ -1,3 +1,5 @@
+// conditional.go implements a conditional resource getter.
+
 package resource
 
 import (

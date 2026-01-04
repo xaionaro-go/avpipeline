@@ -1,3 +1,5 @@
+// stream_measurements_test.go provides tests for stream measurements.
+
 package quality
 
 import (

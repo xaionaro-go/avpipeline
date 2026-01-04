@@ -1,3 +1,5 @@
+// and.go implements a logical AND condition for packet-or-frame unions.
+
 package condition
 
 import (

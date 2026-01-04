@@ -1,3 +1,5 @@
+// benchmark_test.go provides benchmarks for the media pipeline.
+
 package avpipeline
 
 import (

@@ -1,3 +1,6 @@
+// limit_framerate.go implements a filter that limits the frame rate.
+
+// Package limitframerate provides a filter that limits the frame rate.
 package limitframerate
 
 import (
@@ -40,6 +43,7 @@ func (f *Filter) Match(
 ) (_ret bool) {
 	return xsync.DoA2R1(ctx, &f.Mutex, f.match, ctx, i)
 }
+
 func (f *Filter) match(
 	ctx context.Context,
 	i packetorframe.InputUnion,

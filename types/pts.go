@@ -1,3 +1,5 @@
+// pts.go defines constants related to Presentation Time Stamps (PTS).
+
 package types
 
 import (

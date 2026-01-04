@@ -1,3 +1,5 @@
+// stream_forwarder.go defines the StreamForwarder interface for forwarding streams between nodes.
+
 package router
 
 import (

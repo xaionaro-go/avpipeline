@@ -1,3 +1,5 @@
+// is_oob_headers.go provides a helper to check if a format uses out-of-band headers.
+
 package autoheaders
 
 import (

@@ -1,3 +1,6 @@
+// push_queue_size.go implements a condition based on the push queue size of a node.
+
+// Package condition provides extra conditions for packet-or-frame unions.
 package condition
 
 import (

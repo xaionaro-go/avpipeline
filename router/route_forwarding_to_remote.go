@@ -1,3 +1,5 @@
+// route_forwarding_to_remote.go provides functions to add route forwarding to remote destinations.
+
 package router
 
 import (

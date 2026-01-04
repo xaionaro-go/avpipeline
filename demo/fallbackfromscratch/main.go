@@ -1,3 +1,6 @@
+// main.go is a demo application that demonstrates fallback from scratch.
+
+// Package main is a demo application.
 package main
 
 import (
@@ -32,7 +35,6 @@ import (
 )
 
 func main() {
-
 	// parse the input
 
 	pflag.Usage = func() {

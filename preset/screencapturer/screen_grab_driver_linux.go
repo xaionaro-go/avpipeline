@@ -1,3 +1,5 @@
+// screen_grab_driver_linux.go provides the screen grab driver for Linux.
+
 package screencapturer
 
 import (

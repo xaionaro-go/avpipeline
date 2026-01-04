@@ -1,3 +1,6 @@
+// kernel.go implements a client-side kernel.
+
+// Package client provides a client-side kernel implementation.
 package client
 
 import (
@@ -12,9 +15,11 @@ import (
 
 type Kernel struct{}
 
-var _ kernel.Abstract = (*Kernel)(nil)
-var _ packet.Source = (*Kernel)(nil)
-var _ packet.Sink = (*Kernel)(nil)
+var (
+	_ kernel.Abstract = (*Kernel)(nil)
+	_ packet.Source   = (*Kernel)(nil)
+	_ packet.Sink     = (*Kernel)(nil)
+)
 
 func (k *Kernel) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(k)

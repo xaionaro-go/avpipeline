@@ -1,3 +1,6 @@
+// state_getter.go defines the StateGetter interface.
+
+// Package stategetter provides implementations of the StateGetter interface.
 package stategetter
 
 import (

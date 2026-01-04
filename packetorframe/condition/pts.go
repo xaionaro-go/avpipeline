@@ -1,3 +1,5 @@
+// pts.go implements a condition based on the PTS of a packet or frame.
+
 package condition
 
 import (

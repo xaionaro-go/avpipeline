@@ -1,3 +1,5 @@
+// packet.go provides conversion functions for packets between Protobuf and Go.
+
 package libav
 
 import (

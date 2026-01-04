@@ -1,3 +1,5 @@
+// mama_test.go provides tests for the MAMA indicator.
+
 package indicator
 
 import (

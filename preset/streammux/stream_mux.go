@@ -1,3 +1,5 @@
+// stream_mux.go implements a handler that routes audio and video streams to different outputs.
+
 // Package streammux provides a handler that routes audio and video streams to different outputs.
 package streammux
 

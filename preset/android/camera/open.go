@@ -1,3 +1,6 @@
+// open.go implements a preset for opening an Android camera.
+
+// Package camera provides a preset for opening an Android camera.
 package camera
 
 import (

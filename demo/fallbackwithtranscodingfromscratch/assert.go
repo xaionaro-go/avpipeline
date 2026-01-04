@@ -1,3 +1,5 @@
+// assert.go provides assertion utilities for the fallback with transcoding demo.
+
 package main
 
 import (

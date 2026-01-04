@@ -1,3 +1,5 @@
+// input_factory.go defines the interface for creating input kernels and decoders.
+
 package inputwithfallback
 
 import (

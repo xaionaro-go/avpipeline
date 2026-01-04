@@ -1,12 +1,13 @@
+// route.go defines the Route struct, representing a single path in the router.
+
 package router
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
-
-	"slices"
 
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -172,6 +173,7 @@ func (r *Route[T]) Close(ctx context.Context) (_err error) {
 	defer wg.Wait()
 	return xsync.DoA2R1(ctx, &r.Node.Locker, r.closeLocked, ctx, &wg)
 }
+
 func (r *Route[T]) getPublishersChangeChan(
 	ctx context.Context,
 ) <-chan struct{} {

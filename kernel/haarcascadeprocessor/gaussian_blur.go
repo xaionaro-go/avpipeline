@@ -1,6 +1,8 @@
 //go:build with_cv
 // +build with_cv
 
+// gaussian_blur.go implements a Gaussian blur image processor using Haar cascades.
+
 package haarcascadeprocessor
 
 import (

@@ -1,3 +1,5 @@
+// condition.go defines the Condition interface for generic filtering.
+
 package types
 
 import (

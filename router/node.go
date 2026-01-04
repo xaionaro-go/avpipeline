@@ -1,3 +1,5 @@
+// node.go defines node types and helper functions for routing.
+
 package router
 
 import (
@@ -26,8 +28,10 @@ type GoBug63285RouteInterface[T any] interface {
 	) Publishers[T]
 }
 
-type ProcessorRouting = processor.FromKernel[*NodeKernel]
-type NodeRouting[T any] = node.NodeWithCustomData[GoBug63285RouteInterface[T], *ProcessorRouting]
+type (
+	ProcessorRouting   = processor.FromKernel[*NodeKernel]
+	NodeRouting[T any] = node.NodeWithCustomData[GoBug63285RouteInterface[T], *ProcessorRouting]
+)
 
 type Sender interface {
 	Close(context.Context) error

@@ -1,3 +1,5 @@
+// node_kernel_option.go defines functional options for configuring NodeKernel.
+
 package router
 
 type nodeKernelConfig struct {

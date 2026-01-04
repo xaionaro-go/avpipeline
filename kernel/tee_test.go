@@ -1,3 +1,5 @@
+// tee_test.go contains tests for the tee kernel.
+
 package kernel
 
 import (
@@ -131,6 +133,7 @@ type closeFakeKernel struct {
 func (c *closeFakeKernel) SendInput(context.Context, packetorframe.InputUnion, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
+
 func (c *closeFakeKernel) Generate(context.Context, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
@@ -140,6 +143,7 @@ func (c *closeFakeKernel) Close(ctx context.Context) error {
 	c.closed = true
 	return c.closeErr
 }
+
 func (c *closeFakeKernel) CloseChan() <-chan struct{} {
 	return c.ch
 }
@@ -193,6 +197,7 @@ type blockingKernel struct {
 func (b *blockingKernel) SendInput(context.Context, packetorframe.InputUnion, chan<- packetorframe.OutputUnion) error {
 	return nil
 }
+
 func (b *blockingKernel) Generate(ctx context.Context, _ chan<- packetorframe.OutputUnion) error {
 	close(b.started)
 	<-ctx.Done()

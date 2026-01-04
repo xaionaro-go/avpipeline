@@ -1,3 +1,5 @@
+// node.go implements the node interface for the ScreenCapturer preset.
+
 package screencapturer
 
 import (

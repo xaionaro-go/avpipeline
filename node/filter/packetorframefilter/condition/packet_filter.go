@@ -1,3 +1,5 @@
+// packet_filter.go implements a condition that wraps a packet filter condition.
+
 package condition
 
 import (

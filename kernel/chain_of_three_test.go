@@ -1,3 +1,5 @@
+// chain_of_three_test.go contains tests for the chain_of_three kernel.
+
 package kernel
 
 import (

@@ -1,3 +1,5 @@
+// stream_forwarder_transcoding.go provides a StreamForwarder implementation that transcodes streams.
+
 package router
 
 import (

@@ -1,3 +1,5 @@
+// processor.go implements the processor interface for the ScreenCapturer preset.
+
 package screencapturer
 
 import (

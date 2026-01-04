@@ -1,3 +1,5 @@
+// packet_or_frame.go implements a condition that wraps a packet-or-frame condition.
+
 package condition
 
 import (

@@ -1,5 +1,6 @@
 // mama.go implements the MESA Adaptive Moving Average (MAMA) indicator.
 
+// Package indicator provides technical indicators for media streams.
 package indicator
 
 import (

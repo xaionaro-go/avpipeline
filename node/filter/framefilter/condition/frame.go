@@ -1,3 +1,5 @@
+// frame.go implements a condition that wraps frame-specific conditions for node input filtering.
+
 package condition
 
 import (

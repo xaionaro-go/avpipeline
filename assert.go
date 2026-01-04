@@ -1,5 +1,6 @@
 // assert.go provides internal assertion helpers for the avpipeline package.
 
+// Package avpipeline provides the core functionality for building and managing media pipelines.
 package avpipeline
 
 import (

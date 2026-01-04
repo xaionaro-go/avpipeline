@@ -1,3 +1,5 @@
+// publish_mode.go defines the PublishMode type, which controls how multiple publishers interact on a route.
+
 package router
 
 import (

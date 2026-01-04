@@ -1,3 +1,5 @@
+// chain_of_three.go implements the chain_of_three kernel.
+
 package kernel
 
 import (

@@ -1,3 +1,4 @@
+// assert.go provides assertion utilities for the fallback demo.
 package main
 
 import (

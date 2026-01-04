@@ -1,3 +1,5 @@
+// dummy_test.go contains tests for the dummy kernel.
+
 package kernel
 
 import (

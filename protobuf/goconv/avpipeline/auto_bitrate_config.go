@@ -1,3 +1,5 @@
+// auto_bitrate_config.go provides conversion functions for auto bitrate configuration between Protobuf and Go.
+
 package avpipeline
 
 import (

@@ -1,3 +1,5 @@
+// codec_resource_manager.go implements a resource manager for reusing codec resources.
+
 package streammux
 
 import (

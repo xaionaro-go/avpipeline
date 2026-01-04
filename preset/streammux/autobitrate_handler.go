@@ -1,3 +1,5 @@
+// autobitrate_handler.go implements automatic bitrate adjustment for the stream muxer.
+
 package streammux
 
 import (

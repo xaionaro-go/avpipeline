@@ -1,3 +1,5 @@
+// resampler_test.go provides tests for audio resampling.
+
 package resampler
 
 import (

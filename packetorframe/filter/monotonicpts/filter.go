@@ -1,3 +1,6 @@
+// filter.go implements a filter that ensures monotonic PTS.
+
+// Package monotonicpts provides a filter that ensures monotonic PTS.
 package monotonicpts
 
 import (

@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for resource getters.
+
+// Package gettercondition provides various conditions for filtering resource getters.
 package gettercondition
 
 import (

@@ -1,3 +1,5 @@
+// resolution.go provides conversion functions for resolution between Protobuf and Go.
+
 package avpipelinenolibav
 
 import (

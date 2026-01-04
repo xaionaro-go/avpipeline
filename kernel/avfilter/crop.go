@@ -1,3 +1,5 @@
+// crop.go implements a crop filter.
+
 package avfilter
 
 import (

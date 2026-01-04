@@ -1,3 +1,5 @@
+// as_packet_sourcesink.go provides helper functions to cast processors to packet sources or sinks.
+
 package router
 
 import (

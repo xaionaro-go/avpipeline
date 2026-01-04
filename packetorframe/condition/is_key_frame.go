@@ -1,3 +1,5 @@
+// is_key_frame.go implements a condition that checks if a packet or frame is a key frame.
+
 package condition
 
 import (

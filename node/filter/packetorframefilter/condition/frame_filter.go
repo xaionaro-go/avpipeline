@@ -1,3 +1,5 @@
+// frame_filter.go implements a condition that wraps a frame filter condition.
+
 package condition
 
 import (

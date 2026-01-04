@@ -1,3 +1,5 @@
+// assert.go provides an assertion helper for the limitframerate package.
+
 package limitframerate
 
 import (

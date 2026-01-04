@@ -1,3 +1,5 @@
+// stream_quality.go defines the quality metrics for a single media stream.
+
 package types
 
 type StreamQuality struct {

@@ -1,3 +1,5 @@
+// dts_and_duration.go defines a structure to store DTS and duration of packets or frames.
+
 package quality
 
 import (

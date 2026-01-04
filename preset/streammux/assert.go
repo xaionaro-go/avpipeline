@@ -1,3 +1,5 @@
+// assert.go provides assertion helpers for the streammux package.
+
 package streammux
 
 import (

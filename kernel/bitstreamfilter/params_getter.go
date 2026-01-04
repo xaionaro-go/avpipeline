@@ -1,3 +1,5 @@
+// params_getter.go provides bitstream filter parameters and getter interface.
+
 package bitstreamfilter
 
 import (

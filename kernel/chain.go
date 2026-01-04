@@ -1,3 +1,5 @@
+// chain.go implements the Chain kernel for chaining multiple kernels together.
+
 package kernel
 
 import (

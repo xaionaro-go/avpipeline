@@ -1,3 +1,5 @@
+// source.go implements a condition that matches the source of a packet.
+
 package condition
 
 import (

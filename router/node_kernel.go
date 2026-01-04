@@ -1,3 +1,5 @@
+// node_kernel.go defines the NodeKernel, which handles the actual packet/frame processing within a route.
+
 package router
 
 import (

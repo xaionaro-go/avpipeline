@@ -1,3 +1,5 @@
+// send_inputer.go defines the SendInputer interface.
+
 package types
 
 import (

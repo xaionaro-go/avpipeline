@@ -1,3 +1,4 @@
+// assert.go provides assertion utilities for the demo.
 package main
 
 import (

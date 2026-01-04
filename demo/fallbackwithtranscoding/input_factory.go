@@ -1,3 +1,5 @@
+// input_factory.go implements an input factory.
+
 package main
 
 import (

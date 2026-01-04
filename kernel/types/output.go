@@ -1,3 +1,6 @@
+// output.go defines the Output interface for kernels.
+
+// Package types provides common types for kernels.
 package types
 
 import (

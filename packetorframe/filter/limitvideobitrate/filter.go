@@ -1,3 +1,6 @@
+// filter.go implements a filter that limits the video bitrate.
+
+// Package limitvideobitrate provides a filter that limits the video bitrate.
 package limitvideobitrate
 
 import (

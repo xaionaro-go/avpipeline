@@ -1,3 +1,5 @@
+// sampled.go implements a condition that samples every Nth packet for input filtering.
+
 package condition
 
 import (

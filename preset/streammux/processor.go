@@ -1,3 +1,5 @@
+// processor.go implements the processor interface for the stream muxer.
+
 package streammux
 
 import (
@@ -17,12 +19,15 @@ var _ processor.Abstract = (*StreamMux[struct{}])(nil)
 func (s *StreamMux[C]) InputChan() chan<- packetorframe.InputUnion {
 	return s.InputAll.Node.Processor.InputCh
 }
+
 func (s *StreamMux[C]) OutputChan() <-chan packetorframe.OutputUnion {
 	return nil
 }
+
 func (s *StreamMux[C]) ErrorChan() <-chan error {
 	panic("not implemented")
 }
+
 func (s *StreamMux[C]) Flush(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Flush: %v:%p", s, s)
 	defer func() { logger.Tracef(ctx, "/Flush: %v:%p: %v", s, s, _err) }()

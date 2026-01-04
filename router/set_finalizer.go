@@ -1,3 +1,5 @@
+// set_finalizer.go provides helper functions to set finalizers for objects that need to be freed.
+
 package router
 
 import (

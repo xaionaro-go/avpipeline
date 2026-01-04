@@ -1,3 +1,4 @@
+// logger.go provides logging utilities for the fallback demo.
 package main
 
 import (

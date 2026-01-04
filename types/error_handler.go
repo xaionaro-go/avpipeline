@@ -1,3 +1,5 @@
+// error_handler.go defines the ErrorHandler interface.
+
 package types
 
 import (

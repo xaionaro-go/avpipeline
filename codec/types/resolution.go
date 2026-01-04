@@ -1,3 +1,5 @@
+// resolution.go defines the Resolution type for codecs.
+
 package types
 
 import (

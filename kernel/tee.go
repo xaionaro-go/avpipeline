@@ -1,3 +1,5 @@
+// tee.go implements the Tee kernel for duplicating packets and frames to multiple underlying kernels.
+
 package kernel
 
 import (
@@ -21,10 +23,12 @@ import (
 // and collects their outputs (including Generate).
 type Tee[K Abstract] []K
 
-var _ Abstract = (*Tee[Abstract])(nil)
-var _ packet.Source = (*Tee[Abstract])(nil)
-var _ packet.Sink = (*Tee[Abstract])(nil)
-var _ types.OriginalPacketSourcer = (*Tee[Abstract])(nil)
+var (
+	_ Abstract                    = (*Tee[Abstract])(nil)
+	_ packet.Source               = (*Tee[Abstract])(nil)
+	_ packet.Sink                 = (*Tee[Abstract])(nil)
+	_ types.OriginalPacketSourcer = (*Tee[Abstract])(nil)
+)
 
 // OriginalPacketSource returns the first kernel that has an actual packet source.
 // All Tee children receive the same input, so they should have equivalent format contexts.

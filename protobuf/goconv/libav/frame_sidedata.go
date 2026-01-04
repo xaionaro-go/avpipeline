@@ -1,3 +1,5 @@
+// frame_sidedata.go provides conversion functions for frame side data between Protobuf and Go.
+
 package libav
 
 import (

@@ -1,6 +1,6 @@
 // serve.go provides functionality for serving and managing the media pipeline.
 
-// Package avpipeline provides a framework for building and managing media processing pipelines.
+// Package avpipeline provides the core functionality for building and managing media pipelines.
 package avpipeline
 
 import (

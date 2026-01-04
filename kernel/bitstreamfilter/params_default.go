@@ -1,3 +1,5 @@
+// params_default.go provides default bitstream filter parameters.
+
 package bitstreamfilter
 
 import (

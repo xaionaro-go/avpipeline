@@ -1,3 +1,5 @@
+// switch.go implements the Switch kernel for switching between multiple kernels based on conditions.
+
 package kernel
 
 import (

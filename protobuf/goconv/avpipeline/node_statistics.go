@@ -1,3 +1,5 @@
+// node_statistics.go provides conversion functions for node statistics between Protobuf and Go.
+
 package avpipeline
 
 import (

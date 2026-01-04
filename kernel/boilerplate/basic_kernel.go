@@ -1,3 +1,6 @@
+// basic_kernel.go provides a basic implementation of a kernel.
+
+// Package boilerplate provides boilerplate code for kernels.
 package boilerplate
 
 import (

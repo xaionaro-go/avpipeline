@@ -1,3 +1,5 @@
+// logger.go provides logger initialization.
+
 package main
 
 import (

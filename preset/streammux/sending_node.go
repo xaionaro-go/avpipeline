@@ -1,3 +1,5 @@
+// sending_node.go defines the interface for sending nodes in the stream muxer.
+
 package streammux
 
 import (

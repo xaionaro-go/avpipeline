@@ -1,3 +1,6 @@
+// linesize.go provides conversion functions for linesize between Protobuf and Go.
+
+// Package libav provides conversion functions between Protobuf and Go for libav types.
 package libav
 
 import (

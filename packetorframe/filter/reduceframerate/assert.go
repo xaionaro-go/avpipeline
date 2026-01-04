@@ -1,3 +1,5 @@
+// assert.go provides an assertion helper for the reduceframerate package.
+
 package reduceframerate
 
 import (

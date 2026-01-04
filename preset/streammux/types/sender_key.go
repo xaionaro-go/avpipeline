@@ -1,3 +1,5 @@
+// sender_key.go defines the key used to identify a stream sender.
+
 package types
 
 import (

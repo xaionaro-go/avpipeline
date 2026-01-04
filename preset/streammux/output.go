@@ -1,3 +1,5 @@
+// output.go implements the output handling for the stream muxer.
+
 package streammux
 
 import (
@@ -41,11 +43,13 @@ const (
 	outputReuseDecoderResources = false
 )
 
-type NodeBarrier[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
-type NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
-type NodeTranscoder[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
-type SenderKey = types.SenderKey
-type SenderKeys = types.SenderKeys
+type (
+	NodeBarrier[C any]          = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Barrier]]
+	NodeMapStreamIndexes[C any] = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.MapStreamIndices]]
+	NodeTranscoder[C any]       = node.NodeWithCustomData[C, *processor.FromKernel[*kernel.Transcoder[*codec.NaiveDecoderFactory, *codec.NaiveEncoderFactory]]]
+	SenderKey                   = types.SenderKey
+	SenderKeys                  = types.SenderKeys
+)
 
 type OutputID int
 

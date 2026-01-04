@@ -1,3 +1,5 @@
+// static.go implements a static boolean condition.
+
 package condition
 
 import (

@@ -1,3 +1,4 @@
+// stream_mux_test.go tests the stream muxer.
 package streammux
 
 import (

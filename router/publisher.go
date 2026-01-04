@@ -1,3 +1,5 @@
+// publisher.go defines the Publisher interface for route sources.
+
 package router
 
 import (

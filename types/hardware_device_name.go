@@ -1,3 +1,5 @@
+// hardware_device_name.go defines the HardwareDeviceName type.
+
 package types
 
 import (

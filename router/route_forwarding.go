@@ -1,3 +1,5 @@
+// route_forwarding.go defines the RouteForwarding struct for forwarding streams between routes.
+
 package router
 
 import (

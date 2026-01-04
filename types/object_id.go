@@ -1,3 +1,5 @@
+// object_id.go defines the ObjectID type and related utilities.
+
 package types
 
 import (

@@ -1,3 +1,5 @@
+// frame.go implements a condition that wraps a frame condition.
+
 package condition
 
 import (

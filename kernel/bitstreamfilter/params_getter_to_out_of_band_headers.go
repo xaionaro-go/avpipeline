@@ -1,3 +1,5 @@
+// params_getter_to_out_of_band_headers.go provides a ParamsGetter that converts in-band headers to out-of-band headers.
+
 package bitstreamfilter
 
 import (

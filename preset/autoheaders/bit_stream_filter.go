@@ -1,3 +1,6 @@
+// bit_stream_filter.go provides helpers to create bitstream filters for header fixing.
+
+// Package autoheaders provides a preset that automatically fixes stream headers.
 package autoheaders
 
 import (

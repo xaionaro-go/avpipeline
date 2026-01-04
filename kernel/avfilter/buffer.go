@@ -1,3 +1,5 @@
+// buffer.go implements a buffer filter (src and sink).
+
 package avfilter
 
 import (

@@ -1,3 +1,5 @@
+// codec_parameters.go provides conversion functions for codec parameters between Protobuf and Go.
+
 package libavnolibav
 
 import (

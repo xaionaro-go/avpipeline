@@ -1,3 +1,6 @@
+// packet_or_frame.go defines a union type for packets and frames.
+
+// Package packetorframe provides a union type for packets and frames.
 package packetorframe
 
 import (
@@ -87,8 +90,10 @@ type OutputUnion struct {
 	Packet *packet.Output
 }
 
-var _ Abstract = (*InputUnion)(nil)
-var _ Abstract = (*OutputUnion)(nil)
+var (
+	_ Abstract = (*InputUnion)(nil)
+	_ Abstract = (*OutputUnion)(nil)
+)
 
 func (u *InputUnion) Get() Abstract {
 	switch {
@@ -115,48 +120,63 @@ func (u *OutputUnion) Get() Abstract {
 func (u *InputUnion) GetSize() int {
 	return u.Get().GetSize()
 }
+
 func (u *InputUnion) GetStreamIndex() int {
 	return u.Get().GetStreamIndex()
 }
+
 func (u *InputUnion) GetMediaType() astiav.MediaType {
 	return u.Get().GetMediaType()
 }
+
 func (u *InputUnion) GetPTS() int64 {
 	return u.Get().GetPTS()
 }
+
 func (u *InputUnion) GetDTS() int64 {
 	return u.Get().GetDTS()
 }
+
 func (u *InputUnion) SetPTS(v int64) {
 	u.Get().SetPTS(v)
 }
+
 func (u *InputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
 }
+
 func (u *InputUnion) GetTimeBase() astiav.Rational {
 	return u.Get().GetTimeBase()
 }
+
 func (u *InputUnion) SetTimeBase(v astiav.Rational) {
 	u.Get().SetTimeBase(v)
 }
+
 func (u *InputUnion) GetDuration() int64 {
 	return u.Get().GetDuration()
 }
+
 func (u *InputUnion) SetDuration(v int64) {
 	u.Get().SetDuration(v)
 }
+
 func (u *InputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()
 }
+
 func (u *InputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 	return u.Get().AddPipelineSideData(obj)
 }
+
 func (u *InputUnion) IsKey() bool {
 	return u.Get().IsKey()
 }
+
 func (u *InputUnion) GetCodecParameters() *astiav.CodecParameters {
 	return u.Get().GetCodecParameters()
 }
+
 func (u *InputUnion) SetStreamIndex(v int) {
 	u.Get().SetStreamIndex(v)
 }
@@ -164,48 +184,63 @@ func (u *InputUnion) SetStreamIndex(v int) {
 func (u *OutputUnion) GetSize() int {
 	return u.Get().GetSize()
 }
+
 func (u *OutputUnion) GetStreamIndex() int {
 	return u.Get().GetStreamIndex()
 }
+
 func (u *OutputUnion) SetStreamIndex(v int) {
 	u.Get().SetStreamIndex(v)
 }
+
 func (u *OutputUnion) GetMediaType() astiav.MediaType {
 	return u.Get().GetMediaType()
 }
+
 func (u *OutputUnion) GetPTS() int64 {
 	return u.Get().GetPTS()
 }
+
 func (u *OutputUnion) GetDTS() int64 {
 	return u.Get().GetDTS()
 }
+
 func (u *OutputUnion) SetPTS(v int64) {
 	u.Get().SetPTS(v)
 }
+
 func (u *OutputUnion) SetDTS(v int64) {
 	u.Get().SetDTS(v)
 }
+
 func (u *OutputUnion) GetTimeBase() astiav.Rational {
 	return u.Get().GetTimeBase()
 }
+
 func (u *OutputUnion) SetTimeBase(v astiav.Rational) {
 	u.Get().SetTimeBase(v)
 }
+
 func (u *OutputUnion) GetDuration() int64 {
 	return u.Get().GetDuration()
 }
+
 func (u *OutputUnion) SetDuration(v int64) {
 	u.Get().SetDuration(v)
 }
+
 func (u *OutputUnion) GetPipelineSideData() types.PipelineSideData {
 	return u.Get().GetPipelineSideData()
 }
+
 func (u *OutputUnion) AddPipelineSideData(obj any) types.PipelineSideData {
 	return u.Get().AddPipelineSideData(obj)
 }
+
 func (u *OutputUnion) IsKey() bool {
 	return u.Get().IsKey()
 }
+
 func (u *OutputUnion) GetCodecParameters() *astiav.CodecParameters {
 	return u.Get().GetCodecParameters()
 }

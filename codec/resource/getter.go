@@ -1,3 +1,5 @@
+// getter.go defines the ResourcesGetter interface for retrieving codec resources.
+
 package resource
 
 import (

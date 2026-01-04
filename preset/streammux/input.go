@@ -1,3 +1,5 @@
+// input.go implements the input handling for the stream muxer.
+
 package streammux
 
 import (
@@ -89,8 +91,10 @@ type InputHandler[C any] struct {
 	Kernel    *kernelboilerplate.BaseWithFormatContext[*InputHandler[C]]
 }
 
-var _ kernelboilerplate.CustomHandlerWithContextFormat = (*InputHandler[any])(nil)
-var _ kernelboilerplate.StreamFilterer = (*InputHandler[any])(nil)
+var (
+	_ kernelboilerplate.CustomHandlerWithContextFormat = (*InputHandler[any])(nil)
+	_ kernelboilerplate.StreamFilterer                 = (*InputHandler[any])(nil)
+)
 
 func (h *InputHandler[C]) String() string {
 	return fmt.Sprintf("StreamMux:Input:%s", h.Type)

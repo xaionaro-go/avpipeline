@@ -1,3 +1,5 @@
+// stream_index_assigner.go implements a stream index assigner for the stream muxer.
+
 package streammux
 
 import (

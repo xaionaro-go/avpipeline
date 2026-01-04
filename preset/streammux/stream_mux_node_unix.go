@@ -1,6 +1,8 @@
 //go:build unix
 // +build unix
 
+// stream_mux_node_unix.go provides platform-specific error handling for Unix systems.
+
 package streammux
 
 import (
