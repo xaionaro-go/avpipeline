@@ -339,7 +339,7 @@ func (n *netConn) setRecvBufferSizeLocked(
 	return n.withRawNetworkConnLocked(
 		ctx,
 		func(ctx context.Context, rawConn syscall.RawConn, _ string) error {
-			return netraw.SetOption(ctx, rawConn, tcpopt.ReceiveBuffer(size))
+			return netraw.SetTCPSockOption(ctx, rawConn, tcpopt.ReceiveBuffer(size))
 		},
 	)
 }
@@ -360,7 +360,7 @@ func (n *netConn) setSendBufferSizeLocked(
 	return n.withRawNetworkConnLocked(
 		ctx,
 		func(ctx context.Context, rawConn syscall.RawConn, _ string) error {
-			return netraw.SetOption(ctx, rawConn, tcpopt.SendBuffer(size))
+			return netraw.SetTCPSockOption(ctx, rawConn, tcpopt.SendBuffer(size))
 		},
 	)
 }

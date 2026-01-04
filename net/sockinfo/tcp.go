@@ -25,7 +25,7 @@ func getRawConnInfoTCP(
 	ctx context.Context,
 	rawConn syscall.RawConn,
 ) (SockInfo, error) {
-	opt, err := raw.GetOption(ctx, rawConn, (*tcpinfo.Info)(nil))
+	opt, err := raw.GetTCPSockOption(ctx, rawConn, (*tcpinfo.Info)(nil))
 	if err != nil {
 		return nil, fmt.Errorf("unable to get TCP info: %w", err)
 	}

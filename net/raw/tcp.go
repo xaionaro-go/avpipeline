@@ -5,6 +5,7 @@ package raw
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"syscall"
 
@@ -13,13 +14,13 @@ import (
 	tcpsyscall "github.com/xaionaro-go/tcp/syscall"
 )
 
-func SetOption(
+func SetTCPSockOption(
 	ctx context.Context,
 	rawConn syscall.RawConn,
 	opt tcpopt.Option,
 ) (_err error) {
-	logger.Debugf(ctx, "SetOption: %#+v", opt)
-	defer func() { logger.Debugf(ctx, "/SetOption: %#+v: %v", opt, _err) }()
+	logger.Debugf(ctx, "SetTCPSockOption: %T:%#+v", opt, opt)
+	defer func() { logger.Debugf(ctx, "/SetTCPSockOption: %T:%#+v: %v", opt, opt, _err) }()
 
 	b, err := opt.Marshal()
 	if err != nil {
@@ -39,13 +40,31 @@ func SetOption(
 	return nil
 }
 
-func GetOption(
+func SetTCPSockOptions(
+	ctx context.Context,
+	rawConn syscall.RawConn,
+	opts []tcpopt.Option,
+) (_err error) {
+	logger.Debugf(ctx, "SetTCPSockOptions: %d options", len(opts))
+	defer func() { logger.Debugf(ctx, "/SetOptions: %d options: %v", len(opts), _err) }()
+
+	var errs []error
+	for _, opt := range opts {
+		if err := SetTCPSockOption(ctx, rawConn, opt); err != nil {
+			errs = append(errs, fmt.Errorf("unable to set option %#+v: %w", opt, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func GetTCPSockOption(
 	ctx context.Context,
 	rawConn syscall.RawConn,
 	opt tcpopt.Option,
 ) (_ret tcpopt.Option, _err error) {
-	logger.Tracef(ctx, "GetOption: %#+v", opt)
-	defer func() { logger.Tracef(ctx, "/GetOption: %v", _ret, _err) }()
+	logger.Tracef(ctx, "GetTCPSockOption: %T:%#+v", opt, opt)
+	defer func() { logger.Tracef(ctx, "/GetTCPSockOption: %v", _ret, _err) }()
 
 	level, name := opt.Level(), opt.Name()
 

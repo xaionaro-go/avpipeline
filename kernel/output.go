@@ -427,7 +427,7 @@ func (o *Output) doOpen(
 				rawConn syscall.RawConn,
 				_ string,
 			) error {
-				return netraw.SetOption(ctx, rawConn, tcpopt.SendBuffer(cfg.SendBufferSize))
+				return netraw.SetTCPSockOption(ctx, rawConn, tcpopt.SendBuffer(cfg.SendBufferSize))
 			},
 		)
 		if err != nil {
