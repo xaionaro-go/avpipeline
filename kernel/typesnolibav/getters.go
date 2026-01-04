@@ -12,10 +12,10 @@ type GetInternalQueueSizer interface {
 	GetInternalQueueSize(context.Context) map[string]uint64
 }
 
-type GetNetConner interface {
-	UnsafeWithNetworkConn(ctx context.Context, callback func(context.Context, net.Conn) error) error
+type WithNetworkConner interface {
+	WithNetworkConn(ctx context.Context, callback func(context.Context, net.Conn) error) error
 }
 
-type GetSyscallRawConner interface {
-	UnsafeWithRawNetworkConn(ctx context.Context, callback func(context.Context, syscall.RawConn, string) error) error
+type WithRawNetworkConner interface {
+	WithRawNetworkConn(ctx context.Context, callback func(context.Context, syscall.RawConn, string) error) error
 }

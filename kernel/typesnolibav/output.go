@@ -7,6 +7,6 @@ import (
 	"time"
 )
 
-type UnsafeGetOldestDTSInTheQueuer interface {
-	UnsafeGetOldestDTSInTheQueue(context.Context) (time.Duration, error)
+type GetOldestDTSInTheQueuer interface {
+	GetOldestDTSInTheQueue(context.Context) (time.Duration, error)
 }

@@ -13,12 +13,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TCPConnFromFD(
+func ConnFromFD(
 	ctx context.Context,
 	fd int,
 ) (_ret net.Conn, _file *os.File, _err error) {
-	logger.Tracef(ctx, "TCPConnFromFD: %d", fd)
-	defer func() { logger.Tracef(ctx, "/TCPConnFromFD: %d: %v", fd, _err) }()
+	logger.Tracef(ctx, "ConnFromFD: %d", fd)
+	defer func() { logger.Tracef(ctx, "/ConnFromFD: %d: %v", fd, _err) }()
 
 	fdDup, err := unix.Dup(fd)
 	if err != nil {
@@ -36,15 +36,15 @@ func TCPConnFromFD(
 	return conn, f, nil
 }
 
-func WithTCPConnFromFD(
+func WithConnFromFD(
 	ctx context.Context,
 	fd int,
 	callback func(net.Conn) error,
 ) (_err error) {
-	logger.Tracef(ctx, "WithTCPConnFromFD: %d", fd)
-	defer func() { logger.Tracef(ctx, "/WithTCPConnFromFD: %d: %v", fd, _err) }()
+	logger.Tracef(ctx, "WithConnFromFD: %d", fd)
+	defer func() { logger.Tracef(ctx, "/WithConnFromFD: %d: %v", fd, _err) }()
 
-	conn, f, err := TCPConnFromFD(ctx, fd)
+	conn, f, err := ConnFromFD(ctx, fd)
 	if err != nil {
 		return err
 	}

@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -30,6 +28,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/types"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	netraw "github.com/xaionaro-go/avpipeline/net/raw"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -142,9 +141,7 @@ type Output struct {
 	headerSent bool
 	ioContext  *astiav.IOContext
 	proxy      *proxy.TCPProxy
-	netConn    net.Conn
-	netFile    *os.File
-	rawConn    syscall.RawConn
+	netConn
 
 	formatContextLocker xsync.CtxLocker
 
@@ -171,8 +168,11 @@ type Output struct {
 }
 
 var (
-	_ Abstract    = (*Output)(nil)
-	_ packet.Sink = (*Output)(nil)
+	_ Abstract              = (*Output)(nil)
+	_ packet.Sink           = (*Output)(nil)
+	_ GetInternalQueueSizer = (*Output)(nil)
+	_ WithNetworkConner     = (*Output)(nil)
+	_ WithRawNetworkConner  = (*Output)(nil)
 )
 
 func formatFromURL(url *url.URL) string {
@@ -420,8 +420,8 @@ func (o *Output) doOpen(
 	o.initNetworkConn(ctx)
 
 	if cfg.SendBufferSize != 0 {
-		err := o.UnsafeWithRawNetworkConn(
-			context.WithValue(ctx, ctxKeyBypassIsOpenCheck, struct{}{}),
+		err := o.WithRawNetworkConn(
+			ctx,
 			func(
 				ctx context.Context,
 				rawConn syscall.RawConn,
@@ -444,36 +444,16 @@ func (o *Output) doOpen(
 
 func (o *Output) initNetworkConn(ctx context.Context) {
 	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
+		logger.Debugf(ctx, "not initializing network connection: output format has NOFILE flag")
 		return
 	}
 
-	fd, err := o.unsafeGetFileDescriptor(ctx)
-	if err != nil {
-		logger.Debugf(ctx, "unable to get FD: %v", err)
+	if o.URLParsed == nil {
+		logger.Errorf(ctx, "cannot init network connection: URLParsed == nil")
 		return
 	}
 
-	switch o.URLParsed.Scheme {
-	case "rtmp", "rtmps":
-	default:
-		logger.Errorf(ctx, "unsupported scheme for network connection: '%s'", o.URLParsed.Scheme)
-		return
-	}
-
-	conn, f, err := netraw.TCPConnFromFD(ctx, fd)
-	if err != nil {
-		logger.Debugf(ctx, "unable to get net.Conn from FD %d: %v", fd, err)
-		return
-	}
-
-	o.netConn = conn
-	o.netFile = f
-	if rawConner, ok := conn.(syscall.Conn); ok {
-		rawConn, err := rawConner.SyscallConn()
-		if err == nil {
-			o.rawConn = rawConn
-		}
-	}
+	o.netConn.Init(ctx, o.FormatContext)
 }
 
 func (o *Output) Close(
@@ -516,14 +496,9 @@ func (o *Output) Close(
 			}
 			o.ioContext = nil
 		}
-		if o.netFile != nil {
-			if err := o.netFile.Close(); err != nil {
-				result = append(result, fmt.Errorf("unable to close the network file: %w", err))
-			}
-			o.netFile = nil
+		if err := o.netConn.Close(ctx); err != nil {
+			result = append(result, fmt.Errorf("unable to close the network connection: %w", err))
 		}
-		o.netConn = nil
-		o.rawConn = nil
 		o.FormatContext = nil
 	})
 	if o.proxy != nil {
@@ -1263,4 +1238,30 @@ func (o *Output) NotifyAboutPacketSource(
 		return nil
 	}
 	return errors.Join(errs...)
+}
+
+// GetInternalQueueSize returns the size of internal queues used by the output.
+func (o *Output) GetInternalQueueSize(
+	ctx context.Context,
+) (_ret map[string]uint64) {
+	defer func() { logger.Tracef(ctx, "GetInternalQueueSize: %#+v", _ret) }()
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Debugf(ctx, "panic recovered in %s in GetInternalQueueSize: %v\n%s", o, rec, debug.Stack())
+		}
+	}()
+	if o.proxy != nil {
+		logger.Debugf(ctx, "getting the internal queue size from the proxy is not implemented, yet")
+		return nil
+	}
+
+	return o.netConn.GetInternalQueueSize(ctx)
+}
+
+var _ kerneltypes.GetOldestDTSInTheQueuer = (*Output)(nil)
+
+func (o *Output) GetOldestDTSInTheQueue(
+	ctx context.Context,
+) (_ret time.Duration, _err error) {
+	return o.netConn.GetOldestDTSInTheQueue(ctx, o.URL, o.outTSs.GetAll())
 }

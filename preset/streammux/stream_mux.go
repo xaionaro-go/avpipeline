@@ -1487,7 +1487,7 @@ func (s *StreamMux[C]) updateSendingLatencyValues(
 		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputVideo.SendingNode.GetProcessor())
 	}
 
-	videoSendingOldestDTS, err := videoQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	videoSendingOldestDTS, err := videoQueuer.GetOldestDTSInTheQueue(ctx)
 	videoSendingEarliestDTS := time.Nanosecond * time.Duration(outputVideo.Measurements.LastSendingVideoDTS.Load())
 	switch {
 	case err == nil:
@@ -1516,7 +1516,7 @@ func (s *StreamMux[C]) updateSendingLatencyValues(
 	if !ok {
 		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
 	}
-	audioSendingOldestDTS, err := audioQueuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	audioSendingOldestDTS, err := audioQueuer.GetOldestDTSInTheQueue(ctx)
 	audioSendingEarliestDTS := time.Nanosecond * time.Duration(outputVideo.Measurements.LastSendingAudioDTS.Load())
 	switch {
 	case err == nil:

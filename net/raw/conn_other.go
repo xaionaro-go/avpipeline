@@ -9,14 +9,14 @@ import (
 	"os"
 )
 
-func TCPConnFromFD(
+func ConnFromFD(
 	ctx context.Context,
 	fd int,
 ) (_ret net.Conn, _file *os.File, _err error) {
 	return nil, nil, ErrNotImplemented{}
 }
 
-func WithTCPConnFromFD(
+func WithConnFromFD(
 	ctx context.Context,
 	fd int,
 	callback func(net.Conn) error,

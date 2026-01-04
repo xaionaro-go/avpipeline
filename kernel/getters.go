@@ -9,6 +9,6 @@ import (
 type (
 	GetInternalQueueSizer = types.GetInternalQueueSizer
 	GetKerneler           = types.GetKerneler
-	GetNetConner          = types.GetNetConner
-	GetSyscallRawConner   = types.GetSyscallRawConner
+	WithNetworkConner     = types.WithNetworkConner
+	WithRawNetworkConner  = types.WithRawNetworkConner
 )

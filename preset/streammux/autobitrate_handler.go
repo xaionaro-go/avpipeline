@@ -242,7 +242,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	}()
 
 	var activeVideoOutput *Output[C]
-	var getRawConners []kernel.GetSyscallRawConner
+	var getRawConners []kernel.WithRawNetworkConner
 	var getQueueSizers []kernel.GetInternalQueueSizer
 	err := h.StreamMux.withActiveVideoOutput(ctx, func(output *Output[C]) error {
 		activeVideoOutput = output
@@ -251,7 +251,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 				return true
 			}
 			outputProc := o.SendingNode.GetProcessor()
-			getRawConner, ok := outputProc.(kernel.GetSyscallRawConner)
+			getRawConner, ok := outputProc.(kernel.WithRawNetworkConner)
 			if ok {
 				getRawConners = append(getRawConners, getRawConner)
 			} else {
@@ -289,7 +289,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 			wg.Add(1)
 			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
-				err := proc.UnsafeWithRawNetworkConn(
+				err := proc.WithRawNetworkConn(
 					ctx,
 					func(
 						ctx context.Context,

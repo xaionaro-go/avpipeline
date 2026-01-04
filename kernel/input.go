@@ -31,7 +31,6 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
-	"github.com/xaionaro-go/xsync"
 )
 
 const (
@@ -74,13 +73,16 @@ type Input struct {
 
 	OutputFilters []packetcondition.Condition
 
-	FormatContextLocker xsync.CtxLocker
-	WaitGroup           sync.WaitGroup
+	WaitGroup sync.WaitGroup
+
+	netConn
 }
 
 var (
-	_ Abstract      = (*Input)(nil)
-	_ packet.Source = (*Input)(nil)
+	_ Abstract             = (*Input)(nil)
+	_ packet.Source        = (*Input)(nil)
+	_ WithNetworkConner    = (*Input)(nil)
+	_ WithRawNetworkConner = (*Input)(nil)
 )
 
 var nextInputID atomic.Uint64
@@ -293,8 +295,10 @@ func (i *Input) doOpen(
 	}
 	logger.Debugf(ctx, "ForceRealTime=%t ForceStartPTS=%d ForceStartDTS=%d", i.ForceRealTime, i.ForceStartPTS, i.ForceStartDTS)
 
+	i.initNetworkConn(ctx)
+
 	if cfg.RecvBufferSize != 0 {
-		if err := i.UnsafeSetRecvBufferSize(ctx, cfg.RecvBufferSize); err != nil {
+		if err := i.SetRecvBufferSize(ctx, cfg.RecvBufferSize); err != nil {
 			return fmt.Errorf("unable to set the recv buffer size to %d: %w", cfg.RecvBufferSize, err)
 		}
 	}
@@ -312,6 +316,15 @@ func (i *Input) doOpen(
 	}
 
 	return nil
+}
+
+func (i *Input) initNetworkConn(ctx context.Context) {
+	if i.URLParsed == nil {
+		logger.Errorf(ctx, "cannot init network connection: URLParsed == nil")
+		return
+	}
+
+	i.netConn.Init(ctx, i.FormatContext)
 }
 
 func (i *Input) Close(
@@ -345,6 +358,9 @@ func (i *Input) Close(
 			}
 		}
 		i.FormatContext.CloseInput()
+	}
+	if err := i.netConn.Close(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to close network connection: %w", err))
 	}
 	return errors.Join(errs...)
 }

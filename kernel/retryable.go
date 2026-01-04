@@ -408,9 +408,9 @@ func (e ErrRetry) Error() string {
 	return fmt.Sprintf("%s [please retry]", e.Err)
 }
 
-var _ types.UnsafeGetOldestDTSInTheQueuer = (*Retryable[Abstract])(nil)
+var _ types.GetOldestDTSInTheQueuer = (*Retryable[Abstract])(nil)
 
-func (r *Retryable[K]) UnsafeGetOldestDTSInTheQueue(
+func (r *Retryable[K]) GetOldestDTSInTheQueue(
 	ctx context.Context,
 ) (time.Duration, error) {
 	kernel := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() *K {
@@ -423,12 +423,12 @@ func (r *Retryable[K]) UnsafeGetOldestDTSInTheQueue(
 		return 0, ErrKernelNotSet{}
 	}
 
-	queuer, ok := any(*kernel).(types.UnsafeGetOldestDTSInTheQueuer)
+	queuer, ok := any(*kernel).(types.GetOldestDTSInTheQueuer)
 	if !ok {
 		return 0, ErrNotImplemented{}
 	}
 
-	return queuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	return queuer.GetOldestDTSInTheQueue(ctx)
 }
 
 type ErrKernelNotSet struct{}

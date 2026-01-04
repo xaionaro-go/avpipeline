@@ -300,34 +300,34 @@ func (p *FromKernel[T]) GetInternalQueueSize(
 	return queuer.GetInternalQueueSize(ctx)
 }
 
-var _ kerneltypes.GetNetConner = (*FromKernel[kernel.Abstract])(nil)
+var _ kerneltypes.WithNetworkConner = (*FromKernel[kernel.Abstract])(nil)
 
-func (p *FromKernel[T]) UnsafeWithNetworkConn(
+func (p *FromKernel[T]) WithNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, net.Conn) error,
 ) error {
-	getter, ok := any(p.Kernel).(kerneltypes.GetNetConner)
+	getter, ok := any(p.Kernel).(kerneltypes.WithNetworkConner)
 	if !ok {
 		return ErrNotImplemented{
 			Err: fmt.Errorf("kernel %T does not implement GetNetConner", p.Kernel),
 		}
 	}
-	return getter.UnsafeWithNetworkConn(ctx, callback)
+	return getter.WithNetworkConn(ctx, callback)
 }
 
-var _ kerneltypes.GetSyscallRawConner = (*FromKernel[kernel.Abstract])(nil)
+var _ kerneltypes.WithRawNetworkConner = (*FromKernel[kernel.Abstract])(nil)
 
-func (p *FromKernel[T]) UnsafeWithRawNetworkConn(
+func (p *FromKernel[T]) WithRawNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, syscall.RawConn, string) error,
 ) error {
-	getter, ok := any(p.Kernel).(kerneltypes.GetSyscallRawConner)
+	getter, ok := any(p.Kernel).(kerneltypes.WithRawNetworkConner)
 	if !ok {
 		return ErrNotImplemented{
 			Err: fmt.Errorf("kernel %T does not implement GetSyscallRawConner", p.Kernel),
 		}
 	}
-	return getter.UnsafeWithRawNetworkConn(ctx, callback)
+	return getter.WithRawNetworkConn(ctx, callback)
 }
 
 type GetKerneler = kernel.GetKerneler
@@ -374,12 +374,12 @@ func (p *FromKernel[T]) HandleError(
 
 var _ processortypes.UnsafeGetOldestDTSInTheQueuer = (*FromKernel[kernel.Abstract])(nil)
 
-func (p *FromKernel[T]) UnsafeGetOldestDTSInTheQueue(
+func (p *FromKernel[T]) GetOldestDTSInTheQueue(
 	ctx context.Context,
 ) (_ret time.Duration, _err error) {
-	queuer, ok := any(p.Kernel).(kerneltypes.UnsafeGetOldestDTSInTheQueuer)
+	queuer, ok := any(p.Kernel).(kerneltypes.GetOldestDTSInTheQueuer)
 	if !ok {
 		return 0, ErrNotImplemented{Err: kerneltypes.ErrNotImplemented{}}
 	}
-	return queuer.UnsafeGetOldestDTSInTheQueue(ctx)
+	return queuer.GetOldestDTSInTheQueue(ctx)
 }

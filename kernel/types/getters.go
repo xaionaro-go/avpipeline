@@ -12,6 +12,6 @@ type GetKerneler interface {
 
 type (
 	GetInternalQueueSizer = typesnolibav.GetInternalQueueSizer
-	GetNetConner          = typesnolibav.GetNetConner
-	GetSyscallRawConner   = typesnolibav.GetSyscallRawConner
+	WithNetworkConner     = typesnolibav.WithNetworkConner
+	WithRawNetworkConner  = typesnolibav.WithRawNetworkConner
 )
