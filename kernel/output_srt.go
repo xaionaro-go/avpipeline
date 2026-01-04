@@ -1,6 +1,8 @@
 //go:build with_libsrt
 // +build with_libsrt
 
+// output_srt.go provides SRT-specific functionality for the Output kernel.
+
 package kernel
 
 import (
@@ -15,6 +17,6 @@ type GetSRTer interface {
 
 var _ GetSRTer = (*Output)(nil)
 
-func (output *Output) SRT(ctx context.Context) (*threadsafe.Socket, error) {
-	return formatContextToSRTSocket(ctx, output.FormatContext)
+func (o *Output) SRT(ctx context.Context) (*threadsafe.Socket, error) {
+	return formatContextToSRTSocket(ctx, o.FormatContext)
 }

@@ -1,3 +1,5 @@
+// error.go defines custom error types used within the kernel package.
+
 package kernel
 
 import "fmt"

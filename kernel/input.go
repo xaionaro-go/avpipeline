@@ -1,3 +1,5 @@
+// input.go implements the Input kernel for reading media streams from URLs or files.
+
 package kernel
 
 import (

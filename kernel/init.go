@@ -1,3 +1,5 @@
+// init.go performs package-level initialization, such as registering FFmpeg devices.
+
 package kernel
 
 import (

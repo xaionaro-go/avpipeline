@@ -1,3 +1,5 @@
+// codec.go defines types and options for codec-related operations in the kernel.
+
 package kernel
 
 type CodecResetOption interface {

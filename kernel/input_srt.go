@@ -1,6 +1,8 @@
 //go:build with_libsrt
 // +build with_libsrt
 
+// input_srt.go provides SRT-specific functionality for the Input kernel.
+
 package kernel
 
 import (

@@ -1,6 +1,8 @@
 //go:build with_cv
 // +build with_cv
 
+// haar_cascade_cv.go implements a kernel for object detection using Haar cascades (requires OpenCV).
+
 package kernel
 
 import (

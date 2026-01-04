@@ -1,3 +1,5 @@
+// decoder.go implements the Decoder kernel for decoding media packets into frames.
+
 package kernel
 
 import (

@@ -1,3 +1,5 @@
+// retryable_option.go defines options for configuring Retryable kernels.
+
 package kernel
 
 import (

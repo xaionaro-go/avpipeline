@@ -1,3 +1,5 @@
+// stream_configurer.go defines the StreamConfigurer interface for configuring output streams.
+
 package kernel
 
 import (

@@ -1,3 +1,5 @@
+// output_unsafe.go provides methods for accessing underlying network connections of an Output kernel.
+
 package kernel
 
 import (
@@ -31,23 +33,30 @@ func (o *Output) UnsafeWithNetworkConn(
 	return xsync.DoA2R1(ctx, &o.formatContextLocker, o.unsafeWithNetworkConn, ctx, callback)
 }
 
+func (o *Output) verifyOpen(ctx context.Context) error {
+	select {
+	case <-o.openFinished:
+		if o.openError != nil {
+			return fmt.Errorf("output opening errored: %w", o.openError)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-o.CloseChan():
+		return io.EOF
+	default:
+		return fmt.Errorf("not opened, yet")
+	}
+}
+
 func (o *Output) unsafeWithNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, net.Conn) error,
 ) (_err error) {
 	if _, ok := ctx.Value(ctxKeyBypassIsOpenCheck).(struct{}); !ok {
 		logger.Tracef(ctx, "checking whether the output is opened")
-		select {
-		case <-o.openFinished:
-			if o.openError != nil {
-				return fmt.Errorf("output is not opened successfully: %w", o.openError)
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-o.CloseChan():
-			return io.EOF
-		default:
-			return fmt.Errorf("output is not opened, yet")
+		if err := o.verifyOpen(ctx); err != nil {
+			return fmt.Errorf("output is not opened: %w", err)
 		}
 	}
 
@@ -55,27 +64,38 @@ func (o *Output) unsafeWithNetworkConn(
 	if err != nil {
 		return fmt.Errorf("unable to get file descriptor: %w", err)
 	}
+
+	if o.URLParsed.Scheme == "srt" {
+		return ErrNotImplemented{
+			Err: fmt.Errorf("SRT is not supported for net.Conn wrapping yet"),
+		}
+	}
+
 	logger.Tracef(ctx, "obtained file descriptor %d", fd)
 
-	return raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
+	err = raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
 		return callback(ctx, conn)
 	})
+	if err != nil {
+		return fmt.Errorf("WithTCPConnFromFD(ctx, %d, ...) failed: %w", fd, err)
+	}
+	return nil
 }
 
-func (r *Output) UnsafeWithRawNetworkConn(
+func (o *Output) UnsafeWithRawNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, syscall.RawConn, string) error,
 ) (_err error) {
 	logger.Debugf(ctx, "UnsafeWithRawNetworkConn")
 	defer func() { logger.Debugf(ctx, "/UnsafeWithRawNetworkConn: %v", _err) }()
-	return xsync.DoA2R1(ctx, &r.formatContextLocker, r.unsafeWithRawNetworkConn, ctx, callback)
+	return xsync.DoA2R1(ctx, &o.formatContextLocker, o.unsafeWithRawNetworkConn, ctx, callback)
 }
 
-func (r *Output) unsafeWithRawNetworkConn(
+func (o *Output) unsafeWithRawNetworkConn(
 	ctx context.Context,
 	callback func(context.Context, syscall.RawConn, string) error,
 ) (_err error) {
-	return r.unsafeWithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+	return o.unsafeWithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
 		rawConner, ok := conn.(syscall.Conn)
 		if !ok {
 			return fmt.Errorf("unable to get syscall.Conn from net.Conn (%T)", conn)
@@ -101,56 +121,65 @@ var (
 // GetInternalQueueSize returns the size of internal queues used by the output.
 //
 // Warning! The implementation intrudes into private structures, which is unsafe.
-func (r *Output) GetInternalQueueSize(
+func (o *Output) GetInternalQueueSize(
 	ctx context.Context,
 ) (_ret map[string]uint64) {
 	defer func() { logger.Tracef(ctx, "GetInternalQueueSize: %#+v", _ret) }()
 	defer func() {
 		if rec := recover(); rec != nil {
-			logger.Debugf(ctx, "panic recovered in %s in GetInternalQueueSize: %v\n%s", r, rec, debug.Stack())
+			logger.Debugf(ctx, "panic recovered in %s in GetInternalQueueSize: %v\n%s", o, rec, debug.Stack())
 		}
 	}()
-	return xsync.DoA1R1(ctx, &r.formatContextLocker, r.unsafeGetInternalQueueSize, ctx)
+	return xsync.DoA1R1(ctx, &o.formatContextLocker, o.unsafeGetInternalQueueSize, ctx)
 }
 
-func (r *Output) unsafeGetInternalQueueSize(
+func (o *Output) unsafeGetInternalQueueSize(
 	ctx context.Context,
 ) map[string]uint64 {
-	if r.proxy != nil {
+	if _, ok := ctx.Value(ctxKeyBypassIsOpenCheck).(struct{}); !ok {
+		logger.Tracef(ctx, "checking whether the output is opened")
+		if err := o.verifyOpen(ctx); err != nil {
+			logger.Debugf(ctx, "output is not opened: %v", err)
+			return nil
+		}
+	}
+
+	if o.proxy != nil {
 		logger.Debugf(ctx, "getting the internal queue size from the proxy is not implemented, yet")
 		return nil
 	}
-	switch r.URLParsed.Scheme {
+
+	switch o.URLParsed.Scheme {
 	case "rtmp", "rtmps":
-		return r.getInternalQueueSizeRTMP(ctx)
+		return o.getInternalQueueSizeRTMP(ctx)
 	default:
-		logger.Debugf(ctx, "getting the internal queue size from '%s' is not implemented, yet", r.URLParsed.Scheme)
+		logger.Debugf(ctx, "getting the internal queue size from '%s' is not implemented, yet", o.URLParsed.Scheme)
 		return nil // not implemented, yet
 	}
 }
 
-func (r *Output) UnsafeGetRawAVIOContext(
+func (o *Output) UnsafeGetRawAVIOContext(
 	ctx context.Context,
 ) *avcommon.AVIOContext {
-	return xsync.DoA1R1(context.Background(), &r.formatContextLocker, r.unsafeGetRawAVIOContext, ctx)
+	return xsync.DoA1R1(context.Background(), &o.formatContextLocker, o.unsafeGetRawAVIOContext, ctx)
 }
 
-func (r *Output) unsafeGetRawAVIOContext(
+func (o *Output) unsafeGetRawAVIOContext(
 	ctx context.Context,
 ) *avcommon.AVIOContext {
-	return r.unsafeGetRawAVFormatContext(ctx).Pb()
+	return o.unsafeGetRawAVFormatContext(ctx).Pb()
 }
 
-func (r *Output) UnsafeGetRawAVFormatContext(
+func (o *Output) UnsafeGetRawAVFormatContext(
 	ctx context.Context,
 ) *avcommon.AVFormatContext {
-	return xsync.DoA1R1(context.Background(), &r.formatContextLocker, r.unsafeGetRawAVFormatContext, ctx)
+	return xsync.DoA1R1(context.Background(), &o.formatContextLocker, o.unsafeGetRawAVFormatContext, ctx)
 }
 
-func (r *Output) unsafeGetRawAVFormatContext(
+func (o *Output) unsafeGetRawAVFormatContext(
 	ctx context.Context,
 ) *avcommon.AVFormatContext {
-	return avcommon.WrapAVFormatContext(xastiav.CFromAVFormatContext(r.FormatContext))
+	return avcommon.WrapAVFormatContext(xastiav.CFromAVFormatContext(o.FormatContext))
 }
 
 func (o *Output) UnsafeGetFileDescriptor(
@@ -176,65 +205,65 @@ func (o *Output) unsafeGetFileDescriptor(
 	return 0, fmt.Errorf("do not know how to obtain the file descriptor of the output for network scheme '%s'", o.URLParsed.Scheme)
 }
 
-func (r *Output) UnsafeGetRawURLContext(
+func (o *Output) UnsafeGetRawURLContext(
 	ctx context.Context,
 ) *avcommon.URLContext {
-	return xsync.DoA1R1(ctx, &r.formatContextLocker, r.unsafeGetRawURLContext, ctx)
+	return xsync.DoA1R1(ctx, &o.formatContextLocker, o.unsafeGetRawURLContext, ctx)
 }
 
-func (r *Output) unsafeGetRawURLContext(
+func (o *Output) unsafeGetRawURLContext(
 	ctx context.Context,
 ) *avcommon.URLContext {
-	avioCtx := r.unsafeGetRawAVIOContext(ctx)
+	avioCtx := o.unsafeGetRawAVIOContext(ctx)
 	return avcommon.WrapURLContext(avioCtx.Opaque())
 }
 
-func (r *Output) UnsafeGetRawTCPContext(
+func (o *Output) UnsafeGetRawTCPContext(
 	ctx context.Context,
 ) *avcommon.TCPContext {
-	return xsync.DoA1R1(ctx, &r.formatContextLocker, r.unsafeGetRawTCPContext, ctx)
+	return xsync.DoA1R1(ctx, &o.formatContextLocker, o.unsafeGetRawTCPContext, ctx)
 }
 
-func (r *Output) unsafeGetRawTCPContext(
+func (o *Output) unsafeGetRawTCPContext(
 	ctx context.Context,
 ) *avcommon.TCPContext {
-	switch r.URLParsed.Scheme {
+	switch o.URLParsed.Scheme {
 	case "rtmp", "rtmps":
-		if rtmp := r.unsafeGetRawRTMPContext(ctx); rtmp != nil {
+		if rtmp := o.unsafeGetRawRTMPContext(ctx); rtmp != nil {
 			return rtmp.TCPContext()
 		}
 		return nil
 	default:
-		logger.Debugf(ctx, "getting the the TCP docket from '%s' (yet?)", r.URLParsed.Scheme)
+		logger.Debugf(ctx, "getting the the TCP docket from '%s' (yet?)", o.URLParsed.Scheme)
 		return nil
 	}
 }
 
-func (r *Output) UnsafeGetRawRTMPContext(
+func (o *Output) UnsafeGetRawRTMPContext(
 	ctx context.Context,
 ) *avcommon.RTMPContext {
-	return xsync.DoA1R1(ctx, &r.formatContextLocker, r.unsafeGetRawRTMPContext, ctx)
+	return xsync.DoA1R1(ctx, &o.formatContextLocker, o.unsafeGetRawRTMPContext, ctx)
 }
 
-func (r *Output) unsafeGetRawRTMPContext(
+func (o *Output) unsafeGetRawRTMPContext(
 	ctx context.Context,
 ) *avcommon.RTMPContext {
-	urlCtx := r.unsafeGetRawURLContext(ctx)
+	urlCtx := o.unsafeGetRawURLContext(ctx)
 	return avcommon.WrapRTMPContext(urlCtx.PrivData())
 }
 
-func (r *Output) getInternalQueueSizeRTMP(
+func (o *Output) getInternalQueueSizeRTMP(
 	ctx context.Context,
 ) (_ret map[string]uint64) {
 	defer func() { logger.Tracef(ctx, "getInternalQueueSizeRTMP: %#+v", _ret) }()
 
-	avioCtx := r.unsafeGetRawAVIOContext(ctx)
+	avioCtx := o.unsafeGetRawAVIOContext(ctx)
 	avioBytes := avioCtx.Buffer()
 	result := map[string]uint64{
 		"AVIOBuffered": uint64(len(avioBytes)),
 	}
 
-	tcpQueue := r.unsafeGetTCPSocketQueue(ctx)
+	tcpQueue := o.unsafeGetTCPSocketQueue(ctx)
 	for k, v := range tcpQueue {
 		result["TCP:"+k] = v
 	}
@@ -244,15 +273,15 @@ func (r *Output) getInternalQueueSizeRTMP(
 
 var _ kerneltypes.UnsafeGetOldestDTSInTheQueuer = (*Output)(nil)
 
-func (r *Output) UnsafeGetOldestDTSInTheQueue(
+func (o *Output) UnsafeGetOldestDTSInTheQueue(
 	ctx context.Context,
 ) (_ret time.Duration, _err error) {
-	logger.Tracef(ctx, "UnsafeGetOldestDTSInTheQueue[%s]", r.URL)
-	defer func() { logger.Tracef(ctx, "/UnsafeGetOldestDTSInTheQueue[%s]: %v %v", r.URL, _ret, _err) }()
+	logger.Tracef(ctx, "UnsafeGetOldestDTSInTheQueue[%s]", o.URL)
+	defer func() { logger.Tracef(ctx, "/UnsafeGetOldestDTSInTheQueue[%s]: %v %v", o.URL, _ret, _err) }()
 
-	outTSs := r.outTSs.GetAll()
+	outTSs := o.outTSs.GetAll()
 
-	queueSize := r.GetInternalQueueSize(ctx)
+	queueSize := o.GetInternalQueueSize(ctx)
 	if queueSize == nil {
 		return 0, fmt.Errorf("unable to get the internal queue size")
 	}

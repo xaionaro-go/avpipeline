@@ -1,3 +1,5 @@
+// get_caller.go provides a helper to retrieve the caller's file and line number.
+
 package kernel
 
 import (

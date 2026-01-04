@@ -1,3 +1,5 @@
+// getters.go defines type aliases for various getter interfaces used in the kernel.
+
 package kernel
 
 import (

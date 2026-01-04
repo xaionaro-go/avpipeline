@@ -1,3 +1,5 @@
+// frame_condition.go implements a kernel that filters frames based on a condition.
+
 package kernel
 
 import (

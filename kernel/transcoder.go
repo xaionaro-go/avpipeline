@@ -1,3 +1,5 @@
+// transcoder.go implements the Transcoder kernel for decoding and then re-encoding media streams.
+
 package kernel
 
 import (
@@ -146,20 +148,13 @@ func (r *Transcoder[DF, EF]) sendPacketNoLock(
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		defer logger.Tracef(ctx, "result channel closed")
-		for {
-			var streamIdx int
-			select {
-			case out, ok := <-resultCh:
-				if !ok {
-					return
-				}
-				r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, out)
-				if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
-					logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
-					r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
-				}
-				streamIdx = out.GetStreamIndex()
+		for out := range resultCh {
+			r.pendingPacketsAndFrames = append(r.pendingPacketsAndFrames, out)
+			if len(r.pendingPacketsAndFrames) > pendingPacketsAndFramesLimit {
+				logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
+				r.pendingPacketsAndFrames = r.pendingPacketsAndFrames[1:]
 			}
+			streamIdx := out.GetStreamIndex()
 
 			if _, ok := r.activeStreamsMap[streamIdx]; ok {
 				continue

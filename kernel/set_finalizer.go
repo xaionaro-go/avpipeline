@@ -1,3 +1,5 @@
+// set_finalizer.go provides helpers for setting runtime finalizers on objects.
+
 package kernel
 
 import (

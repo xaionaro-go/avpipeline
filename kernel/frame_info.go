@@ -1,3 +1,5 @@
+// frame_info.go defines the FrameInfo struct for storing metadata about media frames.
+
 package kernel
 
 import (

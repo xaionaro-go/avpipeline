@@ -1,3 +1,5 @@
+// packet_filter.go implements a kernel that filters packets based on a condition.
+
 package kernel
 
 import (

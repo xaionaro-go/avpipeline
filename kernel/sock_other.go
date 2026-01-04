@@ -1,6 +1,8 @@
 //go:build !unix
 // +build !unix
 
+// sock_other.go provides fallback socket option implementations for non-Unix systems.
+
 package kernel
 
 func sockSetLinger(

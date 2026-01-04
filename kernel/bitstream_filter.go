@@ -1,3 +1,5 @@
+// bitstream_filter.go implements a kernel that applies FFmpeg bitstream filters to packets.
+
 package kernel
 
 import (

@@ -1,3 +1,5 @@
+// source.go provides helper functions for interacting with packet sources.
+
 package kernel
 
 import (

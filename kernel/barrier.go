@@ -1,3 +1,5 @@
+// barrier.go implements a kernel that can block or drop packets based on a condition.
+
 package kernel
 
 import (

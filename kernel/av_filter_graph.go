@@ -1,3 +1,5 @@
+// av_filter_graph.go implements a kernel that wraps FFmpeg filter graphs.
+
 package kernel
 
 import (
@@ -21,6 +23,7 @@ type AVFilterGraph[T avfilter.Kernel] struct {
 
 var _ Abstract = (*AVFilterGraph[avfilter.Kernel])(nil)
 
+// NewAVFilterGraph creates a new AVFilterGraph.
 // experimental: API will change in the future
 func NewAVFilterGraph[T avfilter.Kernel](
 	ctx context.Context,

@@ -1,3 +1,5 @@
+// map_stream_indices.go implements a kernel that maps input stream indices to output stream indices.
+
 package kernel
 
 import (

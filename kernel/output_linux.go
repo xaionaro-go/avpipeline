@@ -1,6 +1,8 @@
 //go:build linux
 // +build linux
 
+// output_linux.go provides Linux-specific implementations for the Output kernel.
+
 package kernel
 
 import (
@@ -10,10 +12,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (r *Output) unsafeGetTCPSocketQueue(
+func (o *Output) unsafeGetTCPSocketQueue(
 	ctx context.Context,
 ) map[string]uint64 {
-	tcpCtx := r.unsafeGetRawTCPContext(ctx)
+	tcpCtx := o.unsafeGetRawTCPContext(ctx)
 	if tcpCtx == nil {
 		logger.Errorf(ctx, "unable to get TCP context")
 		return nil

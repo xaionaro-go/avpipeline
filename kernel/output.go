@@ -1,3 +1,5 @@
+// output.go implements the Output kernel for writing media streams to destinations.
+
 package kernel
 
 import (

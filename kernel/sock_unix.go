@@ -1,6 +1,8 @@
 //go:build unix
 // +build unix
 
+// sock_unix.go provides Unix-specific socket option implementations.
+
 package kernel
 
 import (

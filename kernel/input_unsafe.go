@@ -1,3 +1,5 @@
+// input_unsafe.go provides methods for accessing underlying network connections of an Input kernel.
+
 package kernel
 
 import (
@@ -49,9 +51,19 @@ func (i *Input) unsafeWithNetworkConn(
 		return fmt.Errorf("unable to get file descriptor: %w", err)
 	}
 
-	return raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
+	if i.URLParsed.Scheme == "srt" {
+		return ErrNotImplemented{
+			Err: fmt.Errorf("SRT is not supported for net.Conn wrapping yet"),
+		}
+	}
+
+	err = raw.WithTCPConnFromFD(ctx, fd, func(conn net.Conn) error {
 		return callback(ctx, conn)
 	})
+	if err != nil {
+		return fmt.Errorf("WithTCPConnFromFD(ctx, %d, ...) failed: %w", fd, err)
+	}
+	return nil
 }
 
 func (i *Input) UnsafeWithRawNetworkConn(

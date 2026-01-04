@@ -1,3 +1,5 @@
+// passthrough.go implements a kernel that passes all inputs to the output without modification.
+
 package kernel
 
 import (

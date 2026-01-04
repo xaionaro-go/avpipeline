@@ -1,3 +1,5 @@
+// srt.go provides general SRT-related helper functions.
+
 package kernel
 
 import (

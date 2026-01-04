@@ -1,6 +1,8 @@
 //go:build !linux
 // +build !linux
 
+// output_nonlinux.go provides fallback implementations for the Output kernel on non-Linux systems.
+
 package kernel
 
 import (

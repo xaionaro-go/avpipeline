@@ -1,3 +1,5 @@
+// wait.go implements a kernel that buffers inputs until a condition is met.
+
 package kernel
 
 import (

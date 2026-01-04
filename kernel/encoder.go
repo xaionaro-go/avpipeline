@@ -1,3 +1,5 @@
+// encoder.go implements the Encoder kernel for encoding media frames into packets.
+
 package kernel
 
 import (
