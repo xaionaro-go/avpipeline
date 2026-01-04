@@ -2,14 +2,7 @@
 
 package types
 
-type BitRateInfo struct {
-	Video Ubps
-	Audio Ubps
-	Other Ubps
-}
+import globaltypes "github.com/xaionaro-go/avpipeline/types"
 
-type BitRates struct {
-	Input   BitRateInfo
-	Encoded BitRateInfo
-	Output  BitRateInfo
-}
+type BitRateInfo = globaltypes.BitRateInfo
+type BitRates = globaltypes.BitRates

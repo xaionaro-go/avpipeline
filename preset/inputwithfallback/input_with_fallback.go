@@ -25,6 +25,7 @@ import (
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
 	"github.com/xaionaro-go/avpipeline/processor"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/xsync"
 )
@@ -50,6 +51,10 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	serveWaitGroup    sync.WaitGroup
 	syncingSince      xatomic.Value[time.Time]
 	switchingProcN    xatomic.Int64
+
+	// measurements
+	Measurements                    map[astiav.MediaType]*TrackMeasurements
+	CurrentBitRateMeasurementsCount atomic.Uint64
 }
 
 // |  retryable:input0 -> inputSwitch (-> autoheaders -> decoder) -> inputSyncer ->-+
@@ -81,6 +86,11 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 		InputSyncer:       barrierstategetter.NewSwitch(),
 		MonotonicPTS:      monotonicpts.New(true),
 		newInputChainChan: make(chan *InputChain[K, DF, C], 100),
+		Measurements: map[astiav.MediaType]*TrackMeasurements{
+			astiav.MediaTypeVideo:   newTrackMeasurements(),
+			astiav.MediaTypeAudio:   newTrackMeasurements(),
+			astiav.MediaTypeUnknown: newTrackMeasurements(),
+		},
 	}
 	i.PreOutput.AddPushTo(ctx, i.Output, packetorframefiltercondition.PacketOrFrame{i.MonotonicPTS})
 	if err := i.initSwitches(ctx); err != nil {
@@ -439,4 +449,112 @@ func (i *InputWithFallback[K, DF, C]) getInputsLocked() InputNodes[K, C] {
 		inputs = append(inputs, inputChain.Input)
 	}
 	return inputs
+}
+
+type TrackMeasurements struct {
+	InputBitRate  atomic.Uint64
+	OutputBitRate atomic.Uint64
+}
+
+func newTrackMeasurements() *TrackMeasurements {
+	return &TrackMeasurements{}
+}
+
+func (i *InputWithFallback[K, DF, C]) getTrackMeasurements(mediaType astiav.MediaType) *TrackMeasurements {
+	m := i.Measurements[mediaType]
+	if m != nil {
+		return m
+	}
+	return i.Measurements[astiav.MediaTypeUnknown]
+}
+
+func updateWithInertialValue(
+	oldValue uint64,
+	newValue uint64,
+	inertia float64,
+	measurementsCount uint64,
+) uint64 {
+	if measurementsCount == 0 {
+		return newValue
+	}
+	return uint64(float64(oldValue)*inertia + float64(newValue)*(1.0-inertia))
+}
+
+func (i *InputWithFallback[K, DF, C]) inputBitRateMeasurerLoop(
+	ctx context.Context,
+) (_err error) {
+	logger.Tracef(ctx, "inputBitRateMeasurerLoop")
+	defer func() { logger.Tracef(ctx, "/inputBitRateMeasurerLoop: %v", _err) }()
+
+	t := time.NewTicker(time.Second / 4)
+	defer t.Stop()
+	bytesInputReadPrev := map[astiav.MediaType]uint64{}
+	bytesOutputReadPrev := map[astiav.MediaType]uint64{}
+	tsPrev := time.Now()
+	for {
+		var tsNext time.Time
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case tsNext = <-t.C:
+			duration := tsNext.Sub(tsPrev)
+
+			bytesInputReadNext := map[astiav.MediaType]uint64{}
+			i.InputChainsLocker.Do(ctx, func() {
+				for _, inputChain := range i.InputChains {
+					inputCounters := inputChain.Input.GetCountersPtr()
+					bytesInputReadNext[astiav.MediaTypeVideo] += inputCounters.Received.Packets.Video.Bytes.Load()
+					bytesInputReadNext[astiav.MediaTypeAudio] += inputCounters.Received.Packets.Audio.Bytes.Load()
+					bytesInputReadNext[astiav.MediaTypeUnknown] += inputCounters.Received.Packets.Other.Bytes.Load()
+				}
+			})
+
+			outputCounters := i.Output.GetCountersPtr()
+			bytesOutputReadNext := map[astiav.MediaType]uint64{
+				astiav.MediaTypeVideo:   outputCounters.Received.Packets.Video.Bytes.Load(),
+				astiav.MediaTypeAudio:   outputCounters.Received.Packets.Audio.Bytes.Load(),
+				astiav.MediaTypeUnknown: outputCounters.Received.Packets.Other.Bytes.Load(),
+			}
+
+			for _, mediaType := range []astiav.MediaType{astiav.MediaTypeVideo, astiav.MediaTypeAudio, astiav.MediaTypeUnknown} {
+				m := i.getTrackMeasurements(mediaType)
+				bytesInputRead := bytesInputReadNext[mediaType] - bytesInputReadPrev[mediaType]
+				bitRateInput := int(float64(bytesInputRead*8) / duration.Seconds())
+				oldInputValue := m.InputBitRate.Load()
+				newInputValue := updateWithInertialValue(oldInputValue, uint64(bitRateInput), 0.9, i.CurrentBitRateMeasurementsCount.Load())
+				m.InputBitRate.Store(newInputValue)
+
+				bytesOutputRead := bytesOutputReadNext[mediaType] - bytesOutputReadPrev[mediaType]
+				bitRateOutput := int(float64(bytesOutputRead*8) / duration.Seconds())
+				oldOutputValue := m.OutputBitRate.Load()
+				newOutputValue := updateWithInertialValue(oldOutputValue, uint64(bitRateOutput), 0.9, i.CurrentBitRateMeasurementsCount.Load())
+				m.OutputBitRate.Store(newOutputValue)
+			}
+
+			bytesInputReadPrev = bytesInputReadNext
+			bytesOutputReadPrev = bytesOutputReadNext
+			tsPrev = tsNext
+			i.CurrentBitRateMeasurementsCount.Add(1)
+		}
+	}
+}
+
+func (i *InputWithFallback[K, DF, C]) GetBitRates(
+	ctx context.Context,
+) *globaltypes.BitRates {
+	video := i.getTrackMeasurements(astiav.MediaTypeVideo)
+	audio := i.getTrackMeasurements(astiav.MediaTypeAudio)
+	other := i.getTrackMeasurements(astiav.MediaTypeUnknown)
+	return &globaltypes.BitRates{
+		Input: globaltypes.BitRateInfo{
+			Video: globaltypes.Ubps(video.InputBitRate.Load()),
+			Audio: globaltypes.Ubps(audio.InputBitRate.Load()),
+			Other: globaltypes.Ubps(other.InputBitRate.Load()),
+		},
+		Output: globaltypes.BitRateInfo{
+			Video: globaltypes.Ubps(video.OutputBitRate.Load()),
+			Audio: globaltypes.Ubps(audio.OutputBitRate.Load()),
+			Other: globaltypes.Ubps(other.OutputBitRate.Load()),
+		},
+	}
 }

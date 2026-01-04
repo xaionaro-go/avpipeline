@@ -81,6 +81,14 @@ func (i *InputWithFallback[K, DF, C]) Serve(
 	i.serveWaitGroup.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer i.serveWaitGroup.Done()
+		if err := i.inputBitRateMeasurerLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Errorf(ctx, "inputBitRateMeasurerLoop failed: %v", err)
+		}
+	})
+
+	i.serveWaitGroup.Add(1)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer i.serveWaitGroup.Done()
 		defer logger.Debugf(ctx, "inputwithfallback.Serve: inputChain receiver loop ended")
 		for {
 			select {
