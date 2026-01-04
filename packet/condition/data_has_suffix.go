@@ -1,3 +1,5 @@
+// data_has_suffix.go implements a condition that checks if packet data has a specific suffix.
+
 package condition
 
 import (

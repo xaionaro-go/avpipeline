@@ -1,3 +1,5 @@
+// data_has_prefix.go implements a condition that checks if packet data has a specific prefix.
+
 package condition
 
 import (

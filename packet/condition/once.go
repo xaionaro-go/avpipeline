@@ -1,3 +1,5 @@
+// once.go implements a condition that matches until a sub-condition is met once.
+
 package condition
 
 import (

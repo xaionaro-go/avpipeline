@@ -1,3 +1,6 @@
+// condition.go defines the Condition interface for filtering media packets.
+
+// Package condition provides various conditions for filtering media packets.
 package condition
 
 import (

@@ -1,3 +1,6 @@
+// commons.go provides common structures and methods for media packets.
+
+// Package packet provides types and utilities for handling media packets.
 package packet
 
 import (

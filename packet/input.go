@@ -1,3 +1,5 @@
+// input.go defines the Input type for media packets received from a source.
+
 package packet
 
 import (
@@ -34,6 +36,7 @@ func (pkt *Input) SetTimeBase(v astiav.Rational)  { (*Commons)(pkt).SetTimeBase(
 func (pkt *Input) GetPipelineSideData() types.PipelineSideData {
 	return (*Commons)(pkt).GetPipelineSideData()
 }
+
 func (pkt *Input) AddPipelineSideData(obj any) types.PipelineSideData {
 	return (*Commons)(pkt).AddPipelineSideData(obj)
 }
@@ -41,6 +44,7 @@ func (pkt *Input) IsKey() bool { return (*Commons)(pkt).IsKey() }
 func (pkt *Input) IsOOBHeaders() bool {
 	return (*Commons)(pkt).IsOOBHeaders()
 }
+
 func (pkt *Input) GetCodecParameters() *astiav.CodecParameters {
 	return (*Commons)(pkt).GetCodecParameters()
 }
@@ -49,4 +53,4 @@ func (pkt *Input) GetSource() Source         { return (*Commons)(pkt).GetSource(
 func (pkt *Input) GetStreamFromSource(ctx context.Context) *astiav.Stream {
 	return (*Commons)(pkt).GetStreamFromSource(ctx)
 }
-func (pkt *Input) RescaleTs(src, dst astiav.Rational) { (*Commons)(pkt).RescaleTs(src, dst) }
+func (pkt *Input) RescaleTS(src, dst astiav.Rational) { (*Commons)(pkt).RescaleTs(src, dst) }

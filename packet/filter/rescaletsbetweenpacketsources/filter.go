@@ -1,3 +1,6 @@
+// filter.go implements a packet filter that rescales timestamps between different packet sources.
+
+// Package rescaletsbetweenpacketsources provides a packet filter that rescales timestamps between different packet sources.
 package rescaletsbetweenpacketsources
 
 import (

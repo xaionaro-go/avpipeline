@@ -1,3 +1,6 @@
+// filter.go implements a packet filter that shifts packet timestamps by an offset.
+
+// Package shifttimestamps provides a packet filter that shifts packet timestamps by an offset.
 package shifttimestamps
 
 import (

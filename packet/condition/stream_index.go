@@ -1,3 +1,5 @@
+// stream_index.go implements a condition that checks the stream index of a packet.
+
 package condition
 
 import (

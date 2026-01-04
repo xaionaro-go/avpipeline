@@ -1,3 +1,5 @@
+// output.go defines the Output type for media packets to be sent to a sink.
+
 package packet
 
 import (
@@ -38,6 +40,7 @@ func (o *Output) SetDTS(v int64)       { (*Commons)(o).SetDTS(v) }
 func (o *Output) GetPipelineSideData() types.PipelineSideData {
 	return (*Commons)(o).GetPipelineSideData()
 }
+
 func (o *Output) AddPipelineSideData(obj any) types.PipelineSideData {
 	return (*Commons)(o).AddPipelineSideData(obj)
 }

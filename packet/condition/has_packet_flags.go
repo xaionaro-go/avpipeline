@@ -1,3 +1,5 @@
+// has_packet_flags.go implements a condition that checks for specific packet flags.
+
 package condition
 
 import (

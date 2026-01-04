@@ -1,3 +1,5 @@
+// atomic_bool.go implements a condition based on an atomic boolean value.
+
 package condition
 
 import (

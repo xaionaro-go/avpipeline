@@ -1,3 +1,5 @@
+// switch.go implements a condition that can switch between values based on packet matching.
+
 package condition
 
 import (

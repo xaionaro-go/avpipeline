@@ -1,3 +1,5 @@
+// seen_all_streams.go implements a condition that matches when all expected streams have been seen.
+
 package condition
 
 import (

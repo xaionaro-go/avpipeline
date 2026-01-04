@@ -1,3 +1,6 @@
+// filter.go implements a packet filter that adds specific flags to packets.
+
+// Package addpacketflags provides a packet filter that adds specific flags to packets.
 package addpacketflags
 
 import (
