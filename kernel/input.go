@@ -156,6 +156,13 @@ func NewInputFromURL(
 		}
 	}
 
+	if formatName == "" {
+		if urlParsed != nil {
+			logger.Warnf(ctx, "attempting to detect input format from URL: %s", urlString)
+			formatName = urltools.FormatNameFromURL(urlParsed)
+		}
+	}
+
 	defaultFPSRational := globaltypes.RationalFromApproxFloat64(defaultFPS)
 	i.DefaultFPS = astiav.NewRational(defaultFPSRational.Num, defaultFPSRational.Den)
 
