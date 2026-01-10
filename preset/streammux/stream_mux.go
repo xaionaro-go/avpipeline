@@ -107,16 +107,22 @@ func NewWithCustomData[C any](
 		lastKeyFrames: map[int]*ringbuffer.RingBuffer[packetorframe.InputUnion]{},
 		startedCh:     ptr(make(chan struct{})),
 		Measurements: map[astiav.MediaType]*TrackMeasurements{
-			astiav.MediaTypeVideo:   newTrackMeasurements(),
-			astiav.MediaTypeAudio:   newTrackMeasurements(),
-			astiav.MediaTypeUnknown: newTrackMeasurements(),
+			astiav.MediaTypeVideo:    newTrackMeasurements(),
+			astiav.MediaTypeAudio:    newTrackMeasurements(),
+			astiav.MediaTypeSubtitle: newTrackMeasurements(),
+			astiav.MediaTypeData:     newTrackMeasurements(),
+			astiav.MediaTypeUnknown:  newTrackMeasurements(),
 		},
 	}
 	s.InputAll = *newInput(ctx, s, InputTypeAll)
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
 		s.InputAudioOnly = newInput(ctx, s, InputTypeAudioOnly)
 		s.InputVideoOnly = newInput(ctx, s, InputTypeVideoOnly)
-		s.InputAll.Node.AddPushTo(ctx, s.InputAudioOnly.Node, packetorframefiltercondition.MediaType(astiav.MediaTypeAudio))
+		s.InputAll.Node.AddPushTo(ctx, s.InputAudioOnly.Node, packetorframefiltercondition.Or{
+			packetorframefiltercondition.MediaType(astiav.MediaTypeAudio),
+			packetorframefiltercondition.MediaType(astiav.MediaTypeSubtitle),
+			packetorframefiltercondition.MediaType(astiav.MediaTypeData),
+		})
 		s.InputAll.Node.AddPushTo(ctx, s.InputVideoOnly.Node, packetorframefiltercondition.MediaType(astiav.MediaTypeVideo))
 		s.allowCorruptPackets.Store(true) // to initialize stream on the remote side quickly, we allow blank frames (this is applicable not only to MuxModeDifferentOutputsSameTracksSplitAV, but we tested it only here for now)
 	}

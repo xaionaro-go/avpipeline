@@ -750,6 +750,7 @@ func (o *Output[C]) reconfigureEncoder(
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
 			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
+			_isCopyEncoder = encoderFactory.VideoCodec == codec.NameCopy
 			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
 			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
 			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)

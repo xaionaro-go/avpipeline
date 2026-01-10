@@ -22,7 +22,6 @@ require (
 	github.com/xaionaro-go/polyjson v0.0.0-20250825191950-a2ce35ee07f0
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
-	github.com/xaionaro-go/sockopt v0.0.0-20260103194101-61181aff0f9e
 	github.com/xaionaro-go/tcp v0.0.0-20260103194940-f10157ebd88d
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e

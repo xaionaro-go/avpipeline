@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/url"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +25,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	"github.com/xaionaro-go/avpipeline/ts"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/avpipeline/urltools"
 	"github.com/xaionaro-go/observability"
@@ -65,11 +65,10 @@ type Input struct {
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
 
-	SyncStreamIndex   atomic.Int64
-	SyncStartPTS      atomic.Int64
-	SyncStartUnixNano atomic.Int64
-	PTSShift          atomic.Int64
-	DTSShift          atomic.Int64
+	SyncStreamIndex atomic.Int64
+	ClockCalculator *ts.ClockCalculator
+	PTSShift        atomic.Int64
+	DTSShift        atomic.Int64
 
 	OutputFilters []packetcondition.Condition
 
@@ -118,8 +117,6 @@ func NewInputFromURL(
 		}
 	}
 	i.SyncStreamIndex.Store(math.MinInt64)
-	i.SyncStartPTS.Store(math.MinInt64)
-	i.SyncStartUnixNano.Store(math.MinInt64)
 	i.PTSShift.Store(math.MinInt64)
 	i.DTSShift.Store(math.MinInt64)
 	defaultFPS := float64(inputDefaultFPS)
@@ -165,11 +162,19 @@ func NewInputFromURL(
 	var inputFormat *astiav.InputFormat
 	if formatName != "" {
 		inputFormat = astiav.FindInputFormat(formatName)
-		if inputFormat == nil {
-			logger.Errorf(ctx, "unable to find input format by name '%s'", formatName)
-		} else {
-			logger.Debugf(ctx, "using format '%s'", inputFormat.Name())
+		logger.Debugf(ctx, "using format '%s'", inputFormat.Name())
+	}
+
+	if inputFormat != nil {
+		switch inputFormat.Name() {
+		case "rtsp":
+			if i.Dictionary.Get("rtsp_transport", nil, 0) == nil {
+				logger.Debugf(ctx, "setting rtsp_transport to 'tcp'")
+				i.Dictionary.Set("rtsp_transport", "tcp", 0)
+			}
 		}
+	} else {
+		logger.Errorf(ctx, "unable to find input format by name '%s' (option 'f')", formatName)
 	}
 
 	i.FormatContext = astiav.AllocFormatContext()
@@ -318,6 +323,17 @@ func (i *Input) doOpen(
 	return nil
 }
 
+func (i *Input) FormatName() string {
+	if i == nil || i.FormatContext == nil {
+		return ""
+	}
+	f := i.FormatContext.InputFormat()
+	if f == nil {
+		return ""
+	}
+	return f.Name()
+}
+
 func (i *Input) initNetworkConn(ctx context.Context) {
 	if i.URLParsed == nil {
 		logger.Errorf(ctx, "cannot init network connection: URLParsed == nil")
@@ -418,57 +434,30 @@ func (i *Input) slowdownIfNeeded(
 		return
 	}
 
-	pts := outPkt.Pts()
-	if pts == astiav.NoPtsValue {
-		return
-	}
-
 	timeBase := outPkt.GetTimeBase()
 	if timeBase.Num() == 0 || timeBase.Den() == 0 {
 		return
 	}
-	wantSeconds := timeBase.Float64() * float64(pts)
 
+	pts := outPkt.Pts()
+	if pts == astiav.NoPtsValue {
+		return
+	}
 	assert(ctx, pts >= 0, "PTS is negative")
-	nowUnixNano := time.Now().UnixNano()
-	startUnixNano := i.SyncStartUnixNano.Load()
 
-	// Initialize base reference on the first sync packet.
-	startPTS := i.SyncStartPTS.Load()
-	if startUnixNano == math.MinInt64 {
-		if startPTS == math.MinInt64 {
-			for {
-				i.SyncStartPTS.CompareAndSwap(math.MinInt64, pts)
-				startPTS = i.SyncStartPTS.Load()
-				if startPTS >= 0 {
-					break
-				}
-				runtime.Gosched()
-			}
-		}
-		i.SyncStartUnixNano.Store(nowUnixNano)
-		startUnixNano = nowUnixNano
-	}
-
-	currentSeconds := float64(nowUnixNano-startUnixNano) / float64(time.Second.Nanoseconds())
-	diffSeconds := wantSeconds - float64(startPTS)*timeBase.Float64()
-	if diffSeconds <= 0 {
+	sleepDuration := i.ClockCalculator.Until(ctx, pts)
+	if sleepDuration <= 0 {
 		return
 	}
 
-	sleepSeconds := diffSeconds - currentSeconds
-	if sleepSeconds <= 0 {
-		return
+	const maxSleep = 10 * time.Second
+	if sleepDuration > maxSleep {
+		logger.Errorf(ctx, "sleepSeconds too large (%s), capping to %s: %s", sleepDuration, maxSleep, i.ClockCalculator)
+		sleepDuration = maxSleep
 	}
 
-	if sleepSeconds > 10 {
-		logger.Errorf(ctx, "sleepSeconds too large (%f), capping to 10 seconds (wantSeconds:%f currentSeconds:%f startPTS:%d)", sleepSeconds, wantSeconds, currentSeconds, startPTS)
-		sleepSeconds = 10
-	}
-
-	logger.Tracef(ctx, "slowing down input by sleeping for %f seconds (wantSeconds:%f currentSeconds:%f startPTS:%d)", sleepSeconds, wantSeconds, currentSeconds, startPTS)
-	sleepDur := time.Duration(sleepSeconds * float64(time.Second))
-	timer := time.NewTimer(sleepDur)
+	logger.Tracef(ctx, "slowing down input by sleeping for %s (%s)", sleepDuration, i.ClockCalculator)
+	timer := time.NewTimer(sleepDuration)
 	defer timer.Stop()
 
 	select {
@@ -680,17 +669,33 @@ func (i *Input) Generate(
 		if !i.IgnoreZeroDuration {
 			isDurationIncorrect := curPkt.GetDuration() <= 1
 			if isDurationIncorrect {
-				switch curPkt.GetMediaType() {
-				case astiav.MediaTypeVideo:
-					fps := stream.CodecParameters().FrameRate()
-					if fps.Num() == 0 || fps.Den() == 0 {
-						logger.Tracef(ctx, "the video packet had no duration set; stream has no FPS set; using default FPS %d", i.DefaultFPS.Float64())
-						fps = i.DefaultFPS
+				fps := i.FormatContext.GuessFrameRate(stream, nil)
+				logger.Tracef(ctx, "guessed FPS from format context: %v", fps)
+				if fps.Num() == 0 || fps.Den() == 0 {
+					fps = stream.AvgFrameRate()
+					logger.Tracef(ctx, "guessed FPS from avg frame rate: %v", fps)
+				}
+				if fps.Num() == 0 || fps.Den() == 0 {
+					fps = stream.RFrameRate()
+					logger.Tracef(ctx, "guessed FPS from r frame rate: %v", fps)
+				}
+				if fps.Num() == 0 || fps.Den() == 0 {
+					fps = stream.CodecParameters().FrameRate()
+					logger.Tracef(ctx, "guessed FPS from codec parameters frame rate: %v", fps)
+				}
+
+				if fps.Num() != 0 && fps.Den() != 0 {
+					if stream.CodecParameters().FrameRate().Num() == 0 {
+						stream.CodecParameters().SetFrameRate(fps)
 					}
-					duration := int(float64(1) / fps.Float64() / stream.TimeBase().Float64())
-					curPkt.SetDuration(int64(duration))
-					logger.Tracef(ctx, "the video packet had no duration set; setting duration to default FPS %d: %d", fps.Float64(), curPkt.GetDuration())
-				default:
+					if stream.TimeBase().Num() != 0 && stream.TimeBase().Den() != 0 {
+						duration := int64(math.Round(float64(1) / fps.Float64() / stream.TimeBase().Float64()))
+						curPkt.SetDuration(duration)
+						logger.Tracef(ctx, "the packet had no duration set; setting duration to FPS %v: %d", fps, curPkt.GetDuration())
+					}
+				}
+
+				if curPkt.GetDuration() <= 1 {
 					if curPkt.GetPTS() >= curPkt.GetDTS() && // not a B-frame-like packet
 						curPkt.GetPTS() != astiav.NoPtsValue { // PTS is set (thus duration can be calculated)
 						assert(ctx, curPkt.GetPTS() >= 0, "previous packet PTS is negative")
@@ -699,8 +704,18 @@ func (i *Input) Generate(
 						prevPkts[streamIndex] = curPkt
 						continue
 					} else {
-						logger.Tracef(ctx, "the B-frame packet has no duration set; using the last known duration")
+						logger.Tracef(ctx, "the packet has no duration set; using the last known duration")
 						curPkt.SetDuration(lastDuration[streamIndex])
+					}
+				}
+
+				if curPkt.GetDuration() <= 1 && curPkt.GetMediaType() == astiav.MediaTypeVideo {
+					fps = i.DefaultFPS
+					logger.Warnf(ctx, "using default FPS (%v) to calculate the frame duration; the calculation is likely incorrect", fps)
+					if fps.Num() != 0 && fps.Den() != 0 && stream.TimeBase().Num() != 0 && stream.TimeBase().Den() != 0 {
+						logger.Tracef(ctx, "the video packet still has no duration set; using default FPS %d", fps.Float64())
+						duration := int64(math.Round(float64(1) / fps.Float64() / stream.TimeBase().Float64()))
+						curPkt.SetDuration(duration)
 					}
 				}
 			} else {

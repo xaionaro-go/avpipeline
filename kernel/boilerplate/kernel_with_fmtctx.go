@@ -199,9 +199,9 @@ func (k *BaseWithFormatContext[H]) SendInput(
 		outputStream, err := xsync.DoR2(ctx, &k.Locker, func() (*astiav.Stream, error) {
 			return k.getOutputStreamForPacketByIndex(
 				ctx,
-				input.Packet.Stream.Index(),
-				input.Packet.Stream.CodecParameters(),
-				input.Packet.Stream.TimeBase(),
+				input.Packet.GetStreamIndex(),
+				input.Packet.GetCodecParameters(),
+				input.Packet.GetTimeBase(),
 			)
 		})
 		if err != nil {

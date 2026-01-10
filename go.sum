@@ -121,8 +121,6 @@ github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722 h1:/vM4t4pLV3ksaOx
 github.com/xaionaro-go/rpn v0.0.0-20250818130635-1419b5218722/go.mod h1:v0s9YvLb4Wy7lAdsNL584t5QEPz/U2pzNWgq4B3Sdlg=
 github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2 h1:QHpTWfyfmz65cE0MtFXe9fScdi+X0VIYR2wgolSYEUk=
 github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2/go.mod h1:XKoHGZ4VKMbVBl8VotLIoWQdrB6Q7jnR++RbkiegZFU=
-github.com/xaionaro-go/sockopt v0.0.0-20260103194101-61181aff0f9e h1:dN/sP31AhNAV2A9CdAYOQHUqP9rkc+pxFMlgWr6PZZQ=
-github.com/xaionaro-go/sockopt v0.0.0-20260103194101-61181aff0f9e/go.mod h1:CqilA8ZWT91g8OUBwHE0JTIklhtB77lBrgTM7HlKYo4=
 github.com/xaionaro-go/spinlock v0.0.0-20190309154744-55278e21e817/go.mod h1:Nb/15eS0BMty6TMuWgRQM8WCDIUlyPZagcpchHT6c9Y=
 github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 h1:1Kqw9dv2LnznIhJoMt3dNzc/ctSj6VHjyGh4YZHjpE4=
 github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1/go.mod h1:UwmTXX+EpoEYHuy0rSys1Rp5PW+eVTgZSjgMVLJENKg=

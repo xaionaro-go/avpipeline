@@ -22,6 +22,7 @@ func MediaTypes() []MediaType {
 		MediaTypeVideo,
 		MediaTypeAudio,
 		MediaTypeSubtitle,
+		MediaTypeData,
 	}
 }
 

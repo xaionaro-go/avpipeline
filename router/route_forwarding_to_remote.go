@@ -32,6 +32,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 	dstURL string,
 	streamKey secret.String,
 	transcoderConfig *transcodertypes.TranscoderConfig,
+	outputConfig kernel.OutputConfig,
 ) (_ret *RouteForwardingToRemote[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwardingToRemote(ctx, '%s', '%s')", sourcePath, dstURL)
 	defer func() {
@@ -73,7 +74,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 	fwd.Output = newRetryOutputNode(ctx, fwd, func(ctx context.Context) error {
 		_, err := fwd.Input.WaitForPublisher(ctx)
 		return err
-	}, dstURL, streamKey, kernel.OutputConfig{})
+	}, dstURL, streamKey, outputConfig)
 
 	fwd.StreamForwarder, err = NewStreamForwarder(ctx, fwd.Input.Node, fwd.Output, transcoderConfig)
 	if err != nil {

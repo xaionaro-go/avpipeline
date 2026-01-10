@@ -4,6 +4,7 @@ package avpipelinenolibav
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/xaionaro-go/polyjson"
 )
@@ -14,15 +15,20 @@ func PipelineSideDataFromProtobuf(input []byte) PipelineSideData {
 	return (PipelineSideData)(input)
 }
 
-func PipelineSideDataFromGo(input any) PipelineSideData {
+func PipelineSideDataFromGo(input any) (ret PipelineSideData, _err error) {
 	if input == nil {
-		return nil
+		return nil, nil
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			_err = fmt.Errorf("panic during marshaling pipeline side data: %v", r)
+		}
+	}()
 	b, err := polyjson.MarshalWithTypeIDs(input, polyjson.TypeRegistry())
 	if err != nil {
-		panic("unable to marshal pipeline side data: " + err.Error())
+		return nil, fmt.Errorf("unable to marshal pipeline side data: %w", err)
 	}
-	return b
+	return b, nil
 }
 
 func (f PipelineSideData) Protobuf() []byte {

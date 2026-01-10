@@ -12,6 +12,6 @@ func PipelineSideDataFromProtobuf(input []byte) PipelineSideData {
 	return avpipelinenolibav.PipelineSideDataFromProtobuf(input)
 }
 
-func PipelineSideDataFromGo(input any) PipelineSideData {
+func PipelineSideDataFromGo(input any) (PipelineSideData, error) {
 	return avpipelinenolibav.PipelineSideDataFromGo(input)
 }

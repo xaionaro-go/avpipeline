@@ -23,7 +23,7 @@ type StreamInfo struct {
 	CodecParameters *astiav.CodecParameters
 	StreamIndex     int
 	StreamsCount    int
-	TimeBase        astiav.Rational
+	TimeBase        astiav.Rational // TODO: remove this field, use Stream.TimeBase() instead
 	Duration        int64
 }
 
@@ -46,4 +46,14 @@ func (si *StreamInfo) GetCodecParameters() *astiav.CodecParameters {
 		return si.Stream.CodecParameters()
 	}
 	return si.CodecParameters
+}
+
+func (si *StreamInfo) GetMediaType() astiav.MediaType {
+	if si.Stream != nil {
+		return si.Stream.CodecParameters().MediaType()
+	}
+	if si.CodecParameters != nil {
+		return si.CodecParameters.MediaType()
+	}
+	return astiav.MediaTypeUnknown
 }

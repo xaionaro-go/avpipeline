@@ -213,16 +213,23 @@ func (m *Monitor) observePacket(
 	pkt *astiav.Packet,
 	streamInfo *packet.StreamInfo,
 ) (_err error) {
+	if streamInfo == nil {
+		return fmt.Errorf("streamInfo is nil")
+	}
 	var sourceKernelID globaltypes.ObjectID
 	if _, ok := streamInfo.Source.(globaltypes.GetObjectIDer); ok {
 		sourceKernelID = streamInfo.Source.(globaltypes.GetObjectIDer).GetObjectID()
+	}
+	psd, err := goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData)
+	if err != nil {
+		logger.Errorf(ctx, "monitor: failed to convert pipeline side data: %v", err)
 	}
 	event := &avpipelinegrpc.MonitorEvent{
 		TimestampNs:      uint64(time.Now().UnixNano()),
 		SourceKernelId:   uint64(sourceKernelID),
 		Stream:           goconvlibav.StreamFromGo(streamInfo.Stream).Protobuf(),
 		Packet:           goconvlibav.PacketFromGo(pkt, m.IncludePacketPayload).Protobuf(),
-		PipelineSideData: goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
+		PipelineSideData: psd.Protobuf(),
 	}
 	if m.DoDecode {
 		frames, err := m.decodeFrames(ctx, pkt, streamInfo)
@@ -253,9 +260,16 @@ func (m *Monitor) observeFrame(
 	fr *astiav.Frame,
 	streamInfo *frame.StreamInfo,
 ) (_err error) {
+	if streamInfo == nil {
+		return fmt.Errorf("streamInfo is nil")
+	}
 	var sourceKernelID globaltypes.ObjectID
 	if _, ok := streamInfo.Source.(globaltypes.GetObjectIDer); ok {
 		sourceKernelID = streamInfo.Source.(globaltypes.GetObjectIDer).GetObjectID()
+	}
+	psd, err := goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData)
+	if err != nil {
+		logger.Errorf(ctx, "monitor: failed to convert pipeline side data: %v", err)
 	}
 	event := &avpipelinegrpc.MonitorEvent{
 		TimestampNs:    uint64(time.Now().UnixNano()),
@@ -267,12 +281,14 @@ func (m *Monitor) observeFrame(
 			Duration:        streamInfo.Duration,
 		},
 		Frames:           []*libav_proto.Frame{goconvlibav.FrameFromGo(fr, m.IncludeFramePayload).Protobuf()},
-		PipelineSideData: goconvavp.PipelineSideDataFromGo(streamInfo.PipelineSideData).Protobuf(),
+		PipelineSideData: psd.Protobuf(),
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case m.Events <- event:
+	default:
+		// Drop the event if the buffer is full to avoid stalling the pipeline
 	}
 	return nil
 }

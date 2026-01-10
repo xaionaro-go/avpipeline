@@ -103,10 +103,7 @@ func (pkt Commons) String() string {
 }
 
 func (pkt *Commons) IsOOBHeaders() bool {
-	if pkt.Stream == nil {
-		return false
-	}
-	codecParams := pkt.Stream.CodecParameters()
+	codecParams := pkt.GetCodecParameters()
 	if codecParams == nil {
 		return false
 	}
@@ -114,18 +111,14 @@ func (pkt *Commons) IsOOBHeaders() bool {
 }
 
 func (pkt *Commons) GetSize() int {
+	if pkt.Packet == nil {
+		return 0
+	}
 	return pkt.Size()
 }
 
 func (pkt *Commons) GetMediaType() astiav.MediaType {
-	if pkt.Stream == nil {
-		return astiav.MediaTypeUnknown
-	}
-	codecParams := pkt.Stream.CodecParameters()
-	if codecParams == nil {
-		return astiav.MediaTypeUnknown
-	}
-	return codecParams.MediaType()
+	return pkt.StreamInfo.GetMediaType()
 }
 
 func (pkt *Commons) GetStreamIndex() int {
@@ -136,17 +129,23 @@ func (pkt *Commons) GetStreamIndex() int {
 }
 
 func (pkt *Commons) SetStreamIndex(v int) {
+	if pkt.Packet == nil {
+		return
+	}
 	pkt.Packet.SetStreamIndex(v)
 }
 
 func (pkt *Commons) GetStream() *astiav.Stream {
-	return pkt.Stream
+	if pkt.StreamInfo == nil {
+		return nil
+	}
+	return pkt.StreamInfo.Stream
 }
 
 func (pkt *Commons) GetStreamFromSource(ctx context.Context) *astiav.Stream {
 	streamIndex := pkt.GetStreamIndex()
 	var result *astiav.Stream
-	pkt.Source.(Source).WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
+	pkt.StreamInfo.Source.(Source).WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		for _, stream := range fmtCtx.Streams() {
 			if stream.Index() == streamIndex {
 				result = stream
@@ -158,15 +157,18 @@ func (pkt *Commons) GetStreamFromSource(ctx context.Context) *astiav.Stream {
 }
 
 func (pkt *Commons) PtsAsDuration() time.Duration {
-	return avconv.Duration(pkt.Pts(), pkt.Stream.TimeBase())
+	return avconv.Duration(pkt.GetPTS(), pkt.GetTimeBase())
 }
 
 func (pkt *Commons) GetTimeBase() astiav.Rational {
-	return pkt.Stream.TimeBase()
+	return pkt.StreamInfo.GetTimeBase()
 }
 
 func (pkt *Commons) SetTimeBase(v astiav.Rational) {
-	pkt.Stream.SetTimeBase(v)
+	if pkt.StreamInfo.Stream != nil {
+		pkt.StreamInfo.Stream.SetTimeBase(v)
+	}
+	pkt.StreamInfo.TimeBase = v
 }
 
 func (pkt *Commons) GetDuration() int64 {
@@ -225,10 +227,7 @@ func (pkt *Commons) GetSource() Source {
 }
 
 func (pkt *Commons) GetResolution() *codectypes.Resolution {
-	if pkt.Stream == nil {
-		return nil
-	}
-	codecParams := pkt.Stream.CodecParameters()
+	codecParams := pkt.GetCodecParameters()
 	if codecParams == nil {
 		return nil
 	}
@@ -249,7 +248,7 @@ func (pkt *Commons) IsKey() bool {
 }
 
 func (pkt *Commons) GetCodecParameters() *astiav.CodecParameters {
-	return pkt.Stream.CodecParameters()
+	return pkt.StreamInfo.GetCodecParameters()
 }
 
 func (pkt *Commons) GetPacketSource() Source {

@@ -663,6 +663,10 @@ func newCodec(
 	c.setQuirks(ctx)
 	c.logHints(ctx)
 	logger.Debugf(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, customOptions)
+	logger.Debugf(ctx, "opening codec %s: type=%v, codec_id=%v, bit_rate=%v, sample_fmt=%v, sample_rate=%v, channel_layout=%v, width=%v, height=%v, pix_fmt=%v",
+		c.codec.Name(), c.codecContext.MediaType(), c.codecContext.CodecID(), c.codecContext.BitRate(),
+		c.codecContext.SampleFormat(), c.codecContext.SampleRate(), c.codecContext.ChannelLayout(),
+		c.codecContext.Width(), c.codecContext.Height(), c.codecContext.PixelFormat())
 	err := c.codecContext.Open(c.codec, customOptions)
 	switch {
 	case err == nil:

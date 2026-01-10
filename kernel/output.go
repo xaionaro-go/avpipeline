@@ -62,10 +62,12 @@ const (
 )
 
 type OutputConfigWaitForOutputStreams struct {
-	MinStreams       uint
-	MinStreamsVideo  uint
-	MinStreamsAudio  uint
-	VideoBeforeAudio *bool
+	MinStreams         uint
+	MinStreamsVideo    uint
+	MinStreamsAudio    uint
+	MinStreamsSubtitle uint
+	MinStreamsData     uint
+	VideoBeforeAudio   *bool
 }
 
 type OutputConfig struct {
@@ -151,8 +153,10 @@ type Output struct {
 	LatestSentPTS time.Duration
 	LatestSentDTS time.Duration
 
-	PreallocatedAudioStreams []*OutputStream
-	PreallocatedVideoStreams []*OutputStream
+	PreallocatedAudioStreams    []*OutputStream
+	PreallocatedVideoStreams    []*OutputStream
+	PreallocatedSubtitleStreams []*OutputStream
+	PreallocatedDataStreams     []*OutputStream
 
 	sendingAllowed   bool
 	openFinished     chan struct{}
@@ -383,7 +387,7 @@ func (o *Output) doOpen(
 	}()
 
 	switch url.Scheme {
-	case "rtmp", "rtmps":
+	case "rtmp", "rtmps", "rtsp":
 		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsVideo); i++ {
 			outputStream := &OutputStream{
 				Stream:  o.FormatContext.NewStream(nil),
@@ -392,17 +396,32 @@ func (o *Output) doOpen(
 			o.PreallocatedVideoStreams = append(o.PreallocatedVideoStreams, outputStream)
 			o.waitingKeyFrames[outputStream.Index()] = struct{}{}
 		}
+		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsAudio); i++ {
+			outputStream := &OutputStream{
+				Stream:  o.FormatContext.NewStream(nil),
+				LastDTS: math.MinInt64,
+			}
+			o.PreallocatedAudioStreams = append(o.PreallocatedAudioStreams, outputStream)
+		}
+		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsSubtitle); i++ {
+			outputStream := &OutputStream{
+				Stream:  o.FormatContext.NewStream(nil),
+				LastDTS: math.MinInt64,
+			}
+			o.PreallocatedSubtitleStreams = append(o.PreallocatedSubtitleStreams, outputStream)
+		}
+		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsData); i++ {
+			outputStream := &OutputStream{
+				Stream:  o.FormatContext.NewStream(nil),
+				LastDTS: math.MinInt64,
+			}
+			o.PreallocatedDataStreams = append(o.PreallocatedDataStreams, outputStream)
+		}
 	}
 
 	formatName := o.FormatContext.OutputFormat().Name()
 	logger.Debugf(ctx, "output format name: '%s'", formatName)
 	o.outputFormatName = formatName
-
-	if o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
-		// if output is not a file then nothing else to do
-		return nil
-	}
-	logger.Tracef(ctx, "destination '%s' is a file", url)
 
 	ioContext, err := astiav.OpenIOContext(
 		url.String(),
@@ -584,6 +603,18 @@ func (o *Output) initOutputStreamFor(
 			o.PreallocatedAudioStreams = o.PreallocatedAudioStreams[1:]
 			logger.Debugf(ctx, "reusing preallocated audio output stream for input stream #%d", inputStream.Index())
 		}
+	case astiav.MediaTypeSubtitle:
+		if len(o.PreallocatedSubtitleStreams) > 0 {
+			outputStream = o.PreallocatedSubtitleStreams[0]
+			o.PreallocatedSubtitleStreams = o.PreallocatedSubtitleStreams[1:]
+			logger.Debugf(ctx, "reusing preallocated subtitle output stream for input stream #%d", inputStream.Index())
+		}
+	case astiav.MediaTypeData:
+		if len(o.PreallocatedDataStreams) > 0 {
+			outputStream = o.PreallocatedDataStreams[0]
+			o.PreallocatedDataStreams = o.PreallocatedDataStreams[1:]
+			logger.Debugf(ctx, "reusing preallocated data output stream for input stream #%d", inputStream.Index())
+		}
 	}
 	if outputStream == nil {
 		outputStream = &OutputStream{
@@ -673,6 +704,20 @@ func (o *Output) preallocateOutputStream(
 			LastDTS: math.MinInt64,
 		}
 		o.PreallocatedVideoStreams = append(o.PreallocatedVideoStreams, outputStream)
+		o.OutputStreams[inputStreamIndex] = nil
+	case astiav.MediaTypeSubtitle:
+		outputStream := &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
+		o.PreallocatedSubtitleStreams = append(o.PreallocatedSubtitleStreams, outputStream)
+		o.OutputStreams[inputStreamIndex] = nil
+	case astiav.MediaTypeData:
+		outputStream := &OutputStream{
+			Stream:  o.FormatContext.NewStream(nil),
+			LastDTS: math.MinInt64,
+		}
+		o.PreallocatedDataStreams = append(o.PreallocatedDataStreams, outputStream)
 		o.OutputStreams[inputStreamIndex] = nil
 	default:
 		logger.Tracef(ctx, "not preallocating output stream for input stream #%d: media type is %s", inputStreamIndex, inputStream.CodecParameters().MediaType())
@@ -838,6 +883,8 @@ func (o *Output) send(
 	var expectedStreamsCount uint
 	var expectedStreamsVideoCount uint
 	var expectedStreamsAudioCount uint
+	var expectedStreamsSubtitleCount uint
+	var expectedStreamsDataCount uint
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		for _, inputStream := range fmtCtx.Streams() {
 			switch inputStream.CodecParameters().MediaType() {
@@ -845,6 +892,10 @@ func (o *Output) send(
 				expectedStreamsVideoCount++
 			case astiav.MediaTypeAudio:
 				expectedStreamsAudioCount++
+			case astiav.MediaTypeSubtitle:
+				expectedStreamsSubtitleCount++
+			case astiav.MediaTypeData:
+				expectedStreamsDataCount++
 			}
 			expectedStreamsCount++
 		}
@@ -855,6 +906,8 @@ func (o *Output) send(
 		}
 		expectedStreamsVideoCount = max(expectedStreamsVideoCount, o.Config.WaitForOutputStreams.MinStreamsVideo)
 		expectedStreamsAudioCount = max(expectedStreamsAudioCount, o.Config.WaitForOutputStreams.MinStreamsAudio)
+		expectedStreamsSubtitleCount = max(expectedStreamsSubtitleCount, o.Config.WaitForOutputStreams.MinStreamsSubtitle)
+		expectedStreamsDataCount = max(expectedStreamsDataCount, o.Config.WaitForOutputStreams.MinStreamsData)
 	}
 
 	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() uint {
@@ -862,7 +915,7 @@ func (o *Output) send(
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d, videoBeforeAudio:%t", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount, *o.Config.WaitForOutputStreams.VideoBeforeAudio)
+	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d, expectedStreamsSubtitleCount:%d, expectedStreamsDataCount:%d, videoBeforeAudio:%t", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount, expectedStreamsSubtitleCount, expectedStreamsDataCount, *o.Config.WaitForOutputStreams.VideoBeforeAudio)
 	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
 		if outputAcceptOnlyKeyFramesUntilStart {
 			logger.Debugf(ctx, "not a key frame; skipping")
@@ -898,6 +951,8 @@ func (o *Output) send(
 	}
 	var activeVideoStreamCount uint
 	var activeAudioStreamCount uint
+	var activeSubtitleStreamCount uint
+	var activeDataStreamCount uint
 	for _, stream := range o.OutputStreams {
 		if stream == nil {
 			continue
@@ -907,6 +962,10 @@ func (o *Output) send(
 			activeVideoStreamCount++
 		case astiav.MediaTypeAudio:
 			activeAudioStreamCount++
+		case astiav.MediaTypeSubtitle:
+			activeSubtitleStreamCount++
+		case astiav.MediaTypeData:
+			activeDataStreamCount++
 		}
 	}
 	if o.Config.WaitForOutputStreams != nil {
@@ -920,6 +979,14 @@ func (o *Output) send(
 		}
 		if activeAudioStreamCount < expectedStreamsAudioCount {
 			logger.Tracef(ctx, "not starting sending the packets, yet: audio streams: %d < %d; %s", activeAudioStreamCount, expectedStreamsAudioCount, mediaType)
+			return nil
+		}
+		if activeSubtitleStreamCount < expectedStreamsSubtitleCount {
+			logger.Tracef(ctx, "not starting sending the packets, yet: subtitle streams: %d < %d; %s", activeSubtitleStreamCount, expectedStreamsSubtitleCount, mediaType)
+			return nil
+		}
+		if activeDataStreamCount < expectedStreamsDataCount {
+			logger.Tracef(ctx, "not starting sending the packets, yet: data streams: %d < %d; %s", activeDataStreamCount, expectedStreamsDataCount, mediaType)
 			return nil
 		}
 	}
@@ -938,13 +1005,15 @@ func (o *Output) send(
 			}
 			logger.Debugf(
 				ctx,
-				"writing the header; streams: *:%d/%d, a:%d/%d, v:%d/%d; len(waitingKeyFrames): %d",
+				"writing the header; streams: *:%d/%d, a:%d/%d, v:%d/%d, s:%d/%d, d:%d/%d; len(waitingKeyFrames): %d",
 				activeStreamCount, expectedStreamsCount,
 				activeAudioStreamCount, expectedStreamsAudioCount,
 				activeVideoStreamCount, expectedStreamsVideoCount,
+				activeSubtitleStreamCount, expectedStreamsSubtitleCount,
+				activeDataStreamCount, expectedStreamsDataCount,
 				len(o.waitingKeyFrames),
 			)
-			err = o.FormatContext.WriteHeader(nil)
+			err = o.FormatContext.WriteHeader(o.Dictionary)
 			o.headerSent = true
 			logger.Debugf(ctx, "wrote the header: %v", err)
 		})
@@ -960,6 +1029,7 @@ func (o *Output) send(
 	}
 	for _, pendingPkt := range o.pendingPackets {
 		// pendingPkt.RescaleTs(pendingPkt.InputStream.TimeBase(), inputStream.TimeBase())
+		outputStream := o.OutputStreams[pendingPkt.InputStream.Index()]
 		err := o.doWritePacket(
 			belt.WithField(ctx, "reason", "pending_packet"),
 			pendingPkt.Packet,
@@ -1010,6 +1080,12 @@ func (o *Output) GetOutputMonitor(
 	ctx context.Context,
 ) OutputPacketMonitor {
 	return o.OutputMonitor.Load()
+}
+
+func (o *Output) SetSendingAllowed(
+	allowed bool,
+) {
+	o.sendingAllowed = allowed
 }
 
 func (o *Output) doWritePacket(
@@ -1148,6 +1224,14 @@ func (o *Output) doWritePacket(
 	o.formatContextLocker.Do(ctx, func() {
 		if o.FormatContext == nil {
 			err = io.EOF
+			return
+		}
+		if outputStream.TimeBase().Num() == 0 || outputStream.TimeBase().Den() == 0 {
+			err = fmt.Errorf("time_base is invalid (%v) for stream %d", outputStream.TimeBase(), pkt.StreamIndex())
+			return
+		}
+		if pkt.StreamIndex() >= int(o.FormatContext.NbStreams()) {
+			err = fmt.Errorf("stream index %d is out of bounds (nb_streams: %d)", pkt.StreamIndex(), o.FormatContext.NbStreams())
 			return
 		}
 		err = o.FormatContext.WriteInterleavedFrame(pkt)

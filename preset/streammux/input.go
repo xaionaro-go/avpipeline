@@ -47,7 +47,7 @@ func (t InputType) IncludesMediaType(mediaType astiav.MediaType) bool {
 	case InputTypeAll:
 		return true
 	case InputTypeAudioOnly:
-		return mediaType == astiav.MediaTypeAudio
+		return mediaType == astiav.MediaTypeAudio || mediaType == astiav.MediaTypeSubtitle || mediaType == astiav.MediaTypeData
 	case InputTypeVideoOnly:
 		return mediaType == astiav.MediaTypeVideo
 	default:
