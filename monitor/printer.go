@@ -15,8 +15,9 @@ import (
 const eventFormatString = "%-21s %-10s %-10s %-14s %-10s %-14s %-10s %-14s %-10s %-10s %-10s %-10s\n"
 
 type PrintOptions struct {
-	Format          string
-	HighlightMissed time.Duration
+	Format                 string
+	HighlightDiscontinuity time.Duration
+	StreamIndices          []int
 }
 
 func PrintMonitorEvents(ctx context.Context, out io.Writer, eventsCh <-chan *avpipeline_proto.MonitorEvent, options PrintOptions) error {
@@ -33,8 +34,19 @@ func PrintMonitorEvents(ctx context.Context, out io.Writer, eventsCh <-chan *avp
 		lastEndPTS       int64
 		lastEndTimestamp int64
 	}
+
+	streamIndexFilter := map[uint32]struct{}{}
+	for _, idx := range options.StreamIndices {
+		streamIndexFilter[uint32(idx)] = struct{}{}
+	}
+
 	streams := map[int]*streamState{}
 	for ev := range eventsCh {
+		if options.StreamIndices != nil {
+			if _, ok := streamIndexFilter[uint32(ev.Stream.Index)]; !ok {
+				continue
+			}
+		}
 		state, ok := streams[int(ev.Stream.Index)]
 		if !ok {
 			fmt.Fprintf(out, "= new stream: %d; codec: 0x%X: time_base: %s\n", ev.Stream.Index, ev.Stream.CodecParameters.CodecId, ev.Stream.TimeBase)
@@ -46,12 +58,13 @@ func PrintMonitorEvents(ctx context.Context, out io.Writer, eventsCh <-chan *avp
 			timeBase := goconvlibav.RationalFromProtobuf(ev.Stream.GetTimeBase())
 			if ev.Packet != nil && len(ev.Frames) == 0 {
 				pkt := ev.Packet
-				if options.HighlightMissed > 0 && state.lastEndPTS != 0 && pkt.Pts > state.lastEndPTS {
-					gapDur := AVConvDuration(pkt.Pts-state.lastEndPTS, timeBase)
-					if gapDur >= options.HighlightMissed {
-						fmt.Fprintf(out, "%-21d %-10d !!! MISSED PACKETS: gap from %d to %d (duration %s)\n",
-							state.lastEndTimestamp, ev.Stream.Index, state.lastEndPTS, pkt.Pts, gapDur)
-					}
+				ptsGap := pkt.Pts - state.lastEndPTS
+				ptsGapDur := AVConvDuration(ptsGap, timeBase)
+
+				if options.HighlightDiscontinuity > 0 && state.lastEndPTS != 0 && ptsGapDur >= options.HighlightDiscontinuity {
+					fmt.Fprintf(out, "%-21s %-10d !!! DISCONTINUITY: gap from %d to %d (duration %s)\n",
+						fmt.Sprintf("%d.%09d", state.lastEndTimestamp/1e9, state.lastEndTimestamp%1e9),
+						ev.Stream.Index, state.lastEndPTS, pkt.Pts, ptsGapDur)
 				}
 				printRow(out,
 					ev.GetTimestampNs(),
@@ -70,12 +83,13 @@ func PrintMonitorEvents(ctx context.Context, out io.Writer, eventsCh <-chan *avp
 				state.lastEndTimestamp = int64(ev.GetTimestampNs()) + int64(AVConvDuration(pkt.Duration, timeBase))
 			}
 			for _, frame := range ev.Frames {
-				if options.HighlightMissed > 0 && state.lastEndPTS != 0 && frame.Pts > state.lastEndPTS {
-					gapDur := AVConvDuration(frame.Pts-state.lastEndPTS, timeBase)
-					if gapDur >= options.HighlightMissed {
-						fmt.Fprintf(out, "%-21d %-10d !!! MISSED FRAMES: gap from %d to %d (duration %s)\n",
-							state.lastEndTimestamp, ev.Stream.Index, state.lastEndPTS, frame.Pts, gapDur)
-					}
+				ptsGap := frame.Pts - state.lastEndPTS
+				ptsGapDur := AVConvDuration(ptsGap, timeBase)
+
+				if options.HighlightDiscontinuity > 0 && state.lastEndPTS != 0 && ptsGapDur >= options.HighlightDiscontinuity {
+					fmt.Fprintf(out, "%-21s %-10d !!! DISCONTINUITY: gap from %d to %d (duration %s)\n",
+						fmt.Sprintf("%d.%09d", state.lastEndTimestamp/1e9, state.lastEndTimestamp%1e9),
+						ev.Stream.Index, state.lastEndPTS, frame.Pts, ptsGapDur)
 				}
 				printRow(out,
 					ev.GetTimestampNs(),
@@ -125,7 +139,7 @@ func printRow(
 	}
 
 	fmt.Fprintf(out, eventFormatString,
-		fmt.Sprintf("%d", tsNs),
+		fmt.Sprintf("%d.%09d", tsNs/1e9, tsNs%1e9),
 		fmt.Sprintf("%d", streamIdx),
 		fmt.Sprintf("%d", pts),
 		AVConvDuration(pts, timeBase),
