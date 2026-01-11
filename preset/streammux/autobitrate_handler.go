@@ -368,12 +368,13 @@ func (h *AutoBitRateHandler[C]) logRawConnInfo(
 					logger.Debugf(ctx, "connInfo: %s", spew.Sdump(connInfo))
 					return nil
 				})
-			if err != nil {
-				if errors.As(err, &kernel.ErrNotImplemented{}) {
-					logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
-				} else {
-					logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
-				}
+			switch {
+			case err == nil:
+			case errors.As(err, &kernel.ErrNoRawNetworkConn{}),
+				errors.As(err, &kernel.ErrNotImplemented{}):
+				logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
+			default:
+				logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
 			}
 		})
 	}

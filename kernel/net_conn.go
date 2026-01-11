@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
@@ -143,8 +144,6 @@ func (n *netConn) closeLocked(context.Context) error {
 		}
 		n.netFile = nil
 	}
-	n.netConn = nil
-	n.rawConn = nil
 	return errors.Join(result...)
 }
 
@@ -154,12 +153,21 @@ func (n *netConn) Close(ctx context.Context) error {
 	return n.closeLocked(ctx)
 }
 
+type ErrNoNetworkConn struct{}
+
+func (e ErrNoNetworkConn) Error() string {
+	return "no network connection"
+}
+
 func (n *netConn) withNetworkConnLocked(
 	ctx context.Context,
 	callback func(context.Context, net.Conn) error,
 ) error {
 	if n.netConn == nil {
-		return fmt.Errorf("network connection is not available")
+		return ErrNoNetworkConn{}
+	}
+	if n.netFile == nil {
+		return io.EOF
 	}
 
 	return callback(ctx, n.netConn)
@@ -174,12 +182,21 @@ func (n *netConn) WithNetworkConn(
 	return n.withNetworkConnLocked(ctx, callback)
 }
 
+type ErrNoRawNetworkConn struct{}
+
+func (e ErrNoRawNetworkConn) Error() string {
+	return "no raw network connection"
+}
+
 func (n *netConn) withRawNetworkConnLocked(
 	ctx context.Context,
 	callback func(context.Context, syscall.RawConn, string) error,
 ) error {
 	if n.rawConn == nil {
-		return fmt.Errorf("raw network connection is not available")
+		return ErrNoRawNetworkConn{}
+	}
+	if n.netFile == nil {
+		return io.EOF
 	}
 
 	return callback(ctx, n.rawConn, n.networkName)
