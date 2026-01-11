@@ -13,7 +13,7 @@ import (
 
 func TestIsFiller(t *testing.T) {
 	ctx := context.Background()
-	cond := IsFiller{}
+	cond := IsFiller(false)
 
 	t.Run("H264_Filler", func(t *testing.T) {
 		// NAL type 12 (Filler Data)

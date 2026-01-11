@@ -4,24 +4,29 @@ package condition
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-type IsFiller struct{}
+type IsFiller bool
 
-var _ Condition = IsFiller{}
+var _ Condition = IsFiller(false)
 
 func (v IsFiller) String() string {
-	return "IsFiller"
+	return fmt.Sprintf("IsFiller(%t)", bool(v))
 }
 
 func (v IsFiller) Match(
 	_ context.Context,
 	input packet.Input,
 ) bool {
+	return bool(v) == isFillerPacket(input)
+}
+
+func isFillerPacket(input packet.Input) bool {
 	cp := input.GetCodecParameters()
 	if cp == nil {
 		return false
