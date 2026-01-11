@@ -1,4 +1,4 @@
-// is_filler_test.go tests the IsFiller packet condition.
+// contains_filler_test.go tests the ContainsFiller packet condition.
 
 package condition
 
@@ -11,9 +11,9 @@ import (
 	"github.com/xaionaro-go/avpipeline/packet"
 )
 
-func TestIsFiller(t *testing.T) {
+func TestContainsFiller(t *testing.T) {
 	ctx := context.Background()
-	cond := IsFiller(false)
+	cond := ContainsFiller(true)
 
 	t.Run("H264_Filler", func(t *testing.T) {
 		// NAL type 12 (Filler Data)
