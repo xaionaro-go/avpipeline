@@ -43,10 +43,12 @@ const (
 	encoderRescaleEnableCropping               = false
 	encoderRescaleSameResolution               = false
 	encoderRescaleEnableTightPacking           = false
+	encoderDefaultCoverPTSGaps                 = true
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
 	*closuresignaler.ClosureSignaler
+	EncoderConfig
 
 	EncoderFactory EF
 	Locker         xsync.Mutex
@@ -54,7 +56,6 @@ type Encoder[EF codec.EncoderFactory] struct {
 
 	encoders                  map[int]*streamEncoder
 	outputStreams             map[int]*astiav.Stream
-	StreamConfigurer          StreamConfigurer
 	outputFormatContextLocker xsync.RWMutex
 	outputFormatContext       *astiav.FormatContext
 	headerIsWritten           bool
@@ -67,12 +68,14 @@ var (
 )
 
 type streamEncoder struct {
-	Encoder         codec.Encoder
-	Resampler       *resampler.Resampler
-	ResampledFrames []*astiav.Frame
-	Scaler          scaler.Scaler
-	ScaledFrame     *astiav.Frame
-	LastInitTS      time.Time
+	Encoder            codec.Encoder
+	Resampler          *resampler.Resampler
+	ResampledFrames    []*astiav.Frame
+	Scaler             scaler.Scaler
+	ScaledFrame        *astiav.Frame
+	LastInitTS         time.Time
+	NextExpectedPTS    int64
+	NextExpectedPTSSet bool
 }
 
 func (e *streamEncoder) Close(ctx context.Context) error {
@@ -83,18 +86,39 @@ func (e *streamEncoder) Close(ctx context.Context) error {
 	return err
 }
 
+type EncoderConfig struct {
+	StreamConfigurer    StreamConfigurer
+	VideoRecoverPTSGaps bool
+}
+
+func (cfg *EncoderConfig) String() string {
+	if cfg == nil {
+		return "<nil>"
+	}
+	return spew.Sdump(*cfg)
+}
+
+func DefaultEncoderConfig() EncoderConfig {
+	return EncoderConfig{
+		VideoRecoverPTSGaps: encoderDefaultCoverPTSGaps,
+	}
+}
+
 func NewEncoder[EF codec.EncoderFactory](
 	ctx context.Context,
 	encoderFactory EF,
-	streamConfigurer StreamConfigurer,
+	encoderConfig *EncoderConfig,
 ) (_ret *Encoder[EF]) {
 	logger.Tracef(ctx, "NewEncoder")
 	defer func() { logger.Tracef(ctx, "/NewEncoder: %s", _ret) }()
+	if encoderConfig == nil {
+		encoderConfig = ptr(DefaultEncoderConfig())
+	}
 	e := &Encoder[EF]{
 		ClosureSignaler:     closuresignaler.New(),
 		EncoderFactory:      encoderFactory,
+		EncoderConfig:       *encoderConfig,
 		encoders:            map[int]*streamEncoder{},
-		StreamConfigurer:    streamConfigurer,
 		outputFormatContext: astiav.AllocFormatContext(),
 		outputStreams:       make(map[int]*astiav.Stream),
 	}
@@ -541,6 +565,23 @@ func (e *Encoder[EF]) sendFrame(
 
 	if codec.IsEncoderCopy(streamEncoder.Encoder) {
 		return codec.ErrCopyEncoder{}
+	}
+
+	if e.VideoRecoverPTSGaps && input.GetMediaType() == astiav.MediaTypeVideo {
+		if streamEncoder.NextExpectedPTSSet {
+			currentPTS := input.GetPTS()
+			expectedPTS := streamEncoder.NextExpectedPTS
+			if currentPTS > expectedPTS {
+				gap := currentPTS - streamEncoder.NextExpectedPTS
+				newDuration := input.Frame.Duration() + gap
+				logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap for stream %d: lastPTS=%d, currentPTS=%d, expectedPTS=%d, adjusting duration from %d to %d",
+					input.GetStreamIndex(), streamEncoder.NextExpectedPTS, currentPTS, expectedPTS, input.Frame.Duration(), newDuration)
+				input.SetPTS(streamEncoder.NextExpectedPTS)
+				input.SetDuration(newDuration)
+			}
+		}
+		streamEncoder.NextExpectedPTS = input.GetPTS() + input.GetDuration()
+		streamEncoder.NextExpectedPTSSet = true
 	}
 
 	outputStream := xsync.DoR1(ctx, &e.Locker, func() *astiav.Stream {

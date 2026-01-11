@@ -60,16 +60,16 @@ func NewTranscoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	ctx context.Context,
 	decoderFactory DF,
 	encoderFactory EF,
-	streamConfigurer StreamConfigurer,
+	encoderConfig *EncoderConfig,
 ) (_ret *Transcoder[DF, EF], _err error) {
-	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v)", decoderFactory, encoderFactory, streamConfigurer)
+	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %s)", decoderFactory, encoderFactory, encoderConfig)
 	defer func() {
-		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v): %s, %v", decoderFactory, encoderFactory, streamConfigurer, _ret, _err)
+		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %s): %s, %v", decoderFactory, encoderFactory, encoderConfig, _ret, _err)
 	}()
 	r := &Transcoder[DF, EF]{
 		ClosureSignaler: closuresignaler.New(),
 		Decoder:         NewDecoder(ctx, decoderFactory),
-		Encoder:         NewEncoder(ctx, encoderFactory, streamConfigurer),
+		Encoder:         NewEncoder(ctx, encoderFactory, encoderConfig),
 
 		activeStreamsMap: make(map[int]struct{}),
 	}

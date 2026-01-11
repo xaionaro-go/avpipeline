@@ -22,18 +22,18 @@ func NewTranscoder(
 	ctx context.Context,
 	decoderFactory codec.DecoderFactory,
 	encoderFactory codec.EncoderFactory,
-	streamConfigurer kernel.StreamConfigurer,
+	encoderConfig *kernel.EncoderConfig,
 	processorOpts ...Option,
 ) (_ret *FromKernel[*kernel.Transcoder[codec.DecoderFactory, codec.EncoderFactory]], _err error) {
-	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v)", decoderFactory, encoderFactory, streamConfigurer, processorOpts)
+	logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v)", decoderFactory, encoderFactory, encoderConfig, processorOpts)
 	defer func() {
-		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v): %#+v, %v", decoderFactory, encoderFactory, streamConfigurer, processorOpts, _ret, _err)
+		logger.Debugf(ctx, "NewTranscoder(ctx, %s, %s, %#+v, %#+v): %#+v, %v", decoderFactory, encoderFactory, encoderConfig, processorOpts, _ret, _err)
 	}()
 	k, err := kernel.NewTranscoder(
 		ctx,
 		decoderFactory,
 		encoderFactory,
-		streamConfigurer,
+		encoderConfig,
 	)
 	if err != nil {
 		return nil, err
