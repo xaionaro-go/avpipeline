@@ -43,7 +43,6 @@ const (
 	encoderRescaleEnableCropping               = false
 	encoderRescaleSameResolution               = false
 	encoderRescaleEnableTightPacking           = false
-	encoderDefaultCoverPTSGaps                 = true
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -69,6 +68,7 @@ var (
 
 type streamEncoder struct {
 	Encoder            codec.Encoder
+	EncoderConfig      *EncoderConfig
 	Resampler          *resampler.Resampler
 	ResampledFrames    []*astiav.Frame
 	Scaler             scaler.Scaler
@@ -86,9 +86,33 @@ func (e *streamEncoder) Close(ctx context.Context) error {
 	return err
 }
 
+type VideoGapsStrategy int
+
+const (
+	UndefinedVideoGapsStrategy VideoGapsStrategy = iota
+	VideoGapsStrategyNone
+	VideoGapsStrategyExtendNextFrame
+	VideoGapsStrategyDuplicateNextFrame
+)
+
+func (vgs VideoGapsStrategy) String() string {
+	switch vgs {
+	case UndefinedVideoGapsStrategy:
+		return "<undefined>"
+	case VideoGapsStrategyNone:
+		return "none"
+	case VideoGapsStrategyExtendNextFrame:
+		return "extend_next_frame"
+	case VideoGapsStrategyDuplicateNextFrame:
+		return "duplicate_next_frame"
+	default:
+		return fmt.Sprintf("<unknown:%d>", int(vgs))
+	}
+}
+
 type EncoderConfig struct {
-	StreamConfigurer    StreamConfigurer
-	VideoRecoverPTSGaps bool
+	StreamConfigurer  StreamConfigurer
+	VideoGapsStrategy VideoGapsStrategy
 }
 
 func (cfg *EncoderConfig) String() string {
@@ -100,7 +124,7 @@ func (cfg *EncoderConfig) String() string {
 
 func DefaultEncoderConfig() EncoderConfig {
 	return EncoderConfig{
-		VideoRecoverPTSGaps: encoderDefaultCoverPTSGaps,
+		VideoGapsStrategy: VideoGapsStrategyExtendNextFrame,
 	}
 }
 
@@ -355,7 +379,7 @@ func (e *Encoder[EF]) initEncoderFor(
 		return fmt.Errorf("the encoder factory produced an encoder %T with nil CodecContext", encoderInstance)
 	}
 
-	encoder := &streamEncoder{Encoder: encoderInstance}
+	encoder := &streamEncoder{Encoder: encoderInstance, EncoderConfig: &e.EncoderConfig}
 	e.encoders[streamIndex] = encoder
 	return nil
 }
@@ -567,23 +591,6 @@ func (e *Encoder[EF]) sendFrame(
 		return codec.ErrCopyEncoder{}
 	}
 
-	if e.VideoRecoverPTSGaps && input.GetMediaType() == astiav.MediaTypeVideo {
-		if streamEncoder.NextExpectedPTSSet {
-			currentPTS := input.GetPTS()
-			expectedPTS := streamEncoder.NextExpectedPTS
-			if currentPTS > expectedPTS {
-				gap := currentPTS - streamEncoder.NextExpectedPTS
-				newDuration := input.Frame.Duration() + gap
-				logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap for stream %d: lastPTS=%d, currentPTS=%d, expectedPTS=%d, adjusting duration from %d to %d",
-					input.GetStreamIndex(), streamEncoder.NextExpectedPTS, currentPTS, expectedPTS, input.Frame.Duration(), newDuration)
-				input.SetPTS(streamEncoder.NextExpectedPTS)
-				input.SetDuration(newDuration)
-			}
-		}
-		streamEncoder.NextExpectedPTS = input.GetPTS() + input.GetDuration()
-		streamEncoder.NextExpectedPTSSet = true
-	}
-
 	outputStream := xsync.DoR1(ctx, &e.Locker, func() *astiav.Stream {
 		outputStream := e.outputStreams[input.GetStreamIndex()]
 		assert(ctx, outputStream != nil, "outputStream != nil")
@@ -639,6 +646,10 @@ func (e *Encoder[EF]) sendFrame(
 		if len(fittedFrames) == 0 {
 			logger.Tracef(ctx, "the frame was dropped by the fitter")
 			return nil
+		}
+
+		if outputMediaType == astiav.MediaTypeVideo {
+			fittedFrames = streamEncoder.fixVideoGapIfNeeded(ctx, fittedFrames)
 		}
 
 		frameInfo := FrameInfo{
@@ -709,6 +720,111 @@ func (e *Encoder[EF]) sendFrame(
 
 		return nil
 	})
+}
+
+// fixVideoGapIfNeeded detects such gaps and applies a configured strategy to fix them.
+//
+// DJI Osmo devices tend to produce video with PTS gaps.
+// It is assumed it is caused by their MCU being overloaded and dropping frames internally.
+//
+// Note: this function assumes frames are received in PTS order.
+func (e *streamEncoder) fixVideoGapIfNeeded(
+	ctx context.Context,
+	input []*astiav.Frame,
+) (_output []*astiav.Frame) {
+	for _, frame := range input {
+		_output = append(_output, e.fixVideoGapIfNeededForOneFrame(ctx, frame)...)
+	}
+	return
+}
+
+func (e *streamEncoder) fixVideoGapIfNeededForOneFrame(
+	ctx context.Context,
+	input *astiav.Frame,
+) []*astiav.Frame {
+	switch e.EncoderConfig.VideoGapsStrategy {
+	case VideoGapsStrategyNone, UndefinedVideoGapsStrategy:
+		return []*astiav.Frame{input}
+	default:
+	}
+
+	var gapStart *int64
+	if e.NextExpectedPTSSet {
+		currentPTS := input.Pts()
+		expectedPTS := e.NextExpectedPTS
+		if currentPTS > expectedPTS {
+			logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap: lastPTS=%d, currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", expectedPTS, currentPTS, expectedPTS, e.EncoderConfig.VideoGapsStrategy)
+			gapStart = ptr(expectedPTS)
+		}
+	}
+	e.NextExpectedPTS = input.Pts() + input.Duration()
+	e.NextExpectedPTSSet = true
+	if gapStart == nil {
+		return []*astiav.Frame{input}
+	}
+
+	switch e.EncoderConfig.VideoGapsStrategy {
+	case VideoGapsStrategyNone, UndefinedVideoGapsStrategy:
+		panic("supposed to be impossible")
+	case VideoGapsStrategyExtendNextFrame:
+		return e.fixVideoGapExtendNextFrame(ctx, input, *gapStart)
+	case VideoGapsStrategyDuplicateNextFrame:
+		return e.fixVideoGapDuplicateNextFrame(ctx, input, *gapStart)
+	default:
+		logger.Errorf(ctx, "unknown VideoGapsStrategy: %s", e.EncoderConfig.VideoGapsStrategy)
+		return []*astiav.Frame{input}
+	}
+}
+
+func (e *streamEncoder) fixVideoGapExtendNextFrame(
+	_ context.Context,
+	input *astiav.Frame,
+	gapStart int64,
+) []*astiav.Frame {
+	gap := input.Pts() - gapStart
+	newDuration := input.Duration() + gap
+	input.SetPts(gapStart)
+	input.SetDuration(newDuration)
+	return []*astiav.Frame{input}
+}
+
+func (e *streamEncoder) fixVideoGapDuplicateNextFrame(
+	_ context.Context,
+	input *astiav.Frame,
+	gapStart int64,
+) []*astiav.Frame {
+	var result []*astiav.Frame
+
+	originalDuration := input.Duration()
+	if originalDuration <= 0 {
+		return []*astiav.Frame{input}
+	}
+
+	currentPTS := gapStart
+	targetPTS := input.Pts()
+
+	// duplicates
+	for currentPTS < targetPTS {
+		dupFrame := frame.CloneAsReferenced(input)
+		dupFrame.SetPts(currentPTS)
+
+		// Check if the next frame would overshoot the target PTS
+		nextPTS := currentPTS + originalDuration
+		if nextPTS > targetPTS {
+			// Extend this frame's duration to exactly reach the target PTS
+			dupFrame.SetDuration(targetPTS - currentPTS)
+		} else {
+			dupFrame.SetDuration(originalDuration)
+		}
+
+		result = append(result, dupFrame)
+		currentPTS = dupFrame.Pts() + dupFrame.Duration()
+	}
+
+	// the original
+	result = append(result, input)
+
+	return result
 }
 
 func isEmptyFrame(
