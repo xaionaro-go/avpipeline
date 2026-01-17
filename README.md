@@ -4,107 +4,129 @@
 
 This package is targeted on unlocking [`libav`](https://en.wikipedia.org/wiki/Libav) capabilities to build dynamic pipelines for processing audio/video.
 
+Core concepts:
+- **Kernel**: Implements specific media processing logic (I/O, transcoding, filtering).
+- **Processor**: Manages a Kernel, providing queuing, synchronization, and observability.
+- **Node**: A vertex in the pipeline graph, handling data routing and lifecycle.
+
 For example:
 ```go
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 
-	// input node
-
-	logger.Debugf(ctx, "opening '%s' as the input...", fromURL)
-	input, err := processor.NewInputFromURL(ctx, fromURL, secret.New(""), kernel.InputConfig{})
+	// 1. Initialize an input (e.g., from an RTMP URL)
+	inputKernel, err := kernel.NewInputFromURL(ctx, fromURL, secret.New(""), kernel.InputConfig{})
 	assert(ctx, err == nil, err)
-	defer input.Close(ctx)
-	inputNode := node.New(input)
+	defer inputKernel.Close(ctx)
+	inputNode := node.NewFromKernel(ctx, inputKernel, processor.DefaultOptionsInput()...)
 
-	// output node
-
-	logger.Debugf(ctx, "opening '%s' as the output...", toURL)
-	output, err := processor.NewOutputFromURL(
-		ctx,
-		toURL, secret.New(""),
-		kernel.OutputConfig{},
-	)
-	assert(ctx, err == nil, err)
-	defer output.Close(ctx)
-	outputNode := node.New(output)
-
-	// transcoder node
-
-	hwDevName := codec.HardwareDeviceName(*hwDeviceName)
-	transcoder, err := processor.NewTranscoder(
+	// 2. Initialize a transcoder (e.g., to H.264 using NVIDIA hardware acceleration)
+	hwDevName := codec.HardwareDeviceName("cuda")
+	transcoderKernel, err := kernel.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, &codec.NaiveDecoderFactoryParams{
-			HardwareDeviceName: hwDeviceName,
+			HardwareDeviceName: hwDevName,
 		}),
 		codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
-			VideoCodec:         *videoCodec,
-			AudioCodec:         codec.CodecNameCopy,
-			HardwareDeviceType: 0,
-			HardwareDeviceName: hwDeviceName,
-			VideoOptions:       types.DictionaryItems{{Key: "bf", Value: "0"}}.ToAstiav(),
+			VideoCodec:         codec.Name("h264_nvenc"),
+			AudioCodec:         codec.NameCopy, // Passthrough audio
+			HardwareDeviceName: hwDevName,
 		}),
-		nil,
+		nil, // Default encoder config
 	)
 	assert(ctx, err == nil, err)
-	defer transcoder.Close(ctx)
-	logger.Debugf(ctx, "initialized a transcoder to %s (hwdev:%s)...", *videoCodec, hwDeviceName)
-	transcodingNode := node.New(transcoder)
+	defer transcoderKernel.Close(ctx)
+	transcoderNode := node.NewFromKernel(ctx, transcoderKernel, processor.DefaultOptionsTranscoder()...)
 
-	// route nodes: input -> transcoder -> output
+	// 3. Initialize an output (e.g., to an RTMP URL)
+	outputKernel, err := kernel.NewOutputFromURL(ctx, toURL, secret.New(""), kernel.OutputConfig{})
+	assert(ctx, err == nil, err)
+	defer outputKernel.Close(ctx)
+	outputNode := node.NewFromKernel(ctx, outputKernel, processor.DefaultOptionsOutput()...)
 
-	inputNode.AddPushPacketsTo(transcodingNode)
-	transcodingNode.AddPushPacketsTo(outputNode)
-	logger.Debugf(ctx, "resulting pipeline: %s", inputNode.String())
-	logger.Debugf(ctx, "resulting pipeline (for graphviz):\n%s\n", inputNode.DotString(false))
+	// 4. Connect nodes: input -> transcoder -> output
+	inputNode.AddPushTo(ctx, transcoderNode)
+	transcoderNode.AddPushTo(ctx, outputNode)
 
-	// start
-
-	errCh := make(chan node.Error, 10)
-	observability.Go(ctx, func() {
-		defer cancelFn()
+	// 5. Start the pipeline
+	errCh := make(chan node.Error, 100)
+	observability.Go(ctx, func(ctx context.Context) {
 		avpipeline.Serve(ctx, avpipeline.ServeConfig{
 			EachNode: node.ServeConfig{
-				FrameDrop: *frameDrop,
+				FrameDropVideo: true,
 			},
 		}, errCh, inputNode)
 	})
 
-	// observe
-
+	// 6. Monitor for errors and statistics
 	statusTicker := time.NewTicker(time.Second)
 	defer statusTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Infof(ctx, "finished")
 			return
 		case err, ok := <-errCh:
 			if !ok {
 				return
 			}
-			if errors.Is(err.Err, context.Canceled) {
+			switch {
+			case errors.Is(err.Err, context.Canceled), errors.Is(err.Err, io.EOF):
 				continue
-			}
-			if errors.Is(err.Err, io.EOF) {
-				continue
-			}
-			if err.Err != nil {
-				logger.Fatal(ctx, err)
-				return
+			default:
+				logger.Errorf(ctx, "pipeline error: %v", err)
 			}
 		case <-statusTicker.C:
-			inputStats := inputNode.GetStats()
-			inputStatsJSON, err := json.Marshal(inputStats.FramesWrote)
-			assert(ctx, err == nil, err)
-
-			outputStats := outputNode.GetStats()
-			outputStatsJSON, err := json.Marshal(outputStats.FramesRead)
-			assert(ctx, err == nil, err)
-
-			fmt.Printf("input:%s -> output:%s\n", inputStatsJSON, outputStatsJSON)
+			inputStats := inputNode.GetCountersPtr()
+			outputStats := outputNode.GetCountersPtr()
+			fmt.Printf("Input: %d packets | Output: %d packets\n",
+				inputStats.Sent.Packets.TotalCount(),
+				outputStats.Received.Packets.TotalCount(),
+			)
 		}
 	}
+```
+
+The provided example could be represented this way:
+```mermaid
+graph LR
+    SRC[Source: e.g. Network/Disk] -- "Receive" --> IK
+
+    subgraph IN [Input Node]
+        direction TB
+        IK[Kernel: Input] -- "1. Generate()" --> IP[Processor]
+        IP -- "2. OutputChan()" --> IS["Node's Serve() loop"]
+    end
+
+    subgraph TN [Transcoder Node]
+        direction TB
+        TP[Processor] -- "4. SendInput()" --> TK[Kernel: Transcoder]
+        TK -- "5. OutputChan" --> TP
+        TP -- "6. OutputChan()" --> TS["Node's Serve() loop"]
+    end
+
+    subgraph ON [Output Node]
+        direction TB
+        OP[Processor] -- "8. SendInput()" --> OK[Kernel: Output]
+    end
+
+    IS -- "3. Push (to InputChan)" --> TP
+    TS -- "7. Push (to InputChan)" --> OP
+
+    OK -- "Send" --> SNK[Sink: e.g. Network/Disk]
+
+    style SRC fill:#333,stroke:#666,color:#fff
+    style SNK fill:#333,stroke:#666,color:#fff
+    style IN fill:#333,stroke:#666,color:#fff
+    style TN fill:#333,stroke:#666,color:#fff
+    style ON fill:#333,stroke:#666,color:#fff
+    style IP fill:#000066,stroke:#0055ff,color:#fff
+    style TP fill:#000066,stroke:#0055ff,color:#fff
+    style OP fill:#000066,stroke:#0055ff,color:#fff
+    style IK fill:#663300,stroke:#ff6600,color:#fff
+    style TK fill:#663300,stroke:#ff6600,color:#fff
+    style OK fill:#663300,stroke:#ff6600,color:#fff
+    style IS fill:#003300,stroke:#008000,color:#fff
+    style TS fill:#003300,stroke:#008000,color:#fff
 ```
 
 # Examples
