@@ -25,6 +25,8 @@ github.com/asticode/go-astikit v0.55.0 h1:jdR6djfjAF2SwtFu1hzwkenCRejzOZUREsr3xP
 github.com/asticode/go-astikit v0.55.0/go.mod h1:fV43j20UZYfXzP9oBn33udkvCvDvCDhzjVqoLFuuYZE=
 github.com/av-elier/go-decimal-to-rational v0.0.0-20250603203441-f39a07f43ff3 h1:/YU0DeJ1G3zn93Yk2ziNZdG7Q0w9KNfw/JmPNJ4IVDI=
 github.com/av-elier/go-decimal-to-rational v0.0.0-20250603203441-f39a07f43ff3/go.mod h1:GnsWLsBM/Ru0k9GBU9jUFqf35G9c5/EPQfvoV4IPPzA=
+github.com/brettbuddin/fourier v0.1.1 h1:jjlYBAV018g3B2VH5wGI/XgZE9veEHXS7MmPa4BJgmo=
+github.com/brettbuddin/fourier v0.1.1/go.mod h1:o4lEcyAaNBt8evqo2VXTSpRnZTts9lyzt73uRFtmD70=
 github.com/campoy/embedmd v1.0.0 h1:V4kI2qTJJLf4J29RzI/MAt2c3Bl4dQSYPuflzwFH2hY=
 github.com/campoy/embedmd v1.0.0/go.mod h1:oxyr9RCiSXg0M3VJ3ks0UGfp98BpSSGr0kpiX3MzVl8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -80,6 +82,7 @@ github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVs
 github.com/spf13/pflag v1.0.6 h1:jFzHGLGAlb3ruxLB8MhbI6A8+AQX/2eW4qeyNZXNp2o=
 github.com/spf13/pflag v1.0.6/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5cxcmMvtA=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.0 h1:ib4sjIrwZKxE5u/Japgo/7SJV3PvgjGiRNAvTVGqQl8=
@@ -95,8 +98,6 @@ github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825 h1:4f2P9/JA
 github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825/go.mod h1:IvRt8Hto32EGtBEf7A94HVxiYEt7hGXLWabjdnUYmAE=
 github.com/xaionaro-go/astiav v0.0.0-20251221215811-398e1d68b2e9 h1:BVolJGRVLBd2w8HMb57VqY1Lk8mW5ZMKITGsKWHNfJA=
 github.com/xaionaro-go/astiav v0.0.0-20251221215811-398e1d68b2e9/go.mod h1:txVrlvD3ErCtyacQ6WBMarn9+oD1V8vk33dWmVCGQhM=
-github.com/xaionaro-go/audio v0.0.0-20250426140416-6a9b3f1c8737 h1:82T1ghLMySGzft1c11Go+GtSQI67Ixk6Mq+nZ52CnnI=
-github.com/xaionaro-go/audio v0.0.0-20250426140416-6a9b3f1c8737/go.mod h1:m1JTs/Kqw+iPlQ081sfXA2JPBIylezwe5c3w//oV3Gs=
 github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d h1:++uR850Cqo5qXGTfAq60p2sIfq7oSYK0x0KoKL8B9Ts=
 github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d/go.mod h1:kjLo1LasgdDJqbTGD5bbEM+D6RiZSbf5ZT8yiPFF1BA=
 github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8 h1:FZn9+TN3uHhohfpanWkR9lFNHApizznZbML6XjvEgTU=

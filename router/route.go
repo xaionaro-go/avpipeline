@@ -226,9 +226,9 @@ func (r *Route[T]) AddPublisherLocked(
 	wg *sync.WaitGroup,
 ) (_ret Publishers[T], _err error) {
 	ctx = belt.WithField(ctx, "publish_mode", publisher.GetPublishMode(ctx))
-	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %s)", r, publisher)
+	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %s/%p)", r, publisher, publisher)
 	defer func() {
-		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %s): len(ret):%d, %v", r, publisher, len(_ret), _err)
+		logger.Debugf(ctx, "/AddPublisherLocked[%s](ctx, %s/%p): len(ret):%d, %v", r, publisher, publisher, len(_ret), _err)
 	}()
 
 	if !r.IsNodeOpen {

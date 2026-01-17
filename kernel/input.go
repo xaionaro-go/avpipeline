@@ -414,9 +414,9 @@ func (i *Input) autoDetectSyncStreamIndexIfNeeded(
 	}
 
 	switch outPkt.GetCodecParameters().MediaType() {
-	case astiav.MediaTypeAudio:
+	case astiav.MediaTypeVideo, astiav.MediaTypeAudio:
 		if i.SyncStreamIndex.CompareAndSwap(math.MinInt64, int64(outPkt.GetStreamIndex())) {
-			logger.Debugf(ctx, "auto-detected sync stream index: %d (video)", outPkt.GetStreamIndex())
+			logger.Debugf(ctx, "auto-detected sync stream index: %d (%v)", outPkt.GetStreamIndex(), outPkt.GetCodecParameters().MediaType())
 		}
 		return i.SyncStreamIndex.Load() >= 0
 	default:
@@ -451,6 +451,10 @@ func (i *Input) slowdownIfNeeded(
 		return
 	}
 	assert(ctx, pts >= 0, "PTS is negative")
+
+	if i.ClockCalculator == nil {
+		i.ClockCalculator = ts.NewClockCalculator(globaltypes.Rational{Num: timeBase.Num(), Den: timeBase.Den()})
+	}
 
 	sleepDuration := i.ClockCalculator.Until(ctx, pts)
 	if sleepDuration <= 0 {

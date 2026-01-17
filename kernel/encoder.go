@@ -67,16 +67,13 @@ var (
 )
 
 type streamEncoder struct {
-	Encoder            codec.Encoder
-	EncoderConfig      *EncoderConfig
-	Resampler          *resampler.Resampler
-	ResampledFrames    []*astiav.Frame
-	Scaler             scaler.Scaler
-	ScaledFrame        *astiav.Frame
-	LastAudioFrame     *astiav.Frame
-	LastInitTS         time.Time
-	NextExpectedPTS    int64
-	NextExpectedPTSSet bool
+	Encoder         codec.Encoder
+	EncoderConfig   *EncoderConfig
+	Resampler       *resampler.Resampler
+	ResampledFrames []*astiav.Frame
+	Scaler          scaler.Scaler
+	ScaledFrame     *astiav.Frame
+	LastInitTS      time.Time
 }
 
 func (e *streamEncoder) Close(ctx context.Context) error {
@@ -84,67 +81,11 @@ func (e *streamEncoder) Close(ctx context.Context) error {
 	err := e.Encoder.Close(ctx)
 	// Prevent GC from collecting ScaledFrame before the encoder is done draining
 	runtime.KeepAlive(e.ScaledFrame)
-	runtime.KeepAlive(e.LastAudioFrame)
 	return err
 }
 
-type VideoGapsStrategy int
-
-const (
-	UndefinedVideoGapsStrategy VideoGapsStrategy = iota
-	VideoGapsStrategyNone
-	VideoGapsStrategyAddBlankFrames
-	VideoGapsStrategyExtendNextFrame
-	VideoGapsStrategyDuplicateNextFrame
-)
-
-func (vgs VideoGapsStrategy) String() string {
-	switch vgs {
-	case UndefinedVideoGapsStrategy:
-		return "<undefined>"
-	case VideoGapsStrategyNone:
-		return "none"
-	case VideoGapsStrategyAddBlankFrames:
-		return "add_blank_frames"
-	case VideoGapsStrategyExtendNextFrame:
-		return "extend_next_frame"
-	case VideoGapsStrategyDuplicateNextFrame:
-		return "duplicate_next_frame"
-	default:
-		return fmt.Sprintf("<unknown:%d>", int(vgs))
-	}
-}
-
-type AudioGapsStrategy int
-
-const (
-	UndefinedAudioGapsStrategy AudioGapsStrategy = iota
-	AudioGapsStrategyNone
-	AudioGapsStrategyAddSilence
-	AudioGapsStrategyRepeat
-)
-
-func (ags AudioGapsStrategy) String() string {
-	switch ags {
-	case UndefinedAudioGapsStrategy:
-		return "<undefined>"
-	case AudioGapsStrategyNone:
-		return "none"
-	case AudioGapsStrategyAddSilence:
-		return "add_silence"
-	case AudioGapsStrategyRepeat:
-		return "repeat"
-	default:
-		return fmt.Sprintf("<unknown:%d>", int(ags))
-	}
-}
-
 type EncoderConfig struct {
-	StreamConfigurer    StreamConfigurer
-	AudioGapsStrategy   AudioGapsStrategy
-	AudioMaxGapDuration time.Duration
-	VideoGapsStrategy   VideoGapsStrategy
-	VideoMaxGapDuration time.Duration
+	StreamConfigurer StreamConfigurer
 }
 
 func (cfg *EncoderConfig) String() string {
@@ -155,12 +96,7 @@ func (cfg *EncoderConfig) String() string {
 }
 
 func DefaultEncoderConfig() EncoderConfig {
-	return EncoderConfig{
-		AudioGapsStrategy:   AudioGapsStrategyAddSilence,
-		AudioMaxGapDuration: 500 * time.Millisecond,
-		VideoGapsStrategy:   VideoGapsStrategyExtendNextFrame,
-		VideoMaxGapDuration: 2 * time.Second,
-	}
+	return EncoderConfig{}
 }
 
 func NewEncoder[EF codec.EncoderFactory](
@@ -683,13 +619,6 @@ func (e *Encoder[EF]) sendFrame(
 			return nil
 		}
 
-		if outputMediaType == astiav.MediaTypeVideo {
-			fittedFrames = streamEncoder.fixVideoGapIfNeeded(ctx, fittedFrames)
-		}
-		if outputMediaType == astiav.MediaTypeAudio {
-			fittedFrames = streamEncoder.fixAudioGapIfNeeded(ctx, fittedFrames)
-		}
-
 		frameInfo := FrameInfo{
 			PTS:         input.Pts(),
 			DTS:         input.PktDts(),
@@ -758,340 +687,6 @@ func (e *Encoder[EF]) sendFrame(
 
 		return nil
 	})
-}
-
-// fixVideoGapIfNeeded detects such gaps and applies a configured strategy to fix them.
-//
-// DJI Osmo devices tend to produce video with PTS gaps.
-// It is assumed it is caused by their MCU being overloaded and dropping frames internally.
-//
-// Note: this function assumes frames are received in PTS order.
-func (e *streamEncoder) fixVideoGapIfNeeded(
-	ctx context.Context,
-	input []*astiav.Frame,
-) (_output []*astiav.Frame) {
-	for _, frame := range input {
-		_output = append(_output, e.fixVideoGapIfNeededForOneFrame(ctx, frame)...)
-	}
-	return
-}
-
-func (e *streamEncoder) fixVideoGapIfNeededForOneFrame(
-	ctx context.Context,
-	input *astiav.Frame,
-) []*astiav.Frame {
-	switch e.EncoderConfig.VideoGapsStrategy {
-	case VideoGapsStrategyNone, UndefinedVideoGapsStrategy:
-		return []*astiav.Frame{input}
-	default:
-	}
-
-	var gapStart *int64
-	if e.NextExpectedPTSSet {
-		currentPTS := input.Pts()
-		expectedPTS := e.NextExpectedPTS
-		if currentPTS > expectedPTS {
-			gap := currentPTS - expectedPTS
-			if e.EncoderConfig.VideoMaxGapDuration > 0 {
-				maxGapPTSUnits := astiav.RescaleQ(e.EncoderConfig.VideoMaxGapDuration.Nanoseconds(), astiav.NewRational(1, 1000000000), e.Encoder.CodecContext().TimeBase())
-				if gap > maxGapPTSUnits {
-					logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap too large to fix: gap=%d, maxGap=%d (strategy: %s); resetting the expected PTS", gap, maxGapPTSUnits, e.EncoderConfig.VideoGapsStrategy)
-					e.NextExpectedPTSSet = false
-				}
-			}
-
-			if e.NextExpectedPTSSet {
-				logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap: lastPTS=%d, currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", expectedPTS, currentPTS, expectedPTS, e.EncoderConfig.VideoGapsStrategy)
-				gapStart = ptr(expectedPTS)
-			}
-		}
-	}
-	e.NextExpectedPTS = input.Pts() + input.Duration()
-	e.NextExpectedPTSSet = true
-	if gapStart == nil {
-		return []*astiav.Frame{input}
-	}
-
-	switch e.EncoderConfig.VideoGapsStrategy {
-	case VideoGapsStrategyNone, UndefinedVideoGapsStrategy:
-		panic("supposed to be impossible")
-	case VideoGapsStrategyExtendNextFrame:
-		return e.fixVideoGapExtendNextFrame(ctx, input, *gapStart)
-	case VideoGapsStrategyDuplicateNextFrame:
-		return e.fixVideoGapDuplicateNextFrame(ctx, input, *gapStart)
-	case VideoGapsStrategyAddBlankFrames:
-		return e.fixVideoGapAddBlankFrames(ctx, input, *gapStart)
-	default:
-		logger.Errorf(ctx, "unknown VideoGapsStrategy: %s", e.EncoderConfig.VideoGapsStrategy)
-		return []*astiav.Frame{input}
-	}
-}
-
-func (e *streamEncoder) fixVideoGapAddBlankFrames(
-	ctx context.Context,
-	input *astiav.Frame,
-	gapStart int64,
-) []*astiav.Frame {
-	var result []*astiav.Frame
-
-	originalDuration := input.Duration()
-	if originalDuration <= 0 {
-		return []*astiav.Frame{input}
-	}
-
-	currentPTS := gapStart
-	targetPTS := input.Pts()
-
-	for currentPTS < targetPTS {
-		f := frame.Pool.Get()
-		f.SetWidth(input.Width())
-		f.SetHeight(input.Height())
-		f.SetPixelFormat(input.PixelFormat())
-		f.SetSampleAspectRatio(input.SampleAspectRatio())
-		f.SetColorRange(input.ColorRange())
-		f.SetColorSpace(input.ColorSpace())
-		if err := f.AllocBuffer(0); err != nil {
-			logger.Errorf(ctx, "unable to allocate frame buffer for a blank frame: %v", err)
-			break
-		}
-		if err := f.ImageFillBlack(); err != nil {
-			logger.Errorf(ctx, "unable to fill frame with black color: %v", err)
-		}
-
-		f.SetPts(currentPTS)
-
-		// Check if the next frame would overshoot the target PTS
-		nextPTS := currentPTS + originalDuration
-		if nextPTS > targetPTS {
-			f.SetDuration(targetPTS - currentPTS)
-		} else {
-			f.SetDuration(originalDuration)
-		}
-
-		result = append(result, f)
-		currentPTS = f.Pts() + f.Duration()
-	}
-
-	result = append(result, input)
-
-	return result
-}
-
-func (e *streamEncoder) fixVideoGapExtendNextFrame(
-	_ context.Context,
-	input *astiav.Frame,
-	gapStart int64,
-) []*astiav.Frame {
-	gap := input.Pts() - gapStart
-	newDuration := input.Duration() + gap
-	input.SetPts(gapStart)
-	input.SetDuration(newDuration)
-	return []*astiav.Frame{input}
-}
-
-func (e *streamEncoder) fixVideoGapDuplicateNextFrame(
-	_ context.Context,
-	input *astiav.Frame,
-	gapStart int64,
-) []*astiav.Frame {
-	var result []*astiav.Frame
-
-	originalDuration := input.Duration()
-	if originalDuration <= 0 {
-		return []*astiav.Frame{input}
-	}
-
-	currentPTS := gapStart
-	targetPTS := input.Pts()
-
-	// duplicates
-	for currentPTS < targetPTS {
-		dupFrame := frame.CloneAsReferenced(input)
-		dupFrame.SetPts(currentPTS)
-
-		// Check if the next frame would overshoot the target PTS
-		nextPTS := currentPTS + originalDuration
-		if nextPTS > targetPTS {
-			// Extend this frame's duration to exactly reach the target PTS
-			dupFrame.SetDuration(targetPTS - currentPTS)
-		} else {
-			dupFrame.SetDuration(originalDuration)
-		}
-
-		result = append(result, dupFrame)
-		currentPTS = dupFrame.Pts() + dupFrame.Duration()
-	}
-
-	// the original
-	result = append(result, input)
-
-	return result
-}
-
-func (e *streamEncoder) fixAudioGapIfNeeded(
-	ctx context.Context,
-	input []*astiav.Frame,
-) (_output []*astiav.Frame) {
-	for _, frame := range input {
-		_output = append(_output, e.fixAudioGapIfNeededForOneFrame(ctx, frame)...)
-	}
-	return
-}
-
-func (e *streamEncoder) fixAudioGapIfNeededForOneFrame(
-	ctx context.Context,
-	input *astiav.Frame,
-) []*astiav.Frame {
-	switch e.EncoderConfig.AudioGapsStrategy {
-	case AudioGapsStrategyNone, UndefinedAudioGapsStrategy:
-		return []*astiav.Frame{input}
-	default:
-	}
-
-	var gapStart *int64
-	if e.NextExpectedPTSSet {
-		currentPTS := input.Pts()
-		expectedPTS := e.NextExpectedPTS
-		if currentPTS > expectedPTS {
-			gap := currentPTS - expectedPTS
-			if e.EncoderConfig.AudioMaxGapDuration > 0 {
-				maxGapPTSUnits := astiav.RescaleQ(e.EncoderConfig.AudioMaxGapDuration.Nanoseconds(), astiav.NewRational(1, 1000000000), e.Encoder.CodecContext().TimeBase())
-				if gap > maxGapPTSUnits {
-					logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap too large to fix: gap=%d, maxGap=%d (strategy: %s); resetting the expected PTS", gap, maxGapPTSUnits, e.EncoderConfig.AudioGapsStrategy)
-					e.NextExpectedPTSSet = false
-				}
-			}
-
-			if e.NextExpectedPTSSet {
-				logger.Warnf(ctx, "CoverPTSGaps: detected PTS gap: lastPTS=%d, currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", expectedPTS, currentPTS, expectedPTS, e.EncoderConfig.AudioGapsStrategy)
-				gapStart = ptr(expectedPTS)
-			}
-		}
-	}
-
-	res := []*astiav.Frame{input}
-	if gapStart != nil {
-		switch e.EncoderConfig.AudioGapsStrategy {
-		case AudioGapsStrategyAddSilence:
-			res = e.fixAudioGapAddSilence(ctx, input, *gapStart)
-		case AudioGapsStrategyRepeat:
-			res = e.fixAudioGapRepeat(ctx, input, *gapStart)
-		default:
-			logger.Errorf(ctx, "unknown AudioGapsStrategy: %s", e.EncoderConfig.AudioGapsStrategy)
-		}
-	}
-
-	e.NextExpectedPTS = input.Pts() + input.Duration()
-	e.NextExpectedPTSSet = true
-
-	if e.EncoderConfig.AudioGapsStrategy == AudioGapsStrategyRepeat {
-		if e.LastAudioFrame != nil {
-			frame.Pool.Put(e.LastAudioFrame)
-		}
-		e.LastAudioFrame = frame.CloneAsReferenced(input)
-	}
-
-	return res
-}
-
-func (e *streamEncoder) fixAudioGapAddSilence(
-	ctx context.Context,
-	input *astiav.Frame,
-	gapStart int64,
-) []*astiav.Frame {
-	var result []*astiav.Frame
-	currentPTS := gapStart
-	targetPTS := input.Pts()
-
-	nbSamples := input.NbSamples()
-	if nbSamples <= 0 {
-		return []*astiav.Frame{input}
-	}
-
-	originalDuration := input.Duration()
-	if originalDuration <= 0 {
-		return []*astiav.Frame{input}
-	}
-
-	for currentPTS < targetPTS {
-		f := frame.Pool.Get()
-		f.SetSampleFormat(input.SampleFormat())
-		f.SetSampleRate(input.SampleRate())
-		f.SetChannelLayout(input.ChannelLayout())
-
-		remainingGap := targetPTS - currentPTS
-		samplesToFill := int(remainingGap * int64(nbSamples) / originalDuration)
-		if samplesToFill > nbSamples {
-			samplesToFill = nbSamples
-		}
-		if samplesToFill <= 0 {
-			break
-		}
-
-		f.SetNbSamples(samplesToFill)
-		if err := f.AllocBuffer(0); err != nil {
-			logger.Errorf(ctx, "unable to allocate frame buffer for a silent frame: %v", err)
-			break
-		}
-		if err := f.SamplesFillSilence(); err != nil {
-			logger.Errorf(ctx, "unable to fill frame with silence: %v", err)
-		}
-
-		f.SetPts(currentPTS)
-		dur := samplesToFill * int(originalDuration) / nbSamples
-		if currentPTS+int64(dur) > targetPTS {
-			dur = int(targetPTS - currentPTS)
-		}
-		f.SetDuration(int64(dur))
-
-		result = append(result, f)
-		currentPTS = f.Pts() + f.Duration()
-	}
-
-	result = append(result, input)
-	return result
-}
-
-func (e *streamEncoder) fixAudioGapRepeat(
-	ctx context.Context,
-	input *astiav.Frame,
-	gapStart int64,
-) []*astiav.Frame {
-	if e.LastAudioFrame == nil {
-		return e.fixAudioGapAddSilence(ctx, input, gapStart)
-	}
-
-	var result []*astiav.Frame
-	currentPTS := gapStart
-	targetPTS := input.Pts()
-
-	nbSamples := e.LastAudioFrame.NbSamples()
-	if nbSamples <= 0 {
-		return e.fixAudioGapAddSilence(ctx, input, gapStart)
-	}
-
-	originalDuration := e.LastAudioFrame.Duration()
-	if originalDuration <= 0 {
-		return e.fixAudioGapAddSilence(ctx, input, gapStart)
-	}
-
-	for currentPTS < targetPTS {
-		f := frame.CloneAsReferenced(e.LastAudioFrame)
-		f.SetPts(currentPTS)
-
-		remainingGap := targetPTS - currentPTS
-		if originalDuration > remainingGap {
-			f.SetDuration(remainingGap)
-		} else {
-			f.SetDuration(originalDuration)
-		}
-
-		result = append(result, f)
-		currentPTS = f.Pts() + f.Duration()
-	}
-
-	result = append(result, input)
-	return result
 }
 
 func isEmptyFrame(

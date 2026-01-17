@@ -276,10 +276,20 @@ func runTest(
 					},
 				)
 				if errors.As(err, &streammux.ErrSwitchAlreadyInProgress{}) {
-					logger.Warnf(ctx, "SwitchToOutputByProps: switch in progress: %v; retrying in 1 second", err)
-					time.Sleep(time.Second)
+					logger.Warnf(ctx, "SwitchToOutputByProps: switch in progress: %v; retrying", err)
+					chSwitch := streamMux.InputAll.OutputSwitch.GetChangeChan()
+					chSyncer := streamMux.InputAll.OutputSyncer.GetChangeChan()
+					if streamMux.InputAll.OutputSwitch.GetValue(ctx) != streamMux.InputAll.OutputSyncer.GetValue(ctx) {
+						select {
+						case <-ctx.Done():
+							require.NoError(t, ctx.Err())
+						case <-chSwitch:
+						case <-chSyncer:
+						}
+					}
 					continue
 				}
+				logger.Debugf(ctx, "SwitchToOutputByProps: switch successful, err=%v", err)
 				require.NoError(t, err)
 				break
 			}

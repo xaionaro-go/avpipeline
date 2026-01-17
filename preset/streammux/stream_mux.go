@@ -509,11 +509,13 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 	// the order is important to avoid race conditions:
 	id1 := OutputID(input.OutputSyncer.GetValue(ctx))
 	id0 := OutputID(input.OutputSwitch.GetValue(ctx))
-	if id0 != id1 {
-		return ErrSwitchAlreadyInProgress{OutputIDCurrent: id0, OutputIDNext: id1}
-	}
-	if output.ID == id0 {
+	logger.Debugf(ctx, "setPreferredOutputForInput: id0=%d, id1=%d, output.ID=%d", id0, id1, output.ID)
+
+	switch {
+	case output.ID == id0:
 		return ErrOutputAlreadyPreferred{OutputID: output.ID}
+	case id0 != id1:
+		return ErrSwitchAlreadyInProgress{OutputIDCurrent: id0, OutputIDNext: id1}
 	}
 
 	err := input.OutputSwitch.SetValue(ctx, int32(output.ID))
@@ -1066,7 +1068,9 @@ func (s *StreamMux[C]) withActiveVideoOutput(
 func (s *StreamMux[C]) GetActiveVideoOutput(
 	ctx context.Context,
 ) *Output[C] {
-	return xsync.DoA1R1(ctx, &s.OutputsLocker, s.getActiveVideoOutputLocked, ctx)
+	result := xsync.DoA1R1(ctx, &s.OutputsLocker, s.getActiveVideoOutputLocked, ctx)
+	logger.Tracef(ctx, "GetActiveVideoOutput returning: %v", result != nil)
+	return result
 }
 
 func (s *StreamMux[C]) getActiveVideoOutputLocked(
@@ -1075,6 +1079,7 @@ func (s *StreamMux[C]) getActiveVideoOutputLocked(
 	outputID := s.getVideoInput().OutputSwitch.CurrentValue.Load()
 	logger.Tracef(ctx, "getActiveVideoOutputLocked: outputID=%d", outputID)
 	output, _ := s.Outputs.Load(OutputID(outputID))
+	logger.Tracef(ctx, "getActiveVideoOutputLocked: found output: %v", output != nil)
 	return output
 }
 

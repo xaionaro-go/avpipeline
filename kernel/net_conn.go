@@ -45,7 +45,7 @@ func (n *netConn) Init(
 	n.protocolName = urlCtx.Protocol().Name()
 
 	switch n.protocolName {
-	case "rtmp", "rtmps", "srt", "libsrt", "udp":
+	case "rtmp", "rtmps", "udp", "srt", "libsrt":
 	default:
 		return
 	}

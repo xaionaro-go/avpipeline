@@ -26,6 +26,14 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 	cfg node.ServeConfig,
 	errCh chan<- node.Error,
 ) {
+	if a == nil {
+		return
+	}
+	if !a.isServing.CompareAndSwap(false, true) {
+		panic("already serving")
+	}
+	defer a.isServing.Store(false)
+
 	logger.Tracef(ctx, "AutoFixer[%p: %p, %p]: Serve: %s", a, a.AutoHeadersNode, a.MapStreamIndicesNode, debug.Stack())
 	defer logger.Tracef(ctx, "AutoFixer[%p: %p, %p]: /Serve", a, a.AutoHeadersNode, a.MapStreamIndicesNode)
 

@@ -50,7 +50,9 @@ func (si *StreamInfo) GetCodecParameters() *astiav.CodecParameters {
 
 func (si *StreamInfo) GetMediaType() astiav.MediaType {
 	if si.Stream != nil {
-		return si.Stream.CodecParameters().MediaType()
+		if cp := si.Stream.CodecParameters(); cp != nil {
+			return cp.MediaType()
+		}
 	}
 	if si.CodecParameters != nil {
 		return si.CodecParameters.MediaType()

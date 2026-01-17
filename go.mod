@@ -14,7 +14,7 @@ require (
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.11.0
-	github.com/xaionaro-go/audio v0.0.0-20250426140416-6a9b3f1c8737
+	github.com/xaionaro-go/audio v0.0.0-20260117175055-f7091fc3002b
 	github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20250505013920-61d894a3b7e9
@@ -39,6 +39,7 @@ require (
 	codeberg.org/go-pdf/fpdf v0.10.0 // indirect
 	git.sr.ht/~sbinet/gg v0.6.0 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
+	github.com/brettbuddin/fourier v0.1.1 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
@@ -81,3 +82,5 @@ require (
 	lukechampine.com/blake3 v1.4.0 // indirect
 	tailscale.com v1.86.5
 )
+
+replace github.com/xaionaro-go/audio => ../audio

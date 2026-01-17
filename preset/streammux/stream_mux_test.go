@@ -23,7 +23,9 @@ func TestStreamMuxNodes(t *testing.T) {
 		}
 
 		fV := v.Field(i)
-		expectedValues = append(expectedValues, fV.Interface().(node.Abstract))
+		if fV.Interface() != nil {
+			expectedValues = append(expectedValues, fV.Interface().(node.Abstract))
+		}
 	}
 
 	// we have zero outputs, so there be only the global streammux nodes:

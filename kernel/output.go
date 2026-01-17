@@ -1,5 +1,3 @@
-// output.go implements the Output kernel for writing media streams to destinations.
-
 package kernel
 
 import (
@@ -387,7 +385,7 @@ func (o *Output) doOpen(
 	}()
 
 	switch url.Scheme {
-	case "rtmp", "rtmps", "rtsp":
+	case "rtmp", "rtmps", "rtsp", "srt":
 		for i := 0; i < int(cfg.WaitForOutputStreams.MinStreamsVideo); i++ {
 			outputStream := &OutputStream{
 				Stream:  o.FormatContext.NewStream(nil),
@@ -420,20 +418,23 @@ func (o *Output) doOpen(
 	}
 
 	formatName := o.FormatContext.OutputFormat().Name()
-	logger.Debugf(ctx, "output format name: '%s'", formatName)
+	flags := o.FormatContext.OutputFormat().Flags()
+	logger.Debugf(ctx, "output format name: '%s', flags: %v (NOFILE:%v)", formatName, flags, flags.Has(astiav.IOFormatFlagNofile))
 	o.outputFormatName = formatName
 
-	ioContext, err := astiav.OpenIOContext(
-		url.String(),
-		astiav.NewIOContextFlags(astiav.IOContextFlagWrite),
-		nil,
-		o.Dictionary,
-	)
-	if err != nil {
-		return fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
+	if url.String() != "" && !o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
+		ioContext, err := astiav.OpenIOContext(
+			url.String(),
+			astiav.NewIOContextFlags(astiav.IOContextFlagWrite),
+			nil,
+			o.Dictionary,
+		)
+		if err != nil {
+			return fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
+		}
+		o.ioContext = ioContext
+		o.FormatContext.SetPb(ioContext)
 	}
-	o.ioContext = ioContext
-	o.FormatContext.SetPb(ioContext)
 	o.URLParsed = url
 
 	o.initNetworkConn(ctx)
@@ -502,7 +503,6 @@ func (o *Output) Close(
 				logger.Debugf(ctx, "writing the trailer")
 				err := o.FormatContext.WriteTrailer()
 				logger.Debugf(ctx, "wrote the trailer, result: %v", err)
-				o.headerSent = false
 				return err
 			}()
 			if err != nil {
@@ -540,6 +540,9 @@ func (o *Output) updateOutputFormat(
 	inputSource packet.Source,
 	inputFmt *astiav.FormatContext,
 ) (_err error) {
+	if inputFmt == nil {
+		return fmt.Errorf("input format context is nil")
+	}
 	logger.Debugf(ctx, "updateOutputFormat: %d streams", inputFmt.NbStreams())
 	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
 	for _, inputStream := range inputFmt.Streams() {
@@ -997,7 +1000,7 @@ func (o *Output) send(
 	o.sendingAllowed = true
 
 	var err error
-	if outputWriteHeaders {
+	if outputWriteHeaders && !o.headerSent {
 		o.formatContextLocker.Do(ctx, func() {
 			if o.FormatContext == nil {
 				err = io.EOF

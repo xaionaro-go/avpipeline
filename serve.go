@@ -35,7 +35,7 @@ func Serve[T node.Abstract](
 ) {
 	var nodesWG sync.WaitGroup
 	defer nodesWG.Wait()
-	dstAlreadyVisited := map[node.Abstract]struct{}{}
+	var dstAlreadyVisited sync.Map
 	serve(ctx, serveConfig, errCh, &nodesWG, &dstAlreadyVisited, nodes...)
 }
 
@@ -44,7 +44,7 @@ func serve[T node.Abstract](
 	serveConfig ServeConfig,
 	errCh chan<- node.Error,
 	nodesWG *sync.WaitGroup,
-	dstAlreadyVisited *map[node.Abstract]struct{},
+	dstAlreadyVisited *sync.Map,
 	nodes ...T,
 ) {
 	for _, n := range nodes {
@@ -56,12 +56,12 @@ func serve[T node.Abstract](
 			}
 			nodeKey := fmt.Sprintf("%s:%p", any(n), any(n))
 			logger.Tracef(ctx, "Serve[%s]", nodeKey)
-			if _, ok := (*dstAlreadyVisited)[n]; ok {
+			if _, ok := dstAlreadyVisited.LoadOrStore(n, struct{}{}); ok {
 				logger.Tracef(ctx, "/Serve[%s]: already visited", nodeKey)
 				return
 			}
-			logger.Tracef(ctx, "Serve[%s]: was not visited (%v)", nodeKey, (*dstAlreadyVisited))
-			(*dstAlreadyVisited)[n] = struct{}{}
+			logger.Tracef(ctx, "Serve[%s]: was not visited", nodeKey)
+			dstAlreadyVisited.Store(n, struct{}{})
 
 			if serveConfig.NodeTreeFilter != nil && !serveConfig.NodeTreeFilter.Match(ctx, n) {
 				logger.Tracef(ctx, "/Serve[%s]: skipped the whole tree", nodeKey)

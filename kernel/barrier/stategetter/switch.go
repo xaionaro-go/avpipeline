@@ -146,7 +146,7 @@ func (s *Switch) SetValue(
 		}
 	}
 
-	if s.GetKeepUnless() == nil {
+	if s.GetKeepUnless() == nil || s.CurrentValue.Load() == math.MinInt32 {
 		return s.setValueNow(ctx, idx)
 	}
 

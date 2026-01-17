@@ -195,8 +195,9 @@ func (s *StreamMux[C]) IsDrained(ctx context.Context) bool {
 }
 
 func (s *StreamMux[C]) Nodes(ctx context.Context) []node.Abstract {
-	nodes := []node.Abstract{
-		s.InputAll.Node,
+	var nodes []node.Abstract
+	if s.InputAll.Node != nil {
+		nodes = append(nodes, s.InputAll.Node)
 	}
 	s.Locker.Do(ctx, func() {
 		s.OutputsMap.Range(func(_ SenderKey, output *Output[C]) bool {
