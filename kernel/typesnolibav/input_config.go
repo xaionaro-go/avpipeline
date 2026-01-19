@@ -30,6 +30,8 @@ type InputConfig struct {
 	ForceStartPTS *int64
 	ForceStartDTS *int64
 
+	DisplayRotation *float64
+
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
 

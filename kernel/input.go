@@ -61,6 +61,7 @@ type Input struct {
 	ForceRealTime      bool
 	ForceStartPTS      int64
 	ForceStartDTS      int64
+	DisplayRotation    *float64
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
@@ -110,6 +111,7 @@ func NewInputFromURL(
 		AutoClose:          cfg.AutoClose,
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
+		DisplayRotation:    cfg.DisplayRotation,
 	}
 	if cfg.OnPreClose != nil {
 		i.OnPreClose = func(ctx context.Context, i *Input) error {
@@ -149,6 +151,14 @@ func NewInputFromURL(
 				}
 				defaultFPS = r
 				i.Dictionary.Set("framerate", opt.Value, 0)
+			case "display_rotation":
+				logger.Debugf(ctx, "setting display rotation to '%s'", opt.Value)
+				var r float64
+				_, err := fmt.Sscanf(opt.Value, "%f", &r)
+				if err != nil {
+					return nil, fmt.Errorf("unable to parse display_rotation '%s': %w", opt.Value, err)
+				}
+				i.DisplayRotation = &r
 			default:
 				logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
 				i.Dictionary.Set(opt.Key, opt.Value, 0)
@@ -321,6 +331,14 @@ func (i *Input) doOpen(
 
 	for _, stream := range i.FormatContext.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
+		if i.DisplayRotation != nil && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+			dm := astiav.NewDisplayMatrixFromRotation(*i.DisplayRotation)
+			err := stream.SideData().DisplayMatrix().Add(dm)
+			if err != nil {
+				return fmt.Errorf("unable to add display matrix to stream #%d: %w", stream.Index(), err)
+			}
+			logger.Infof(ctx, "set display rotation to %f for stream #%d", *i.DisplayRotation, stream.Index())
+		}
 	}
 
 	if cfg.OnPostOpen != nil {
