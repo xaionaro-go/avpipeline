@@ -462,7 +462,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	)
 	nodeFilterThrottle := node.NewFromKernel(
 		ctx,
-		kernel.NewPacketFilter(s.FilterThrottle),
+		kernel.NewFilter(s.FilterThrottle),
 		processor.DefaultOptionsOutput()...,
 	)
 

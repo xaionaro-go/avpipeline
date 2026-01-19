@@ -9,13 +9,21 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/packet"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/xsync"
 )
 
 type DecoderFactory interface {
 	fmt.Stringer
 
-	NewDecoder(ctx context.Context, stream *astiav.Stream, opts ...Option) (*Decoder, error)
+	NewDecoder(
+		ctx context.Context,
+		source packet.Source,
+		stream *astiav.Stream,
+		pipelineSideData globaltypes.PipelineSideData,
+		opts ...Option,
+	) (*Decoder, error)
 
 	Reset(ctx context.Context) error
 }
@@ -59,7 +67,9 @@ func NewNaiveDecoderFactory(
 
 func (f *NaiveDecoderFactory) NewDecoder(
 	ctx context.Context,
+	_ packet.Source,
 	stream *astiav.Stream,
+	_ globaltypes.PipelineSideData,
 	opts ...Option,
 ) (_ret *Decoder, _err error) {
 	return xsync.DoA3R2(ctx, &f.Locker, f.newDecoder, ctx, stream, opts)

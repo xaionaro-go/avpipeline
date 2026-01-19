@@ -16,8 +16,8 @@ type CodecParams struct {
 	HardwareDeviceType    HardwareDeviceType
 	HardwareDeviceName    HardwareDeviceName
 	ErrorRecognitionFlags astiav.ErrorRecognitionFlags
-	TimeBase              astiav.Rational
-	CustomOptions         *astiav.Dictionary
+	TimeBase              astiav.Rational    // TODO: replace with types.Rational
+	CustomOptions         *astiav.Dictionary // TODO: replace with types.DictionaryItems
 	HWDevFlags            int
 	ResourceManager       ResourceManager
 	Options               []Option

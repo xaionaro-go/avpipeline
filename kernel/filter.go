@@ -1,5 +1,3 @@
-// packet_filter.go implements a kernel that filters packets based on a condition.
-
 package kernel
 
 import (
@@ -7,29 +5,28 @@ import (
 	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
-	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
-type PacketFilter struct {
+type Filter struct {
 	*closuresignaler.ClosureSignaler
 	Condition packetorframecondition.Condition
 }
 
-var _ Abstract = (*PacketFilter)(nil)
+var _ Abstract = (*Filter)(nil)
 
-func NewPacketFilter(
+func NewFilter(
 	condition packetorframecondition.Condition,
-) *PacketFilter {
-	return &PacketFilter{
+) *Filter {
+	return &Filter{
 		ClosureSignaler: closuresignaler.New(),
 		Condition:       condition,
 	}
 }
 
-func (f *PacketFilter) SendInput(
+func (f *Filter) SendInput(
 	ctx context.Context,
 	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
@@ -37,34 +34,28 @@ func (f *PacketFilter) SendInput(
 	if f.Condition != nil && !f.Condition.Match(ctx, input) {
 		return nil
 	}
-
-	output := input.CloneAsReferencedOutput()
-	if output.Get() == nil {
-		return kerneltypes.ErrUnexpectedInputType{}
-	}
-
-	outputCh <- output
+	outputCh <- input.CloneAsReferencedOutput()
 	return nil
 }
 
-func (f *PacketFilter) GetObjectID() globaltypes.ObjectID {
+func (f *Filter) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(f)
 }
 
-func (f *PacketFilter) String() string {
-	return fmt.Sprintf("ConditionFilter(%s)", f.Condition)
+func (f *Filter) String() string {
+	return fmt.Sprintf("Filter(%s)", f.Condition)
 }
 
-func (f *PacketFilter) Close(ctx context.Context) error {
+func (f *Filter) Close(ctx context.Context) error {
 	f.ClosureSignaler.Close(ctx)
 	return nil
 }
 
-func (f *PacketFilter) CloseChan() <-chan struct{} {
+func (f *Filter) CloseChan() <-chan struct{} {
 	return f.ClosureSignaler.CloseChan()
 }
 
-func (f *PacketFilter) Generate(
+func (f *Filter) Generate(
 	ctx context.Context,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {

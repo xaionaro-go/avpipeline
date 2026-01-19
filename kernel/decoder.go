@@ -175,21 +175,27 @@ func (d *Decoder[DF]) Generate(
 
 func (d *Decoder[DF]) GetStreamDecoder(
 	ctx context.Context,
+	source packet.Source,
 	stream *astiav.Stream,
+	pipelineSideData globaltypes.PipelineSideData,
 ) (*StreamDecoder, error) {
-	return xsync.DoA2R2(ctx, &d.Locker, d.getStreamDecoder, ctx, stream)
+	return xsync.DoR2(ctx, &d.Locker, func() (*StreamDecoder, error) {
+		return d.getStreamDecoder(ctx, source, stream, pipelineSideData)
+	})
 }
 
 func (d *Decoder[DF]) getStreamDecoder(
 	ctx context.Context,
+	source packet.Source,
 	stream *astiav.Stream,
+	pipelineSideData globaltypes.PipelineSideData,
 ) (*StreamDecoder, error) {
 	decoder := d.Decoders[stream.Index()]
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder != nil {
 		return decoder, nil
 	}
-	rawDecoder, err := d.DecoderFactory.NewDecoder(ctx, stream)
+	rawDecoder, err := d.DecoderFactory.NewDecoder(ctx, source, stream, pipelineSideData)
 	if err != nil {
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
@@ -261,7 +267,7 @@ func (d *Decoder[DF]) sendPacket(
 	}
 
 	streamDecoder, err := xsync.DoR2(ctx, &d.Locker, func() (*StreamDecoder, error) {
-		return d.getStreamDecoder(ctx, input.Stream)
+		return d.getStreamDecoder(ctx, input.GetSource(), input.Stream, input.PipelineSideData)
 	})
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
@@ -533,7 +539,7 @@ func (d *Decoder[DF]) NotifyAboutPacketSource(
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		d.Locker.Do(ctx, func() {
 			for _, inputStream := range fmtCtx.Streams() {
-				_, err := d.getStreamDecoder(ctx, inputStream)
+				_, err := d.getStreamDecoder(ctx, source, inputStream, nil)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("unable to get a stream decoder: %w", err))
 				}

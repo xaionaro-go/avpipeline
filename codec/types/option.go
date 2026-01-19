@@ -2,6 +2,10 @@
 
 package types
 
+import (
+	"github.com/xaionaro-go/avpipeline/types"
+)
+
 type OptionCommons struct{}
 
 func (OptionCommons) codecOption() {}
@@ -20,3 +24,11 @@ func OptionLatest[T Option](s Options) (ret T, ok bool) {
 	}
 	return
 }
+
+type OptionOverrideHardwareDeviceType types.HardwareDeviceType
+
+func (OptionOverrideHardwareDeviceType) codecOption() {}
+
+type OptionOverrideCustomOptions types.DictionaryItems
+
+func (OptionOverrideCustomOptions) codecOption() {}

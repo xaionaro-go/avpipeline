@@ -22,9 +22,11 @@ import (
 	"github.com/facebookincubator/go-belt"
 	"github.com/xaionaro-go/avpipeline/codec/mediacodec"
 	"github.com/xaionaro-go/avpipeline/codec/resource"
+	"github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	globaltypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
+	xastiav "github.com/xaionaro-go/avpipeline/types/astiav"
 	"github.com/xaionaro-go/unsafetools"
 	"github.com/xaionaro-go/xsync"
 )
@@ -311,6 +313,12 @@ func newCodec(
 			opts...,
 		)
 	}
+	if v, ok := types.OptionLatest[types.OptionOverrideHardwareDeviceType](opts); ok {
+		hardwareDeviceType = HardwareDeviceType(v)
+	}
+	if v, ok := types.OptionLatest[types.OptionOverrideCustomOptions](opts); ok {
+		customOptions = xastiav.DictionaryItemsToAstiav(ctx, globaltypes.DictionaryItems(v))
+	}
 	ctx = belt.WithField(ctx, "is_encoder", isEncoder)
 	if codecParameters.CodecID() != astiav.CodecIDNone {
 		ctx = belt.WithField(ctx, "codec_id", codecParameters.CodecID())
@@ -320,7 +328,7 @@ func newCodec(
 
 	logger.Debugf(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts)
 	defer func() {
-		logger.Debugf(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, _ret, _err)
+		logger.Debugf(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts, _ret, _err)
 	}()
 	c := &Codec{
 		codecInternals: &codecInternals{
@@ -530,7 +538,7 @@ func newCodec(
 		default:
 			switch c.codec.Name() {
 			case "rawvideo":
-				logger.Errorf(ctx, "unable to init hardware device context for 'rawvideo' codec, ignoring the error: %v", err)
+				logger.Debugf(ctx, "unable to init hardware device context for 'rawvideo' codec, ignoring the error: %v", err)
 			default:
 				return nil, fmt.Errorf("unable to init hardware device context: %w", err)
 			}
@@ -769,20 +777,25 @@ func (c *codecInternals) setupPixelFormat(
 
 	c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 
-	var forcePixelFormat astiav.PixelFormat
-	defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
-	if c.isMediaCodec() {
-		if reusableResources != nil && reusableResources.HWDeviceContext != nil {
-			defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
-		}
-	}
-
 	pixelFormatOptionName := "pixel_format"
 	if isEncoder {
 		pixelFormatOptionName = "pix_fmt"
 	}
-	if c.isMediaCodec() {
-		if customOptions.Get(pixelFormatOptionName, nil, 0) == nil {
+
+	var forcePixelFormat astiav.PixelFormat
+	if v := customOptions.Get(pixelFormatOptionName, nil, 0); v != nil {
+		logger.Debugf(ctx, "%q option is set to '%s'", pixelFormatOptionName, v.Value())
+		pixFmt := astiav.FindPixelFormatByName(v.Value())
+		if pixFmt != 0 {
+			forcePixelFormat = pixFmt
+		}
+	} else {
+		logger.Debugf(ctx, "%q option is not set", pixelFormatOptionName)
+		if c.isMediaCodec() {
+			defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
+			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
+				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
+			}
 			logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 			if err := customOptions.Set(pixelFormatOptionName, defaultMediaCodecPixelFormat.String(), 0); err != nil {
 				return fmt.Errorf("unable to set %q option: %w", pixelFormatOptionName, err)
