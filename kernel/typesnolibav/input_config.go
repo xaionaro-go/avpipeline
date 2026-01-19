@@ -31,6 +31,7 @@ type InputConfig struct {
 	ForceStartDTS *int64
 
 	DisplayRotation *float64
+	AutoRotate      *bool
 
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool

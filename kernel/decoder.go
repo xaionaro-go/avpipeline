@@ -16,6 +16,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/extradata"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/helpers/avfilter"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
@@ -94,6 +95,16 @@ func packetInfoFromBytes(b []byte) *packetInfo {
 type StreamDecoder struct {
 	*codec.Decoder
 	SentBlankKeyFrame bool
+	AutoRotate        bool
+	Rotation          float64
+	Rotator           *avfilter.FrameRotator
+}
+
+func (sd *StreamDecoder) Close(ctx context.Context) error {
+	if sd.Rotator != nil {
+		sd.Rotator.Close()
+	}
+	return sd.Decoder.Close(ctx)
 }
 
 type Decoder[DF codec.DecoderFactory] struct {
@@ -200,8 +211,28 @@ func (d *Decoder[DF]) getStreamDecoder(
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
 	assert(ctx, rawDecoder != nil)
+
+	autoRotate := true
+	if v, ok := globaltypes.PipelineSideDataLatest[globaltypes.AutoRotate](pipelineSideData); ok {
+		autoRotate = bool(v)
+	}
+
+	var rotation float64
+	if autoRotate && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+		logger.Tracef(ctx, "checking for rotation in stream %d", stream.Index())
+		if sd := stream.SideData(); sd != nil {
+			logger.Tracef(ctx, "stream %d side data types: %v", stream.Index(), sd.Types())
+			if dm, ok := sd.DisplayMatrix().Get(); ok {
+				rotation = dm.Rotation()
+				logger.Tracef(ctx, "found rotation in stream %d: %v", stream.Index(), rotation)
+			}
+		}
+	}
+
 	decoder = &StreamDecoder{
-		Decoder: rawDecoder,
+		Decoder:    rawDecoder,
+		AutoRotate: autoRotate,
+		Rotation:   rotation,
 	}
 	logger.Tracef(ctx, "initialized a decoder: %s", decoder)
 	d.Decoders[stream.Index()] = decoder
@@ -362,7 +393,7 @@ func (d *Decoder[DF]) sendPacket(
 				logger.Debugf(ctx, "flushing the decoder after sending the packet due to SideFlagFlush")
 				drainFn = decoder.Flush
 			}
-			if err := d.drain(ctx, outputCh, drainFn, packetInfo); err != nil {
+			if err := d.drain(ctx, outputCh, streamDecoder, drainFn, packetInfo); err != nil {
 				return fmt.Errorf("unable to drain the decoder: %w", err)
 			}
 			if !shouldRetry {
@@ -388,6 +419,7 @@ func (d *Decoder[DF]) sendPacket(
 func (d *Decoder[DF]) drain(
 	ctx context.Context,
 	outputCh chan<- packetorframe.OutputUnion,
+	streamDecoder *StreamDecoder,
 	decoderDrainFn func(context.Context, codec.CallbackFrameReceiver) error,
 	packetInfo packetInfo,
 ) (_err error) {
@@ -443,6 +475,22 @@ func (d *Decoder[DF]) drain(
 
 		if packetInfo.Flags != 0 {
 			streamInfo = frame.BuildStreamInfo(streamInfo.Source, streamInfo.CodecParameters, streamInfo.StreamIndex, streamInfo.StreamsCount, streamInfo.TimeBase, streamInfo.Duration, packetInfo.Flags.PipelineSideData())
+		}
+
+		if streamDecoder.Rotation != 0 {
+			if streamDecoder.Rotator == nil {
+				var err error
+				streamDecoder.Rotator, err = avfilter.NewFrameRotator(ctx, f, streamInfo.TimeBase, streamDecoder.Rotation)
+				if err != nil {
+					return fmt.Errorf("unable to initialize frame rotator: %w", err)
+				}
+			}
+			rotated, err := streamDecoder.Rotator.Rotate(ctx, f)
+			if err != nil {
+				return fmt.Errorf("unable to rotate frame: %w", err)
+			}
+			frame.Pool.Put(f)
+			f = rotated
 		}
 
 		err := d.send(ctx, outputCh, f, streamInfo)
@@ -671,6 +719,7 @@ func (d *Decoder[DF]) Flush(
 					err := d.drain(
 						ctx,
 						outputCh,
+						decoder,
 						decoder.Flush,
 						packetInfo{
 							StreamIndex: streamIndex,

@@ -45,6 +45,7 @@ type Input struct {
 	*closuresignaler.ClosureSignaler
 	openFinished chan struct{}
 	openError    error
+	isClosing    atomic.Bool
 
 	*astiav.FormatContext
 	*astiav.IOInterrupter
@@ -62,9 +63,12 @@ type Input struct {
 	ForceStartPTS      int64
 	ForceStartDTS      int64
 	DisplayRotation    *float64
+	AutoRotate         bool
 	OnPreClose         func(context.Context, *Input) error
 	IgnoreIncorrectDTS bool
 	IgnoreZeroDuration bool
+
+	PipelineSideData globaltypes.PipelineSideData
 
 	SyncStreamIndex atomic.Int64
 	ClockCalculator *ts.ClockCalculator
@@ -112,7 +116,9 @@ func NewInputFromURL(
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
 		DisplayRotation:    cfg.DisplayRotation,
+		AutoRotate:         cfg.AutoRotate == nil || *cfg.AutoRotate,
 	}
+	i.PipelineSideData = append(i.PipelineSideData, globaltypes.AutoRotate(i.AutoRotate))
 	if cfg.OnPreClose != nil {
 		i.OnPreClose = func(ctx context.Context, i *Input) error {
 			return cfg.OnPreClose.FireHook(ctx, i)
@@ -159,6 +165,10 @@ func NewInputFromURL(
 					return nil, fmt.Errorf("unable to parse display_rotation '%s': %w", opt.Value, err)
 				}
 				i.DisplayRotation = &r
+			case "autorotate":
+				i.AutoRotate = true
+			case "noautorotate":
+				i.AutoRotate = false
 			default:
 				logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
 				i.Dictionary.Set(opt.Key, opt.Value, 0)
@@ -331,6 +341,9 @@ func (i *Input) doOpen(
 
 	for _, stream := range i.FormatContext.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
+		if sd := stream.SideData(); sd != nil {
+			logger.Debugf(ctx, "input stream #%d side data types: %v", stream.Index(), sd.Types())
+		}
 		if i.DisplayRotation != nil && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 			dm := astiav.NewDisplayMatrixFromRotation(*i.DisplayRotation)
 			err := stream.SideData().DisplayMatrix().Add(dm)
@@ -371,6 +384,9 @@ func (i *Input) initNetworkConn(ctx context.Context) {
 func (i *Input) Close(
 	ctx context.Context,
 ) (_err error) {
+	if i.isClosing.Swap(true) {
+		return fmt.Errorf("already closed or closing")
+	}
 	f, l := getCaller()
 	logger.Debugf(ctx, "Close[%s]: called from %s:%d", i, f, l)
 	defer func() { logger.Debugf(ctx, "/Close[%s]: %v", i, _err) }()
@@ -398,7 +414,9 @@ func (i *Input) Close(
 				errs = append(errs, fmt.Errorf("input OnPreClose error: %w", err))
 			}
 		}
-		i.FormatContext.CloseInput()
+		if i.FormatContext != nil {
+			i.FormatContext.CloseInput()
+		}
 	}
 	if err := i.netConn.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close network connection: %w", err))
@@ -665,7 +683,7 @@ func (i *Input) Generate(
 			packet.BuildStreamInfo(
 				stream,
 				i,
-				nil,
+				i.PipelineSideData,
 			),
 		))
 

@@ -2,8 +2,6 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.25.5
 
-replace github.com/asticode/go-astiav => ../astiav
-
 require (
 	github.com/anthonynsimon/bild v0.14.0
 	github.com/asticode/go-astiav v0.36.0
@@ -42,6 +40,10 @@ require (
 	github.com/brettbuddin/fourier v0.1.1 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
+	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -82,5 +84,3 @@ require (
 	lukechampine.com/blake3 v1.4.0 // indirect
 	tailscale.com v1.86.5
 )
-
-replace github.com/xaionaro-go/audio => ../audio

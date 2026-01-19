@@ -17,8 +17,17 @@ func CopyParameters(
 	if err := src.CodecParameters().Copy(dst.CodecParameters()); err != nil {
 		return fmt.Errorf("unable to copy the codec parameters of stream: %w", err)
 	}
+	CopySideData(dst, src)
 	CopyNonCodecParameters(dst, src)
 	return nil
+}
+
+func CopySideData(
+	dst, src *astiav.Stream,
+) {
+	if dm, ok := src.SideData().DisplayMatrix().Get(); ok {
+		dst.SideData().DisplayMatrix().Add(dm)
+	}
 }
 
 func CopyNonCodecParameters(
