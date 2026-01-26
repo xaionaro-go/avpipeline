@@ -25,6 +25,7 @@ type InputVideoTrackConfig struct {
 type OutputAudioTrackConfig struct {
 	InputTrackIDs   []int            `yaml:"input_track_ids"`
 	OutputTrackIDs  []int            `yaml:"output_track_ids"`
+	Filters         []string         `yaml:"filters"`
 	CodecName       codectypes.Name  `yaml:"codec_name"`
 	AveragingPeriod time.Duration    `yaml:"averaging_period"`
 	AverageBitRate  uint64           `yaml:"average_bit_rate"`
@@ -36,6 +37,7 @@ type OutputAudioTrackConfig struct {
 type OutputVideoTrackConfig struct {
 	InputTrackIDs      []int                 `yaml:"input_track_ids"`
 	OutputTrackIDs     []int                 `yaml:"output_track_ids"`
+	Filters            []string              `yaml:"filters"`
 	CodecName          codectypes.Name       `yaml:"codec_name"`
 	AveragingPeriod    time.Duration         `yaml:"averaging_period"`
 	AverageFrameRate   float64               `yaml:"average_frame_rate"`
@@ -69,6 +71,7 @@ type TranscoderInputConfig struct {
 type TranscoderOutputConfig struct {
 	AudioTrackConfigs []OutputAudioTrackConfig `yaml:"audio_track_configs"`
 	VideoTrackConfigs []OutputVideoTrackConfig `yaml:"video_track_configs"`
+	FilterComplex     string                   `yaml:"filter_complex"`
 }
 
 type (

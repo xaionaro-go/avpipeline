@@ -89,3 +89,25 @@ func (b *Crop) InputFilterContext() *astiav.FilterContext {
 func (b *Crop) OutputFilterContext() *astiav.FilterContext {
 	return b.SinkCtx.FilterContext()
 }
+
+func (b *Crop) AddFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersrcFlags) error {
+	if b.SrcCtx == nil {
+		return fmt.Errorf("SrcCtx is nil")
+	}
+	return b.SrcCtx.AddFrame(f, flags)
+}
+
+func (b *Crop) GetFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersinkFlags) error {
+	if b.SinkCtx == nil {
+		return fmt.Errorf("SinkCtx is nil")
+	}
+	return b.SinkCtx.GetFrame(f, flags)
+}
+
+func (b *Crop) GetOutputStreams() []int {
+	return []int{0}
+}
+
+func (b *Crop) Close() error {
+	return nil
+}

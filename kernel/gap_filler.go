@@ -101,11 +101,71 @@ func (ags GapsStrategyAudio) String() string {
 	}
 }
 
+// OverlapStrategyAudio defines the method used to handle overlapping audio streams.
+type OverlapStrategyAudio int
+
+const (
+	// OverlapStrategyAudioUndefined indicates that no strategy has been set.
+	OverlapStrategyAudioUndefined OverlapStrategyAudio = iota
+	// OverlapStrategyAudioNone means overlaps are ignored and frames are passed through as is.
+	OverlapStrategyAudioNone
+	// OverlapStrategyAudioDrop drops the overlapping part of the new frame.
+	OverlapStrategyAudioDrop
+	// OverlapStrategyAudioBlend blends the overlapping part with the previous frame's tail.
+	OverlapStrategyAudioBlend
+	// OverlapStrategyAudioSpeedUp speeds up the audio playback to catch up with the timeline.
+	OverlapStrategyAudioSpeedUp
+)
+
+func (oas OverlapStrategyAudio) String() string {
+	switch oas {
+	case OverlapStrategyAudioUndefined:
+		return "<undefined>"
+	case OverlapStrategyAudioNone:
+		return "none"
+	case OverlapStrategyAudioDrop:
+		return "drop"
+	case OverlapStrategyAudioBlend:
+		return "blend"
+	case OverlapStrategyAudioSpeedUp:
+		return "speed_up"
+	default:
+		return fmt.Sprintf("<unknown:%d>", int(oas))
+	}
+}
+
+// OverlapStrategyVideo defines the method used to handle overlapping video streams.
+type OverlapStrategyVideo int
+
+const (
+	// OverlapStrategyVideoUndefined indicates that no strategy has been set.
+	OverlapStrategyVideoUndefined OverlapStrategyVideo = iota
+	// OverlapStrategyVideoNone means overlaps are ignored and frames are passed through as is.
+	OverlapStrategyVideoNone
+	// OverlapStrategyVideoDrop drops the overlapping frames.
+	OverlapStrategyVideoDrop
+)
+
+func (ovs OverlapStrategyVideo) String() string {
+	switch ovs {
+	case OverlapStrategyVideoUndefined:
+		return "<undefined>"
+	case OverlapStrategyVideoNone:
+		return "none"
+	case OverlapStrategyVideoDrop:
+		return "drop"
+	default:
+		return fmt.Sprintf("<unknown:%d>", int(ovs))
+	}
+}
+
 type GapFillerConfig struct {
 	GapsStrategyAudio      GapsStrategyAudio
 	AudioMaxGapDuration    time.Duration
+	OverlapStrategyAudio   OverlapStrategyAudio
 	GapsStrategyVideo      GapsStrategyVideo
 	VideoMaxGapDuration    time.Duration
+	OverlapStrategyVideo   OverlapStrategyVideo
 	VideoInterpolationMode string
 }
 
@@ -120,8 +180,10 @@ func DefaultGapFillerConfig() GapFillerConfig {
 	return GapFillerConfig{
 		GapsStrategyAudio:      GapsStrategyAudioAddSilence,
 		AudioMaxGapDuration:    500 * time.Millisecond,
+		OverlapStrategyAudio:   OverlapStrategyAudioDrop,
 		GapsStrategyVideo:      GapsStrategyVideoExtendNextFrame,
 		VideoMaxGapDuration:    2 * time.Second,
+		OverlapStrategyVideo:   OverlapStrategyVideoDrop,
 		VideoInterpolationMode: "mci",
 	}
 }
@@ -243,12 +305,30 @@ func (k *GapFiller) processFrameLocked(
 	var err error
 	switch input.GetMediaType() {
 	case astiav.MediaTypeVideo:
-		frames, err = k.fixVideoGapIfNeeded(ctx, state, input.StreamInfo, frames)
+		if state.NextExpectedPTSSet {
+			if input.Frame.Pts() > state.NextExpectedPTS {
+				frames, err = k.fixVideoGapIfNeeded(ctx, state, input.StreamInfo, frames)
+			} else if input.Frame.Pts() < state.NextExpectedPTS {
+				frames, err = k.handleVideoOverlapIfNeeded(ctx, state, input.StreamInfo, frames)
+			}
+		}
 	case astiav.MediaTypeAudio:
-		frames, err = k.fixAudioGapIfNeeded(ctx, state, input.StreamInfo, frames)
+		if state.NextExpectedPTSSet {
+			if input.Frame.Pts() > state.NextExpectedPTS {
+				frames, err = k.fixAudioGapIfNeeded(ctx, state, input.StreamInfo, frames)
+			} else if input.Frame.Pts() < state.NextExpectedPTS {
+				frames, err = k.handleAudioOverlapIfNeeded(ctx, state, input.StreamInfo, frames)
+			}
+		}
 	}
 	if err != nil {
-		return fmt.Errorf("unable to fix gap: %w", err)
+		return fmt.Errorf("unable to fix gap/overlap: %w", err)
+	}
+
+	k.updateStreamState(state, frames)
+
+	if input.GetMediaType() == astiav.MediaTypeAudio && len(frames) > 0 {
+		k.updateLastAudioFrame(state, frames[len(frames)-1])
 	}
 
 	for _, f := range frames {
@@ -279,11 +359,6 @@ func (k *GapFiller) getGapStart(
 	maxGapDuration time.Duration,
 	strategy fmt.Stringer,
 ) *int64 {
-	defer func() {
-		state.NextExpectedPTS = input.Pts() + input.Duration()
-		state.NextExpectedPTSSet = true
-	}()
-
 	if !state.NextExpectedPTSSet {
 		return nil
 	}
@@ -310,6 +385,211 @@ func (k *GapFiller) getGapStart(
 
 	logger.Warnf(ctx, "GapFiller: detected PTS gap: lastPTS=%d, currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", expectedPTS, currentPTS, expectedPTS, strategy)
 	return ptr(expectedPTS)
+}
+
+func (k *GapFiller) updateStreamState(state *gapFillerStreamState, frames []*astiav.Frame) {
+	if len(frames) == 0 {
+		return
+	}
+	last := frames[len(frames)-1]
+	state.NextExpectedPTS = last.Pts() + last.Duration()
+	state.NextExpectedPTSSet = true
+}
+
+func (k *GapFiller) handleAudioOverlapIfNeeded(
+	ctx context.Context,
+	state *gapFillerStreamState,
+	si *frame.StreamInfo,
+	input []*astiav.Frame,
+) ([]*astiav.Frame, error) {
+	strategy := k.Config.OverlapStrategyAudio
+	if strategy == OverlapStrategyAudioNone || strategy == OverlapStrategyAudioUndefined {
+		return input, nil
+	}
+
+	if !state.NextExpectedPTSSet {
+		return input, nil
+	}
+
+	var output []*astiav.Frame
+	for _, f := range input {
+		if f.Pts() < state.NextExpectedPTS {
+			overlapPTS := state.NextExpectedPTS - f.Pts()
+			overlapSamples := int(astiav.RescaleQ(overlapPTS, si.TimeBase, astiav.NewRational(1, f.SampleRate())))
+
+			switch strategy {
+			case OverlapStrategyAudioDrop:
+				if overlapSamples >= f.NbSamples() {
+					logger.Warnf(ctx, "GapFiller: detected audio PTS overlap: currentPTS=%d, expectedPTS=%d; whole frame is overlapping, dropping", f.Pts(), state.NextExpectedPTS)
+					continue
+				}
+
+				newF := frame.Pool.Get()
+				newF.SetNbSamples(f.NbSamples() - overlapSamples)
+				newF.SetChannelLayout(f.ChannelLayout())
+				newF.SetSampleFormat(f.SampleFormat())
+				newF.SetSampleRate(f.SampleRate())
+				if err := newF.AllocBuffer(0); err != nil {
+					frame.Pool.Put(newF)
+					return nil, fmt.Errorf("failed to allocate buffer for trimmed frame: %w", err)
+				}
+
+				for c := 0; c < f.ChannelLayout().Channels(); c++ {
+					samples, err := avpaudio.ExtractSamples(f, c)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+					err = avpaudio.FillSamples(newF, c, samples[overlapSamples:])
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+				}
+				newF.SetPts(state.NextExpectedPTS)
+				output = append(output, newF)
+				continue
+
+			case OverlapStrategyAudioBlend:
+				if state.LastAudioFrame == nil || overlapSamples >= f.NbSamples() {
+					logger.Warnf(ctx, "GapFiller: detected audio PTS overlap: currentPTS=%d, expectedPTS=%d; whole frame is overlapping or no previous frame, dropping", f.Pts(), state.NextExpectedPTS)
+					if overlapSamples < f.NbSamples() {
+						output = append(output, f)
+					}
+					continue
+				}
+
+				blendSamples := overlapSamples
+				maxBlendSamples := int(float64(f.SampleRate()) * 0.020) // 20ms
+				if blendSamples > maxBlendSamples {
+					blendSamples = maxBlendSamples
+				}
+				if blendSamples > f.NbSamples()-overlapSamples {
+					blendSamples = f.NbSamples() - overlapSamples
+				}
+				if blendSamples > state.LastAudioFrame.NbSamples() {
+					blendSamples = state.LastAudioFrame.NbSamples()
+				}
+
+				newNbSamples := f.NbSamples() - overlapSamples
+				newF := frame.Pool.Get()
+				newF.SetNbSamples(newNbSamples)
+				newF.SetChannelLayout(f.ChannelLayout())
+				newF.SetSampleFormat(f.SampleFormat())
+				newF.SetSampleRate(f.SampleRate())
+				if err := newF.AllocBuffer(0); err != nil {
+					frame.Pool.Put(newF)
+					return nil, fmt.Errorf("failed to allocate buffer for blended frame: %w", err)
+				}
+
+				logger.Warnf(ctx, "GapFiller: blending %d samples to handle overlap of %d samples", blendSamples, overlapSamples)
+				for c := 0; c < f.ChannelLayout().Channels(); c++ {
+					prevSamples, err := avpaudio.ExtractSamples(state.LastAudioFrame, c)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+					nextSamples, err := avpaudio.ExtractSamples(f, c)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+
+					res := make([]float64, newNbSamples)
+					copy(res, nextSamples[overlapSamples:])
+
+					if blendSamples > 0 {
+						prevTail := prevSamples[len(prevSamples)-blendSamples:]
+						for i := 0; i < blendSamples; i++ {
+							weight := float64(i) / float64(blendSamples)
+							res[i] = res[i]*weight + prevTail[i]*(1.0-weight)
+						}
+					}
+
+					err = avpaudio.FillSamples(newF, c, res)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+				}
+				newF.SetPts(state.NextExpectedPTS)
+				output = append(output, newF)
+				continue
+
+			case OverlapStrategyAudioSpeedUp:
+				targetSamples := f.NbSamples() - overlapSamples
+				if targetSamples <= 0 {
+					logger.Warnf(ctx, "GapFiller: detected audio PTS overlap: currentPTS=%d, expectedPTS=%d; whole frame is overlapping, dropping", f.Pts(), state.NextExpectedPTS)
+					continue
+				}
+
+				logger.Warnf(ctx, "GapFiller: detected audio PTS overlap: currentPTS=%d, expectedPTS=%d; speeding up from %d to %d samples", f.Pts(), state.NextExpectedPTS, f.NbSamples(), targetSamples)
+
+				newF := frame.Pool.Get()
+				newF.SetNbSamples(targetSamples)
+				newF.SetChannelLayout(f.ChannelLayout())
+				newF.SetSampleFormat(f.SampleFormat())
+				newF.SetSampleRate(f.SampleRate())
+				if err := newF.AllocBuffer(0); err != nil {
+					frame.Pool.Put(newF)
+					return nil, fmt.Errorf("failed to allocate buffer for speed-up frame: %w", err)
+				}
+
+				for c := 0; c < f.ChannelLayout().Channels(); c++ {
+					samples, err := avpaudio.ExtractSamples(f, c)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+					resampled := resampleLinear(samples, targetSamples)
+					err = avpaudio.FillSamples(newF, c, resampled)
+					if err != nil {
+						frame.Pool.Put(newF)
+						return nil, err
+					}
+				}
+				newF.SetPts(state.NextExpectedPTS)
+				output = append(output, newF)
+				continue
+
+			default:
+				logger.Errorf(ctx, "unknown OverlapStrategyAudio: %s", strategy)
+			}
+		}
+		output = append(output, f)
+	}
+	return output, nil
+}
+
+func (k *GapFiller) handleVideoOverlapIfNeeded(
+	ctx context.Context,
+	state *gapFillerStreamState,
+	si *frame.StreamInfo,
+	input []*astiav.Frame,
+) ([]*astiav.Frame, error) {
+	strategy := k.Config.OverlapStrategyVideo
+	if strategy == OverlapStrategyVideoNone || strategy == OverlapStrategyVideoUndefined {
+		return input, nil
+	}
+
+	if !state.NextExpectedPTSSet {
+		return input, nil
+	}
+
+	var output []*astiav.Frame
+	for _, f := range input {
+		if f.Pts() < state.NextExpectedPTS {
+			switch strategy {
+			case OverlapStrategyVideoDrop:
+				logger.Warnf(ctx, "GapFiller: detected video PTS overlap: currentPTS=%d, expectedPTS=%d; dropping frame", f.Pts(), state.NextExpectedPTS)
+				continue
+			default:
+				logger.Errorf(ctx, "unknown OverlapStrategyVideo: %s", strategy)
+			}
+		}
+		output = append(output, f)
+	}
+	return output, nil
 }
 
 func (k *GapFiller) fixVideoGapIfNeeded(
@@ -812,4 +1092,30 @@ func (k *GapFiller) fixAudioGapInterpolate(
 	f.SetDuration(gapDuration)
 
 	return []*astiav.Frame{f, input}
+}
+
+func resampleLinear(input []float64, targetLen int) []float64 {
+	if targetLen <= 0 {
+		return nil
+	}
+	n := len(input)
+	if n == 0 {
+		return make([]float64, targetLen)
+	}
+	if targetLen == 1 {
+		return []float64{input[0]}
+	}
+	output := make([]float64, targetLen)
+	step := float64(n-1) / float64(targetLen-1)
+	for i := 0; i < targetLen; i++ {
+		pos := float64(i) * step
+		idx := int(pos)
+		frac := pos - float64(idx)
+		if idx+1 < n {
+			output[i] = input[idx]*(1.0-frac) + input[idx+1]*frac
+		} else {
+			output[i] = input[idx]
+		}
+	}
+	return output
 }

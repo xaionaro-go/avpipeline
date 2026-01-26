@@ -29,7 +29,7 @@ type AudioSyncConfig struct {
 	Syncer syncerstream.Factory
 
 	// ConfidenceThreshold is the minimum confidence score (0..1) required
-	// to trust the synchronization result. Default is 0.5.
+	// to trust the synchronization result. Default is 0.1.
 	ConfidenceThreshold float64
 }
 
@@ -48,7 +48,9 @@ func DefaultAudioSyncConfig() *AudioSyncConfig {
 		WindowSize:          2 * time.Second,
 		OffsetThreshold:     50 * time.Millisecond,
 		ConsistencyDuration: 1 * time.Second,
-		ConfidenceThreshold: 0.5,
+		// ConfidenceThreshold set to 0.1 as a safe default for GCC-PHAT.
+		// A peak of 0.1 is significantly above the noise floor for typical window sizes (N >= 1024).
+		ConfidenceThreshold: 0.1,
 		Tracks:              make(map[int]AudioSyncTrackConfig),
 	}
 }

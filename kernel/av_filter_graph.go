@@ -7,105 +7,96 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiav"
+	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
-type AVFilterGraph[T avfilter.Kernel] struct {
+type AVFilterGraph struct {
 	*closuresignaler.ClosureSignaler
-	*astiav.FilterGraph
-	Inputs  *astiav.FilterInOut
-	Outputs *astiav.FilterInOut
-	Filters []avfilter.AVFilter[T]
+	avfilter.AVFilter[avfilter.Kernel]
 }
 
-var _ Abstract = (*AVFilterGraph[avfilter.Kernel])(nil)
+var _ Abstract = (*AVFilterGraph)(nil)
 
-// NewAVFilterGraph creates a new AVFilterGraph.
-// experimental: API will change in the future
-func NewAVFilterGraph[T avfilter.Kernel](
+// NewAVFilterGraph creates a new AVFilterGraph from an avfilter.Kernel.
+func NewAVFilterGraph(
 	ctx context.Context,
-	filters ...avfilter.AVFilter[T],
-) (*AVFilterGraph[T], error) {
-	f := &AVFilterGraph[T]{
+	k avfilter.Kernel,
+) *AVFilterGraph {
+	return &AVFilterGraph{
 		ClosureSignaler: closuresignaler.New(),
-		FilterGraph:     astiav.AllocFilterGraph(),
-		Inputs:          astiav.AllocFilterInOut(),
-		Outputs:         astiav.AllocFilterInOut(),
+		AVFilter: avfilter.AVFilter[avfilter.Kernel]{
+			Kernel: k,
+		},
 	}
-	setFinalizerFree(ctx, f.FilterGraph)
-	setFinalizerFree(ctx, f.Inputs)
-	setFinalizerFree(ctx, f.Outputs)
-	if f.FilterGraph == nil {
-		return nil, fmt.Errorf("unable to allocate FilterGraph")
-	}
-	if f.Inputs == nil {
-		return nil, fmt.Errorf("unable to allocate Inputs")
-	}
-	if f.Outputs == nil {
-		return nil, fmt.Errorf("unable to allocate Outputs")
-	}
-
-	for _, filter := range filters {
-		filter.Kernel.ConnectInput(f.FilterGraph, "in")
-		filter.Kernel.ConnectOutput(f.FilterGraph, "out")
-
-		f.Inputs.SetName("out") // should it be "in"
-		f.Inputs.SetFilterContext(filter.OutputFilterContext())
-		f.Inputs.SetPadIdx(0)
-		f.Inputs.SetNext(nil)
-
-		f.Outputs.SetName("in")
-		f.Outputs.SetFilterContext(filter.InputFilterContext())
-		f.Outputs.SetPadIdx(0)
-		f.Outputs.SetNext(nil)
-
-		if err := f.FilterGraph.Parse(filter.Content, f.Inputs, f.Outputs); err != nil {
-			return nil, fmt.Errorf("unable to parse the filter graph: %w", err)
-		}
-	}
-
-	if err := f.FilterGraph.Configure(); err != nil {
-		return nil, fmt.Errorf("unable to configure the filter graph: %w", err)
-	}
-
-	f.Filters = filters
-	return f, nil
 }
 
-func (f *AVFilterGraph[T]) GetObjectID() globaltypes.ObjectID {
+func (f *AVFilterGraph) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(f)
 }
 
-func (f *AVFilterGraph[T]) SendInput(
+func (f *AVFilterGraph) SendInput(
 	ctx context.Context,
 	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	_, frame := input.Unwrap()
-	if frame == nil {
-		return fmt.Errorf("a Filter is supposed to be used only for Frame-s, not Packet-s")
+	_, frameInput := input.Unwrap()
+	if frameInput == nil {
+		outputCh <- input.CloneAsReferencedOutput()
+		return nil
 	}
-	for _, filter := range f.Filters {
-		if filter.Condition != nil && filter.Condition.Match(ctx, *frame) {
-			// TODO: implement
+
+	if f.Condition != nil && !f.Condition.Match(ctx, *frameInput) {
+		outputCh <- input.CloneAsReferencedOutput()
+		return nil
+	}
+
+	streamIdx := input.GetStreamIndex()
+	if err := f.Kernel.AddFrame(streamIdx, frameInput.Frame, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+		return fmt.Errorf("unable to add frame to filter source for stream %d: %w", streamIdx, err)
+	}
+
+	for _, outStreamIdx := range f.Kernel.GetOutputStreams() {
+		for {
+			outFrame := frame.Pool.Get()
+			if err := f.Kernel.GetFrame(outStreamIdx, outFrame, astiav.NewBuffersinkFlags()); err != nil {
+				frame.Pool.Put(outFrame)
+				if err == astiav.ErrEof || err == astiav.ErrEagain {
+					break
+				}
+				return fmt.Errorf("unable to get frame from filter sink for stream %d: %w", outStreamIdx, err)
+			}
+
+			// TODO: get proper stream info if it changed
+			outputFrame := frame.BuildOutput(outFrame, frameInput.StreamInfo)
+			outputFrame.StreamIndex = outStreamIdx
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case outputCh <- packetorframe.OutputUnion{Frame: &outputFrame}:
+			}
 		}
 	}
+
 	return nil
 }
 
-func (f *AVFilterGraph[T]) String() string {
-	return "Filter"
+func (f *AVFilterGraph) String() string {
+	return "AVFilterGraph"
 }
 
-func (f *AVFilterGraph[T]) Close(ctx context.Context) error {
+func (f *AVFilterGraph) Close(ctx context.Context) error {
 	f.ClosureSignaler.Close(ctx)
+	if f.Kernel != nil {
+		return f.Kernel.Close()
+	}
 	return nil
 }
 
-func (f *AVFilterGraph[T]) Generate(
+func (f *AVFilterGraph) Generate(
 	ctx context.Context,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {

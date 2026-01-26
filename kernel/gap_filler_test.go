@@ -3,7 +3,9 @@ package kernel
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/audio/pkg/interpolation/fourier"
 	"github.com/xaionaro-go/avpipeline/frame"
+	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 func TestFixVideoGapDuplicateNextFrame(t *testing.T) {
@@ -424,4 +427,101 @@ func BenchmarkGapFillerInterpolateResolutions(b *testing.B) {
 			})
 		}
 	}
+}
+
+func TestGapFiller_AudioDriftCorrection(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		strategy OverlapStrategyAudio
+	}{
+		{"Drop", OverlapStrategyAudioDrop},
+		{"SpeedUp", OverlapStrategyAudioSpeedUp},
+		{"Blend", OverlapStrategyAudioBlend},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultGapFillerConfig()
+			cfg.OverlapStrategyAudio = tt.strategy
+			cfg.AudioMaxGapDuration = 0 // No limit for test
+			gf := NewGapFiller(ctx, &cfg)
+
+			sampleRate := 48000
+			nbSamples := 1024
+			timeBase := astiav.NewRational(1, sampleRate)
+
+			cp := astiav.AllocCodecParameters()
+			cp.SetMediaType(astiav.MediaTypeAudio)
+			si := &frame.StreamInfo{
+				TimeBase:        timeBase,
+				CodecParameters: cp,
+			}
+
+			// First frame starts at 0
+			f1 := createTestAudioFrameForDrift(t, 0, nbSamples, sampleRate)
+
+			outputCh := make(chan packetorframe.OutputUnion, 100)
+			ip1 := frame.Input{
+				Frame:      f1,
+				StreamInfo: si,
+			}
+			err := gf.SendInput(ctx, packetorframe.InputUnion{
+				Frame: &ip1,
+			}, outputCh)
+			require.NoError(t, err)
+			<-outputCh // Consume f1
+
+			// Next expected PTS is 1024.
+			// Feed a frame that overlaps by 100 samples (starts at 924)
+			f2 := createTestAudioFrameForDrift(t, 924, nbSamples, sampleRate)
+			ip2 := frame.Input{
+				Frame:      f2,
+				StreamInfo: si,
+			}
+			err = gf.SendInput(ctx, packetorframe.InputUnion{
+				Frame: &ip2,
+			}, outputCh)
+			require.NoError(t, err)
+
+			out := <-outputCh
+			require.NotNil(t, out.Frame)
+
+			// Objective evidence: output PTS must be exactly 1024 to ensure continuity
+			require.Equal(t, int64(1024), out.Frame.Frame.Pts(), "Output PTS should be corrected to maintain continuity")
+
+			switch tt.strategy {
+			case OverlapStrategyAudioSpeedUp:
+				require.Equal(t, nbSamples-100, out.Frame.Frame.NbSamples(), "SpeedUp should result in fewer samples to fit the timeline")
+			case OverlapStrategyAudioDrop, OverlapStrategyAudioBlend:
+				require.Equal(t, nbSamples-100, out.Frame.Frame.NbSamples(), "Drop/Blend should result in fewer samples")
+			}
+		})
+	}
+}
+
+func createTestAudioFrameForDrift(t *testing.T, pts int64, nbSamples int, sampleRate int) *astiav.Frame {
+	f := astiav.AllocFrame()
+	f.SetNbSamples(nbSamples)
+	f.SetSampleFormat(astiav.SampleFormatS16)
+	f.SetChannelLayout(astiav.ChannelLayoutStereo)
+	f.SetSampleRate(sampleRate)
+	f.SetPts(pts)
+	f.SetDuration(int64(nbSamples))
+	err := f.AllocBuffer(0)
+	require.NoError(t, err)
+
+	// Fill with some pattern (e.g. sine wave)
+	ptr, err := f.Data().Bytes(0)
+	require.NoError(t, err)
+	// Simple sine wave to avoid silence detection
+	for i := 0; i < nbSamples; i++ {
+		val := int16(math.Sin(float64(i)*0.1) * 10000)
+		// Stereo: 2 bytes per sample per channel
+		binary.LittleEndian.PutUint16(ptr[i*4:], uint16(val))
+		binary.LittleEndian.PutUint16(ptr[i*4+2:], uint16(val))
+	}
+
+	return f
 }

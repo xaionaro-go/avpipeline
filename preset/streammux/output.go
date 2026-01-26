@@ -19,6 +19,7 @@ import (
 	framecondition "github.com/xaionaro-go/avpipeline/frame/condition"
 	frameconditionextra "github.com/xaionaro-go/avpipeline/frame/condition/extra"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
@@ -425,7 +426,7 @@ func (o *Output[C]) initFPSFractioner(ctx context.Context) {
 		return
 	}
 
-	o.TranscoderNode.Processor.Kernel.Filter = framecondition.Or{
+	o.TranscoderNode.Processor.Kernel.FilterCondition = framecondition.Or{
 		framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
 		frameconditionextra.PacketOrFrame{
 			reduceframerate.New(mathcondition.GetterFunction[globaltypes.Rational](
@@ -662,7 +663,101 @@ func (o *Output[C]) reconfigureTranscoder(
 		}
 	}
 
+	if err := o.reconfigureFilters(ctx, cfg); err != nil {
+		return fmt.Errorf("unable to reconfigure filters: %w", err)
+	}
+
+	if err := o.reconfigureMapping(ctx, cfg); err != nil {
+		return fmt.Errorf("unable to reconfigure mapping: %w", err)
+	}
+
 	o.TranscoderNode.SetInputFilter(ctx, nil)
+	return nil
+}
+
+func (o *Output[C]) reconfigureMapping(
+	ctx context.Context,
+	cfg types.TranscoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureMapping(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureMapping(ctx, %#+v): %v", cfg, _err) }()
+
+	mapping := make(map[int]int)
+	for _, videoCfg := range cfg.Output.VideoTrackConfigs {
+		for i, inIdx := range videoCfg.InputTrackIDs {
+			if i < len(videoCfg.OutputTrackIDs) {
+				mapping[inIdx] = videoCfg.OutputTrackIDs[i]
+			}
+		}
+	}
+	for _, audioCfg := range cfg.Output.AudioTrackConfigs {
+		for i, inIdx := range audioCfg.InputTrackIDs {
+			if i < len(audioCfg.OutputTrackIDs) {
+				mapping[inIdx] = audioCfg.OutputTrackIDs[i]
+			}
+		}
+	}
+
+	if len(mapping) == 0 {
+		return nil
+	}
+
+	mapNode := o.MapIndices.Processor.Kernel
+	assigner, ok := mapNode.Assigner.(*streamIndexAssigner)
+	if !ok {
+		return fmt.Errorf("MapIndices assigner is not *streamIndexAssigner (it is %T)", mapNode.Assigner)
+	}
+
+	// TODO: notify assigned about the mapping
+	_ = assigner
+
+	return nil
+}
+
+func (o *Output[C]) reconfigureFilters(
+	ctx context.Context,
+	cfg types.TranscoderConfig,
+) (_err error) {
+	logger.Tracef(ctx, "reconfigureFilters(ctx, %#+v)", cfg)
+	defer func() { logger.Tracef(ctx, "/reconfigureFilters(ctx, %#+v): %v", cfg, _err) }()
+
+	transcoder := o.TranscoderNode.Processor.Kernel
+
+	trackConfigs := make(map[int]avfilter.TrackConfig)
+	inputFmtCtx := o.InputFrom.Processor.Kernel.FormatContext
+	for _, stream := range inputFmtCtx.Streams() {
+		mediaType := stream.CodecParameters().MediaType()
+		var filters []string
+		switch mediaType {
+		case astiav.MediaTypeVideo:
+			if len(cfg.Output.VideoTrackConfigs) > 0 {
+				filters = cfg.Output.VideoTrackConfigs[0].Filters
+			}
+		case astiav.MediaTypeAudio:
+			if len(cfg.Output.AudioTrackConfigs) > 0 {
+				filters = cfg.Output.AudioTrackConfigs[0].Filters
+			}
+		}
+		trackConfigs[stream.Index()] = avfilter.TrackConfig{
+			Filters:         filters,
+			CodecParameters: stream.CodecParameters(),
+			TimeBase:        stream.TimeBase(),
+		}
+	}
+
+	g, err := avfilter.NewGraph(ctx, trackConfigs, cfg.Output.FilterComplex)
+	if err != nil {
+		return fmt.Errorf("unable to create a new filter graph: %w", err)
+	}
+
+	filterGraph := kernel.NewAVFilterGraph(ctx, g)
+
+	oldFilterKernel := transcoder.GetFilterKernel(ctx)
+	if oldFilterKernel != nil {
+		_ = oldFilterKernel.Close(ctx)
+	}
+	transcoder.SetFilterKernel(ctx, filterGraph)
+
 	return nil
 }
 

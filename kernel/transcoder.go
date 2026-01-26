@@ -40,9 +40,10 @@ type Transcoder[DF codec.DecoderFactory, EF codec.EncoderFactory] struct {
 	*Decoder[DF]
 	*Encoder[EF]
 	*closuresignaler.ClosureSignaler
-	Filter framecondition.Condition
+	FilterCondition framecondition.Condition
+	FilterKernel    Abstract
+	Locker          xsync.Mutex
 
-	locker                  xsync.Mutex
 	flushLocker             xsync.Mutex
 	started                 bool
 	activeStreamsMap        map[int]struct{}
@@ -76,6 +77,22 @@ func NewTranscoder[DF codec.DecoderFactory, EF codec.EncoderFactory](
 	return r, nil
 }
 
+func (r *Transcoder[DF, EF]) SetFilterKernel(
+	ctx context.Context,
+	kernel Abstract,
+) {
+	xsync.DoA2(ctx, &r.Locker, func(ctx context.Context, kernel Abstract) {
+		r.FilterKernel = kernel
+	}, ctx, kernel)
+}
+func (r *Transcoder[DF, EF]) GetFilterKernel(
+	ctx context.Context,
+) Abstract {
+	return xsync.DoA1R1(ctx, &r.Locker, func(ctx context.Context) Abstract {
+		return r.FilterKernel
+	}, ctx)
+}
+
 func (r *Transcoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	logger.Tracef(ctx, "Close")
 	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
@@ -86,6 +103,11 @@ func (r *Transcoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	}
 	if err := r.Encoder.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close the encoder: %w", err))
+	}
+	if r.FilterKernel != nil {
+		if err := r.FilterKernel.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close the filter kernel: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -109,7 +131,7 @@ func (r *Transcoder[DF, EF]) SendInput(
 		defer func() { logger.Tracef(ctx, "/SendInput(packet): %v", _err) }()
 		return xsync.DoA3R1(
 			ctx,
-			&r.locker,
+			&r.Locker,
 			r.sendPacketNoLock,
 			ctx,
 			*pkt,
@@ -243,11 +265,45 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 	resultCh := make(chan packetorframe.OutputUnion, 2)
 	wg.Add(1)
 	var encoderError error
+	var encoderErrorLocker sync.Mutex
+	setEncoderError := func(err error) {
+		encoderErrorLocker.Lock()
+		defer encoderErrorLocker.Unlock()
+		if encoderError == nil {
+			encoderError = err
+		}
+	}
+	getEncoderError := func() error {
+		encoderErrorLocker.Lock()
+		defer encoderErrorLocker.Unlock()
+		return encoderError
+	}
+
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
 		defer func() {
 			cancelFn()
 		}()
+
+		var filterOutputCh chan packetorframe.OutputUnion
+		if r.FilterKernel != nil {
+			filterOutputCh = make(chan packetorframe.OutputUnion, 100)
+			wg.Add(1)
+			observability.Go(ctx, func(ctx context.Context) {
+				defer wg.Done()
+				for out := range filterOutputCh {
+					if err := getEncoderError(); err != nil {
+						continue
+					}
+					err := r.Encoder.SendInput(ctx, out.ToInput(), outputCh)
+					if err != nil {
+						setEncoderError(err)
+					}
+				}
+			})
+			defer close(filterOutputCh)
+		}
+
 		for {
 			out, ok := <-resultCh
 			if !ok {
@@ -266,20 +322,30 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 			logger.Tracef(ctx, "got a decoded %s frame from the decoder", f.GetMediaType())
 			func() {
 				defer frame.Pool.Put(f.Frame)
-				if encoderError != nil {
-					logger.Tracef(ctx, "skipping encoding because there is already an encoder error: %v", encoderError)
+				if err := getEncoderError(); err != nil {
+					logger.Tracef(ctx, "skipping encoding because there is already an encoder error: %v", err)
 					return
 				}
 
 				inputFrame := frame.Input(f)
-				if r.Filter != nil && !r.Filter.Match(ctx, inputFrame) {
-					logger.Tracef(ctx, "frame filtered out")
+				if r.FilterCondition != nil && !r.FilterCondition.Match(ctx, inputFrame) {
+					logger.Tracef(ctx, "frame filtered out by condition")
 					return
 				}
-				err := r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, outputCh)
+
+				if r.FilterKernel == nil {
+					err := r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, outputCh)
+					if err != nil {
+						logger.Tracef(ctx, "encoder returned an error: %v", err)
+						setEncoderError(err)
+					}
+					return
+				}
+
+				err := r.FilterKernel.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, filterOutputCh)
 				if err != nil {
-					logger.Tracef(ctx, "encoder returned an error: %v", err)
-					encoderError = err
+					logger.Tracef(ctx, "filter kernel returned an error: %v", err)
+					setEncoderError(err)
 				}
 			}()
 		}
@@ -308,7 +374,7 @@ func (r *Transcoder[DF, EF]) sendFrame(
 ) (_err error) {
 	logger.Tracef(ctx, "sendFrame")
 	defer func() { logger.Tracef(ctx, "/sendFrame: %v", _err) }()
-	r.locker.Do(ctx, func() {
+	r.Locker.Do(ctx, func() {
 		if r.started {
 			return
 		}
@@ -319,11 +385,32 @@ func (r *Transcoder[DF, EF]) sendFrame(
 		r.activeStreamsCount++
 		r.activeStreamsMap[streamIdx] = struct{}{}
 	})
-	if r.Filter != nil && !r.Filter.Match(ctx, input) {
-		logger.Tracef(ctx, "frame filtered out")
+	if r.FilterCondition != nil && !r.FilterCondition.Match(ctx, input) {
+		logger.Tracef(ctx, "frame filtered out by condition")
 		return nil
 	}
-	return r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &input}, outputCh)
+
+	if r.FilterKernel == nil {
+		return r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &input}, outputCh)
+	}
+
+	filterOutputCh := make(chan packetorframe.OutputUnion, 100)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var encoderErr error
+	observability.Go(ctx, func(ctx context.Context) {
+		defer wg.Done()
+		for out := range filterOutputCh {
+			err := r.Encoder.SendInput(ctx, out.ToInput(), outputCh)
+			if err != nil && encoderErr == nil {
+				encoderErr = err
+			}
+		}
+	})
+	err := r.FilterKernel.SendInput(ctx, packetorframe.InputUnion{Frame: &input}, filterOutputCh)
+	close(filterOutputCh)
+	wg.Wait()
+	return errors.Join(err, encoderErr)
 }
 
 func (r *Transcoder[DF, EF]) GetObjectID() globaltypes.ObjectID {

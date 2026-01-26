@@ -116,7 +116,7 @@ func main() {
 		if fps.Float64() > 1 {
 			logger.Fatalf(ctx, "scaling video framerate up is not supported in this demo, yet: %v", fps.Float64())
 		}
-		transcodingNode.Processor.Kernel.Filter = framecondition.Or{
+		transcodingNode.Processor.Kernel.FilterCondition = framecondition.Or{
 			framecondition.Not{framecondition.MediaType(astiav.MediaTypeVideo)},
 			frameconditionextra.PacketOrFrame{
 				reduceframerate.New(mathcondition.GetterStatic[globaltypes.Rational]{

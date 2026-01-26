@@ -23,6 +23,10 @@ type Kernel interface {
 	ConnectOutput(graph *astiav.FilterGraph, nodeName string) error
 	InputFilterContext() *astiav.FilterContext
 	OutputFilterContext() *astiav.FilterContext
+	AddFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersrcFlags) error
+	GetFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersinkFlags) error
+	GetOutputStreams() []int
+	Close() error
 }
 
 func (k *AVFilter[T]) String() string {
@@ -37,12 +41,12 @@ func (k *AVFilter[T]) FilterOutput() *astiav.Filter {
 	return k.Kernel.FilterOutput()
 }
 
-func (k *AVFilter[T]) ConnectInput(graph *astiav.FilterGraph, nodeName string) {
-	k.Kernel.ConnectInput(graph, nodeName)
+func (k *AVFilter[T]) ConnectInput(graph *astiav.FilterGraph, nodeName string) error {
+	return k.Kernel.ConnectInput(graph, nodeName)
 }
 
-func (k *AVFilter[T]) ConnectOutput(graph *astiav.FilterGraph, nodeName string) {
-	k.Kernel.ConnectOutput(graph, nodeName)
+func (k *AVFilter[T]) ConnectOutput(graph *astiav.FilterGraph, nodeName string) error {
+	return k.Kernel.ConnectOutput(graph, nodeName)
 }
 
 func (k *AVFilter[T]) InputFilterContext() *astiav.FilterContext {
@@ -51,4 +55,16 @@ func (k *AVFilter[T]) InputFilterContext() *astiav.FilterContext {
 
 func (k *AVFilter[T]) OutputFilterContext() *astiav.FilterContext {
 	return k.Kernel.OutputFilterContext()
+}
+
+func (k *AVFilter[T]) AddFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersrcFlags) error {
+	return k.Kernel.AddFrame(streamIdx, f, flags)
+}
+
+func (k *AVFilter[T]) GetFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersinkFlags) error {
+	return k.Kernel.GetFrame(streamIdx, f, flags)
+}
+
+func (k *AVFilter[T]) GetOutputStreams() []int {
+	return k.Kernel.GetOutputStreams()
 }

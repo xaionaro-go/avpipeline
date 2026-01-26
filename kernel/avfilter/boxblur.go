@@ -120,3 +120,19 @@ func (b *BoxBlur) InputFilterContext() *astiav.FilterContext {
 func (b *BoxBlur) OutputFilterContext() *astiav.FilterContext {
 	panic("not implemented, yet")
 }
+
+func (b *BoxBlur) AddFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersrcFlags) error {
+	panic("not implemented, yet")
+}
+
+func (b *BoxBlur) GetFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersinkFlags) error {
+	panic("not implemented, yet")
+}
+
+func (b *BoxBlur) GetOutputStreams() []int {
+	return []int{0}
+}
+
+func (b *BoxBlur) Close() error {
+	return nil
+}
