@@ -148,9 +148,10 @@ type AutoBitRateVideoConfig struct {
 	MinBitRate             Ubps
 	MinFPSFraction         float64
 
-	BitRateIncreaseSlowdown             time.Duration
-	ResolutionSlowdownDurationUpgrade   time.Duration
-	ResolutionSlowdownDurationDowngrade time.Duration
+	BitRateIncreaseSlowdown                time.Duration
+	ResolutionUpgradeSlowdownMinDuration   time.Duration
+	ResolutionUpgradeSlowdownMovingAverage MovingAverage[uint64]
+	ResolutionDowngradeSlowdownDuration    time.Duration
 }
 
 type FPSReducerConfig []FPSReductionRange

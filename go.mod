@@ -14,11 +14,11 @@ require (
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.11.0
-	github.com/xaionaro-go/audio v0.0.0-20260117175055-f7091fc3002b
+	github.com/xaionaro-go/audio v0.0.0-20260124161002-bd5e1d855f00
 	github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20250505013920-61d894a3b7e9
-	github.com/xaionaro-go/observability v0.0.0-20250622130956-24b7017284e4
+	github.com/xaionaro-go/observability v0.0.0-20251102143534-3aeb2a25e57d
 	github.com/xaionaro-go/polyjson v0.0.0-20250825191950-a2ce35ee07f0
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
@@ -46,6 +46,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
+	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

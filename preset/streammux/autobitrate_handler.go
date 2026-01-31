@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/indicator"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/net/sockinfo"
@@ -132,9 +133,12 @@ func DefaultAutoBitRateVideoConfig(
 		MaxBitRate:             resBest.BitrateHigh * 2, // limiting since there is no need to consume more channel if we already provide enough bitrate
 		MinFPSFraction:         0.2,
 
-		BitRateIncreaseSlowdown:             time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
-		ResolutionSlowdownDurationUpgrade:   time.Second * 15,
-		ResolutionSlowdownDurationDowngrade: time.Second * 2,
+		BitRateIncreaseSlowdown:              time.Second * 7 / 8, // essentially just skip three iterations of increasing after a decrease (to dampen oscillations)
+		ResolutionUpgradeSlowdownMinDuration: time.Second * 15,
+		ResolutionDowngradeSlowdownDuration:  time.Second * 2,
+		ResolutionUpgradeSlowdownMovingAverage: types.MovingAverage[uint64](
+			indicator.NewMAMA[uint64](int(time.Minute*30/(time.Second/4)), 0.5, 0.05),
+		),
 	}
 	return result
 }
@@ -187,6 +191,8 @@ type AutoBitRateHandler[C any] struct {
 	lastCheckTS                    time.Time
 	currentResolutionChangeRequest *resolutionChangeRequest
 	lastBitRateDecreaseTS          time.Time
+
+	currentDesiredResolutionAvg atomic.Uint64
 
 	temporaryFPSReductionMultiplier xatomic.Value[fpsReductionMultiplier]
 }
@@ -553,6 +559,14 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 
 	if h.isBypassEnabled(ctx) {
 		logger.Tracef(ctx, "bypass mode is enabled; skipping bitrate change")
+		if h.ResolutionUpgradeSlowdownMovingAverage != nil {
+			inputMeasurements := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo)
+			inputBitrate := types.Ubps(inputMeasurements.InputBitRate.Load())
+			resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(inputBitrate).Best()
+			if resCfg != nil {
+				h.currentDesiredResolutionAvg.Store(h.ResolutionUpgradeSlowdownMovingAverage.Update(uint64(resCfg.Width) * uint64(resCfg.Height)))
+			}
+		}
 		return nil
 	}
 
@@ -697,44 +711,46 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 
 	logger.Tracef(ctx, "current resolution: %v; resCfg: %v", *res, resCfg)
 
-	var newRes AutoBitRateResolutionAndBitRateConfig
-	var bitrateBeyondThreshold types.Ubps
+	desiredResCfg := h.getDesiredResolutionConfig(bitrate, *res)
+	if h.ResolutionUpgradeSlowdownMovingAverage != nil && desiredResCfg != nil {
+		h.currentDesiredResolutionAvg.Store(h.ResolutionUpgradeSlowdownMovingAverage.Update(uint64(desiredResCfg.Width) * uint64(desiredResCfg.Height)))
+	}
+
 	switch {
-	case bitrate < resCfg.BitrateLow:
-		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
-		if _newRes == nil {
-			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Worst()
-		}
-		if _newRes.Resolution == *res {
-			logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %v), minBitRate: %d", *res, resCfg, resCfg.BitrateLow)
-			return nil
-		}
-		newRes = *_newRes
-		bitrateBeyondThreshold = bitrate - resCfg.BitrateLow
+	case bitrate >= resCfg.BitrateLow && bitrate <= resCfg.BitrateHigh:
+		h.resetTemporaryFPSReduction(ctx, bitrate, "the bitrate is back within the range")
+		return nil
+	case desiredResCfg != nil && desiredResCfg.Resolution != *res:
+		return h.applyResolutionChange(ctx, bitrate, force, allowTrafficLoss, resCfg, desiredResCfg.Resolution)
 	case bitrate > resCfg.BitrateHigh:
-		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
-		if _newRes == nil {
-			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best()
+		logger.Debugf(ctx, "bitrate %v is higher than the current resolution (%v) high-bitrate-threshold (%v), but we are already at the highest resolution", bitrate, *res, resCfg.BitrateHigh)
+		if err := h.enableBypass(ctx, true, force, allowTrafficLoss); err != nil {
+			return fmt.Errorf("unable to enable bypass mode: %w", err)
 		}
-		if _newRes.Resolution == *res {
-			logger.Debugf(ctx, "already at the highest resolution %v (resCfg: %v), maxBitRate: %d", *res, resCfg, resCfg.BitrateHigh)
-			return nil
-		}
-		newRes = *_newRes
-		if newRes.Resolution == *res {
-			// if already the highest resolution, then enable bypass:
-			err := h.enableBypass(ctx, true, force, allowTrafficLoss)
-			if err != nil {
-				return fmt.Errorf("unable to enable bypass mode: %w", err)
-			}
-		}
-		bitrateBeyondThreshold = bitrate - resCfg.BitrateHigh
+		return nil
+	case bitrate < resCfg.BitrateLow:
+		logger.Debugf(ctx, "already at the lowest resolution %v (resCfg: %v), minBitRate: %d", *res, resCfg, resCfg.BitrateLow)
+		return nil
 	default:
 		return nil
 	}
+}
+
+func (h *AutoBitRateHandler[C]) applyResolutionChange(
+	ctx context.Context,
+	bitrate types.Ubps,
+	force bool,
+	allowTrafficLoss bool,
+	resCfg *AutoBitRateResolutionAndBitRateConfig,
+	newRes codec.Resolution,
+) error {
+	bitrateBeyondThreshold := bitrate - resCfg.BitrateHigh
+	if bitrate < resCfg.BitrateLow {
+		bitrateBeyondThreshold = bitrate - resCfg.BitrateLow
+	}
 
 	err := h.setVideoOutput(ctx, &SenderKey{
-		VideoResolution: newRes.Resolution,
+		VideoResolution: newRes,
 	}, bitrate, force, allowTrafficLoss)
 	switch {
 	case err == nil:
@@ -744,49 +760,65 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 			BitrateBeyondThreshold: bitrateBeyondThreshold,
 		}
 	default:
-		return fmt.Errorf("unable to set new resolution %v: %w", newRes.Resolution, err)
+		return fmt.Errorf("unable to set new resolution %v: %w", newRes, err)
 	}
 }
 
-func (h *AutoBitRateHandler[C]) setVideoOutput(
+func (h *AutoBitRateHandler[C]) checkSlowdown(
 	ctx context.Context,
+	isUpgrade bool,
 	videoOutputKey *SenderKey,
-	bitrate types.Ubps,
-	force bool,
-	allowTrafficLoss bool,
 ) (_err error) {
-	logger.Tracef(ctx, "setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t)", videoOutputKey, bitrate, force, allowTrafficLoss)
+	logger.Tracef(ctx, "checkSlowdown: %v %v", isUpgrade, videoOutputKey)
 	defer func() {
-		logger.Tracef(ctx, "/setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
+		logger.Tracef(ctx, "/checkSlowdown: %v %v: %v", isUpgrade, videoOutputKey, _err)
 	}()
-
-	if !h.StreamMux.IsAllowedDifferentOutputs() {
-		return fmt.Errorf("changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+	now := time.Now()
+	prevRequest := h.currentResolutionChangeRequest
+	if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade || now.Sub(prevRequest.LatestAt) > time.Minute {
+		h.currentResolutionChangeRequest = &resolutionChangeRequest{
+			IsUpgrade: isUpgrade,
+			StartedAt: now,
+			LatestAt:  now,
+		}
+		logger.Debugf(ctx, "started resolution change request: %v (prev: %v, isUpgrade: %v)", h.currentResolutionChangeRequest, prevRequest, isUpgrade)
+		return ErrNotThisTime{}
 	}
+	prevRequest.LatestAt = now
 
-	encV, encA := h.StreamMux.GetEncoders(ctx)
-	var curACodecName codec.Name
-	var curASampleRate audio.SampleRate
-	if encA != nil {
-		curACodecName = codec.Name(encA.Codec().Name())
-		curASampleRate = audio.SampleRate(encA.CodecContext().SampleRate())
-	}
-	var curRes codec.Resolution
-	var curVCodecName codec.Name
-	if codec.IsEncoderCopy(encV) {
-		curVCodecName = codec.NameCopy
-	} else {
-		if encV != nil {
-			encVCtx := encV.CodecContext()
-			curRes = codec.Resolution{
-				Width:  uint32(encVCtx.Width()),
-				Height: uint32(encVCtx.Height()),
-			}
-			curVCodecName = codec.Name(encV.Codec().Name())
+	reqDur := now.Sub(prevRequest.StartedAt)
+	upgradeSlowdown := h.ResolutionUpgradeSlowdownMinDuration
+
+	if isUpgrade && h.ResolutionUpgradeSlowdownMovingAverage != nil && h.ResolutionUpgradeSlowdownMovingAverage.Valid() {
+		targetPixels := uint64(videoOutputKey.VideoResolution.Width) * uint64(videoOutputKey.VideoResolution.Height)
+		avgPixels := h.currentDesiredResolutionAvg.Load()
+		if targetPixels > avgPixels {
+			// if target resolution is higher than the moving average, we increase the slowdown duration.
+			// the factor is targetPixels / avgPixels.
+			upgradeSlowdown = time.Duration(float64(upgradeSlowdown) * float64(targetPixels) / float64(avgPixels))
+			logger.Debugf(ctx, "increasing resolution upgrade slowdown duration to %v (targetPixels: %d, avgPixels: %d)", upgradeSlowdown, targetPixels, avgPixels)
 		}
 	}
-	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)
 
+	switch {
+	case isUpgrade && reqDur < upgradeSlowdown:
+		logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, upgradeSlowdown)
+		return ErrNotThisTime{}
+	case !isUpgrade && reqDur < h.ResolutionDowngradeSlowdownDuration:
+		logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v; meanwhile just trying to temporary reduce the FPS", reqDur, h.ResolutionDowngradeSlowdownDuration)
+		return ErrNotThisTime{}
+	}
+	h.currentResolutionChangeRequest = nil
+	return nil
+}
+
+func (h *AutoBitRateHandler[C]) prepareVideoOutputKey(
+	ctx context.Context,
+	videoOutputKey *SenderKey,
+	curRes codec.Resolution,
+	curVCodecName, curACodecName codec.Name,
+	curASampleRate audio.SampleRate,
+) *SenderKey {
 	if videoOutputKey == nil {
 		videoOutputKey = ptr(h.StreamMux.GetBestNotBypassOutput(ctx).GetKey())
 		logger.Tracef(ctx, "using best not-bypass output key: %v", videoOutputKey)
@@ -816,6 +848,70 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 			videoOutputKey.VideoResolution = curRes
 		}
 	}
+	return videoOutputKey
+}
+
+func (h *AutoBitRateHandler[C]) prepareOutputForChange(
+	ctx context.Context,
+	videoOutputCur *Output[C],
+	allowTrafficLoss bool,
+) {
+	if !allowTrafficLoss {
+		return
+	}
+	err := sendingNodeSetDropOnClose(ctx, videoOutputCur.SendingNode, true)
+	switch {
+	case err == nil:
+	case errors.As(err, &ErrNoSetDropOnClose{}):
+		logger.Debugf(ctx, "current output's sending node %T does not implement SetDropOnCloser; cannot allow traffic loss during resolution change", videoOutputCur.SendingNode)
+	default:
+		logger.Errorf(ctx, "unable to set drop-on-close on the current output sending node: %v", err)
+	}
+}
+
+func (h *AutoBitRateHandler[C]) getCurrentEncoderState(
+	ctx context.Context,
+) (curRes codec.Resolution, curVCodecName, curACodecName codec.Name, curASampleRate audio.SampleRate) {
+	encV, encA := h.StreamMux.GetEncoders(ctx)
+	if encA != nil {
+		curACodecName = codec.Name(encA.Codec().Name())
+		curASampleRate = audio.SampleRate(encA.CodecContext().SampleRate())
+	}
+	if codec.IsEncoderCopy(encV) {
+		curVCodecName = codec.NameCopy
+		return
+	}
+	if encV != nil {
+		encVCtx := encV.CodecContext()
+		curRes = codec.Resolution{
+			Width:  uint32(encVCtx.Width()),
+			Height: uint32(encVCtx.Height()),
+		}
+		curVCodecName = codec.Name(encV.Codec().Name())
+	}
+	return
+}
+
+func (h *AutoBitRateHandler[C]) setVideoOutput(
+	ctx context.Context,
+	videoOutputKey *SenderKey,
+	bitrate types.Ubps,
+	force bool,
+	allowTrafficLoss bool,
+) (_err error) {
+	logger.Tracef(ctx, "setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t)", videoOutputKey, bitrate, force, allowTrafficLoss)
+	defer func() {
+		logger.Tracef(ctx, "/setVideoOutput: %v, %v (force:%t, allowTrafficLoss:%t): %v", videoOutputKey, bitrate, force, allowTrafficLoss, _err)
+	}()
+
+	if !h.StreamMux.IsAllowedDifferentOutputs() {
+		return fmt.Errorf("changing output is not allowed in the current MuxMode: %v", h.StreamMux.MuxMode)
+	}
+
+	curRes, curVCodecName, curACodecName, curASampleRate := h.getCurrentEncoderState(ctx)
+	logger.Tracef(ctx, "current encoder state: vCodec=%s, aCodec=%s, res=%v", curVCodecName, curACodecName, curRes)
+
+	videoOutputKey = h.prepareVideoOutputKey(ctx, videoOutputKey, curRes, curVCodecName, curACodecName, curASampleRate)
 
 	videoOutputCur := h.StreamMux.GetActiveVideoOutput(ctx)
 	videoOutputCurKey := videoOutputCur.GetKey()
@@ -837,30 +933,11 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		logger.Debugf(ctx, "force-resolution-change request: cancelling any previous resolution change requests")
 		h.currentResolutionChangeRequest = nil
 	} else {
-		now := time.Now()
-		prevRequest := h.currentResolutionChangeRequest
-		if prevRequest == nil || prevRequest.IsUpgrade != isUpgrade || now.Sub(prevRequest.LatestAt) > time.Minute {
-			h.currentResolutionChangeRequest = &resolutionChangeRequest{
-				IsUpgrade: isUpgrade,
-				StartedAt: now,
-				LatestAt:  now,
-			}
-			logger.Debugf(ctx, "started resolution change request: %v (prev: %v, isUpgrade: %v)", h.currentResolutionChangeRequest, prevRequest, isUpgrade)
-			return ErrNotThisTime{}
+		if err := h.checkSlowdown(ctx, isUpgrade, videoOutputKey); err != nil {
+			return err
 		}
-		prevRequest.LatestAt = now
-
-		reqDur := now.Sub(prevRequest.StartedAt)
-		switch {
-		case isUpgrade && reqDur < h.ResolutionSlowdownDurationUpgrade:
-			logger.Debugf(ctx, "waiting before upgrading resolution: %v < %v", reqDur, h.ResolutionSlowdownDurationUpgrade)
-			return ErrNotThisTime{}
-		case !isUpgrade && reqDur < h.ResolutionSlowdownDurationDowngrade:
-			logger.Debugf(ctx, "waiting before downgrading resolution: %v < %v; meanwhile just trying to temporary reduce the FPS", reqDur, h.ResolutionSlowdownDurationDowngrade)
-			return ErrNotThisTime{}
-		}
-		h.currentResolutionChangeRequest = nil
 	}
+
 	logger.Debugf(ctx, "proceeding with resolution change to %v", videoOutputKey.VideoResolution)
 
 	if videoOutputKey.VideoCodec == codectypes.NameCopy {
@@ -872,16 +949,7 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		return nil
 	}
 
-	if allowTrafficLoss {
-		err := sendingNodeSetDropOnClose(ctx, videoOutputCur.SendingNode, true)
-		switch {
-		case err == nil:
-		case errors.As(err, &ErrNoSetDropOnClose{}):
-			logger.Debugf(ctx, "current output's sending node %T does not implement SetDropOnCloser; cannot allow traffic loss during resolution change", videoOutputCur.SendingNode)
-		default:
-			logger.Errorf(ctx, "unable to set drop-on-close on the current output sending node: %v", err)
-		}
-	}
+	h.prepareOutputForChange(ctx, videoOutputCur, allowTrafficLoss)
 	err := h.StreamMux.setResolutionBitRateCodec(
 		ctx,
 		videoOutputKey.VideoResolution,
@@ -900,6 +968,33 @@ func (h *AutoBitRateHandler[C]) setVideoOutput(
 		return nil
 	default:
 		return fmt.Errorf("unable to set resolution to %v: %w", videoOutputKey.VideoResolution, err)
+	}
+}
+
+func (h *AutoBitRateHandler[C]) getDesiredResolutionConfig(
+	bitrate types.Ubps,
+	currentResolution codec.Resolution,
+) *AutoBitRateResolutionAndBitRateConfig {
+	resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Find(currentResolution)
+	if resCfg == nil {
+		return nil
+	}
+
+	switch {
+	case bitrate < resCfg.BitrateLow:
+		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
+		if _newRes == nil {
+			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Worst()
+		}
+		return _newRes
+	case bitrate > resCfg.BitrateHigh:
+		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
+		if _newRes == nil {
+			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best()
+		}
+		return _newRes
+	default:
+		return resCfg
 	}
 }
 
