@@ -92,7 +92,8 @@ func (cfg *EncoderConfig) String() string {
 	if cfg == nil {
 		return "<nil>"
 	}
-	return spew.Sdump(*cfg)
+	type alias EncoderConfig
+	return spew.Sdump(alias(*cfg))
 }
 
 func DefaultEncoderConfig() EncoderConfig {

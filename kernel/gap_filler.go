@@ -173,7 +173,8 @@ func (cfg *GapFillerConfig) String() string {
 	if cfg == nil {
 		return "<nil>"
 	}
-	return spew.Sdump(*cfg)
+	type alias GapFillerConfig
+	return spew.Sdump(alias(*cfg))
 }
 
 func DefaultGapFillerConfig() GapFillerConfig {
@@ -383,7 +384,7 @@ func (k *GapFiller) getGapStart(
 		}
 	}
 
-	logger.Warnf(ctx, "GapFiller: detected PTS gap: lastPTS=%d, currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", expectedPTS, currentPTS, expectedPTS, strategy)
+	logger.Warnf(ctx, "GapFiller: detected PTS gap: currentPTS=%d, expectedPTS=%d, fixing using strategy: %s", currentPTS, expectedPTS, strategy)
 	return ptr(expectedPTS)
 }
 

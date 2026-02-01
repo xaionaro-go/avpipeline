@@ -745,6 +745,16 @@ func (o *Output[C]) reconfigureFilters(
 		}
 	}
 
+	if cfg.Output.FilterComplex == "" {
+		// no filters
+		oldFilterKernel := transcoder.GetFilterKernel(ctx)
+		if oldFilterKernel != nil {
+			_ = oldFilterKernel.Close(ctx)
+		}
+		transcoder.SetFilterKernel(ctx, nil)
+		return nil
+	}
+
 	g, err := avfilter.NewGraph(ctx, trackConfigs, cfg.Output.FilterComplex)
 	if err != nil {
 		return fmt.Errorf("unable to create a new filter graph: %w", err)
