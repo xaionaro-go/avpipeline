@@ -1354,12 +1354,12 @@ func (s *StreamMux[C]) getVideoEncoderLocked(
 		aEnc codec.Encoder
 	)
 
-	vEncoders := o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.VideoEncoders
+	vEncoders := o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoEncoders
 	if len(vEncoders) == 1 {
 		vEnc = vEncoders[0]
 	}
 
-	aEncoders := o.TranscoderNode.Processor.Kernel.Encoder.EncoderFactory.AudioEncoders
+	aEncoders := o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioEncoders
 	if len(aEncoders) == 1 {
 		aEnc = aEncoders[0]
 	}

@@ -147,7 +147,7 @@ func NewInputFromURL(
 				}
 				i.DefaultWidth = w
 				i.DefaultHeight = h
-				i.Dictionary.Set("video_size", opt.Value, 0)
+				i.Set("video_size", opt.Value, 0)
 			case "framerate":
 				logger.Debugf(ctx, "setting input framerate to '%s'", opt.Value)
 				var r float64
@@ -156,7 +156,7 @@ func NewInputFromURL(
 					return nil, fmt.Errorf("unable to parse input framerate '%s': %w", opt.Value, err)
 				}
 				defaultFPS = r
-				i.Dictionary.Set("framerate", opt.Value, 0)
+				i.Set("framerate", opt.Value, 0)
 			case "display_rotation":
 				logger.Debugf(ctx, "setting display rotation to '%s'", opt.Value)
 				var r float64
@@ -171,7 +171,7 @@ func NewInputFromURL(
 				i.AutoRotate = false
 			default:
 				logger.Debugf(ctx, "input.Dictionary['%s'] = '%s'", opt.Key, opt.Value)
-				i.Dictionary.Set(opt.Key, opt.Value, 0)
+				i.Set(opt.Key, opt.Value, 0)
 			}
 		}
 	}
@@ -195,9 +195,9 @@ func NewInputFromURL(
 	if inputFormat != nil {
 		switch inputFormat.Name() {
 		case "rtsp":
-			if i.Dictionary.Get("rtsp_transport", nil, 0) == nil {
+			if i.Get("rtsp_transport", nil, 0) == nil {
 				logger.Debugf(ctx, "setting rtsp_transport to 'tcp'")
-				i.Dictionary.Set("rtsp_transport", "tcp", 0)
+				i.Set("rtsp_transport", "tcp", 0)
 			}
 		}
 	} else {
@@ -252,7 +252,7 @@ func (i *Input) doOpen(
 
 	i.IOInterrupter = astiav.NewIOInterrupter()
 	setFinalizerFree(ctx, i.IOInterrupter)
-	i.FormatContext.SetIOInterrupter(i.IOInterrupter)
+	i.SetIOInterrupter(i.IOInterrupter)
 
 	if err := ctx.Err(); err != nil {
 		i.FormatContext.Free()
@@ -265,11 +265,11 @@ func (i *Input) doOpen(
 		select {
 		case <-ctx.Done():
 			logger.Debugf(ctx, "context cancelled during OpenInput, interrupting IO")
-			i.IOInterrupter.Interrupt()
+			i.Interrupt()
 		case <-openInputDone:
 		}
 	}()
-	err := i.FormatContext.OpenInput(urlWithSecret, inputFormat, i.Dictionary)
+	err := i.OpenInput(urlWithSecret, inputFormat, i.Dictionary)
 	close(openInputDone)
 
 	if err != nil {
@@ -281,7 +281,7 @@ func (i *Input) doOpen(
 		}
 	}
 	setFinalizer(ctx, i, func(i *Input) {
-		i.FormatContext.CloseInput()
+		i.CloseInput()
 		i.FormatContext.Free()
 	})
 
@@ -335,11 +335,11 @@ func (i *Input) doOpen(
 		}
 	}
 
-	if err := i.FormatContext.FindStreamInfo(nil); err != nil {
+	if err := i.FindStreamInfo(nil); err != nil {
 		return fmt.Errorf("unable to get stream info: %w", err)
 	}
 
-	for _, stream := range i.FormatContext.Streams() {
+	for _, stream := range i.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
 		if sd := stream.SideData(); sd != nil {
 			logger.Debugf(ctx, "input stream #%d side data types: %v", stream.Index(), sd.Types())
@@ -365,7 +365,7 @@ func (i *Input) FormatName() string {
 	if i == nil || i.FormatContext == nil {
 		return ""
 	}
-	f := i.FormatContext.InputFormat()
+	f := i.InputFormat()
 	if f == nil {
 		return ""
 	}
@@ -378,7 +378,7 @@ func (i *Input) initNetworkConn(ctx context.Context) {
 		return
 	}
 
-	i.netConn.Init(ctx, i.FormatContext)
+	i.Init(ctx, i.FormatContext)
 }
 
 func (i *Input) Close(
@@ -395,7 +395,7 @@ func (i *Input) Close(
 	}
 
 	logger.Debugf(ctx, "interrupting IO before close")
-	i.IOInterrupter.Interrupt()
+	i.Interrupt()
 
 	select {
 	case <-i.openFinished:
@@ -415,7 +415,7 @@ func (i *Input) Close(
 			}
 		}
 		if i.FormatContext != nil {
-			i.FormatContext.CloseInput()
+			i.CloseInput()
 		}
 	}
 	if err := i.netConn.Close(ctx); err != nil {
@@ -428,7 +428,7 @@ func (i *Input) readIntoPacket(
 	_ context.Context,
 	packet *astiav.Packet,
 ) error {
-	err := i.FormatContext.ReadFrame(packet)
+	err := i.ReadFrame(packet)
 	switch {
 	case err == nil:
 		return nil
@@ -554,14 +554,14 @@ func (i *Input) Generate(
 					}
 				}
 			}
-			i.FormatContext.CloseInput()
+			i.CloseInput()
 		}()
 	}
 
 	observability.Go(ctx, func(ctx context.Context) {
 		<-ctx.Done()
 		logger.Debugf(ctx, "interrupting IO")
-		i.IOInterrupter.Interrupt()
+		i.Interrupt()
 	})
 
 	lastDuration := map[int]int64{}
@@ -631,6 +631,7 @@ func (i *Input) Generate(
 	for {
 		select {
 		case <-i.CloseChan():
+			logger.Debugf(ctx, "input is closed, stopping packet generation")
 			return io.EOF
 		case <-ctx.Done():
 			return ctx.Err()
@@ -642,7 +643,8 @@ func (i *Input) Generate(
 		case nil:
 		case io.EOF:
 			pkt.Free()
-			return nil
+			logger.Debugf(ctx, "end of input reached")
+			return io.EOF
 		default:
 			pkt.Free()
 			return fmt.Errorf("unable to read a packet: %w", err)
@@ -716,7 +718,7 @@ func (i *Input) Generate(
 		if !i.IgnoreZeroDuration {
 			isDurationIncorrect := curPkt.GetDuration() <= 1
 			if isDurationIncorrect {
-				fps := i.FormatContext.GuessFrameRate(stream, nil)
+				fps := i.GuessFrameRate(stream, nil)
 				logger.Tracef(ctx, "guessed FPS from format context: %v", fps)
 				if fps.Num() == 0 || fps.Den() == 0 {
 					fps = stream.AvgFrameRate()
