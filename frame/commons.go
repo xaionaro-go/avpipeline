@@ -3,11 +3,13 @@
 package frame
 
 import (
+	"context"
 	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
+	"github.com/xaionaro-go/avpipeline/logger"
 	packetorframetypes "github.com/xaionaro-go/avpipeline/packetorframe/types"
 	"github.com/xaionaro-go/avpipeline/types"
 )
@@ -56,7 +58,30 @@ func (f *Commons) GetTimeBase() astiav.Rational {
 }
 
 func (f *Commons) GetSize() int {
-	return 0 // TODO: fix this
+	if f.Frame == nil || f.StreamInfo == nil || f.CodecParameters == nil {
+		return 0
+	}
+	ctx := context.Background()
+
+	const align = 1
+
+	switch f.CodecParameters.MediaType() {
+	case astiav.MediaTypeVideo:
+		size, err := f.ImageBufferSize(align)
+		if err != nil {
+			return 0
+		}
+		return size
+	case astiav.MediaTypeAudio:
+		size, err := f.SamplesBufferSize(align)
+		if err != nil {
+			return 0
+		}
+		return size
+	default:
+		logger.Warnf(ctx, "Unsupported media type: %v", f.CodecParameters.MediaType())
+		return 0 // TODO: implement this
+	}
 }
 
 func (f *Commons) GetDurationAsDuration() time.Duration {

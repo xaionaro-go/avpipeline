@@ -59,6 +59,7 @@ func (b *barrierHandler) processInput(
 		case types.StatePass:
 			return nil
 		case types.StateBlock:
+			logger.Tracef(ctx, "Barrier[%p] blocking on state change", b)
 			select {
 			case <-changeCh:
 			case <-ctx.Done():

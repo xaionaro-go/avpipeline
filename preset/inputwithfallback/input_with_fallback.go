@@ -57,6 +57,8 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	CurrentBitRateMeasurementsCount atomic.Uint64
 }
 
+// New creates a new InputWithFallback instance.
+//
 // |  retryable:input0 -> inputSwitch (-> autoheaders -> decoder) -> inputSyncer ->-+
 // |  (main)                   :                                          :         |
 // |                           :                                          :         |               MonotonicPTS
@@ -157,9 +159,11 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.Or{
 			packetorframecondition.IsKeyFrame(true),
+			packetorframecondition.CodecID(astiav.CodecIDRawvideo),
 			packetorframecondition.AtomicBool(&i.AllowCorruptPackets),
 		},
 	}
+
 	logger.Debugf(ctx, "Switch: setting keep-unless conditions: %s", switchKeepUnlessConds)
 	i.InputSwitch.SetKeepUnless(switchKeepUnlessConds)
 
@@ -235,13 +239,17 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	) {
 		if v := in.Get(); v != nil {
 			ctx = belt.WithField(ctx, "media_type", v.GetMediaType().String())
+		} else {
+			logger.Warnf(ctx, "Switch.SetOnAfterSwitch: no packet/frame for %d -> %d", from, to)
 		}
 		logger.Debugf(ctx, "Switch.SetOnAfterSwitch: %d -> %d", from, to)
 
 		assert(ctx, i.syncingSince.Load().IsZero(), "syncingSince must be zero")
 
 		i.syncingSince.Store(time.Now())
-		in.AddPipelineSideData(kernel.SideFlagFlush{})
+		if in.Get() != nil {
+			in.AddPipelineSideData(kernel.SideFlagFlush{})
+		}
 
 		for inputID := from; inputID > to; inputID-- {
 			inputID := inputID
@@ -283,10 +291,16 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		if in.GetMediaType() != astiav.MediaTypeVideo {
 			return false
 		}
-		if !in.IsKey() {
-			return false
+		if in.GetCodecParameters() != nil {
+			logger.Debugf(ctx, "Syncer keep-unless: media=video key=%t codec_id=%s", in.IsKey(), in.GetCodecParameters().CodecID())
 		}
-		return true
+		if in.IsKey() {
+			return true
+		}
+		if in.GetCodecParameters() != nil && in.GetCodecParameters().CodecID() == astiav.CodecIDRawvideo {
+			return true
+		}
+		return false
 	}))
 	i.InputSyncer.Flags.Set(0 |
 		barrierstategetter.SwitchFlagNextOutputStateBlock,
@@ -402,6 +416,17 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 	}
 
 	i.InputChainsLocker.Do(ctx, func() {
+		keepUnlessSwitch := i.InputSwitch.GetKeepUnless()
+		if keepUnlessSwitch != nil {
+			i.InputSwitch.SetKeepUnless(nil)
+			defer i.InputSwitch.SetKeepUnless(keepUnlessSwitch)
+		}
+		keepUnlessSyncer := i.InputSyncer.GetKeepUnless()
+		if keepUnlessSyncer != nil {
+			i.InputSyncer.SetKeepUnless(nil)
+			defer i.InputSyncer.SetKeepUnless(keepUnlessSyncer)
+		}
+
 		// choose next fallback (simple next index)
 		if id+1 >= InputID(len(i.InputChains)) {
 			logger.Debugf(ctx, "onInputChainError: no fallbacks available: %d+1 >= %d", int(id), len(i.InputChains))

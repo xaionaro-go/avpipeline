@@ -1,4 +1,6 @@
-// switch.go implements a switch state getter.
+// Package stategetter provides implementations of the StateGetter interface,
+// which determines whether a packet/frame should pass, drop, or block in a
+// pipeline.
 package stategetter
 
 import (
@@ -136,8 +138,8 @@ func (s *Switch) SetValue(
 	ctx context.Context,
 	idx int32,
 ) (_err error) {
-	logger.Tracef(ctx, "Switch.SetValue(ctx, %d)", idx)
-	defer func() { logger.Tracef(ctx, "/Switch.SetValue(ctx, %d): %v", idx, _err) }()
+	logger.Debugf(ctx, "Switch.SetValue(ctx, %d)", idx)
+	defer func() { logger.Debugf(ctx, "/Switch.SetValue(ctx, %d): %v", idx, _err) }()
 
 	if onSwitchRequest := s.GetOnSwitchRequest(); onSwitchRequest != nil {
 		err := xsync.DoA3R1(ctx, &s.CommitMutex, onSwitchRequest, ctx, packetorframe.InputUnion{}, idx)
@@ -157,6 +159,7 @@ func (s *Switch) setValueNow(
 	ctx context.Context,
 	idx int32,
 ) (_err error) {
+	logger.Debugf(ctx, "Switch.setValueNow(ctx, %d)", idx)
 	s.CommitMutex.Do(ctx, func() {
 		if onBefore := s.GetOnBeforeSwitch(); onBefore != nil {
 			onBefore(ctx, packetorframe.InputUnion{}, s.CurrentValue.Load(), idx)
@@ -190,6 +193,7 @@ func (s *Switch) setNextValueNow(
 	ctx context.Context,
 	idx int32,
 ) (_err error) {
+	logger.Debugf(ctx, "Switch.setNextValueNow(ctx, %d)", idx)
 	s.CommitMutex.Do(ctx, func() {
 		old := s.NextValue.Swap(int32(idx))
 		logger.Debugf(ctx, "setting the next value: %d -> %d (cur: %d)", old, idx, s.CurrentValue.Load())
@@ -241,6 +245,8 @@ func (s *SwitchOutput) GetState(
 		currentValue := s.CurrentValue.Load()
 		nextValue := s.NextValue.Load()
 		previousValue := s.PreviousValue.Load()
+
+		logger.Tracef(ctx, "GetState[%p:%v]: cur:%d next:%d prev:%d", s.Switch, s.OutputID, currentValue, nextValue, previousValue)
 
 		constructState := func() (types.State, <-chan struct{}) {
 			if currentValue == s.OutputID {
@@ -339,10 +345,12 @@ func (s *SwitchOutput) GetState(
 
 func (s *SwitchOutput) String() string {
 	currentValue := s.CurrentValue.Load()
+	nextValue := s.NextValue.Load()
 	return fmt.Sprintf(
-		"SwitchOutput(%t: req:%d; cur:%d)",
+		"SwitchOutput(%t: req:%d; cur:%d; next:%d)",
 		currentValue == s.OutputID,
 		currentValue,
 		s.OutputID,
+		nextValue,
 	)
 }
