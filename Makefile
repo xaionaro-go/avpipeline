@@ -47,5 +47,49 @@ internal-indocker-streamforward-android-arm64: builddir $(GOPATH)/bin/pkg-config
 		GOFLAGS="$(GOBUILD_FLAGS) -ldflags=$(shell echo ${LINKER_FLAGS_ANDROID} | tr " " ",")" \
 		fyne package $(FYNEBUILD_FLAGS) -release -os android/arm64 && mv streamforward.apk ../../build/streamforward-arm64.apk
 
+ANDROID_AVD?=test_avd
+ANDROID_SDK_ROOT?=$(HOME)/Android/Sdk
+TERMUX_APK?=
+TERMUX_API_APK?=
+TERMUX_API_E2E?=1
+
+.PHONY: android-emulator-start android-emulator-wait android-emulator-stop android-termux-install android-termux-api-install android-termux-setup android-test-termux-microphone-e2e android-test-microphone-e2e
+
+android-emulator-start:
+	$(ANDROID_SDK_ROOT)/emulator/emulator -avd $(ANDROID_AVD) -no-window -no-audio -no-boot-anim -netfast -gpu swiftshader_indirect
+
+android-emulator-wait:
+	adb wait-for-device
+	adb shell getprop sys.boot_completed | grep -m1 1
+	adb shell settings put global window_animation_scale 0
+	adb shell settings put global transition_animation_scale 0
+	adb shell settings put global animator_duration_scale 0
+
+android-emulator-stop:
+	adb emu kill
+
+android-termux-install:
+	@if [ -z "$(TERMUX_APK)" ]; then echo "TERMUX_APK is required"; exit 2; fi
+	adb install -r "$(TERMUX_APK)"
+
+android-termux-api-install:
+	@if [ -z "$(TERMUX_API_APK)" ]; then echo "TERMUX_API_APK is required"; exit 2; fi
+	adb install -r "$(TERMUX_API_APK)"
+
+android-termux-setup:
+	adb shell pm grant com.termux.api android.permission.RECORD_AUDIO
+	adb shell pm grant com.termux android.permission.RECORD_AUDIO
+	adb shell cmd appops set com.termux.api RECORD_AUDIO allow
+	adb shell cmd appops set com.termux RECORD_AUDIO allow
+	adb shell am start -n com.termux/com.termux.app.TermuxActivity
+	adb shell am force-stop com.termux.api
+	adb shell am start -n com.termux.api/.TermuxApiReceiver
+
+android-test-termux-microphone-e2e:
+	TERMUX_API_E2E=$(TERMUX_API_E2E) go test ./tests/e2e -tags test_e2e -run TermuxMicrophoneRecordE2E -v
+
+android-test-microphone-e2e:
+	go test ./tests/e2e -tags test_e2e -run AndroidMicrophoneRecordE2E -v
+
 $(GOPATH)/bin/pkg-config-wrapper:
 	go install github.com/xaionaro-go/pkg-config-wrapper@5dd443e6c18336416c49047e2ba0002e26a85278

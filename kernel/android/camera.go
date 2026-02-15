@@ -1,7 +1,6 @@
-// open.go implements a preset for opening an Android camera.
+// camera.go implements helpers for opening an Android camera.
 
-// Package camera provides a preset for opening an Android camera.
-package camera
+package android
 
 import (
 	"context"
@@ -15,44 +14,44 @@ import (
 
 const InputFormat = "android_camera"
 
-type ID int
+type CameraID int
 
 const (
-	UndefinedID ID = iota
-	IDBack
-	IDFront
+	UndefinedCameraID CameraID = iota
+	CameraIDBack
+	CameraIDFront
 )
 
-func (id ID) String() string {
+func (id CameraID) String() string {
 	switch id {
-	case UndefinedID:
+	case UndefinedCameraID:
 		return "undefined"
-	case IDBack:
+	case CameraIDBack:
 		return "back"
-	case IDFront:
+	case CameraIDFront:
 		return "front"
 	default:
 		return fmt.Sprintf("unknown_%d_", int(id))
 	}
 }
 
-func (id ID) CameraIndex() int {
+func (id CameraID) CameraIndex() int {
 	// see https://ffmpeg.org/ffmpeg-devices.html#android_005fcamera:
 	switch id {
-	case UndefinedID:
+	case UndefinedCameraID:
 		panic("cannot get URL string for undefined camera ID")
-	case IDBack:
+	case CameraIDBack:
 		return 0
-	case IDFront:
+	case CameraIDFront:
 		return 1
 	default:
 		panic("cannot get URL string for unknown camera ID")
 	}
 }
 
-func Open(
+func NewCamera(
 	ctx context.Context,
-	camID ID,
+	camID CameraID,
 	resolution codectypes.Resolution,
 	frameRate globaltypes.Rational,
 	pixelFormat codectypes.PixelFormat,
