@@ -4,6 +4,7 @@ package quality
 
 import (
 	"context"
+	"math"
 	"slices"
 	"time"
 
@@ -105,8 +106,28 @@ func (sm *StreamMeasurements) getStreamQualityLocked(
 		}
 	}
 	intervalInt := endTSInt - minTSInt
-	r.Continuity = 1 - float64(discontinuityLength)/float64(intervalInt)
-	r.Overlap = float64(overlapLength) / float64(intervalInt)
-	r.FrameRate = float64(frameCount) / maxAggregationPeriod.Seconds()
+	if intervalInt > 0 {
+		r.Continuity = 1 - float64(discontinuityLength)/float64(intervalInt)
+		r.Overlap = float64(overlapLength) / float64(intervalInt)
+	} else {
+		r.Continuity = 0
+		r.Overlap = 0
+	}
+	periodSeconds := maxAggregationPeriod.Seconds()
+	if periodSeconds > 0 && frameCount > 0 {
+		r.FrameRate = float64(frameCount) / periodSeconds
+	} else {
+		r.FrameRate = 0
+	}
+	// Ensure no NaN or Inf values (they break JSON serialization)
+	if math.IsNaN(r.Continuity) || math.IsInf(r.Continuity, 0) {
+		r.Continuity = 0
+	}
+	if math.IsNaN(r.Overlap) || math.IsInf(r.Overlap, 0) {
+		r.Overlap = 0
+	}
+	if math.IsNaN(r.FrameRate) || math.IsInf(r.FrameRate, 0) {
+		r.FrameRate = 0
+	}
 	return r, nil
 }
