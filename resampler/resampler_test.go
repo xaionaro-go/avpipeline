@@ -65,7 +65,7 @@ func TestResamplerAllocateOutputFrame(t *testing.T) {
 	t.Cleanup(func() { frame.Pool.Put(out) })
 
 	require.Equal(t, fmt.ChunkSize, out.NbSamples())
-	require.Equal(t, fmt.ChannelLayout, out.ChannelLayout())
+	require.True(t, fmt.ChannelLayout.Equal(out.ChannelLayout()))
 	require.Equal(t, fmt.SampleFormat, out.SampleFormat())
 	require.Equal(t, fmt.SampleRate, out.SampleRate())
 }

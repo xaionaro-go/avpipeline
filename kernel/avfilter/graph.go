@@ -37,6 +37,7 @@ func NewGraph(
 		return nil, fmt.Errorf("unable to allocate FilterGraph")
 	}
 
+	useComplex := filterComplex != ""
 	var inputs, outputs []*astiav.FilterInOut
 
 	for streamIdx, trackCfg := range config {
@@ -52,11 +53,12 @@ func NewGraph(
 
 		inName := fmt.Sprintf("in%d", streamIdx)
 		in := astiav.AllocFilterInOut()
-		setFinalizerFree(ctx, in)
 		in.SetName(inName)
 		in.SetFilterContext(buf.InputFilterContext())
 		in.SetPadIdx(0)
-		inputs = append(inputs, in)
+		if useComplex {
+			inputs = append(inputs, in)
+		}
 
 		g.Inputs[streamIdx] = buf
 
@@ -67,24 +69,36 @@ func NewGraph(
 
 			outName := fmt.Sprintf("out%d", streamIdx)
 			out := astiav.AllocFilterInOut()
-			setFinalizerFree(ctx, out)
 			out.SetName(outName)
 			out.SetFilterContext(buf.OutputFilterContext())
 			out.SetPadIdx(0)
-			outputs = append(outputs, out)
+			if useComplex {
+				outputs = append(outputs, out)
+			}
 
 			g.Outputs[streamIdx] = buf
 
 			filterStr := strings.Join(trackCfg.Filters, ",")
 			if filterStr != "" {
 				if err := g.FilterGraph.Parse(filterStr, out, in); err != nil {
+					in.Free()
+					out.Free()
 					return nil, fmt.Errorf("unable to parse filters for stream %d: %w", streamIdx, err)
 				}
+				if !useComplex {
+					in.Free()
+					out.Free()
+				}
+			} else if !useComplex {
+				in.Free()
+				out.Free()
 			}
+		} else if !useComplex {
+			in.Free()
 		}
 	}
 
-	if filterComplex != "" {
+	if useComplex {
 		for i := 0; i < len(inputs)-1; i++ {
 			inputs[i].SetNext(inputs[i+1])
 		}
@@ -102,7 +116,19 @@ func NewGraph(
 		}
 
 		if err := g.FilterGraph.Parse(filterComplex, firstOutput, firstInput); err != nil {
+			if firstInput != nil {
+				firstInput.Free()
+			}
+			if firstOutput != nil {
+				firstOutput.Free()
+			}
 			return nil, fmt.Errorf("unable to parse filter_complex: %w", err)
+		}
+		if firstInput != nil {
+			firstInput.Free()
+		}
+		if firstOutput != nil {
+			firstOutput.Free()
 		}
 	}
 

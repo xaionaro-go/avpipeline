@@ -256,6 +256,7 @@ func (i *Input) doOpen(
 
 	if err := ctx.Err(); err != nil {
 		i.FormatContext.Free()
+		i.FormatContext = nil
 		return fmt.Errorf("context cancelled before opening input: %w", err)
 	}
 
@@ -274,6 +275,7 @@ func (i *Input) doOpen(
 
 	if err != nil {
 		i.FormatContext.Free()
+		i.FormatContext = nil
 		if authKey.Get() != "" {
 			return fmt.Errorf("unable to open input by URL '%s/<HIDDEN>' (format: %q): %w", urlString, inputFormat, err)
 		} else {
@@ -341,16 +343,16 @@ func (i *Input) doOpen(
 
 	for _, stream := range i.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
-		if sd := stream.SideData(); sd != nil {
-			logger.Debugf(ctx, "input stream #%d side data types: %v", stream.Index(), sd.Types())
-		}
 		if i.DisplayRotation != nil && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 			dm := astiav.NewDisplayMatrixFromRotation(*i.DisplayRotation)
-			err := stream.SideData().DisplayMatrix().Add(dm)
-			if err != nil {
-				return fmt.Errorf("unable to add display matrix to stream #%d: %w", stream.Index(), err)
+			cp := stream.CodecParameters()
+			if cp == nil {
+				return fmt.Errorf("stream #%d has no codec parameters to set display rotation", stream.Index())
 			}
-			logger.Infof(ctx, "set display rotation to %f for stream #%d", *i.DisplayRotation, stream.Index())
+			if err := cp.SideData().DisplayMatrix().Add(dm); err != nil {
+				return fmt.Errorf("unable to add display matrix to stream #%d codec parameters: %w", stream.Index(), err)
+			}
+			logger.Infof(ctx, "set display rotation to %f for stream #%d via codec parameters side data", *i.DisplayRotation, stream.Index())
 		}
 	}
 

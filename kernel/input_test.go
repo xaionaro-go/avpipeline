@@ -32,8 +32,8 @@ func TestInput_DisplayRotation(t *testing.T) {
 	for _, stream := range input.FormatContext.Streams() {
 		if stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 			foundVideoStream = true
-			dm, ok := stream.SideData().DisplayMatrix().Get()
-			require.True(t, ok, "Display matrix should be present")
+			dm, ok := stream.CodecParameters().SideData().DisplayMatrix().Get()
+			require.True(t, ok, "Display matrix should be present in codec parameters side data")
 			require.Equal(t, 90.0, dm.Rotation(), "Rotation should be 90 degrees")
 		}
 	}

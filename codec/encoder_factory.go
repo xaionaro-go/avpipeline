@@ -158,7 +158,7 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 			Options:         optsCombined,
 		}
 	default:
-		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet")
+		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet; %s is not", codecParams.MediaType())
 	}
 
 	return NewEncoder(ctx, *encParams)

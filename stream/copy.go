@@ -25,8 +25,16 @@ func CopyParameters(
 func CopySideData(
 	dst, src *astiav.Stream,
 ) {
-	if dm, ok := src.SideData().DisplayMatrix().Get(); ok {
-		dst.SideData().DisplayMatrix().Add(dm)
+	// FFmpeg deprecated AVStream.side_data in favor of AVStream.codecpar.side_data.
+	// See: https://ffmpeg.org/pipermail/ffmpeg-devel/2023-October/315398.html
+	// The side data is now owned by AVCodecParameters (coded_side_data).
+	// See: https://ffmpeg.org/doxygen/8.0/structAVCodecParameters.html#ad54da9241deabb3601e6e0e8fa832c19
+	// Rotation metadata is stored in AV_PKT_DATA_DISPLAYMATRIX.
+	// See: https://ffmpeg.org/doxygen/8.0/packet_8h.html#gga9a80bfcacc586b483a973272800edb97aab8c149a1e6c67aad340733becec87e1
+	srcSideData := src.CodecParameters().SideData()
+	if dm, ok := srcSideData.DisplayMatrix().Get(); ok {
+		dstSideData := dst.CodecParameters().SideData()
+		_ = dstSideData.DisplayMatrix().Add(dm)
 	}
 }
 

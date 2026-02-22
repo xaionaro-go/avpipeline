@@ -8,4 +8,5 @@
 /.github/backlog
 /3rdparty
 /*.log
+/tests
 /myscripts

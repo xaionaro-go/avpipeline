@@ -379,7 +379,8 @@ func (k *GapFiller) getGapStart(
 		)
 		if gap > maxGapPTSUnits {
 			logger.Warnf(ctx, "GapFiller: detected PTS gap too large to fix: gap=%d, maxGap=%d (strategy: %s); resetting the expected PTS", gap, maxGapPTSUnits, strategy)
-			state.NextExpectedPTSSet = false
+			state.NextExpectedPTSSet = true
+			state.NextExpectedPTS = currentPTS + input.Duration()
 			return nil
 		}
 	}

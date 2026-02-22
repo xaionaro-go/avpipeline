@@ -220,11 +220,11 @@ func (d *Decoder[DF]) getStreamDecoder(
 	var rotation float64
 	if autoRotate && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 		logger.Tracef(ctx, "checking for rotation in stream %d", stream.Index())
-		if sd := stream.SideData(); sd != nil {
+		if sd := stream.CodecParameters().SideData(); sd != nil {
 			logger.Tracef(ctx, "stream %d side data types: %v", stream.Index(), sd.Types())
 			if dm, ok := sd.DisplayMatrix().Get(); ok {
 				rotation = dm.Rotation()
-				logger.Tracef(ctx, "found rotation in stream %d: %v", stream.Index(), rotation)
+				logger.Tracef(ctx, "found rotation %v in codec parameters for stream %d", rotation, stream.Index())
 			}
 		}
 	}

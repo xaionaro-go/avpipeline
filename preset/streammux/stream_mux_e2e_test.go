@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"sync"
@@ -115,7 +116,11 @@ func readInputFromFile(ctx context.Context, t *testing.T, fileName string) ([]pa
 			input = append(input, packet.BuildInput(p.Packet.Packet, p.Packet.StreamInfo))
 		}
 	})
-	require.NoError(t, inputKernel.Generate(ctx, ch))
+	err := inputKernel.Generate(ctx, ch)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	require.NoError(t, err)
 	close(ch)
 	wg.Wait()
 	require.NotEmpty(t, input)

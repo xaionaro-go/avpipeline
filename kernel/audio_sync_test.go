@@ -21,24 +21,33 @@ func createTestAudioFrame(streamIndex int, pts int64, sampleRate int, samples []
 	f.SetSampleRate(sampleRate)
 	f.SetSampleFormat(astiav.SampleFormatS16)
 	f.SetChannelLayout(astiav.ChannelLayoutMono)
-	if err := f.AllocBuffer(0); err != nil {
+	f.SetPts(pts)
+	f.SetDuration(int64(len(samples)))
+	if err := f.AllocBuffer(1); err != nil {
 		panic(err)
 	}
 
-	ls := f.Linesize()[0]
-	b := make([]byte, ls)
+	bufferSize, err := f.SamplesBufferSize(1)
+	if err != nil {
+		panic(err)
+	}
+	if bufferSize == 0 {
+		panic("invalid audio buffer size")
+	}
+	b := make([]byte, bufferSize)
 	for i, v := range samples {
-		binary.LittleEndian.PutUint16(b[i*2:], uint16(int16(v*32767)))
+		idx := i * 2
+		if idx+1 >= len(b) {
+			break
+		}
+		binary.LittleEndian.PutUint16(b[idx:], uint16(int16(v*32767)))
 	}
 
-	if err := f.Data().SetBytes(b, 0); err != nil {
+	if err := f.Data().SetBytes(b, 1); err != nil {
 		// If SetBytes fails, try to fallback to direct copy if possible
 		// but usually it means the frame was not allocated correctly.
 		panic(err)
 	}
-
-	f.SetPts(pts)
-	f.SetDuration(int64(len(samples)))
 
 	cp := astiav.AllocCodecParameters()
 	cp.SetMediaType(astiav.MediaTypeAudio)
@@ -222,6 +231,31 @@ func TestAudioSync_LargeDelay(t *testing.T) {
 
 	// Check if sync was detected
 	state := k.getStreamState(ctx, 1)
+	dataRef, err := fRef.Frame.Data().Bytes(1)
+	if err != nil {
+		panic(err)
+	}
+	dataComp, err := fComp.Frame.Data().Bytes(1)
+	if err != nil {
+		panic(err)
+	}
+	var nonZeroRef int
+	for _, v := range dataRef {
+		if v != 0 {
+			nonZeroRef++
+			break
+		}
+	}
+	var nonZeroComp int
+	for _, v := range dataComp {
+		if v != 0 {
+			nonZeroComp++
+			break
+		}
+	}
+	if nonZeroRef == 0 || nonZeroComp == 0 {
+		panic("audio frame data is all zeros")
+	}
 	testifyassert.InDelta(t, -int64(sampleRate*3), state.offset, 1000)
 }
 

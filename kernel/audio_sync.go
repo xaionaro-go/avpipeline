@@ -197,18 +197,29 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 	// 1. Buffer audio for synchronization
 	samplesAsBytes, err := s.extractBytes(input.Frame.Frame)
 	if err == nil {
+		if isReference && !s.globalFirstPtsSet {
+			s.globalFirstPts = input.Frame.Frame.Pts()
+			s.globalFirstPtsSet = true
+		}
 		if state != nil {
 			// Update state with frame info
 			state.sampleRate = input.Frame.Frame.SampleRate()
 			state.timeBase = input.Frame.StreamInfo.TimeBase
 			state.lastPts = input.Frame.Frame.Pts()
-			s.fillGaps(ctx, state, input.Frame.Frame.Pts())
+			if !s.globalFirstPtsSet {
+				s.globalFirstPts = input.Frame.Frame.Pts()
+				s.globalFirstPtsSet = true
+			}
+			s.fillGaps(ctx, state, input.Frame.Frame.Pts(), input.Frame.Frame)
 		}
 		if err := s.pushData(ctx, streamIdx, samplesAsBytes, input.Frame.Frame); err != nil {
 			return err
 		}
 		if state != nil {
-			state.expectedNextPts = input.Frame.Frame.Pts() + int64(input.Frame.Frame.NbSamples())
+			if state.expectedNextPts == 0 {
+				state.expectedNextPts = input.Frame.Frame.Pts()
+			}
+			state.expectedNextPts += int64(input.Frame.Frame.NbSamples())
 		}
 	}
 
@@ -230,7 +241,7 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 	return nil
 }
 
-func (s *AudioSync) fillGaps(ctx context.Context, state *AudioSyncStreamState, currentPts int64) {
+func (s *AudioSync) fillGaps(ctx context.Context, state *AudioSyncStreamState, currentPts int64, f *astiav.Frame) {
 	if !s.globalFirstPtsSet {
 		s.globalFirstPts = currentPts
 		s.globalFirstPtsSet = true
@@ -240,9 +251,22 @@ func (s *AudioSync) fillGaps(ctx context.Context, state *AudioSyncStreamState, c
 		state.expectedNextPts = s.globalFirstPts
 	}
 
+	if f == nil || f.NbSamples() <= 0 || f.SampleRate() <= 0 {
+		return
+	}
 	gap := currentPts - state.expectedNextPts
 	if gap <= 0 {
 		return
+	}
+	if s.config != nil && s.config.WindowSize > 0 {
+		gapNs := astiav.RescaleQ(
+			gap,
+			state.timeBase,
+			astiav.NewRational(1, int(time.Second.Nanoseconds())),
+		)
+		if gapNs < s.config.WindowSize.Nanoseconds() {
+			return
+		}
 	}
 	// Convert gap in PTS units to samples
 	gapSamples := int64(float64(gap) * float64(state.timeBase.Num()) / float64(state.timeBase.Den()) * float64(state.sampleRate))
@@ -250,14 +274,30 @@ func (s *AudioSync) fillGaps(ctx context.Context, state *AudioSyncStreamState, c
 		return
 	}
 
-	bps := int64(2) // Default S16
-	if state.sampleRate > 0 {
-		// Try to get real BPS from syncer if possible, but for silence we can assume 2 for now
-		// Or better, use the encoding we chose.
+	bytesPerSample := f.SampleFormat().BytesPerSample()
+	if bytesPerSample <= 0 {
+		bytesPerSample = 2
+	}
+	channels := f.ChannelLayout().Channels()
+	if channels <= 0 {
+		channels = 1
+	}
+	frameSize := f.NbSamples()
+	if frameSize <= 0 {
+		return
 	}
 
-	silence := make([]byte, gapSamples*bps)
-	s.pushData(ctx, state.streamIndex, silence, nil)
+	remaining := gapSamples
+	for remaining > 0 {
+		chunkSamples := int64(frameSize)
+		if remaining < chunkSamples {
+			chunkSamples = remaining
+		}
+		chunkBytes := int(chunkSamples) * channels * bytesPerSample
+		silence := make([]byte, chunkBytes)
+		s.pushData(ctx, state.streamIndex, silence, f)
+		remaining -= chunkSamples
+	}
 }
 
 // pushData routes incoming audio data to the appropriate syncers.
@@ -306,6 +346,11 @@ func (s *AudioSync) pushData(ctx context.Context, streamIdx int, data []byte, f 
 // 3. Consistency Check: Only applies a correction if the drift direction is consistent over time.
 // 4. Smoothing: Applies a Moving Average (MAMA) to the offset for stable playback.
 func (s *AudioSync) applySyncResult(state *AudioSyncStreamState, shift float64, confidence float64) {
+	if math.Abs(shift) < 1 || math.IsNaN(shift) || math.IsInf(shift, 0) {
+		state.lastSyncTime = time.Now()
+		return
+	}
+
 	if confidence < s.config.ConfidenceThreshold {
 		logger.Warnf(s.ctx, "syncer: low confidence result (%v < %v) for stream %d, ignoring", confidence, s.config.ConfidenceThreshold, state.streamIndex)
 		state.lastSyncTime = time.Now()
@@ -353,7 +398,7 @@ func (s *AudioSync) applySyncResult(state *AudioSyncStreamState, shift float64, 
 }
 
 func (s *AudioSync) extractBytes(f *astiav.Frame) ([]byte, error) {
-	return f.Data().Bytes(0)
+	return f.Data().Bytes(1)
 }
 
 func (s *AudioSync) String() string {

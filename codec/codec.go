@@ -815,7 +815,7 @@ func (c *codecInternals) setupPixelFormat(
 	}
 
 	supportedPixFmts := map[astiav.PixelFormat]struct{}{}
-	for _, pixFmt := range c.codec.PixelFormats() {
+	for _, pixFmt := range c.codec.SupportedPixelFormats() {
 		logger.Debugf(ctx, "supported pixel format: %s", pixFmt)
 		supportedPixFmts[pixFmt] = struct{}{}
 	}
@@ -831,7 +831,7 @@ func (c *codecInternals) setupPixelFormat(
 	case c.isNVENC():
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNv12)
 	default:
-		if pixFmts := c.codec.PixelFormats(); len(pixFmts) > 0 {
+		if pixFmts := c.codec.SupportedPixelFormats(); len(pixFmts) > 0 {
 			c.codecContext.SetPixelFormat(pixFmts[0])
 		} else {
 			defaultPixelFormat := codecParameters.PixelFormat()

@@ -70,10 +70,16 @@ func (pcmFmt PCMAudioFormat) String() string {
 }
 
 func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
-	channelLayoutEqual, err := pcmFmt.ChannelLayout.Compare(other.ChannelLayout)
-	if err != nil {
-		logger.Errorf(context.TODO(), "unable to compare channel layouts: %v", err)
-		return false
+	channelLayoutEqual := false
+	if pcmFmt.ChannelLayout.Order() == astiav.ChannelOrderUnspecified || other.ChannelLayout.Order() == astiav.ChannelOrderUnspecified {
+		channelLayoutEqual = pcmFmt.ChannelLayout.Channels() == other.ChannelLayout.Channels()
+	} else {
+		var err error
+		channelLayoutEqual, err = pcmFmt.ChannelLayout.Compare(other.ChannelLayout)
+		if err != nil {
+			logger.Errorf(context.TODO(), "unable to compare channel layouts: %v", err)
+			return false
+		}
 	}
 	chunkSizeEqual := pcmFmt.ChunkSize == other.ChunkSize || pcmFmt.ChunkSize == 0 || other.ChunkSize == 0
 	return pcmFmt.SampleFormat == other.SampleFormat &&

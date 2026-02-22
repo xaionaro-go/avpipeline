@@ -543,6 +543,12 @@ func (o *Output) updateOutputFormat(
 	if inputFmt == nil {
 		return fmt.Errorf("input format context is nil")
 	}
+	if inputFmt.Class() == nil {
+		return fmt.Errorf("input format context is closed")
+	}
+	if inputFmt.NbStreams() <= 0 {
+		return fmt.Errorf("input format context has no streams")
+	}
 	logger.Debugf(ctx, "updateOutputFormat: %d streams", inputFmt.NbStreams())
 	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
 	for _, inputStream := range inputFmt.Streams() {
