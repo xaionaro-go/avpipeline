@@ -2,7 +2,7 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.25.5
 
-replace github.com/asticode/go-astiav v0.36.0 => ../astiav
+replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20260222232736-ea032799baeb
 
 require (
 	github.com/anthonynsimon/bild v0.14.0
@@ -18,6 +18,7 @@ require (
 	github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20250505013920-61d894a3b7e9
+	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf
 	github.com/xaionaro-go/observability v0.0.0-20251102143534-3aeb2a25e57d
 	github.com/xaionaro-go/polyjson v0.0.0-20250825191950-a2ce35ee07f0
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
@@ -52,7 +53,6 @@ require (
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
 	golang.org/x/image v0.27.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
