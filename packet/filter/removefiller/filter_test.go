@@ -7,9 +7,37 @@ import (
 	"testing"
 
 	"github.com/asticode/go-astiav"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/packet"
 )
+
+func TestFilter_String(t *testing.T) {
+	f := New()
+	assert.Equal(t, "RemoveFiller", f.String())
+}
+
+func TestFilter_NilCodecParameters(t *testing.T) {
+	ctx := context.Background()
+	f := New()
+	pkt := astiav.AllocPacket()
+	t.Cleanup(pkt.Free)
+	si := &packet.StreamInfo{}
+	p := packet.BuildInput(pkt, si)
+	assert.True(t, f.Match(ctx, p), "nil codec params should pass through")
+}
+
+func TestFilter_EmptyData(t *testing.T) {
+	ctx := context.Background()
+	f := New()
+	pkt := astiav.AllocPacket()
+	t.Cleanup(pkt.Free)
+	cp := astiav.AllocCodecParameters()
+	cp.SetCodecID(astiav.CodecIDH264)
+	si := &packet.StreamInfo{CodecParameters: cp}
+	p := packet.BuildInput(pkt, si)
+	assert.True(t, f.Match(ctx, p), "empty data should pass through")
+}
 
 func TestRemoveFiller(t *testing.T) {
 	ctx := context.Background()

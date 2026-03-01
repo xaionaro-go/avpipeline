@@ -91,8 +91,10 @@ func (n *NodeWithCustomData[C, T]) Serve(
 		if n.Config.CacheHandler != nil {
 			n.Config.CacheHandler.Reset(ctx)
 		}
-		n.IsServingValue = false
-		close(*xatomic.SwapPointer(&n.ChangeChanIsServing, ptr(make(chan struct{}))))
+		n.Locker.Do(context.Background(), func() {
+			n.IsServingValue = false
+			close(*xatomic.SwapPointer(&n.ChangeChanIsServing, ptr(make(chan struct{}))))
+		})
 	}()
 
 	procNodeEndCtx := ctx

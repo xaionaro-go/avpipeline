@@ -90,6 +90,9 @@ func (f *NaiveDecoderFactory) newDecoder(
 	}
 
 	codecParameters := stream.CodecParameters()
+	if codecParameters == nil {
+		return nil, fmt.Errorf("stream %d has nil codec parameters", stream.Index())
+	}
 
 	defer func() {
 		if _err != nil {
@@ -134,7 +137,10 @@ func (f *NaiveDecoderFactory) newDecoder(
 			Options:               optsCombined,
 		}
 	default:
-		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveDecoderFactory, yet")
+		// Return nil for unsupported media types (e.g. subtitles, data streams
+		// like timed_id3 in HLS/MPEG-TS). The caller should skip packets for
+		// streams that have no decoder.
+		return nil, nil
 
 	}
 	if fn := f.PreInitFunc; fn != nil {

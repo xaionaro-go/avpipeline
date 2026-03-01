@@ -53,7 +53,7 @@ func multiplyBitRates(
 	return out
 }
 
-func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateResolutionAndBitRateConfigs {
+func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) (AutoBitRateResolutionAndBitRateConfigs, error) {
 	switch codecID {
 	case astiav.CodecIDH264:
 		return AutoBitRateResolutionAndBitRateConfigs{
@@ -85,13 +85,21 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) AutoBitRateR
 				Resolution:  codec.Resolution{Width: 320, Height: 180},
 				BitrateHigh: 500_000, BitrateLow: 20_000, // 500 Kbps .. 20 Kbps
 			},
-		}
+		}, nil
 	case astiav.CodecIDHevc:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.85)
+		h264Config, err := GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264)
+		if err != nil {
+			return nil, err
+		}
+		return multiplyBitRates(h264Config, 0.85), nil
 	case astiav.CodecIDAv1:
-		return multiplyBitRates(GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264), 0.7)
+		h264Config, err := GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264)
+		if err != nil {
+			return nil, err
+		}
+		return multiplyBitRates(h264Config, 0.7), nil
 	default:
-		panic(fmt.Errorf("unsupported codec for DefaultAutoBitRateVideoConfig: %s", codecID))
+		return nil, fmt.Errorf("unsupported codec for DefaultAutoBitRateVideoConfig: %s", codecID)
 	}
 }
 
@@ -120,8 +128,11 @@ func DefaultFPSReducerConfig() FPSReducerConfig {
 
 func DefaultAutoBitRateVideoConfig(
 	codecID astiav.CodecID,
-) AutoBitRateVideoConfig {
-	resolutions := GetDefaultAutoBitrateResolutionsConfig(codecID)
+) (AutoBitRateVideoConfig, error) {
+	resolutions, err := GetDefaultAutoBitrateResolutionsConfig(codecID)
+	if err != nil {
+		return AutoBitRateVideoConfig{}, fmt.Errorf("unable to get default autobitrate resolutions config: %w", err)
+	}
 	resBest := resolutions.Best()
 	resWorst := resolutions.Worst()
 	result := AutoBitRateVideoConfig{
@@ -140,7 +151,7 @@ func DefaultAutoBitRateVideoConfig(
 			indicator.NewMAMA[uint64](int(time.Minute*30/(time.Second/4)), 0.5, 0.05),
 		),
 	}
-	return result
+	return result, nil
 }
 
 func (s *StreamMux[C]) newAutoBitRateHandler(

@@ -68,47 +68,51 @@ func serve[T node.Abstract](
 				return
 			}
 
-			ctx, cancel := context.WithCancel(ctx)
-			childrenCtx := xcontext.DetachDone(ctx)
-			shouldSkip := false
-			if serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, n) {
-				shouldSkip = true
-				childrenCtx = ctx // TODO: explain
-			}
-
-			childrenCtx, childrenCancelFn := context.WithCancel(childrenCtx)
+			shouldSkip := serveConfig.NodeFilter != nil && !serveConfig.NodeFilter.Match(ctx, n)
 
 			pushChangeChan := n.GetChangeChanPushTo()
 			currentPushTos := n.GetPushTos(ctx)
 
-			nodesWG.Add(1)
-			observability.Go(ctx, func(ctx context.Context) {
-				defer nodesWG.Done()
-				for {
-					select {
-					case <-ctx.Done():
-						logger.Tracef(ctx, "/Serve[%s]: context done", nodeKey)
-						return
-					case <-pushChangeChan:
-						pushChangeChan = n.GetChangeChanPushTo()
-						newPushTos := n.GetPushTos(ctx)
-						newNodes := newPushTos.Nodes().Without(currentPushTos.Nodes())
-						logger.Tracef(ctx, "Serve[%s]: push change; new nodes count: %d", nodeKey, len(newNodes))
-						for _, newNode := range newNodes {
-							serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, newNode)
+			startMonitoringGoroutine := func(monitorCtx, childrenCtx context.Context) {
+				nodesWG.Add(1)
+				observability.Go(monitorCtx, func(ctx context.Context) {
+					defer nodesWG.Done()
+					for {
+						select {
+						case <-ctx.Done():
+							logger.Tracef(ctx, "/Serve[%s]: context done", nodeKey)
+							return
+						case <-pushChangeChan:
+							pushChangeChan = n.GetChangeChanPushTo()
+							newPushTos := n.GetPushTos(ctx)
+							newNodes := newPushTos.Nodes().Without(currentPushTos.Nodes())
+							logger.Tracef(ctx, "Serve[%s]: push change; new nodes count: %d", nodeKey, len(newNodes))
+							for _, newNode := range newNodes {
+								serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, newNode)
+							}
+							currentPushTos = newPushTos
 						}
-						currentPushTos = newPushTos
 					}
-				}
-			})
-
-			for _, pushTo := range currentPushTos {
-				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
+				})
 			}
 
 			if shouldSkip {
+				// Skipped node: monitoring and children use the parent context lifetime.
+				startMonitoringGoroutine(ctx, ctx)
+				for _, pushTo := range currentPushTos {
+					serve(ctx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
+				}
 				logger.Tracef(ctx, "/Serve[%s]: skipped", nodeKey)
 				return
+			}
+
+			ctx, cancel := context.WithCancel(ctx)
+			childrenCtx := xcontext.DetachDone(ctx)
+			childrenCtx, childrenCancelFn := context.WithCancel(childrenCtx)
+
+			startMonitoringGoroutine(ctx, childrenCtx)
+			for _, pushTo := range currentPushTos {
+				serve(childrenCtx, serveConfig, errCh, nodesWG, dstAlreadyVisited, pushTo.Node)
 			}
 
 			logger.Tracef(ctx, "Serve[%s]: starting", nodeKey)

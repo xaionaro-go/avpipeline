@@ -139,31 +139,7 @@ func NewGraph(
 	return g, nil
 }
 
-var _ Kernel = (*Graph)(nil)
-
-func (g *Graph) FilterInput() *astiav.Filter {
-	return nil
-}
-
-func (g *Graph) FilterOutput() *astiav.Filter {
-	return nil
-}
-
-func (g *Graph) ConnectInput(graph *astiav.FilterGraph, nodeName string) error {
-	return fmt.Errorf("use NewGraph to create a graph, don't connect it as a node")
-}
-
-func (g *Graph) ConnectOutput(graph *astiav.FilterGraph, nodeName string) error {
-	return fmt.Errorf("use NewGraph to create a graph, don't connect it as a node")
-}
-
-func (g *Graph) InputFilterContext() *astiav.FilterContext {
-	return nil
-}
-
-func (g *Graph) OutputFilterContext() *astiav.FilterContext {
-	return nil
-}
+var _ FrameFilter = (*Graph)(nil)
 
 func (g *Graph) AddFrame(streamIdx int, f *astiav.Frame, flags astiav.BuffersrcFlags) error {
 	buf, ok := g.Inputs[streamIdx]

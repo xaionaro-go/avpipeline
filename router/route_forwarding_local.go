@@ -42,6 +42,7 @@ func (r *Router[T]) AddRouteForwardingLocal(
 	dstPath RoutePath,
 	publishMode PublishMode,
 	transcoderConfig *transcodertypes.TranscoderConfig,
+	filterKernelFactory FilterKernelFactory,
 ) (_ret *RouteForwarding[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwardingLocal(ctx, '%s', '%s', %s, %#+v)", srcPath, dstPath, publishMode, transcoderConfig)
 	defer func() {
@@ -67,6 +68,7 @@ func (r *Router[T]) AddRouteForwardingLocal(
 		newForwardOutputFactoryLocalPath(r, dstPath),
 		publishMode,
 		transcoderConfig,
+		filterKernelFactory,
 	)
 }
 

@@ -31,8 +31,8 @@ func (b *GaussianBlur) String() string {
 }
 
 func (b *GaussianBlur) Process(
-	ctx context.Context,
-	frame *gocv.Mat,
+	_ context.Context,
+	mat *gocv.Mat,
 	coords []image.Rectangle,
 ) error {
 	radius := b.Radius.Load()
@@ -40,5 +40,18 @@ func (b *GaussianBlur) Process(
 		return nil
 	}
 
-	return fmt.Errorf("not implemented")
+	ksize := int(radius)*2 + 1
+	size := image.Pt(ksize, ksize)
+	matBounds := image.Rect(0, 0, mat.Cols(), mat.Rows())
+
+	for _, rect := range coords {
+		rect = rect.Intersect(matBounds)
+		if rect.Empty() {
+			continue
+		}
+		region := mat.Region(rect)
+		gocv.GaussianBlur(region, &region, size, 0, 0, gocv.BorderDefault)
+		region.Close()
+	}
+	return nil
 }

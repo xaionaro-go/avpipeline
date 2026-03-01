@@ -14,6 +14,7 @@ import (
 	avpaudio "github.com/xaionaro-go/avpipeline/audio"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -196,9 +197,7 @@ type gapFillerStreamState struct {
 	LastVideoFrame     *astiav.Frame
 
 	// For video interpolation
-	videoFilterGraph     *astiav.FilterGraph
-	videoSrcContext      *astiav.BuffersrcFilterContext
-	videoSnkContext      *astiav.BuffersinkFilterContext
+	videoSimpleGraph     *avfilter.SimpleGraph
 	lastFilterArgs       string
 	videoVirtualPTS      int64
 	videoLastWidth       int
@@ -254,9 +253,9 @@ func (k *GapFiller) closeLocked(ctx context.Context) error {
 			frame.Pool.Put(s.LastVideoFrame)
 			s.LastVideoFrame = nil
 		}
-		if s.videoFilterGraph != nil {
-			s.videoFilterGraph.Free()
-			s.videoFilterGraph = nil
+		if s.videoSimpleGraph != nil {
+			s.videoSimpleGraph.Close()
+			s.videoSimpleGraph = nil
 		}
 	}
 	k.ClosureSignaler.Close(ctx)
@@ -767,31 +766,34 @@ func (k *GapFiller) fixVideoGapInterpolate(
 	}
 	filterArgs := fmt.Sprintf("%f:%s", fps, miMode)
 
-	if state.videoFilterGraph != nil && (state.videoLastWidth != lastFrame.Width() ||
+	if state.videoSimpleGraph != nil && (state.videoLastWidth != lastFrame.Width() ||
 		state.videoLastHeight != lastFrame.Height() ||
 		state.videoLastPixelFormat != lastFrame.PixelFormat() ||
 		state.lastFilterArgs != filterArgs) {
-		state.videoFilterGraph.Free()
-		state.videoFilterGraph = nil
+		state.videoSimpleGraph.Close()
+		state.videoSimpleGraph = nil
 	}
 
-	if state.videoFilterGraph == nil {
-		fg, srcCtx, snkCtx, err := k.createTransientVideoFilterGraph(ctx, lastFrame, timeBase, fps, miMode)
+	if state.videoSimpleGraph == nil {
+		var filterStr string
+		if miMode == "mci" {
+			filterStr = avfilter.MInterpolateFilterAdvanced(fps, miMode, videoInterpolationSearchParam)
+		} else {
+			filterStr = avfilter.MInterpolateFilter(fps, miMode)
+		}
+		sg, err := avfilter.NewSimpleVideoGraphFromFrame(ctx, filterStr, lastFrame, timeBase)
 		if err != nil {
 			logger.Errorf(ctx, "unable to create video filter graph for interpolation: %v", err)
 			return k.fixVideoGapDuplicateNextFrame(ctx, input, gapStart), nil
 		}
-		state.videoFilterGraph = fg
-		state.videoSrcContext = srcCtx
-		state.videoSnkContext = snkCtx
+		state.videoSimpleGraph = sg
 		state.videoLastWidth = lastFrame.Width()
 		state.videoLastHeight = lastFrame.Height()
 		state.videoLastPixelFormat = lastFrame.PixelFormat()
 		state.lastFilterArgs = filterArgs
 	}
 
-	srcCtx := state.videoSrcContext
-	snkCtx := state.videoSnkContext
+	sg := state.videoSimpleGraph
 
 	numFrames := (input.Pts() - lastFrame.Pts()) / duration
 	if numFrames <= 1 {
@@ -801,21 +803,21 @@ func (k *GapFiller) fixVideoGapInterpolate(
 	// Push the last frame and the current frame to the filter graph with virtual PTS
 	f1 := frame.CloneAsReferenced(lastFrame)
 	f1.SetPts(state.videoVirtualPTS * duration)
-	if err := srcCtx.AddFrame(f1, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+	if err := sg.AddFrame(0, f1, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
 		logger.Errorf(ctx, "unable to push last frame to interpolation filter: %v", err)
 	}
 	f1.Free()
 
 	f2 := frame.CloneAsReferenced(input)
 	f2.SetPts((state.videoVirtualPTS + numFrames) * duration)
-	if err := srcCtx.AddFrame(f2, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+	if err := sg.AddFrame(0, f2, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
 		logger.Errorf(ctx, "unable to push current frame to interpolation filter: %v", err)
 	}
 
 	// Flush lookahead (minterpolate needs frames to output results)
 	for i := int64(1); i <= videoInterpolationFlushFrames; i++ {
 		f2.SetPts((state.videoVirtualPTS + numFrames + i) * duration)
-		srcCtx.AddFrame(f2, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef))
+		sg.AddFrame(0, f2, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef))
 	}
 	f2.Free()
 
@@ -823,7 +825,7 @@ func (k *GapFiller) fixVideoGapInterpolate(
 	// Pull interpolated frames
 	for {
 		outFrame := astiav.AllocFrame()
-		err := snkCtx.GetFrame(outFrame, astiav.NewBuffersinkFlags())
+		err := sg.GetFrame(0, outFrame, astiav.NewBuffersinkFlags())
 		if err == astiav.ErrEagain {
 			outFrame.Free()
 			break
@@ -852,86 +854,6 @@ func (k *GapFiller) fixVideoGapInterpolate(
 
 	result = append(result, input)
 	return result, nil
-}
-
-func (k *GapFiller) createTransientVideoFilterGraph(
-	_ context.Context,
-	f *astiav.Frame,
-	timeBase astiav.Rational,
-	fps float64,
-	miMode string,
-) (*astiav.FilterGraph, *astiav.BuffersrcFilterContext, *astiav.BuffersinkFilterContext, error) {
-	fg := astiav.AllocFilterGraph()
-	if fg == nil {
-		return nil, nil, nil, fmt.Errorf("unable to allocate filter graph")
-	}
-
-	srcFilter := astiav.FindFilterByName("buffer")
-	sinkFilter := astiav.FindFilterByName("buffersink")
-	if srcFilter == nil || sinkFilter == nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to find buffer or buffersink filters")
-	}
-
-	srcCtx, err := fg.NewBuffersrcFilterContext(srcFilter, "in")
-	if err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to create buffersrc context: %w", err)
-	}
-
-	sinkCtx, err := fg.NewBuffersinkFilterContext(sinkFilter, "out")
-	if err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to create buffersink context: %w", err)
-	}
-
-	params := astiav.AllocBuffersrcFilterContextParameters()
-	defer params.Free()
-	params.SetWidth(f.Width())
-	params.SetHeight(f.Height())
-	params.SetPixelFormat(f.PixelFormat())
-	params.SetTimeBase(timeBase)
-	params.SetSampleAspectRatio(f.SampleAspectRatio())
-
-	if err := srcCtx.SetParameters(params); err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to set buffersrc parameters: %w", err)
-	}
-
-	if err := srcCtx.Initialize(nil); err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to initialize buffersrc: %w", err)
-	}
-
-	outputs := astiav.AllocFilterInOut()
-	defer outputs.Free()
-	outputs.SetName("in")
-	outputs.SetFilterContext(srcCtx.FilterContext())
-	outputs.SetPadIdx(0)
-	outputs.SetNext(nil)
-
-	inputs := astiav.AllocFilterInOut()
-	defer inputs.Free()
-	inputs.SetName("out")
-	inputs.SetFilterContext(sinkCtx.FilterContext())
-	inputs.SetPadIdx(0)
-	inputs.SetNext(nil)
-
-	filterString := fmt.Sprintf("[in]minterpolate=mi_mode=%%s:fps=%%f:mc_mode=aobmc:me_mode=bidir:me=esa:search_param=%d:vsbmc=1:scd=fdiff[out]", videoInterpolationSearchParam)
-	if miMode != "mci" {
-		filterString = "[in]minterpolate=mi_mode=%s:fps=%f[out]"
-	}
-	if err := fg.Parse(fmt.Sprintf(filterString, miMode, fps), inputs, outputs); err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to parse filter string %q: %w", filterString, err)
-	}
-
-	if err := fg.Configure(); err != nil {
-		fg.Free()
-		return nil, nil, nil, fmt.Errorf("unable to configure filter graph: %w", err)
-	}
-
-	return fg, srcCtx, sinkCtx, nil
 }
 
 func (k *GapFiller) fixAudioGapIfNeeded(

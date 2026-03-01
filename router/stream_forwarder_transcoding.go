@@ -23,12 +23,17 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// FilterKernelFactory creates a kernel.Abstract to be set as the filter kernel
+// on a Transcoder. It is called each time the transcoding chain starts (including restarts).
+type FilterKernelFactory func(ctx context.Context) (kernel.Abstract, error)
+
 // TODO: remove StreamForwarder from package `router`
 type StreamForwarderTranscoding[CS any, PS processor.Abstract] struct {
 	Input               *node.NodeWithCustomData[CS, PS]
 	InputAsPacketSource packet.Source
 	DestinationNode     node.Abstract
 	TranscoderConfig    transcodertypes.TranscoderConfig
+	FilterKernelFactory FilterKernelFactory
 	Chain               *transcoder.TranscoderWithPassthrough[CS, PS]
 	ChainInput          *nodewrapper.NoServe[*node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]]
 	CancelFunc          context.CancelFunc
@@ -43,6 +48,7 @@ func NewStreamForwarderTranscoding[CS any, PS processor.Abstract](
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 	transcoderConfig *transcodertypes.TranscoderConfig,
+	filterKernelFactory FilterKernelFactory,
 ) (_ret *StreamForwarderTranscoding[CS, PS], _err error) {
 	logger.Debugf(ctx, "NewStreamForwarderTranscoding(%s, %s)", src, dst)
 	defer func() { logger.Debugf(ctx, "/NewStreamForwarderTranscoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
@@ -56,6 +62,7 @@ func NewStreamForwarderTranscoding[CS any, PS processor.Abstract](
 		Input:               src,
 		InputAsPacketSource: packetSource,
 		DestinationNode:     dst,
+		FilterKernelFactory: filterKernelFactory,
 	}
 
 	if transcoderConfig == nil {
@@ -133,6 +140,16 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) start(origCtx context.Context) (_
 	type chainInputNode = node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]
 	if err := chain.SetTranscoderConfig(ctx, fwd.TranscoderConfig); err != nil {
 		return fmt.Errorf("unable to set the TranscoderConfig to %#+v: %w", fwd.TranscoderConfig, err)
+	}
+
+	if fwd.FilterKernelFactory != nil {
+		fk, err := fwd.FilterKernelFactory(ctx)
+		if err != nil {
+			return fmt.Errorf("unable to create the filter kernel: %w", err)
+		}
+		if fk != nil {
+			chain.Transcoder.SetFilterKernel(ctx, fk)
+		}
 	}
 
 	if err := chain.Start(ctx, transcodertypes.PassthroughModeNever, avpipeline.ServeConfig{

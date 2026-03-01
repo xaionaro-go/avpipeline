@@ -17,7 +17,8 @@ type Buffer struct {
 	Params  *astiav.BuffersrcFilterContextParameters
 }
 
-var _ Kernel = (*Buffer)(nil)
+var _ FrameFilter = (*Buffer)(nil)
+var _ GraphEndpoint = (*Buffer)(nil)
 
 func NewBuffer(
 	ctx context.Context,

@@ -3,27 +3,7 @@
 package condition
 
 import (
-	"context"
-	"strings"
+	conditionbase "github.com/xaionaro-go/avpipeline/types/condition"
 )
 
-type Or []Condition
-
-var _ Condition = Or{}
-
-func (v Or) String() string {
-	var parts []string
-	for _, cond := range v {
-		parts = append(parts, cond.String())
-	}
-	return "(" + strings.Join(parts, " || ") + ")"
-}
-
-func (v Or) Match(ctx context.Context, in Input) bool {
-	for _, cond := range v {
-		if cond.Match(ctx, in) {
-			return true
-		}
-	}
-	return false
-}
+type Or = conditionbase.Or[Input]

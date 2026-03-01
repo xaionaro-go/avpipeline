@@ -244,11 +244,15 @@ func (i *InputChain[K, DF, C]) Close(
 	if err := i.Filter.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close filter node: %w", err))
 	}
-	if err := i.AutoHeaders.Processor.Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to close autoheaders node: %w", err))
+	if i.AutoHeaders != nil {
+		if err := i.AutoHeaders.Processor.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close autoheaders node: %w", err))
+		}
 	}
-	if err := i.Decoder.Processor.Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to close decoder node: %w", err))
+	if i.Decoder != nil {
+		if err := i.Decoder.Processor.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close decoder node: %w", err))
+		}
 	}
 	if err := i.SyncBarrier.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close sync barrier node: %w", err))

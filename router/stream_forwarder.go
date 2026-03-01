@@ -25,6 +25,7 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	src *node.NodeWithCustomData[CS, PS],
 	dst node.Abstract,
 	transcoderConfig *transcodertypes.TranscoderConfig,
+	filterKernelFactory FilterKernelFactory,
 ) (_ret StreamForwarder[CS, PS], _err error) {
 	logger.Tracef(ctx, "NewStreamForwarder(ctx, %s, %s, %#+v)", src, dst, transcoderConfig)
 	defer func() {
@@ -35,7 +36,7 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	if transcoderConfig == nil {
 		fwd, err = NewStreamForwarderCopy(ctx, src, dst)
 	} else {
-		fwd, err = NewStreamForwarderTranscoding(ctx, src, dst, transcoderConfig)
+		fwd, err = NewStreamForwarderTranscoding(ctx, src, dst, transcoderConfig, filterKernelFactory)
 	}
 	if err != nil {
 		return nil, err

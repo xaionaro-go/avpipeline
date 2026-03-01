@@ -3,23 +3,7 @@
 package condition
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/xaionaro-go/avpipeline/packetorframe"
+	conditionbase "github.com/xaionaro-go/avpipeline/types/condition"
 )
 
-type Not []Condition
-
-var _ Condition = (*Not)(nil)
-
-func (n Not) String() string {
-	return fmt.Sprintf("!(%s)", And(n))
-}
-
-func (n Not) Match(
-	ctx context.Context,
-	in packetorframe.InputUnion,
-) bool {
-	return !And(n).Match(ctx, in)
-}
+type Not = conditionbase.Not[Input]

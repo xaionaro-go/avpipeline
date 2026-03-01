@@ -51,7 +51,7 @@ func (a *AutoFixerWithCustomData[T]) OutputChan() <-chan packetorframe.OutputUni
 }
 
 func (a *AutoFixerWithCustomData[T]) ErrorChan() <-chan error {
-	panic("not supported")
+	return nil
 }
 
 func (a *AutoFixerWithCustomData[T]) WithOutputFormatContext(

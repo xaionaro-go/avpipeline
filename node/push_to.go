@@ -10,6 +10,7 @@ import (
 	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
+	conditionbase "github.com/xaionaro-go/avpipeline/types/condition"
 )
 
 type PushToGeneric[T any, C filter.Condition[T]] struct {
@@ -21,30 +22,16 @@ type PushTo = PushToGeneric[packetorframe.InputUnion, packetorframefilterconditi
 
 type PushTos []PushTo
 
-func pushToConds(conds ...packetorframefiltercondition.Condition) packetorframefiltercondition.Condition {
-	switch len(conds) {
-	case 0:
-		return nil
-	case 1:
-		return conds[0]
-	}
-	return packetorframefiltercondition.And(conds)
-}
-
 func (s *PushTos) Add(dst Abstract, conds ...packetorframefiltercondition.Condition) *PushTos {
 	*s = append(*s, PushTo{
 		Node:      dst,
-		Condition: pushToConds(conds...),
+		Condition: conditionbase.CombineConds(conds...),
 	})
 	return s
 }
 
 func (s PushTos) Nodes() Nodes[Abstract] {
-	var result Nodes[Abstract]
-	for _, item := range s {
-		result = append(result, item.Node)
-	}
-	return result
+	return nodesFromPushTos(s)
 }
 
 func (s PushTos) Contains(pushTo PushTo) bool {
@@ -60,60 +47,41 @@ type PushFramesTo = PushToGeneric[frame.Input, framefiltercondition.Condition]
 
 type PushFramesTos []PushFramesTo
 
-func frameConds(conds ...framefiltercondition.Condition) framefiltercondition.Condition {
-	switch len(conds) {
-	case 0:
-		return nil
-	case 1:
-		return conds[0]
-	}
-	return framefiltercondition.And(conds)
-}
-
 func (s *PushFramesTos) Add(dst Abstract, conds ...framefiltercondition.Condition) *PushFramesTos {
 	*s = append(*s, PushFramesTo{
 		Node:      dst,
-		Condition: frameConds(conds...),
+		Condition: conditionbase.CombineConds(conds...),
 	})
 	return s
 }
 
 func (s PushFramesTos) Nodes() Nodes[Abstract] {
-	var result Nodes[Abstract]
+	return nodesFromPushTos(s)
+}
+
+func (s PushFramesTos) Contains(pushTo PushFramesTo) bool {
 	for _, item := range s {
-		result = append(result, item.Node)
+		if item == pushTo {
+			return true
+		}
 	}
-	return result
+	return false
 }
 
 type PushPacketsTo = PushToGeneric[packet.Input, packetfiltercondition.Condition]
 
 type PushPacketsTos []PushPacketsTo
 
-func packetConds(conds ...packetfiltercondition.Condition) packetfiltercondition.Condition {
-	switch len(conds) {
-	case 0:
-		return nil
-	case 1:
-		return conds[0]
-	}
-	return packetfiltercondition.And(conds)
-}
-
 func (s *PushPacketsTos) Add(dst Abstract, conds ...packetfiltercondition.Condition) *PushPacketsTos {
 	*s = append(*s, PushPacketsTo{
 		Node:      dst,
-		Condition: packetConds(conds...),
+		Condition: conditionbase.CombineConds(conds...),
 	})
 	return s
 }
 
 func (s PushPacketsTos) Nodes() Nodes[Abstract] {
-	var result Nodes[Abstract]
-	for _, item := range s {
-		result = append(result, item.Node)
-	}
-	return result
+	return nodesFromPushTos(s)
 }
 
 func (s PushPacketsTos) Contains(pushTo PushPacketsTo) bool {
@@ -123,4 +91,20 @@ func (s PushPacketsTos) Contains(pushTo PushPacketsTo) bool {
 		}
 	}
 	return false
+}
+
+type nodeGetter interface {
+	getNode() Abstract
+}
+
+func (p PushToGeneric[T, C]) getNode() Abstract {
+	return p.Node
+}
+
+func nodesFromPushTos[T nodeGetter](pushTos []T) Nodes[Abstract] {
+	var result Nodes[Abstract]
+	for _, item := range pushTos {
+		result = append(result, item.getNode())
+	}
+	return result
 }

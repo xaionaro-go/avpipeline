@@ -1176,7 +1176,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 
 	err := s.switchToOutputByProps(ctx, types.SenderProps{
 		TranscoderConfig: cfg.TranscoderConfig,
-	}, false)
+	}, true)
 	if err != nil {
 		return fmt.Errorf("unable to switch to the new output props: %w", err)
 	}

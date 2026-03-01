@@ -3,13 +3,19 @@
 package boilerplate
 
 import (
+	"sync"
+
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 )
 
 type Counters struct {
-	*nodetypes.Counters
+	counters     *nodetypes.Counters
+	countersOnce sync.Once
 }
 
 func (n *Counters) CountersPtr() *nodetypes.Counters {
-	return nodetypes.NewCounters()
+	n.countersOnce.Do(func() {
+		n.counters = nodetypes.NewCounters()
+	})
+	return n.counters
 }

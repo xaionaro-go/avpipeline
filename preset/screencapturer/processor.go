@@ -33,7 +33,7 @@ func (a *ScreenCapturer[C]) OutputChan() <-chan packetorframe.OutputUnion {
 }
 
 func (a *ScreenCapturer[C]) ErrorChan() <-chan error {
-	panic("not supported")
+	return nil
 }
 
 func (a *ScreenCapturer[C]) Flush(ctx context.Context) error {

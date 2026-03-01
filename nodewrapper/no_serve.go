@@ -40,7 +40,8 @@ func (n *NoServe[N]) GetObjectID() globaltypes.ObjectID {
 
 func (n *NoServe[N]) OriginalNodeAbstract() node.Abstract {
 	orig := n.OriginalNode()
-	if reflect.ValueOf(orig).IsZero() {
+	v := reflect.ValueOf(orig)
+	if !v.IsValid() || v.IsZero() {
 		return nil
 	}
 	return orig
@@ -84,21 +85,21 @@ func (n *NoServe[N]) AddPushTo(
 	dst node.Abstract,
 	conds ...packetorframefiltercondition.Condition,
 ) {
-	panic("NoServe cannot add PushTo")
+	logger.Errorf(ctx, "NoServe cannot add PushTo")
 }
 
 func (n *NoServe[N]) SetPushTos(
 	ctx context.Context,
 	pushTos node.PushTos,
 ) {
-	panic("NoServe cannot set PushTos")
+	logger.Errorf(ctx, "NoServe cannot set PushTos")
 }
 
 func (n *NoServe[N]) RemovePushTo(
 	ctx context.Context,
 	dst node.Abstract,
 ) error {
-	panic("NoServe cannot remove PushTo")
+	return fmt.Errorf("NoServe cannot remove PushTo")
 }
 
 func (n *NoServe[N]) IsServing() bool {

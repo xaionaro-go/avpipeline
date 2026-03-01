@@ -158,8 +158,10 @@ func (d *Decoder[DF]) closeLocked(ctx context.Context) (_err error) {
 		errs = append(errs, fmt.Errorf("unable to reset the decoder factory: %w", err))
 	}
 	for key, decoder := range d.Decoders {
-		if err := decoder.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("unable to close the decoder for stream #%d: %w", key, err))
+		if decoder.Decoder != nil {
+			if err := decoder.Close(ctx); err != nil {
+				errs = append(errs, fmt.Errorf("unable to close the decoder for stream #%d: %w", key, err))
+			}
 		}
 		delete(d.Decoders, key)
 	}
@@ -204,13 +206,23 @@ func (d *Decoder[DF]) getStreamDecoder(
 	decoder := d.Decoders[stream.Index()]
 	logger.Tracef(ctx, "decoder == %v", decoder)
 	if decoder != nil {
+		if decoder.Decoder == nil {
+			// Sentinel: this stream type is unsupported, skip it.
+			return nil, nil
+		}
 		return decoder, nil
 	}
 	rawDecoder, err := d.DecoderFactory.NewDecoder(ctx, source, stream, pipelineSideData)
 	if err != nil {
 		return nil, fmt.Errorf("cannot initialize a decoder for stream %d: %w", stream.Index(), err)
 	}
-	assert(ctx, rawDecoder != nil)
+	if rawDecoder == nil {
+		// The factory returned nil without error, meaning this stream type
+		// is not supported (e.g. data/subtitle streams). Cache a sentinel
+		// so we don't call the factory again, and return nil to signal skip.
+		d.Decoders[stream.Index()] = &StreamDecoder{}
+		return nil, nil
+	}
 
 	autoRotate := true
 	if v, ok := globaltypes.PipelineSideDataLatest[globaltypes.AutoRotate](pipelineSideData); ok {
@@ -302,6 +314,11 @@ func (d *Decoder[DF]) sendPacket(
 	})
 	if err != nil {
 		return fmt.Errorf("unable to get a stream decoder: %w", err)
+	}
+	if streamDecoder == nil {
+		// No decoder for this stream (unsupported type like data/subtitles).
+		// Silently skip the packet.
+		return nil
 	}
 	ctx = belt.WithField(ctx, "decoder", streamDecoder)
 
@@ -616,6 +633,9 @@ func (d *Decoder[DF]) resetSoft(
 
 	var errs []error
 	for streamIndex, decoder := range d.Decoders {
+		if decoder.Decoder == nil {
+			continue
+		}
 		if err := decoder.Reset(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to reset the decoder for stream #%d: %w", streamIndex, err))
 		}
@@ -643,6 +663,10 @@ func (d *Decoder[DF]) resetHard(
 
 	var errs []error
 	for streamIndex, decoder := range d.Decoders {
+		if decoder.Decoder == nil {
+			delete(d.Decoders, streamIndex)
+			continue
+		}
 		decoder.LockDo(ctx, func(ctx context.Context, decoder *codec.DecoderLocked) (_err error) {
 			if err := decoder.Close(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("unable to close the decoder for stream #%d: %w", streamIndex, err))
@@ -676,6 +700,9 @@ func (d *Decoder[DF]) isDirtyLocked(
 	defer func() { logger.Tracef(ctx, "/isDirty: %v", _ret) }()
 	defer func() { d.IsDirtyCache.Store(_ret) }()
 	for _, decoder := range d.Decoders {
+		if decoder.Decoder == nil {
+			continue
+		}
 		if decoder.IsDirty(ctx) {
 			return true
 		}
@@ -710,6 +737,9 @@ func (d *Decoder[DF]) Flush(
 		defer wg.Done()
 		d.Locker.Do(ctx, func() {
 			for streamIndex, decoder := range d.Decoders {
+				if decoder.Decoder == nil {
+					continue
+				}
 				wg.Add(1)
 				streamIndex, decoder := streamIndex, decoder
 				ctx := belt.WithField(ctx, "stream_index", streamIndex)

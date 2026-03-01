@@ -30,7 +30,11 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 		return
 	}
 	if !a.isServing.CompareAndSwap(false, true) {
-		panic("already serving")
+		errCh <- node.Error{
+			Node: a,
+			Err: fmt.Errorf("%w: %s", node.ErrAlreadyStarted{}, debug.Stack()),
+		}
+		return
 	}
 	defer a.isServing.Store(false)
 
@@ -43,8 +47,10 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	if a.AutoHeadersNode != nil { // TODO: this block is not thread-safe, fix
+	a.serveMu.Lock()
+	if a.AutoHeadersNode != nil {
 		if a.AutoHeadersNode.IsServing() {
+			a.serveMu.Unlock()
 			logger.Errorf(ctx, "AutoHeadersNode[%p] is already serving", a.AutoHeadersNode)
 			errCh <- node.Error{
 				Node: a.AutoHeadersNode,
@@ -61,8 +67,9 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 			a.AutoHeadersNode.Serve(ctx, cfg, errCh)
 		})
 	}
-	if a.MapStreamIndicesNode != nil { // TODO: this block is not thread-safe, fix
+	if a.MapStreamIndicesNode != nil {
 		if a.MapStreamIndicesNode.IsServing() {
+			a.serveMu.Unlock()
 			logger.Errorf(ctx, "MapStreamIndicesNode[%p] is already serving", a.MapStreamIndicesNode)
 			errCh <- node.Error{
 				Node: a.MapStreamIndicesNode,
@@ -79,6 +86,7 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 			a.MapStreamIndicesNode.Serve(ctx, cfg, errCh)
 		})
 	}
+	a.serveMu.Unlock()
 }
 
 func (a *AutoFixerWithCustomData[T]) GetObjectID() globaltypes.ObjectID {
@@ -196,9 +204,14 @@ func (a *AutoFixerWithCustomData[T]) GetChangeChanPushTo() <-chan struct{} {
 }
 
 func (a *AutoFixerWithCustomData[T]) GetChangeChanDrained() <-chan struct{} {
-	logger.Tracef(context.Background(), "GetChangeChanDrained")
+	// Note: using context.Background() because the node.Abstract interface
+	// does not pass a context to GetChangeChanDrained(). The goroutines spawned
+	// by CombineGetChangeChanDrained are cancelled via the returned channel's
+	// context cancellation, so this is safe.
+	ctx := context.Background()
+	logger.Tracef(ctx, "GetChangeChanDrained")
 	return node.CombineGetChangeChanDrained(
-		context.Background(),
+		ctx,
 		a.MapStreamIndicesNode,
 		a.AutoHeadersNode,
 	)

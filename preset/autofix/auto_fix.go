@@ -5,6 +5,7 @@ package autofix
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
@@ -23,6 +24,7 @@ type AutoFixerWithCustomData[T any] struct {
 	MapStreamIndicesNode *node.NodeWithCustomData[T, *processor.FromKernel[*kernel.MapStreamIndices]]
 
 	isServing atomic.Bool
+	serveMu   sync.Mutex
 }
 
 var _ node.DotBlockContentStringWriteToer = (*AutoFixerWithCustomData[any])(nil)

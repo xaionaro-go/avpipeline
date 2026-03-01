@@ -109,15 +109,16 @@ func (r *Route[T]) openNodeLocked(
 	logger.Debugf(ctx, "openNodeLocked: %s", r.Path)
 	defer func() { logger.Debugf(ctx, "/openNodeLocked: %s", r.Path) }()
 
+	if r.IsNodeOpen {
+		logger.Errorf(ctx, "openNodeLocked: node is already open for route %s", r.Path)
+		return
+	}
 	if routeCloseProcessor {
 		r.Node.Processor = processor.NewFromKernel(
 			ctx,
 			must(NewNodeKernel(ctx)),
 			processor.DefaultOptionsTranscoder()...,
 		)
-	}
-	if r.IsNodeOpen {
-		panic("is already open")
 	}
 
 	r.IsNodeOpen = true
@@ -166,6 +167,9 @@ func (r *Route[T]) closeLocked(
 }
 
 func (r *Route[T]) Close(ctx context.Context) (_err error) {
+	if r == nil || r.Node == nil {
+		return fmt.Errorf("route or node is nil")
+	}
 	var sample T
 	logger.Debugf(ctx, "Route[%T].Close", sample)
 	defer func() { logger.Debugf(ctx, "/Route[%T].Close: %v", sample, _err) }()
@@ -225,6 +229,9 @@ func (r *Route[T]) AddPublisherLocked(
 	publisher Publisher[T],
 	wg *sync.WaitGroup,
 ) (_ret Publishers[T], _err error) {
+	if publisher == nil {
+		return nil, fmt.Errorf("publisher == nil")
+	}
 	ctx = belt.WithField(ctx, "publish_mode", publisher.GetPublishMode(ctx))
 	logger.Debugf(ctx, "AddPublisherLocked[%s](ctx, %s/%p)", r, publisher, publisher)
 	defer func() {
@@ -233,10 +240,6 @@ func (r *Route[T]) AddPublisherLocked(
 
 	if !r.IsNodeOpen {
 		return nil, ErrRouteClosed{}
-	}
-
-	if publisher == nil {
-		return nil, fmt.Errorf("publisher == nil")
 	}
 	if slices.Contains(r.Publishers, publisher) {
 		return nil, ErrAlreadyAPublisher{}

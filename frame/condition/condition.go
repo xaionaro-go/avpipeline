@@ -8,4 +8,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type Condition = types.Condition[frame.Input]
+type Input = frame.Input
+
+type Condition = types.Condition[Input]

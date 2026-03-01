@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/go-ng/xatomic"
@@ -66,27 +67,31 @@ func CombineGetChangeChanDrained(
 ) <-chan struct{} {
 	logger.Tracef(ctx, "CombineGetChangeChanDrained (nodes: %v)", nodes)
 	if len(nodes) == 0 {
-		panic("no nodes provides")
+		ch := make(chan struct{})
+		close(ch)
+		return ch
 	}
 	if len(nodes) == 1 {
 		logger.Tracef(ctx, "CombineGetChangeChanDrained: single node: %v:%p", nodes[0], nodes[0])
 		return nodes[0].GetChangeChanDrained()
 	}
-	ctx, cancelFn := context.WithCancel(ctx)
+	doneCh := make(chan struct{})
+	var once sync.Once
+	signalDone := func() { close(doneCh) }
 	for _, n := range nodes {
 		logger.Tracef(ctx, "CombineGetChangeChanDrained: adding node: %v:%p", n, n)
 		n, ch := n, n.GetChangeChanDrained()
 		observability.Go(ctx, func(ctx context.Context) {
-			defer cancelFn()
+			defer once.Do(signalDone)
 			defer logger.Tracef(ctx, "CombineGetChangeChanDrained: node done: %v:%p", n, n)
 			select {
 			case <-ctx.Done():
+			case <-doneCh:
 			case <-ch:
 			}
-			ch = n.GetChangeChanDrained()
 		})
 	}
-	return ctx.Done()
+	return doneCh
 }
 
 func (n *NodeWithCustomData[C, T]) resetChangeChanDrainedChanNow() {

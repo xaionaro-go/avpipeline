@@ -13,6 +13,14 @@ import (
 	packetorframetypes "github.com/xaionaro-go/avpipeline/packetorframe/types"
 )
 
+func TestFilter_String(t *testing.T) {
+	type CustomData struct{ Value string }
+	f := New(CustomData{Value: "test"})
+	s := f.String()
+	require.Contains(t, s, "AddSideData")
+	require.Contains(t, s, "CustomData")
+}
+
 func TestAddSideData(t *testing.T) {
 	ctx := context.Background()
 	type CustomData struct {

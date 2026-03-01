@@ -54,7 +54,9 @@ func (r *Router[T]) Close(
 	r.Locker.Do(ctx, func() { // to make sure we don't have anybody adding more processes
 		close(r.RouterCloseChan)
 		r.WaitGroup.Wait()
-		close(r.ErrorChan)
+		// NOTE: We intentionally do NOT close ErrorChan here because Serve
+		// goroutines may still be running and sending errors. The init()
+		// goroutine exits via RouterCloseChan instead.
 		close(r.RoutesChangedChan)
 	})
 	return nil
@@ -64,22 +66,30 @@ func (r *Router[T]) init(
 	ctx context.Context,
 ) {
 	observability.Go(ctx, func(ctx context.Context) {
-		for err := range r.ErrorChan {
-			route := err.Node.(*NodeRouting[T]).CustomData.(*Route[T])
-			if route == nil {
-				logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
-				continue
+		for {
+			select {
+			case err, ok := <-r.ErrorChan:
+				if !ok {
+					return
+				}
+				route := err.Node.(*NodeRouting[T]).CustomData.(*Route[T])
+				if route == nil {
+					logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
+					continue
+				}
+				belt.WithField(ctx, "route_path", route.Path)
+				if errors.Is(err.Err, context.Canceled) {
+					logger.Debugf(ctx, "Cancelled: %v", err)
+					continue
+				}
+				if errors.Is(err.Err, io.EOF) {
+					logger.Debugf(ctx, "EOF: %v", err)
+					continue
+				}
+				logger.Errorf(ctx, "got an error on node %p (path: '%s'): %v", err.Node, route.Path, err)
+			case <-r.RouterCloseChan:
+				return
 			}
-			belt.WithField(ctx, "route_path", route.Path)
-			if errors.Is(err.Err, context.Canceled) {
-				logger.Debugf(ctx, "Cancelled: %v", err)
-				continue
-			}
-			if errors.Is(err.Err, io.EOF) {
-				logger.Debugf(ctx, "EOF: %v", err)
-				continue
-			}
-			logger.Errorf(ctx, "got an error on node %p (path: '%s'): %v", err.Node, route.Path, err)
 		}
 	})
 }

@@ -64,6 +64,9 @@ func HardwareDeviceTypeFromString(s string) HardwareDeviceType {
 		return strings.Trim(strings.ToLower(s), " \n\r\t")
 	}
 	s = sanitizeString(s)
+	if s == "" {
+		return HardwareDeviceTypeNone
+	}
 	for i := 0; i <= 0xff; i++ {
 		hwt := HardwareDeviceType(i)
 		c := sanitizeString(hwt.String())

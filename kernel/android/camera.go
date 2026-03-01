@@ -35,17 +35,17 @@ func (id CameraID) String() string {
 	}
 }
 
-func (id CameraID) CameraIndex() int {
+func (id CameraID) CameraIndex() (int, error) {
 	// see https://ffmpeg.org/ffmpeg-devices.html#android_005fcamera:
 	switch id {
 	case UndefinedCameraID:
-		panic("cannot get URL string for undefined camera ID")
+		return -1, fmt.Errorf("cannot get camera index for undefined camera ID")
 	case CameraIDBack:
-		return 0
+		return 0, nil
 	case CameraIDFront:
-		return 1
+		return 1, nil
 	default:
-		panic("cannot get URL string for unknown camera ID")
+		return -1, fmt.Errorf("cannot get camera index for unknown camera ID: %d", int(id))
 	}
 }
 
@@ -57,12 +57,16 @@ func NewCamera(
 	pixelFormat codectypes.PixelFormat,
 	inputCfg kernel.InputConfig,
 ) (*kernel.Input, error) {
+	cameraIndex, err := camID.CameraIndex()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get camera index: %w", err)
+	}
 	inputCfg.CustomOptions = append(inputCfg.CustomOptions,
 		globaltypes.DictionaryItem{Key: "f", Value: InputFormat},
 		globaltypes.DictionaryItem{Key: "video_size", Value: resolution.String()},
 		globaltypes.DictionaryItem{Key: "framerate", Value: frameRate.String()},
 		globaltypes.DictionaryItem{Key: "pixel_format", Value: pixelFormat.String()},
-		globaltypes.DictionaryItem{Key: "camera_index", Value: fmt.Sprintf("%d", camID.CameraIndex())},
+		globaltypes.DictionaryItem{Key: "camera_index", Value: fmt.Sprintf("%d", cameraIndex)},
 	)
 	return kernel.NewInputFromURL(ctx, "", secret.New(""), inputCfg)
 }

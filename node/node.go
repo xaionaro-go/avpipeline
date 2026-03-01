@@ -20,6 +20,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
+	conditionbase "github.com/xaionaro-go/avpipeline/types/condition"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -327,7 +328,7 @@ func (n *NodeWithCustomData[C, T]) AddPushTo(
 		if n.Config.CacheHandler != nil {
 			n.Config.CacheHandler.OnAddPushTo(ctx, PushTo{
 				Node:      dst,
-				Condition: pushToConds(conds...),
+				Condition: conditionbase.CombineConds(conds...),
 			})
 		}
 		n.PushTos.Add(dst, conds...)

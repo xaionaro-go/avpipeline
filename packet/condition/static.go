@@ -3,20 +3,7 @@
 package condition
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/xaionaro-go/avpipeline/packet"
+	conditionbase "github.com/xaionaro-go/avpipeline/types/condition"
 )
 
-type Static bool
-
-var _ Condition = (Static)(false)
-
-func (v Static) String() string {
-	return fmt.Sprintf("%t", v)
-}
-
-func (v Static) Match(context.Context, packet.Input) bool {
-	return (bool)(v)
-}
+type Static = conditionbase.Static[Input]

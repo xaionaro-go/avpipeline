@@ -113,8 +113,11 @@ func (sm *StreamMeasurements) getStreamQualityLocked(
 		r.Continuity = 0
 		r.Overlap = 0
 	}
-	periodSeconds := maxAggregationPeriod.Seconds()
-	if periodSeconds > 0 && frameCount > 0 {
+	// Use the actual observed period, capped at maxAggregationPeriod.
+	// This avoids underreporting FPS when less than maxAggregationPeriod of data is available.
+	actualPeriod := avconv.Duration(endTSInt-minTSInt, sm.TimeBase)
+	periodSeconds := min(actualPeriod.Seconds(), maxAggregationPeriod.Seconds())
+	if periodSeconds > 0 && frameCount > 1 {
 		r.FrameRate = float64(frameCount) / periodSeconds
 	} else {
 		r.FrameRate = 0

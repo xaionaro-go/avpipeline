@@ -1,28 +1,28 @@
 # avpipeline-specific guidelines
 
-## Goal of the project
+## Goal
 
-The goal is to provide versitile and portable package for easy-to-build audio/video pipelines. It is essentially a high-level wrapper over libav that makes libav easy.
+Versatile, portable Go library for building audio/video pipelines. High-level wrapper over libav (FFmpeg) that makes it easy to use.
 
-## How it works
+## Architecture: Three-Layer Abstraction
 
-There are 3 main abstractions:
-- a "kernel" is what actually does packet or frame processing
-- a "processor" is a wrapper over a kernel that manages inputs/outputs and does data flow control
-- a "node" is a wrapper over a processor that manages wiring between processors
+```
+Pipeline = [Node] ──filter──> [Node] ──filter──> [Node]
+              │                   │                  │
+          Processor           Processor          Processor
+              │                   │                  │
+           Kernel              Kernel             Kernel
+```
 
-Multiple "nodes" together form a "pipeline".
+- **Kernel**: Does actual packet/frame processing. May transform input→output or generate output independently.
+- **Processor**: Wraps kernel; manages inputs/outputs, data flow control.
+- **Node**: Wraps processor; manages wiring between processors.
+- **Pipeline**: Multiple connected nodes. Connections between nodes can be filtered by **filters**.
 
-The connections between nodes may be filtered by "filters".
+### Helpers
 
-A "kernel" may process incoming packets/frames (and as result may send these or other packets/frames to the output) or generate new packets/frames to the output on its own.
-
-## Non-core features
-
-There also various helpers are available to make pipeline building easier:
-- "router" is a handler that may be used to publish or/and consume named streams.
-- "monitor" is a debugging feature that allows to snoop on packets/frames.
+- **Monitor**: Debug tool to snoop on packets/frames in transit.
 
 ## Rules
 
-- a SEGFAULT is never fault of libav, it is always fault of our code and YOU MUST FIX IT.
+- A SEGFAULT is **never** libav's fault — it is always our code. YOU MUST FIX IT.

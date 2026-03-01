@@ -8,19 +8,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type Condition = types.Condition[packet.Input]
+type Input = packet.Input
 
-/* for easier copy&paste:
-
-func (c *) Match(
-	ctx context.Context,
-	pkt packet.Input,
-) bool {
-
-}
-
-func (c *) String() string {
-
-}
-
-*/
+type Condition = types.Condition[Input]

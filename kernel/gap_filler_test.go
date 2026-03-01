@@ -409,9 +409,9 @@ func BenchmarkGapFillerInterpolateResolutions(b *testing.B) {
 					require.NoError(b, err)
 					require.NotEmpty(b, res)
 
-					if state.videoFilterGraph != nil {
-						state.videoFilterGraph.Free()
-						state.videoFilterGraph = nil
+					if state.videoSimpleGraph != nil {
+						state.videoSimpleGraph.Close()
+						state.videoSimpleGraph = nil
 					}
 				}
 				b.StopTimer()

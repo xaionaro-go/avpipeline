@@ -8,4 +8,6 @@ import (
 	"github.com/xaionaro-go/avpipeline/types"
 )
 
-type Condition = types.Condition[packetorframe.InputUnion]
+type Input = packetorframe.InputUnion
+
+type Condition = types.Condition[Input]

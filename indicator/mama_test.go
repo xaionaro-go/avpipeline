@@ -4,8 +4,10 @@ package indicator
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,4 +81,46 @@ func TestMAMA(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestMAMA_InitPeriod(t *testing.T) {
+	m := NewMAMA[int64](50, 0.5, 0.05)
+	assert.Equal(t, int64(50), m.InitPeriod())
+
+	m2 := NewMAMA[float64](10, 0.3, 0.01)
+	assert.Equal(t, int64(10), m2.InitPeriod())
+}
+
+func TestMAMA_Valid(t *testing.T) {
+	m := NewMAMA[int64](5, 0.5, 0.05)
+
+	// Not valid until InitPeriod measurements
+	for i := 0; i < 4; i++ {
+		m.Update(int64(i * 10))
+		assert.False(t, m.Valid(), "should not be valid after %d updates", i+1)
+	}
+
+	// Valid after InitPeriod measurements
+	m.Update(40)
+	assert.True(t, m.Valid(), "should be valid after %d updates", 5)
+
+	// Stays valid
+	m.Update(50)
+	assert.True(t, m.Valid())
+}
+
+func TestMAMA_Concurrent(t *testing.T) {
+	m := NewMAMA[int64](20, 0.5, 0.05)
+	var wg sync.WaitGroup
+	wg.Add(10)
+	for i := 0; i < 10; i++ {
+		go func(base int64) {
+			defer wg.Done()
+			for j := int64(0); j < 100; j++ {
+				m.Update(base + j)
+			}
+		}(int64(i * 100))
+	}
+	wg.Wait()
+	assert.True(t, m.Valid())
 }
