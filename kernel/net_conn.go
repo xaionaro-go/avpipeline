@@ -107,33 +107,7 @@ func (n *netConn) verify(context.Context) error {
 		return fmt.Errorf("local address is nil")
 	}
 
-	var verifyErr error
-	err := n.rawConn.Control(func(fd uintptr) {
-		soType, err := syscall.GetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_TYPE)
-		if err != nil {
-			verifyErr = fmt.Errorf("getsockopt(SO_TYPE) failed: %w", err)
-			return
-		}
-
-		switch n.protocolName {
-		case "rtmp", "rtmps":
-			if soType != syscall.SOCK_STREAM {
-				verifyErr = fmt.Errorf("expected SOCK_STREAM for protocol %s, but got %d", n.protocolName, soType)
-			}
-		case "srt", "libsrt", "udp":
-			if soType != syscall.SOCK_DGRAM {
-				verifyErr = fmt.Errorf("expected SOCK_DGRAM for protocol %s, but got %d", n.protocolName, soType)
-			}
-		}
-	})
-	if err != nil {
-		return fmt.Errorf("rawConn.Control failed: %w", err)
-	}
-	if verifyErr != nil {
-		return verifyErr
-	}
-
-	return nil
+	return verifySockType(n.rawConn, n.protocolName)
 }
 
 func (n *netConn) closeLocked(context.Context) error {

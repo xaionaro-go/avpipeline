@@ -34,8 +34,7 @@ import (
 const (
 	doFullCopyOfParameters   = false
 	setRateControlParameters = false
-	setSetPktTimeBase        = false
-	setEncoderExtraData      = false // <- this is wrong, don't use it unless you are temporary debugging something
+	setEncoderExtraData = false // <- this is wrong, don't use it unless you are temporary debugging something
 	setPipelinishFlags       = true
 )
 
@@ -358,11 +357,6 @@ func newCodec(
 		logger.Errorf(ctx, "got an error: %v", err)
 	}
 
-	if !isEncoder && hardwareDeviceType == globaltypes.HardwareDeviceTypeCUDA {
-		logger.Warnf(ctx, "hardware decoding using CUDA is not supported, yet")
-		hardwareDeviceType = globaltypes.HardwareDeviceTypeNone
-	}
-
 	isHW := false
 	c.codec = nil
 	if codecName != "" && hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
@@ -392,6 +386,14 @@ func newCodec(
 			isHW = true
 			c.codec = hwCodec
 		}
+	}
+
+	// MediaCodec codecs are always hardware-accelerated. Auto-detect the hardware
+	// device type so the hardware init path (HW device context, pixel format callback)
+	// is triggered even when the caller didn't explicitly set hardwareDeviceType.
+	if hardwareDeviceType == globaltypes.HardwareDeviceTypeNone && c.isMediaCodec() {
+		logger.Debugf(ctx, "auto-detected MediaCodec codec %q, enabling hardware device type", c.codec.Name())
+		hardwareDeviceType = globaltypes.HardwareDeviceTypeMediaCodec
 	}
 
 	ctx = belt.WithField(ctx, "codec_id", c.codec.ID())
@@ -435,7 +437,7 @@ func newCodec(
 					fps = 30
 				}
 				gopSize = int64(0.999+fps) * 2
-				logger.Warnf(ctx, "gop_size is not set, defaulting to the FPS*2 value (%d <- %f)", gopSize, fps)
+				logger.Warnf(ctx, "gop_size is not set, defaulting to FPS*2 (%d <- %f)", gopSize, fps)
 				logIfError(customOptions.Set("g", fmt.Sprintf("%d", gopSize), 0))
 			} else {
 				var err error
@@ -626,8 +628,14 @@ func newCodec(
 
 	logger.Debugf(ctx, "time_base == %v", timeBase)
 	c.codecContext.SetTimeBase(timeBase)
-	if setSetPktTimeBase {
-		c.codecContext.SetPktTimeBase(timeBase)
+	if !isEncoder {
+		// Decoders need pkt_timebase to interpret packet timestamps correctly.
+		// Without it, cuvid and other decoders warn "Invalid pkt_timebase".
+		pktTimeBase := timeBase
+		if pktTimeBase.Num() == 0 {
+			pktTimeBase = astiav.NewRational(1, 90000)
+		}
+		c.codecContext.SetPktTimeBase(pktTimeBase)
 	}
 	flags := astiav.CodecContextFlags(0)
 	if setPipelinishFlags {
@@ -775,6 +783,20 @@ func (c *codecInternals) setupPixelFormat(
 		return nil
 	}
 
+	// For hardware decoders (e.g. h264_cuvid), the pixel format is selected via a
+	// callback set in initHardwarePixelFormat. No need to guess here.
+	// Exception: MediaCodec decoders require pix_fmt to be set explicitly before
+	// avcodec_open2, unlike CUVID which negotiates via the get_format callback.
+	if !isEncoder && c.hardwareContextType != undefinedHardwareContextType {
+		if c.isMediaCodec() {
+			logger.Debugf(ctx, "MediaCodec decoder: setting pixel format to %s before codec open", c.hardwarePixelFormat)
+			c.codecContext.SetPixelFormat(c.hardwarePixelFormat)
+		} else {
+			logger.Tracef(ctx, "hardware pixel format callback is set (%s), skipping pixel format setup", c.hardwarePixelFormat)
+		}
+		return nil
+	}
+
 	c.codecContext.SetPixelFormat(astiav.PixelFormatNone)
 
 	pixelFormatOptionName := "pixel_format"
@@ -826,16 +848,17 @@ func (c *codecInternals) setupPixelFormat(
 		return nil
 	}
 
-	logger.Warnf(ctx, "pixel format is not set, so applying the first supported one")
 	switch {
 	case c.isNVENC():
+		logger.Debugf(ctx, "pixel format is not set, defaulting to nv12 for NVENC")
 		c.codecContext.SetPixelFormat(astiav.PixelFormatNv12)
 	default:
+		logger.Warnf(ctx, "pixel format is not set, so applying the first supported one")
 		if pixFmts := c.codec.SupportedPixelFormats(); len(pixFmts) > 0 {
 			c.codecContext.SetPixelFormat(pixFmts[0])
 		} else {
 			defaultPixelFormat := codecParameters.PixelFormat()
-			if codecParameters.PixelFormat() != astiav.PixelFormatNone {
+			if codecParameters.PixelFormat() == astiav.PixelFormatNone {
 				defaultPixelFormat = astiav.PixelFormatNv12
 			}
 			logger.Warnf(ctx, "codec doesn't report supported pixel formats, unable to select one; guessing %s should be fine", defaultPixelFormat)
@@ -861,11 +884,11 @@ func (c *Codec) initHardwarePixelFormat(
 			continue
 		}
 		switch {
+		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx):
+			c.hardwareContextType = hardwareContextTypeDevice
 		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx):
 			c.hardwareContextType = hardwareContextTypeFrames
 			continue // TODO: implement this
-		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx):
-			c.hardwareContextType = hardwareContextTypeDevice
 		default:
 			logger.Tracef(ctx, "skipping this config, since it doesn't support neither HW frames nor HW device context")
 			continue

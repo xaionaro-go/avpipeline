@@ -808,6 +808,7 @@ func (e *streamEncoderLocked) fitFrameForEncoding(
 		}
 		if !encoderRescaleSameResolution {
 			if input.Frame.Width() == int(res.Width) && input.Frame.Height() == int(res.Height) && input.PixelFormat() == encoderPixelFormat {
+				logger.Tracef(ctx, "frame %dx%d/%s matches encoder; passing through without conversion", input.Frame.Width(), input.Frame.Height(), input.PixelFormat())
 				return []*astiav.Frame{input.Frame}, nil
 			}
 		}
