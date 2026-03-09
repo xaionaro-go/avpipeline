@@ -9,9 +9,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xaionaro-go/avpipeline/frame"
-	"github.com/xaionaro-go/avpipeline/node"
-	"github.com/xaionaro-go/avpipeline/packet"
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 )
 
@@ -21,7 +18,7 @@ type Monitor struct {
 
 func New(
 	ctx context.Context,
-	node node.Abstract,
+	node any,
 	t avpipelinegrpc.MonitorEventType,
 	includePacketPayload bool,
 	includeFramePayload bool,
@@ -36,12 +33,12 @@ func (m *Monitor) Close(ctx context.Context) error {
 
 func (m *Monitor) ObserveInputPacket(
 	ctx context.Context,
-	pkt packet.Input,
+	pkt any,
 ) {
 }
 
 func (m *Monitor) ObserveInputFrame(
 	ctx context.Context,
-	frame frame.Input,
+	frame any,
 ) {
 }
