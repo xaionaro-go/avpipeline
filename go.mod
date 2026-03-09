@@ -5,20 +5,20 @@ go 1.25.5
 replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20260222232736-ea032799baeb
 
 require (
-	github.com/anthonynsimon/bild v0.14.0
 	github.com/asticode/go-astiav v0.36.0
 	github.com/asticode/go-astikit v0.55.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/facebookincubator/go-belt v0.0.0-20250308011339-62fb7027b11f
 	github.com/go-ng/xatomic v0.0.0-20251124145245-9a7a1838d3aa
 	github.com/go-ng/xsort v0.0.0-20250330112557-d2ee7f01661c
+	github.com/k2-fsa/sherpa-onnx-go v1.12.27
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/xaionaro-go/audio v0.0.0-20260124161002-bd5e1d855f00
 	github.com/xaionaro-go/avcommon v0.0.0-20250823173020-6a2bb1e1f59d
 	github.com/xaionaro-go/avmediacodec v0.0.0-20250505012527-c819676502d8
 	github.com/xaionaro-go/libsrt v0.0.0-20251231191024-483a9dd27df8
-	github.com/xaionaro-go/ndk v0.0.0-20251109211112-251265903264
+	github.com/xaionaro-go/ndk v0.0.0-20260309023337-691843bece17
 	github.com/xaionaro-go/observability v0.0.0-20251102143534-3aeb2a25e57d
 	github.com/xaionaro-go/polyjson v0.0.0-20250825191950-a2ce35ee07f0
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
@@ -30,7 +30,7 @@ require (
 	github.com/xaionaro-go/xsync v0.0.0-20260103200624-2cd14b984747
 	go.uber.org/atomic v1.11.0
 	gocv.io/x/gocv v0.41.0
-	google.golang.org/grpc v1.78.0
+	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -47,6 +47,9 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-linux v1.12.28 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-macos v1.12.28 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-windows v1.12.28 // indirect
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -54,10 +57,8 @@ require (
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.39.0 // indirect
 	golang.org/x/image v0.31.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120174246-409b4a993575 // indirect

@@ -9,8 +9,7 @@ import (
 )
 
 type MicrophoneConfig struct {
-	DeviceName    string
-	LibraryPath   string
+	DeviceID      int32
 	SampleRate    int
 	Channels      int
 	SampleFormat  astiav.SampleFormat

@@ -41,7 +41,7 @@ internal-indocker-streamforward-android-arm64: builddir $(GOPATH)/bin/pkg-config
 		PKG_CONFIG='$(GOPATH)/bin/pkg-config-wrapper' \
 		PKG_CONFIG_PATH='/data/data/com.termux/files/usr/lib/pkgconfig' \
 		CGO_CFLAGS='-I$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/ -I/data/data/com.termux/files/usr/include -Wno-incompatible-function-pointer-types -Wno-unused-result -Wno-xor-used-as-pow' \
-		CGO_LDFLAGS='-v -Wl,-Bdynamic -ldl -lc -lcamera2ndk -lmediandk -L$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/ -L$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24/ -L/data/data/com.termux/files/usr/lib' \
+		CGO_LDFLAGS='-v -Wl,-Bdynamic -ldl -lc -lcamera2ndk -lmediandk -L$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/ -L$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/35/ -L/data/data/com.termux/files/usr/lib' \
 		ANDROID_NDK_HOME="$(ANDROID_NDK_HOME)" \
 		PATH="${PATH}:${HOME}/go/bin" \
 		GOFLAGS="$(GOBUILD_FLAGS) -ldflags=$(shell echo ${LINKER_FLAGS_ANDROID} | tr " " ",")" \

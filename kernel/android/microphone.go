@@ -1,7 +1,7 @@
 //go:build android && cgo
 // +build android,cgo
 
-// microphone.go implements Android microphone capture.
+// microphone.go implements Android microphone capture via AAudio.
 
 package android
 
@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
+	"unsafe"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/frame"
@@ -19,8 +19,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/ndk/audio/al"
-	"github.com/xaionaro-go/ndk/audio/alc"
+	"github.com/xaionaro-go/ndk/audio"
+	aaudiocapi "github.com/xaionaro-go/ndk/capi/aaudio"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -31,7 +31,7 @@ type Microphone struct {
 
 	streamInfo  *frame.StreamInfo
 	codecParams *astiav.CodecParameters
-	device      *alc.CaptureDevice
+	stream      *audio.Stream
 
 	bytesPerSample int
 	bufferSamples  int
@@ -60,7 +60,7 @@ func NewMicrophone(ctx context.Context, cfg MicrophoneConfig) (*Microphone, erro
 		cfg.SampleFormat = astiav.SampleFormatS16
 	}
 
-	bytesPerSample, err := bytesPerSample(cfg.SampleFormat)
+	bps, err := bytesPerSample(cfg.SampleFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func NewMicrophone(ctx context.Context, cfg MicrophoneConfig) (*Microphone, erro
 		ClosureSignaler: closuresignaler.New(),
 		Config:          cfg,
 		codecParams:     codecParams,
-		bytesPerSample:  bytesPerSample,
+		bytesPerSample:  bps,
 		bufferSamples:   cfg.BufferSamples,
 		formatContext:   astiav.AllocFormatContext(),
 	}
@@ -156,10 +156,10 @@ func (k *Microphone) Close(ctx context.Context) (_err error) {
 }
 
 func (k *Microphone) closeLocked(ctx context.Context) error {
-	if k.device != nil {
-		k.device.Stop()
-		_ = k.device.Close()
-		k.device = nil
+	if k.stream != nil {
+		_ = k.stream.Stop()
+		_ = k.stream.Close()
+		k.stream = nil
 	}
 	return nil
 }
@@ -182,23 +182,28 @@ func (k *Microphone) Generate(
 	logger.Debugf(ctx, "Generate")
 	defer func() { logger.Debugf(ctx, "/Generate: %v", _err) }()
 
-	if k.device == nil {
-		return fmt.Errorf("capture device is not initialized")
+	if k.stream == nil {
+		return fmt.Errorf("audio stream is not initialized")
 	}
 
-	bufferBytes := k.bufferSamples * k.bytesPerSample * k.Config.Channels
-	buffer := make([]byte, bufferBytes)
 	frameSamples := k.Config.FrameSamples
 	frameBytes := frameSamples * k.bytesPerSample * k.Config.Channels
+	readSamples := k.bufferSamples
+	bufferBytes := readSamples * k.bytesPerSample * k.Config.Channels
+	buffer := make([]byte, bufferBytes)
 	var pts int64
 	pending := make([]byte, 0, bufferBytes)
 
-	logger.Debugf(ctx, "starting capture")
-	k.device.Start()
-	defer k.device.Stop()
+	readTimeoutNanos := k.Config.PollInterval.Nanoseconds()
+	if readTimeoutNanos <= 0 {
+		readTimeoutNanos = 100_000_000 // 100ms default
+	}
 
-	ticker := time.NewTicker(k.Config.PollInterval)
-	defer ticker.Stop()
+	logger.Debugf(ctx, "starting capture")
+	if err := k.stream.Start(); err != nil {
+		return fmt.Errorf("unable to start audio stream: %w", err)
+	}
+	defer k.stream.Stop()
 
 	for {
 		select {
@@ -206,23 +211,24 @@ func (k *Microphone) Generate(
 			return ctx.Err()
 		case <-k.CloseChan():
 			return io.EOF
-		case <-ticker.C:
+		default:
 		}
 
-		available, err := k.captureSamplesAvailable()
-		if err != nil {
-			return err
+		framesRead := aaudiocapi.AAudioStream_read(
+			(*aaudiocapi.AAudioStream)(k.stream.Pointer()),
+			unsafe.Pointer(&buffer[0]),
+			int32(readSamples),
+			readTimeoutNanos,
+		)
+		if framesRead < 0 {
+			return fmt.Errorf("audio read error: %w", audio.Error(framesRead))
 		}
-		if available <= 0 {
+		if framesRead == 0 {
 			continue
 		}
-		if available > k.bufferSamples {
-			available = k.bufferSamples
-		}
 
-		k.device.Samples(buffer, int64(available))
-		readBytes := available * k.bytesPerSample * k.Config.Channels
-		pending = append(pending, buffer[:readBytes]...)
+		bytesRead := int(framesRead) * k.bytesPerSample * k.Config.Channels
+		pending = append(pending, buffer[:bytesRead]...)
 
 		for len(pending) >= frameBytes {
 			frameBytesSlice := pending[:frameBytes]
@@ -249,43 +255,36 @@ func (k *Microphone) Generate(
 }
 
 func (k *Microphone) openCaptureDevice(ctx context.Context) error {
-	if k.Config.LibraryPath != "" {
-		if err := al.InitPath(k.Config.LibraryPath); err != nil {
-			return fmt.Errorf("unable to init OpenAL library: %w", err)
-		}
-	} else {
-		if err := al.Init(); err != nil {
-			return fmt.Errorf("unable to init OpenAL library: %w", err)
-		}
-	}
-
-	format, err := captureFormat(k.Config.SampleFormat, k.Config.Channels)
+	format, err := aaudioFormat(k.Config.SampleFormat)
 	if err != nil {
 		return err
 	}
 
-	device := alc.CaptureOpen(k.Config.DeviceName, uint(k.Config.SampleRate), format, int64(k.Config.BufferSamples))
-	if device == nil {
-		return fmt.Errorf("unable to open capture device")
+	builder, err := audio.NewStreamBuilder()
+	if err != nil {
+		return fmt.Errorf("unable to create AAudio stream builder: %w", err)
 	}
-	if err := alc.Error(device.Error()); err != "" {
-		_ = device.Close()
-		return fmt.Errorf("capture device error: %s", err)
-	}
-	k.device = device
-	return nil
-}
+	defer builder.Close()
 
-func (k *Microphone) captureSamplesAvailable() (int, error) {
-	if k.device == nil {
-		return 0, fmt.Errorf("capture device is nil")
+	builder.
+		SetDirection(audio.Input).
+		SetSampleRate(int32(k.Config.SampleRate)).
+		SetChannelCount(int32(k.Config.Channels)).
+		SetFormat(format).
+		SetPerformanceMode(audio.LowLatency).
+		SetSharingMode(audio.Shared).
+		SetBufferCapacityInFrames(int32(k.Config.BufferSamples))
+
+	if k.Config.DeviceID != 0 {
+		builder.SetDeviceID(k.Config.DeviceID)
 	}
-	var sample int32
-	k.device.GetIntegerv(alc.CaptureSamples, 4, &sample)
-	if sample < 0 {
-		return 0, fmt.Errorf("invalid capture sample count: %d", sample)
+
+	stream, err := builder.Open()
+	if err != nil {
+		return fmt.Errorf("unable to open AAudio capture stream: %w", err)
 	}
-	return int(sample), nil
+	k.stream = stream
+	return nil
 }
 
 func (k *Microphone) buildFrameFromPCM(
@@ -347,28 +346,12 @@ func channelLayoutFromCount(channels int) (astiav.ChannelLayout, error) {
 	}
 }
 
-func captureFormat(format astiav.SampleFormat, channels int) (int, error) {
+func aaudioFormat(format astiav.SampleFormat) (audio.Format, error) {
 	switch format {
 	case astiav.SampleFormatS16:
-		switch channels {
-		case 1:
-			return al.FormatMono16, nil
-		case 2:
-			return al.FormatStereo16, nil
-		default:
-			return 0, fmt.Errorf("unsupported channel count: %d", channels)
-		}
-	case astiav.SampleFormatU8:
-		switch channels {
-		case 1:
-			return al.FormatMono8, nil
-		case 2:
-			return al.FormatStereo8, nil
-		default:
-			return 0, fmt.Errorf("unsupported channel count: %d", channels)
-		}
+		return audio.PcmI16, nil
 	default:
-		return 0, fmt.Errorf("unsupported sample format: %v", format)
+		return audio.Invalid, fmt.Errorf("unsupported sample format for AAudio: %v", format)
 	}
 }
 
