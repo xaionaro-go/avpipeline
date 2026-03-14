@@ -168,7 +168,7 @@ func (s *StreamMux[C]) newAutoBitRateHandler(
 		StreamMux:              s,
 		closureSignaler:        closuresignaler.New(),
 	}
-	h.resetTemporaryFPSReduction(ctx, cfg.ResolutionsAndBitRates.Best().BitrateHigh, "initialization")
+	h.resetTemporaryFPSReduction(ctx, cfg.AllowedResolutionsAndBitRates().Best().BitrateHigh, "initialization")
 	return h, nil
 }
 
@@ -206,6 +206,8 @@ type AutoBitRateHandler[C any] struct {
 	currentDesiredResolutionAvg atomic.Uint64
 
 	temporaryFPSReductionMultiplier xatomic.Value[fpsReductionMultiplier]
+
+	lastConnInfoLogTS time.Time
 }
 
 func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
@@ -382,7 +384,13 @@ func (h *AutoBitRateHandler[C]) logRawConnInfo(
 					if err != nil {
 						return fmt.Errorf("unable to get connection info from %T: %w", proc, err)
 					}
-					logger.Debugf(ctx, "connInfo: %s", spew.Sdump(connInfo))
+					now := time.Now()
+					if now.Sub(h.lastConnInfoLogTS) >= 5*time.Second {
+						h.lastConnInfoLogTS = now
+						logger.Debugf(ctx, "connInfo: %s", spew.Sdump(connInfo))
+					} else {
+						logger.Tracef(ctx, "connInfo: %s", spew.Sdump(connInfo))
+					}
 					return nil
 				})
 			switch {
@@ -573,7 +581,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		if h.ResolutionUpgradeSlowdownMovingAverage != nil {
 			inputMeasurements := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo)
 			inputBitrate := types.Ubps(inputMeasurements.InputBitRate.Load())
-			resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(inputBitrate).Best()
+			resCfg := h.AutoBitRateVideoConfig.AllowedResolutionsAndBitRates().BitRate(inputBitrate).Best()
 			if resCfg != nil {
 				h.currentDesiredResolutionAvg.Store(h.ResolutionUpgradeSlowdownMovingAverage.Update(uint64(resCfg.Width) * uint64(resCfg.Height)))
 			}
@@ -686,7 +694,7 @@ func (h *AutoBitRateHandler[C]) onOutputSwitch(
 		return
 	}
 	logger.Debugf(ctx, "onOutputSwitch: from %v to %v", from, to)
-	h.resetTemporaryFPSReduction(ctx, h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best().BitrateHigh, "output switch ended")
+	h.resetTemporaryFPSReduction(ctx, h.AutoBitRateVideoConfig.AllowedResolutionsAndBitRates().Best().BitrateHigh, "output switch ended")
 }
 
 func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
@@ -720,11 +728,19 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 		return fmt.Errorf("unable to find a resolution config for the current resolution %v", *res)
 	}
 
-	logger.Tracef(ctx, "current resolution: %v; resCfg: %v", *res, resCfg)
+	allowed := h.AutoBitRateVideoConfig.AllowedResolutionsAndBitRates()
+	currentResolutionAllowed := allowed.Find(*res) != nil
+	logger.Tracef(ctx, "current resolution: %v; resCfg: %v; allowed: %t", *res, resCfg, currentResolutionAllowed)
 
 	desiredResCfg := h.getDesiredResolutionConfig(bitrate, *res)
 	if h.ResolutionUpgradeSlowdownMovingAverage != nil && desiredResCfg != nil {
 		h.currentDesiredResolutionAvg.Store(h.ResolutionUpgradeSlowdownMovingAverage.Update(uint64(desiredResCfg.Width) * uint64(desiredResCfg.Height)))
+	}
+
+	// If the current resolution is outside the allowed set, switch immediately.
+	if !currentResolutionAllowed && desiredResCfg != nil && desiredResCfg.Resolution != *res {
+		logger.Debugf(ctx, "current resolution %v is outside the allowed range; switching to %v", *res, desiredResCfg.Resolution)
+		return h.applyResolutionChange(ctx, bitrate, force, allowTrafficLoss, resCfg, desiredResCfg.Resolution)
 	}
 
 	switch {
@@ -986,6 +1002,18 @@ func (h *AutoBitRateHandler[C]) getDesiredResolutionConfig(
 	bitrate types.Ubps,
 	currentResolution codec.Resolution,
 ) *AutoBitRateResolutionAndBitRateConfig {
+	allowed := h.AutoBitRateVideoConfig.AllowedResolutionsAndBitRates()
+
+	// If the current resolution is outside the allowed set, pick the best
+	// allowed resolution that fits the current bitrate.
+	if allowed.Find(currentResolution) == nil {
+		target := allowed.BitRate(bitrate).Best()
+		if target == nil {
+			target = allowed.Best()
+		}
+		return target
+	}
+
 	resCfg := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Find(currentResolution)
 	if resCfg == nil {
 		return nil
@@ -993,15 +1021,15 @@ func (h *AutoBitRateHandler[C]) getDesiredResolutionConfig(
 
 	switch {
 	case bitrate < resCfg.BitrateLow:
-		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Best()
+		_newRes := allowed.BitRate(bitrate).Best()
 		if _newRes == nil {
-			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Worst()
+			_newRes = allowed.Worst()
 		}
 		return _newRes
 	case bitrate > resCfg.BitrateHigh:
-		_newRes := h.AutoBitRateVideoConfig.ResolutionsAndBitRates.BitRate(bitrate).Worst()
+		_newRes := allowed.BitRate(bitrate).Worst()
 		if _newRes == nil {
-			_newRes = h.AutoBitRateVideoConfig.ResolutionsAndBitRates.Best()
+			_newRes = allowed.Best()
 		}
 		return _newRes
 	default:

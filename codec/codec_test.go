@@ -459,6 +459,31 @@ func TestName_hwName_CUDA_Decoder(t *testing.T) {
 	assert.Equal(t, Name("h264_cuvid"), result)
 }
 
+// --- detectHardwareDeviceType ---
+
+func TestDetectHardwareDeviceType(t *testing.T) {
+	for _, tc := range []struct {
+		codecName string
+		expected  HardwareDeviceType
+	}{
+		{"hevc_mediacodec", globaltypes.HardwareDeviceTypeMediaCodec},
+		{"h264_mediacodec", globaltypes.HardwareDeviceTypeMediaCodec},
+		{"h264_nvenc", globaltypes.HardwareDeviceTypeCUDA},
+		{"hevc_nvenc", globaltypes.HardwareDeviceTypeCUDA},
+		{"h264_cuvid", globaltypes.HardwareDeviceTypeCUDA},
+		{"h264_qsv", globaltypes.HardwareDeviceTypeQSV},
+		{"h264_vaapi", globaltypes.HardwareDeviceTypeVAAPI},
+		{"h264_videotoolbox", globaltypes.HardwareDeviceTypeVideoToolbox},
+		{"libx264", globaltypes.HardwareDeviceTypeNone},
+		{"aac", globaltypes.HardwareDeviceTypeNone},
+		{"rawvideo", globaltypes.HardwareDeviceTypeNone},
+	} {
+		t.Run(tc.codecName, func(t *testing.T) {
+			assert.Equal(t, tc.expected, detectHardwareDeviceType(tc.codecName))
+		})
+	}
+}
+
 // --- NaiveDecoderFactory ---
 
 func TestNewNaiveDecoderFactory_NilParams(t *testing.T) {
@@ -504,6 +529,35 @@ func TestNaiveDecoderFactory_NewDecoder_UnsupportedMediaType(t *testing.T) {
 	// NaiveDecoderFactory returns nil,nil for unsupported media types
 	assert.Nil(t, dec)
 	assert.Nil(t, err)
+}
+
+func TestNewDecoder_NoHWCodecVariant_FallsBackToSoftware(t *testing.T) {
+	ctx := context.Background()
+
+	old := FallbackToSoftwareOnNoHWCodec
+	FallbackToSoftwareOnNoHWCodec = true
+	t.Cleanup(func() { FallbackToSoftwareOnNoHWCodec = old })
+
+	// MJPEG has no mediacodec variant (no mjpeg_mediacodec decoder).
+	// When HardwareDeviceType is set to mediacodec and fallback is enabled,
+	// the decoder should fall back to software decoding instead of failing.
+	codecParams := astiav.AllocCodecParameters()
+	t.Cleanup(codecParams.Free)
+	codecParams.SetMediaType(astiav.MediaTypeVideo)
+	codecParams.SetCodecID(astiav.CodecIDMjpeg)
+	codecParams.SetWidth(640)
+	codecParams.SetHeight(480)
+
+	dec, err := NewDecoder(ctx, DecoderInput{
+		CodecParameters:    codecParams,
+		HardwareDeviceType: HardwareDeviceType(globaltypes.HardwareDeviceTypeMediaCodec),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, dec)
+	t.Cleanup(func() { _ = dec.Close(ctx) })
+
+	// Verify it's using a software codec (not a _mediacodec variant).
+	assert.Equal(t, "mjpeg", dec.codec.Name())
 }
 
 // --- NaiveEncoderFactory ---

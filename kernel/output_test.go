@@ -93,6 +93,18 @@ func TestOutput_ErrNoSourceFormatContext(t *testing.T) {
 	})
 }
 
+// TestOutput_DevNull verifies that "/dev/null" as an output URL
+// results in FFmpeg's null muxer being used (discarding all output).
+func TestOutput_DevNull(t *testing.T) {
+	ctx := context.Background()
+
+	output, err := NewOutputFromURL(ctx, "/dev/null", secret.New(""), OutputConfig{})
+	require.NoError(t, err)
+	defer output.Close(ctx)
+
+	require.Equal(t, "null", output.FormatContext.OutputFormat().Name())
+}
+
 // mockPacketSourceContextRespecting simulates a packet.Source that respects
 // context cancellation in WithOutputFormatContext.
 type mockPacketSourceContextRespecting struct{}

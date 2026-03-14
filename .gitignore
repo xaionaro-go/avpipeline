@@ -10,3 +10,5 @@
 /*.log
 /tests
 /myscripts
+go.work
+go.work.sum

@@ -35,9 +35,12 @@ func LogLevelFromAstiav(level astiav.LogLevel) logger.Level {
 	case astiav.LogLevelQuiet:
 		return logger.LevelUndefined
 	case astiav.LogLevelFatal:
-		return logger.LevelFatal
+		// FFmpeg's AV_LOG_FATAL means "this operation failed", not
+		// "the process must exit". Mapping to LevelFatal would cause
+		// logrus to call os.Exit(1) on transient decode errors.
+		return logger.LevelError
 	case astiav.LogLevelPanic:
-		return logger.LevelPanic
+		return logger.LevelError
 	case astiav.LogLevelError:
 		return logger.LevelError
 	case astiav.LogLevelWarning:

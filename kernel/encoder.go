@@ -74,6 +74,12 @@ type streamEncoder struct {
 	Scaler          scaler.Scaler
 	ScaledFrame     *astiav.Frame
 	LastInitTS      time.Time
+
+	// FrameInfoFIFO tracks per-frame timestamps for codecs with encoder
+	// delay that don't support opaque data round-trip (e.g. AAC). Each
+	// SendFrame pushes a FrameInfo, and each ReceivePacket pops one,
+	// maintaining correct timestamp correspondence.
+	FrameInfoFIFO []FrameInfo
 }
 
 func (e *streamEncoder) Close(ctx context.Context) error {
@@ -653,6 +659,11 @@ func (e *Encoder[EF]) sendFrame(
 				err := encoder.SendFrame(ctx, fittedFrame)
 				switch {
 				case err == nil:
+					streamEncoder.FrameInfoFIFO = append(streamEncoder.FrameInfoFIFO, frameInfo)
+					if encoderDebug {
+						logger.Tracef(ctx, "FIFO push: dts:%d pts:%d tb:%v fifo_len:%d",
+							frameInfo.DTS, frameInfo.PTS, frameInfo.TimeBase, len(streamEncoder.FrameInfoFIFO))
+					}
 				case errors.Is(err, astiav.ErrEagain):
 					logger.Tracef(ctx, "encoder.SendFrame(): EAGAIN; draining and retrying")
 					err = e.drain(
@@ -661,6 +672,7 @@ func (e *Encoder[EF]) sendFrame(
 						encoder.Drain,
 						outputStream,
 						frameInfo,
+						&streamEncoder.FrameInfoFIFO,
 					)
 					if err != nil {
 						return fmt.Errorf("unable to drain: %w", err)
@@ -681,6 +693,7 @@ func (e *Encoder[EF]) sendFrame(
 			encoder.Drain,
 			outputStream,
 			frameInfo,
+			&streamEncoder.FrameInfoFIFO,
 		)
 		if err != nil {
 			return fmt.Errorf("unable to drain: %w", err)
@@ -717,6 +730,7 @@ func (e *Encoder[EF]) drain(
 	encoderDrainFn func(context.Context, codec.CallbackPacketReceiver) error,
 	outputStream *astiav.Stream,
 	frameInfo FrameInfo,
+	frameInfoFIFO *[]FrameInfo,
 ) (_err error) {
 	logger.Tracef(ctx, "drain")
 	defer func() { logger.Tracef(ctx, "/drain: %v", _err) }()
@@ -744,14 +758,58 @@ func (e *Encoder[EF]) drain(
 
 		if caps&astiav.CodecCapabilityDr1 != 0 || encoderForceCopyTime {
 			logger.Tracef(ctx, "setting manually the packet timestamps")
-			// get rid of this copying below. We should calculate these values
-			// from scratch, instead of just copying them.
 			if pkt.Duration() <= 0 {
 				pkt.SetDuration(frameInfo.Duration)
 			}
-			pkt.SetDts(frameInfo.DTS)
-			pkt.SetPts(frameInfo.PTS)
-			pkt.RescaleTs(frameInfo.TimeBase, outputStream.TimeBase())
+			if pkt.Duration() <= 0 {
+				// When the encoder doesn't round-trip opaque data (e.g.
+				// hevc_mediacodec) and AVFilter strips frame duration,
+				// both pkt.Duration() and frameInfo.Duration are 0.
+				// Compute duration from the codec's framerate.
+				if fps := outputStream.CodecParameters().FrameRate(); fps.Num() > 0 && fps.Den() > 0 {
+					dur := astiav.RescaleQ(
+						1,
+						astiav.NewRational(fps.Den(), fps.Num()),
+						outputStream.TimeBase(),
+					)
+					if dur > 0 {
+						pkt.SetDuration(dur)
+						logger.Tracef(ctx, "encoder drain: computed duration %d from framerate %v (time_base:%v)",
+							dur, fps, outputStream.TimeBase())
+					}
+				}
+			}
+			switch {
+			case opaque != nil:
+				// Opaque data round-tripped: use it for per-packet timestamps.
+				pkt.SetDts(frameInfo.DTS)
+				pkt.SetPts(frameInfo.PTS)
+				pkt.RescaleTs(frameInfo.TimeBase, outputStream.TimeBase())
+			case frameInfoFIFO != nil && len(*frameInfoFIFO) > 0:
+				// Opaque didn't round-trip (e.g. AAC encoder with 'delay' but
+				// without 'encoder_reordered_opaque'). Pop the oldest FrameInfo
+				// from the FIFO — since non-reordering codecs (like AAC) output
+				// packets in the same order as input frames (just delayed), the
+				// FIFO gives the correct per-packet timestamps.
+				fi := (*frameInfoFIFO)[0]
+				*frameInfoFIFO = (*frameInfoFIFO)[1:]
+				pkt.SetDts(fi.DTS)
+				pkt.SetPts(fi.PTS)
+				if pkt.Duration() <= 0 {
+					pkt.SetDuration(fi.Duration)
+				}
+				logger.Tracef(ctx, "encoder drain: FIFO pop (dts:%d, pts:%d, tb:%v, fifo_remaining:%d)",
+					fi.DTS, fi.PTS, fi.TimeBase, len(*frameInfoFIFO))
+				pkt.RescaleTs(fi.TimeBase, outputStream.TimeBase())
+			default:
+				// No opaque and no FIFO -- fall back to frameInfo parameter
+				// (last resort, may be inaccurate for delayed codecs).
+				logger.Warnf(ctx, "encoder drain: FIFO empty and no opaque; using fallback frameInfo (dts:%d, pts:%d, tb:%v, pkt_count:%d)",
+					frameInfo.DTS, frameInfo.PTS, frameInfo.TimeBase, packetCount)
+				pkt.SetDts(frameInfo.DTS)
+				pkt.SetPts(frameInfo.PTS)
+				pkt.RescaleTs(frameInfo.TimeBase, outputStream.TimeBase())
+			}
 		}
 
 		// pkt.SetPos(-1) // <- TODO: should this happen? why?
@@ -960,12 +1018,12 @@ func (e *streamEncoderLocked) getScaledFrame(
 	logger.Tracef(ctx, "getScaledFrame")
 	defer func() { logger.Tracef(ctx, "/getScaledFrame: %v", _err) }()
 
-	err := e.prepareScaler(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get a scaler: %w", err)
-	}
-
 	frameSrc := input.Frame
+
+	// Transfer hardware frames to software before preparing the scaler.
+	// Decoders using CUDA hw_device_ctx produce frames with cuda pixel format
+	// and hw_frames_ctx set. Software scalers cannot handle hardware pixel formats,
+	// so we must convert to software first.
 	if frameSrc.HardwareFramesContext() != nil {
 		logger.Tracef(ctx, "transferring the frame data from hardware to software")
 		sw := frame.Pool.Get()
@@ -974,6 +1032,12 @@ func (e *streamEncoderLocked) getScaledFrame(
 			return nil, fmt.Errorf("unable to transfer the frame data from hardware to software: %w", err)
 		}
 		frameSrc = sw
+		input.Frame = frameSrc
+	}
+
+	err := e.prepareScaler(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get a scaler: %w", err)
 	}
 
 	if encoderRescaleEnableCropping {
@@ -1118,7 +1182,9 @@ func (e *Encoder[EF]) send(
 
 	if encoderDebug {
 		if outPktWrapped.GetDuration() <= 0 {
-			logger.Warnf(ctx, "packet duration is not set")
+			logger.Warnf(ctx, "packet duration is not set (pts:%d, dts:%d, time_base:%v, stream_tb:%v)",
+				outPktWrapped.GetPTS(), outPktWrapped.GetDTS(),
+				outPktWrapped.GetTimeBase(), outputStream.TimeBase())
 		}
 	}
 
@@ -1309,6 +1375,7 @@ func (e *Encoder[EF]) Flush(
 						FrameInfo{
 							StreamIndex: streamIndex,
 						},
+						&encoder.FrameInfoFIFO,
 					)
 					if err != nil {
 						errCh <- fmt.Errorf("unable to flush the encoder for stream #%d: %w", streamIndex, err)

@@ -143,6 +143,9 @@ message AutoBitRateVideoConfig {
   uint64                                 bit_rate_increase_slowdown_ms             = 8;
   uint64                                 resolution_slowdown_duration_upgrade_ms   = 9;
   uint64                                 resolution_slowdown_duration_downgrade_ms = 10;
+  Resolution                             min_resolution                            = 11;
+  Resolution                             max_resolution                            = 12;
+  double                                 min_fps_fraction                          = 13;
 }
 
 message AutoBitrateCalculatorLogK {

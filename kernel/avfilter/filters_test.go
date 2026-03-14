@@ -80,3 +80,19 @@ func TestRubberbandFilter_WithFormant(t *testing.T) {
 func TestRubberbandFilter_WithoutFormant(t *testing.T) {
 	testifyassert.Equal(t, "rubberband=pitch=1.3", RubberbandFilter(1.3, false))
 }
+
+func TestBilateralFilter(t *testing.T) {
+	testifyassert.Equal(t, "bilateral=sigmaS=10:sigmaR=0.1", BilateralFilter(10, 0.1))
+}
+
+func TestBilateralFilter_Large(t *testing.T) {
+	testifyassert.Equal(t, "bilateral=sigmaS=50:sigmaR=0.5", BilateralFilter(50, 0.5))
+}
+
+func TestBilateralCUDAFilter(t *testing.T) {
+	testifyassert.Equal(t, "bilateral_cuda=sigmaS=10:sigmaR=0.1:window_size=5", BilateralCUDAFilter(10, 0.1, 5))
+}
+
+func TestNLMeansOpenCLFilter(t *testing.T) {
+	testifyassert.Equal(t, "nlmeans_opencl=s=3.5:p=7:r=15", NLMeansOpenCLFilter(3.5, 7, 15))
+}

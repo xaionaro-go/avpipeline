@@ -266,6 +266,68 @@ func TestResolutionConfig_String(t *testing.T) {
 	assert.Contains(t, s, "bps")
 }
 
+// --- AllowedResolutionsAndBitRates ---
+
+func TestAllowedResolutionsAndBitRates_NoLimits(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+	}
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 3)
+}
+
+func TestAllowedResolutionsAndBitRates_MaxHeightOnly(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+		MaxResolution:          codectypes.Resolution{Height: 720},
+	}
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 2)
+	assert.Equal(t, uint32(720), allowed.Best().Height)
+}
+
+func TestAllowedResolutionsAndBitRates_MinHeightOnly(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+		MinResolution:          codectypes.Resolution{Height: 720},
+	}
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 2)
+	assert.Equal(t, uint32(720), allowed.Worst().Height)
+}
+
+func TestAllowedResolutionsAndBitRates_BothLimits(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+		MinResolution:          codectypes.Resolution{Height: 720},
+		MaxResolution:          codectypes.Resolution{Height: 720},
+	}
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 1)
+	assert.Equal(t, uint32(720), allowed[0].Height)
+}
+
+func TestAllowedResolutionsAndBitRates_WidthFilter(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+		MaxResolution:          codectypes.Resolution{Width: 1280},
+	}
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 2)
+	assert.Equal(t, uint32(1280), allowed.Best().Width)
+}
+
+func TestAllowedResolutionsAndBitRates_ConflictingLimitsFallback(t *testing.T) {
+	cfg := &AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: sampleConfigs(),
+		MinResolution:          codectypes.Resolution{Height: 2000},
+		MaxResolution:          codectypes.Resolution{Height: 100},
+	}
+	// Conflicting constraints exclude all resolutions; should fall back to full set.
+	allowed := cfg.AllowedResolutionsAndBitRates()
+	assert.Len(t, allowed, 3)
+}
+
 // --- FPSReducerConfig ---
 
 func TestDefaultFPSReducerConfig(t *testing.T) {

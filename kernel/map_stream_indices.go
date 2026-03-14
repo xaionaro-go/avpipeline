@@ -165,7 +165,6 @@ func (m *MapStreamIndices) sendInput(
 		}
 
 		out := input.CloneAsReferencedOutput()
-		out.SetStreamIndex(outputStream.Index())
 
 		p, f := out.Unwrap()
 		if p != nil {
@@ -185,6 +184,7 @@ func (m *MapStreamIndices) sendInput(
 				f.GetPipelineSideData(),
 			)
 		}
+		out.SetStreamIndex(outputStream.Index())
 
 		m.Locker.UDo(ctx, func() {
 			select {

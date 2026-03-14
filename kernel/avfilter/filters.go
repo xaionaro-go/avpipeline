@@ -59,3 +59,25 @@ func RubberbandFilter(pitchScale float64, formantPreserve bool) string {
 	}
 	return s
 }
+
+// BilateralFilter returns an FFmpeg bilateral filter string for
+// edge-preserving smoothing (CPU).
+// sigmaS controls spatial smoothing; sigmaR controls range/color smoothing.
+func BilateralFilter(sigmaS, sigmaR float64) string {
+	return fmt.Sprintf("bilateral=sigmaS=%g:sigmaR=%g", sigmaS, sigmaR)
+}
+
+// BilateralCUDAFilter returns an FFmpeg bilateral_cuda filter string for
+// GPU-accelerated edge-preserving smoothing.
+// windowSize controls the filter window (diameter).
+func BilateralCUDAFilter(sigmaS, sigmaR float64, windowSize int) string {
+	return fmt.Sprintf("bilateral_cuda=sigmaS=%g:sigmaR=%g:window_size=%d", sigmaS, sigmaR, windowSize)
+}
+
+// NLMeansOpenCLFilter returns an FFmpeg nlmeans_opencl filter string for
+// GPU-accelerated non-local means denoising (used as a smoothing proxy).
+// strength controls denoising strength, patchSize is the patch comparison size,
+// researchSize is the search window size.
+func NLMeansOpenCLFilter(strength float64, patchSize, researchSize int) string {
+	return fmt.Sprintf("nlmeans_opencl=s=%g:p=%d:r=%d", strength, patchSize, researchSize)
+}

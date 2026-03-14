@@ -7,8 +7,10 @@ package android
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"unsafe"
 
 	"github.com/asticode/go-astiav"
@@ -22,6 +24,14 @@ import (
 	"github.com/xaionaro-go/ndk/audio"
 	aaudiocapi "github.com/xaionaro-go/ndk/capi/aaudio"
 	"github.com/xaionaro-go/xsync"
+	"golang.org/x/sys/unix"
+)
+
+// AAudio natively supports S16 (and Float). We hardcode S16 as the
+// capture and output format.
+const (
+	microphoneSampleFormat   = astiav.SampleFormatS16
+	microphoneBytesPerSample = 2
 )
 
 type Microphone struct {
@@ -29,13 +39,11 @@ type Microphone struct {
 	Config MicrophoneConfig
 	Locker xsync.Mutex
 
-	streamInfo  *frame.StreamInfo
-	codecParams *astiav.CodecParameters
-	stream      *audio.Stream
-
-	bytesPerSample int
-	bufferSamples  int
-	formatContext  *astiav.FormatContext
+	streamInfo    *frame.StreamInfo
+	codecParams   *astiav.CodecParameters
+	stream        *audio.Stream
+	bufferSamples int
+	formatContext *astiav.FormatContext
 }
 
 var _ kerneltypes.Abstract = (*Microphone)(nil)
@@ -56,14 +64,18 @@ func NewMicrophone(ctx context.Context, cfg MicrophoneConfig) (*Microphone, erro
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = microphoneDefaultPollInterval
 	}
-	if cfg.SampleFormat == astiav.SampleFormatNone {
-		cfg.SampleFormat = astiav.SampleFormatS16
+	if cfg.InputPreset == 0 {
+		cfg.InputPreset = microphoneDefaultInputPreset
 	}
 
-	bps, err := bytesPerSample(cfg.SampleFormat)
-	if err != nil {
-		return nil, err
+	if cfg.DeviceID == nil && cfg.DeviceNamePattern != "" {
+		devID, err := resolveDeviceByName(ctx, cfg.DeviceNamePattern)
+		if err != nil {
+			return nil, fmt.Errorf("unable to resolve device name: %w", err)
+		}
+		cfg.DeviceID = &devID
 	}
+
 	if cfg.FrameSamples <= 0 {
 		return nil, fmt.Errorf("frame samples must be positive")
 	}
@@ -82,8 +94,8 @@ func NewMicrophone(ctx context.Context, cfg MicrophoneConfig) (*Microphone, erro
 	}
 	internal.SetFinalizerFree(ctx, codecParams)
 	codecParams.SetMediaType(astiav.MediaTypeAudio)
-	codecParams.SetCodecID(codecIDFromSampleFormat(cfg.SampleFormat))
-	codecParams.SetSampleFormat(cfg.SampleFormat)
+	codecParams.SetCodecID(astiav.CodecIDPcmS16Le)
+	codecParams.SetSampleFormat(microphoneSampleFormat)
 	codecParams.SetSampleRate(cfg.SampleRate)
 	codecParams.SetChannelLayout(channelLayout)
 
@@ -91,7 +103,6 @@ func NewMicrophone(ctx context.Context, cfg MicrophoneConfig) (*Microphone, erro
 		ClosureSignaler: closuresignaler.New(),
 		Config:          cfg,
 		codecParams:     codecParams,
-		bytesPerSample:  bps,
 		bufferSamples:   cfg.BufferSamples,
 		formatContext:   astiav.AllocFormatContext(),
 	}
@@ -187,12 +198,22 @@ func (k *Microphone) Generate(
 	}
 
 	frameSamples := k.Config.FrameSamples
-	frameBytes := frameSamples * k.bytesPerSample * k.Config.Channels
+	frameBytes := frameSamples * microphoneBytesPerSample * k.Config.Channels
 	readSamples := k.bufferSamples
-	bufferBytes := readSamples * k.bytesPerSample * k.Config.Channels
+	bufferBytes := readSamples * microphoneBytesPerSample * k.Config.Channels
 	buffer := make([]byte, bufferBytes)
-	var pts int64
 	pending := make([]byte, 0, bufferBytes)
+
+	// Start PTS from the device's monotonic clock so that audio timestamps
+	// are synchronized with v4l2/android_camera video timestamps (which also
+	// use CLOCK_MONOTONIC). Without this, audio PTS starts from 0 while
+	// video PTS starts from the device uptime, causing the receiving side's
+	// DTS reorder buffer to reject audio as "too old".
+	pts, err := monotonicPTS(k.Config.SampleRate)
+	if err != nil {
+		return fmt.Errorf("unable to get initial monotonic PTS: %w", err)
+	}
+	logger.Infof(ctx, "initial audio PTS from CLOCK_MONOTONIC: %d (sample_rate=%d)", pts, k.Config.SampleRate)
 
 	readTimeoutNanos := k.Config.PollInterval.Nanoseconds()
 	if readTimeoutNanos <= 0 {
@@ -203,7 +224,17 @@ func (k *Microphone) Generate(
 	if err := k.stream.Start(); err != nil {
 		return fmt.Errorf("unable to start audio stream: %w", err)
 	}
-	defer k.stream.Stop()
+	defer func() {
+		if k.stream != nil {
+			k.stream.Stop()
+		}
+	}()
+	logger.Infof(ctx,
+		"AAudio capture started: state=%s xruns=%d",
+		k.stream.State(), k.stream.XRunCount(),
+	)
+
+	sd := newSilenceDetector(k.Config)
 
 	for {
 		select {
@@ -214,37 +245,28 @@ func (k *Microphone) Generate(
 		default:
 		}
 
-		framesRead := aaudiocapi.AAudioStream_read(
-			(*aaudiocapi.AAudioStream)(k.stream.Pointer()),
-			unsafe.Pointer(&buffer[0]),
-			int32(readSamples),
-			readTimeoutNanos,
-		)
-		if framesRead < 0 {
-			return fmt.Errorf("audio read error: %w", audio.Error(framesRead))
+		framesRead, err := k.readFromStream(ctx, buffer, readSamples, readTimeoutNanos)
+		if err != nil {
+			return err
 		}
 		if framesRead == 0 {
 			continue
 		}
 
-		bytesRead := int(framesRead) * k.bytesPerSample * k.Config.Channels
+		bytesRead := framesRead * microphoneBytesPerSample * k.Config.Channels
+		sd.update(ctx, buffer[:bytesRead], int64(framesRead))
+
 		pending = append(pending, buffer[:bytesRead]...)
 
 		for len(pending) >= frameBytes {
-			frameBytesSlice := pending[:frameBytes]
-			outFrame, err := k.buildFrameFromPCM(ctx, frameBytesSlice, frameSamples, pts)
+			outFrame, err := k.buildFrameFromPCM(ctx, pending[:frameBytes], frameSamples, pts)
 			if err != nil {
 				return err
 			}
 
-			select {
-			case outputCh <- packetorframe.OutputUnion{Frame: &outFrame}:
-			case <-ctx.Done():
-				frame.Pool.Put(outFrame.Frame)
-				return ctx.Err()
-			case <-k.CloseChan():
-				frame.Pool.Put(outFrame.Frame)
-				return io.EOF
+			err = k.sendFrame(ctx, outputCh, outFrame)
+			if err != nil {
+				return err
 			}
 
 			pts += int64(frameSamples)
@@ -254,10 +276,69 @@ func (k *Microphone) Generate(
 	}
 }
 
+// readFromStream reads audio data from the AAudio stream. On disconnect,
+// it reopens the capture device transparently. Returns the number of
+// frames read (0 means no data available, retry).
+func (k *Microphone) readFromStream(
+	ctx context.Context,
+	buffer []byte,
+	readSamples int,
+	readTimeoutNanos int64,
+) (int, error) {
+	framesRead := aaudiocapi.AAudioStream_read(
+		(*aaudiocapi.AAudioStream)(k.stream.Pointer()),
+		unsafe.Pointer(&buffer[0]),
+		int32(readSamples),
+		readTimeoutNanos,
+	)
+	if framesRead >= 0 {
+		return int(framesRead), nil
+	}
+
+	readErr := audio.Error(framesRead)
+	if !errors.Is(readErr, audio.ErrDisconnected) {
+		return 0, fmt.Errorf("audio read error: %w", readErr)
+	}
+
+	// AAudio stream disconnected (e.g. sensor privacy toggled,
+	// audio routing changed). Reopen and restart.
+	logger.Warnf(ctx, "AAudio stream disconnected, reopening capture device")
+	_ = k.stream.Stop()
+	_ = k.stream.Close()
+	k.stream = nil
+
+	if err := k.openCaptureDevice(ctx); err != nil {
+		return 0, fmt.Errorf("unable to reopen capture device after disconnect: %w", err)
+	}
+	if err := k.stream.Start(); err != nil {
+		return 0, fmt.Errorf("unable to restart capture after disconnect: %w", err)
+	}
+	logger.Infof(ctx, "AAudio capture reconnected: state=%s", k.stream.State())
+	return 0, nil
+}
+
+// sendFrame sends a frame to the output channel, respecting context
+// cancellation and close signals.
+func (k *Microphone) sendFrame(
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
+	outFrame frame.Output,
+) error {
+	select {
+	case outputCh <- packetorframe.OutputUnion{Frame: &outFrame}:
+		return nil
+	case <-ctx.Done():
+		frame.Pool.Put(outFrame.Frame)
+		return ctx.Err()
+	case <-k.CloseChan():
+		frame.Pool.Put(outFrame.Frame)
+		return io.EOF
+	}
+}
+
 func (k *Microphone) openCaptureDevice(ctx context.Context) error {
-	format, err := aaudioFormat(k.Config.SampleFormat)
-	if err != nil {
-		return err
+	if k.Config.DisableSensorPrivacyOnStart {
+		disableSensorPrivacy(ctx)
 	}
 
 	builder, err := audio.NewStreamBuilder()
@@ -270,19 +351,48 @@ func (k *Microphone) openCaptureDevice(ctx context.Context) error {
 		SetDirection(audio.Input).
 		SetSampleRate(int32(k.Config.SampleRate)).
 		SetChannelCount(int32(k.Config.Channels)).
-		SetFormat(format).
+		SetFormat(audio.PcmI16).
 		SetPerformanceMode(audio.LowLatency).
 		SetSharingMode(audio.Shared).
 		SetBufferCapacityInFrames(int32(k.Config.BufferSamples))
 
-	if k.Config.DeviceID != 0 {
-		builder.SetDeviceID(k.Config.DeviceID)
+	// Set input preset (defaults to UNPROCESSED for raw capture without
+	// Android audio processing). Override via MicrophoneConfig.InputPreset.
+	aaudiocapi.AAudioStreamBuilder_setInputPreset(
+		(*aaudiocapi.AAudioStreamBuilder)(builder.Pointer()),
+		k.Config.InputPreset,
+	)
+
+	if k.Config.DeviceID != nil {
+		builder.SetDeviceID(*k.Config.DeviceID)
 	}
 
 	stream, err := builder.Open()
 	if err != nil {
 		return fmt.Errorf("unable to open AAudio capture stream: %w", err)
 	}
+
+	actualDeviceID := aaudiocapi.AAudioStream_getDeviceId(
+		(*aaudiocapi.AAudioStream)(stream.Pointer()),
+	)
+	var requestedDeviceStr string
+	switch {
+	case k.Config.DeviceID == nil:
+		requestedDeviceStr = "<default>"
+	default:
+		requestedDeviceStr = fmt.Sprintf("%d", *k.Config.DeviceID)
+	}
+	if k.Config.DeviceID != nil && actualDeviceID != *k.Config.DeviceID {
+		logger.Warnf(ctx,
+			"AAudio ignored requested device_id=%d, opened device_id=%d instead (device may not exist or does not support capture); to list available devices run: dumpsys media.audio_policy | sed -n '/Available input devices/,/^$/p'",
+			*k.Config.DeviceID, actualDeviceID,
+		)
+	}
+	logger.Infof(ctx,
+		"AAudio capture stream opened: requested_device_id=%s actual_device_id=%d actual_sample_rate=%d actual_channels=%d state=%s frames_per_burst=%d input_preset=%d",
+		requestedDeviceStr, actualDeviceID, stream.SampleRate(), stream.ChannelCount(), stream.State(), stream.FramesPerBurst(), k.Config.InputPreset,
+	)
+
 	k.stream = stream
 	return nil
 }
@@ -295,7 +405,7 @@ func (k *Microphone) buildFrameFromPCM(
 ) (frame.Output, error) {
 	f := frame.Pool.Get()
 	f.Unref()
-	f.SetSampleFormat(k.Config.SampleFormat)
+	f.SetSampleFormat(microphoneSampleFormat)
 	f.SetSampleRate(k.Config.SampleRate)
 	f.SetChannelLayout(k.codecParams.ChannelLayout())
 	f.SetNbSamples(frameSamples)
@@ -303,36 +413,51 @@ func (k *Microphone) buildFrameFromPCM(
 		frame.Pool.Put(f)
 		return frame.Output{}, fmt.Errorf("unable to allocate frame buffer: %w", err)
 	}
-	if err := fillFramePCM(f, k.Config.SampleFormat, k.Config.Channels, pcm); err != nil {
+
+	// SetBytes copies the PCM data into the C frame buffer.
+	// Bytes(0) returns a copy, so writing to it would not modify
+	// the actual frame data — SetBytes is required.
+	if err := f.Data().SetBytes(pcm, 0); err != nil {
 		frame.Pool.Put(f)
-		return frame.Output{}, err
+		return frame.Output{}, fmt.Errorf("unable to set frame data: %w", err)
 	}
+
 	f.SetPts(pts)
 	f.SetDuration(int64(frameSamples))
 	out := frame.BuildOutput(f, k.streamInfo)
 	return out, nil
 }
 
-func bytesPerSample(format astiav.SampleFormat) (int, error) {
-	switch format {
-	case astiav.SampleFormatS16:
-		return 2, nil
-	case astiav.SampleFormatU8:
-		return 1, nil
-	default:
-		return 0, fmt.Errorf("unsupported sample format: %v", format)
+// disableSensorPrivacy runs `cmd sensor_privacy disable 0 microphone`
+// to unblock the microphone at the Android system level. Requires root.
+// sensorPrivacyCmdPath is the full path to the Android `cmd` binary
+// which is not in PATH inside the Termux chroot.
+const sensorPrivacyCmdPath = "/system/bin/cmd"
+
+func disableSensorPrivacy(ctx context.Context) {
+	out, err := exec.CommandContext(
+		ctx, sensorPrivacyCmdPath, "sensor_privacy", "disable", "0", "microphone",
+	).CombinedOutput()
+	if err != nil {
+		logger.Errorf(ctx, "unable to disable microphone sensor privacy: %v: %s", err, out)
+		return
 	}
+	logger.Infof(ctx, "disabled microphone sensor privacy")
 }
 
-func codecIDFromSampleFormat(format astiav.SampleFormat) astiav.CodecID {
-	switch format {
-	case astiav.SampleFormatS16:
-		return astiav.CodecIDPcmS16Le
-	case astiav.SampleFormatU8:
-		return astiav.CodecIDPcmU8
-	default:
-		return astiav.CodecIDNone
+// monotonicPTS returns the current CLOCK_MONOTONIC time converted to audio
+// samples at the given sample rate. This produces PTS values in the same epoch
+// as v4l2/android_camera video timestamps, enabling the receiving side's DTS
+// reorder buffer to interleave audio and video without discarding either as
+// "too old".
+func monotonicPTS(sampleRate int) (int64, error) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return 0, fmt.Errorf("ClockGettime(CLOCK_MONOTONIC): %w", err)
 	}
+	pts := int64(ts.Sec)*int64(sampleRate) +
+		int64(ts.Nsec)*int64(sampleRate)/1_000_000_000
+	return pts, nil
 }
 
 func channelLayoutFromCount(channels int) (astiav.ChannelLayout, error) {
@@ -344,30 +469,4 @@ func channelLayoutFromCount(channels int) (astiav.ChannelLayout, error) {
 	default:
 		return astiav.ChannelLayout{}, fmt.Errorf("unsupported channel count: %d", channels)
 	}
-}
-
-func aaudioFormat(format astiav.SampleFormat) (audio.Format, error) {
-	switch format {
-	case astiav.SampleFormatS16:
-		return audio.PcmI16, nil
-	default:
-		return audio.Invalid, fmt.Errorf("unsupported sample format for AAudio: %v", format)
-	}
-}
-
-func fillFramePCM(f *astiav.Frame, format astiav.SampleFormat, channels int, pcm []byte) error {
-	data := f.Data()
-	if format.IsPlanar() {
-		return fmt.Errorf("planar formats are not supported for capture")
-	}
-	buf, err := data.Bytes(0)
-	if err != nil {
-		return err
-	}
-	if len(buf) < len(pcm) {
-		return fmt.Errorf("frame buffer too small: %d < %d", len(buf), len(pcm))
-	}
-	copy(buf[:len(pcm)], pcm)
-	_ = channels
-	return nil
 }

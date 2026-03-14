@@ -36,6 +36,10 @@ import (
 const (
 	e2eNvencEnable       = true
 	e2eForceTestDraining = false
+
+	// e2eMaxResolutionSwitchTimeout is how long to wait for the auto-bitrate
+	// handler to detect the resolution is outside the allowed range and switch.
+	e2eMaxResolutionSwitchTimeout = 15 * time.Second
 )
 
 func must[T any](v T, err error) T {
@@ -317,4 +321,151 @@ func runTest(
 	if streammux.EnableDraining || e2eForceTestDraining {
 		drain()
 	}
+}
+
+// TestE2E_MaxResolutionConstraint verifies that when MaxResolution is set in
+// the auto-bitrate config, the handler switches the encoder away from a
+// resolution that exceeds the limit.
+func TestE2E_MaxResolutionConstraint(t *testing.T) {
+	loggerLevel := logger.LevelTrace
+	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
+	l := logrus.Default().WithLevel(loggerLevel)
+	ctx := logger.CtxWithLogger(context.Background(), l)
+	logger.SetDefault(func() logger.Logger {
+		return l
+	})
+	defer belt.Flush(ctx)
+
+	astiav.SetLogLevel(avpipeline.LogLevelToAstiav(l.Level()))
+	astiav.SetLogCallback(func(c astiav.Classer, level astiav.LogLevel, fmt, msg string) {
+		var cs string
+		if c != nil {
+			if cl := c.Class(); cl != nil {
+				cs = " - class: " + cl.String()
+			}
+		}
+		l.Logf(
+			avpipeline.LogLevelFromAstiav(level),
+			"%s%s",
+			strings.TrimSpace(msg), cs,
+		)
+	})
+
+	input, cancelFn := readInputFromFile(ctx, t, "video0-1v1a.mov")
+	defer cancelFn()
+
+	codecID := astiav.CodecIDH264
+
+	ctx, ctxCancelFn := context.WithCancel(ctx)
+	defer ctxCancelFn()
+
+	outputFactory := decoderOutputFactory[struct{}]{}
+	streamMux := must(streammux.New(
+		ctx,
+		streammuxtypes.MuxModeDifferentOutputsSameTracks,
+		outputFactory,
+	))
+
+	// Set auto-bitrate config with MaxResolution = 720p.
+	cfg := must(streammux.DefaultAutoBitRateVideoConfig(codecID))
+	cfg.MaxResolution = codectypes.Resolution{Width: 1280, Height: 720}
+	// Use a short check interval to speed up the test.
+	cfg.CheckInterval = 100 * time.Millisecond
+	// Disable slowdowns to allow immediate resolution switch.
+	cfg.ResolutionUpgradeSlowdownMinDuration = 0
+	cfg.ResolutionDowngradeSlowdownDuration = 0
+	cfg.ResolutionUpgradeSlowdownMovingAverage = nil
+	require.NoError(t, streamMux.SetAutoBitRateVideoConfig(ctx, &cfg))
+
+	var vcodecName codectypes.Name
+	var hardwareDeviceType codec.HardwareDeviceType
+	if e2eNvencEnable {
+		vcodecName = codectypes.Name(codecID.String()) + "_nvenc"
+		hardwareDeviceType = globaltypes.HardwareDeviceTypeCUDA
+	} else {
+		vcodecName = "libx264"
+	}
+
+	// Start at 1080p — this exceeds MaxResolution (720p).
+	require.NoError(t, streamMux.SwitchToOutputByProps(
+		ctx,
+		streammuxtypes.SenderProps{
+			TranscoderConfig: streammuxtypes.TranscoderConfig{
+				Output: streammuxtypes.TranscoderOutputConfig{
+					VideoTrackConfigs: []streammuxtypes.OutputVideoTrackConfig{{
+						InputTrackIDs:      []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs:     []int{0},
+						CodecName:          vcodecName,
+						Resolution:         codectypes.Resolution{Width: 1920, Height: 1080},
+						HardwareDeviceType: hardwareDeviceType,
+					}},
+					AudioTrackConfigs: []streammuxtypes.OutputAudioTrackConfig{{
+						InputTrackIDs:  []int{0, 1, 2, 3, 4, 5, 6, 7},
+						OutputTrackIDs: []int{1},
+						CodecName:      "aac",
+						SampleRate:     48000,
+					}},
+				},
+			},
+		},
+	))
+
+	require.NotNil(t, streamMux.GetActiveVideoOutput(ctx))
+
+	errCh := make(chan node.Error, 100)
+	observability.Go(ctx, func(ctx context.Context) {
+		for err := range errCh {
+			if ctx.Err() != nil {
+				return
+			}
+			t.Logf("stream error: %v", err)
+		}
+	})
+
+	defer close(errCh)
+	observability.Go(ctx, func(ctx context.Context) {
+		defer streamMux.Close(ctx)
+		streamMux.Serve(ctx, node.ServeConfig{}, errCh)
+	})
+	inputCh := streamMux.GetProcessor().InputChan()
+
+	// Feed packets continuously while waiting for the resolution to switch.
+	// We cycle through the input to keep the pipeline active.
+	deadline := time.Now().Add(e2eMaxResolutionSwitchTimeout)
+	switched := false
+	packetIdx := 0
+	for time.Now().Before(deadline) && !switched {
+		p := input[packetIdx%len(input)]
+		packetIdx++
+		mediaType := globaltypes.MediaType(p.GetMediaType())
+		pktSize := uint64(p.Packet.Size())
+		streamMux.GetCountersPtr().Addressed.Packets.Increment(mediaType, pktSize)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("context cancelled: %v", ctx.Err())
+		case inputCh <- packetorframe.InputUnion{Packet: &p}:
+			streamMux.GetCountersPtr().Received.Packets.Increment(mediaType, pktSize)
+		}
+
+		// Check encoder resolution periodically (every ~50 packets).
+		if packetIdx%50 == 0 {
+			encoderV, _ := streamMux.GetEncoders(ctx)
+			if encoderV != nil {
+				res := encoderV.GetResolution(ctx)
+				if res != nil && res.Height <= 720 {
+					t.Logf("resolution switched to %dx%d after %d packets", res.Width, res.Height, packetIdx)
+					switched = true
+				}
+			}
+		}
+	}
+
+	require.True(t, switched, "encoder should have switched to <=720p within the timeout; MaxResolution constraint was not enforced")
+
+	// Verify the final encoder resolution.
+	encoderV, _ := streamMux.GetEncoders(ctx)
+	require.NotNil(t, encoderV)
+	res := encoderV.GetResolution(ctx)
+	require.NotNil(t, res)
+	require.LessOrEqual(t, res.Height, uint32(720), "encoder height should be at most 720")
 }

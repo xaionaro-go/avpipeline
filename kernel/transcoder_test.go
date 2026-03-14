@@ -7,13 +7,10 @@ import (
 	"errors"
 	"io"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/asticode/go-astiav"
 	"github.com/facebookincubator/go-belt"
-	"github.com/facebookincubator/go-belt/pkg/runtime"
 	"github.com/facebookincubator/go-belt/tool/logger/implementation/logrus"
 	"github.com/xaionaro-go/avpipeline"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -27,38 +24,21 @@ import (
 	"github.com/xaionaro-go/secret"
 )
 
-func TestTranscoderNoFailure(t *testing.T) {
-	const vcodec = "libx264"
-	const acodec = codec.NameCopy
-	loggerLevel := logger.LevelTrace
+func testTranscoder(
+	t *testing.T,
+	vcodec codec.Name,
+	acodec codec.Name,
+) {
+	t.Helper()
 
-	runtime.DefaultCallerPCFilter = observability.CallerPCFilter(runtime.DefaultCallerPCFilter)
-	l := logrus.Default().WithLevel(loggerLevel)
+	l := logrus.Default().WithLevel(logger.LevelTrace)
 	ctx := logger.CtxWithLogger(context.Background(), l)
-	logger.SetDefault(func() logger.Logger {
-		return l
-	})
 	defer belt.Flush(ctx)
 
 	toURL := "null"
 
-	astiav.SetLogLevel(avpipeline.LogLevelToAstiav(l.Level()))
-	astiav.SetLogCallback(func(c astiav.Classer, level astiav.LogLevel, fmt, msg string) {
-		var cs string
-		if c != nil {
-			if cl := c.Class(); cl != nil {
-				cs = " - class: " + cl.String()
-			}
-		}
-		l.Logf(
-			avpipeline.LogLevelFromAstiav(level),
-			"%s%s",
-			strings.TrimSpace(msg), cs,
-		)
-	})
-
 	for _, fileName := range []string{"video0-1v1a.mov"} {
-		t.Run(fileName, func(t *testing.T) {
+		t.Run(string(vcodec)+"_"+string(acodec)+"/"+fileName, func(t *testing.T) {
 			ctx, cancelFn := context.WithCancel(ctx)
 
 			fromURL := path.Join("testdata", fileName)
@@ -129,6 +109,138 @@ func TestTranscoderNoFailure(t *testing.T) {
 			inputNode.AddPushTo(ctx, transcodingNode)
 			finalNode = transcodingNode
 			finalNode.AddPushTo(ctx, node.NewFromKernel(
+				ctx,
+				output,
+				processor.OptionQueueSizeInput(600),
+				processor.OptionQueueSizeOutput(0),
+				processor.OptionQueueSizeError(2),
+			))
+
+			l.Debugf("resulting pipeline: %s", inputNode.String())
+
+			observability.Go(ctx, func(ctx context.Context) {
+				defer cancelFn()
+				avpipeline.Serve(ctx, avpipeline.ServeConfig{
+					EachNode: node.ServeConfig{
+						FrameDropVideo: false,
+						FrameDropAudio: false,
+					},
+				}, errCh, inputNode)
+			})
+
+			for {
+				select {
+				case <-ctx.Done():
+					l.Infof("finished")
+					return
+				case err, ok := <-errCh:
+					if !ok {
+						return
+					}
+					if errors.Is(err.Err, context.Canceled) {
+						continue
+					}
+					if errors.Is(err.Err, io.EOF) {
+						continue
+					}
+					if err.Err != nil {
+						t.Fatal(err)
+						return
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTranscoderNoFailure(t *testing.T) {
+	testTranscoder(t, "libx264", codec.NameCopy)
+}
+
+// TestTranscoderAACEncoder exercises the AAC encoder path which uses the
+// FrameInfo FIFO for timestamp tracking (AAC has 'delay' capability but
+// not 'encoder_reordered_opaque').
+func TestTranscoderAACEncoder(t *testing.T) {
+	testTranscoder(t, "libx264", "aac")
+}
+
+// TestTranscoderAACEncoderFLV exercises the AAC encoder FIFO path with FLV
+// output format (1/1000 timebase) to check for DTS monotonicity issues.
+// This test is designed to catch the "DTS from the stream's past" errors
+// observed in production with split_av mode + AAC + FLV.
+func TestTranscoderAACEncoderFLV(t *testing.T) {
+	l := logrus.Default().WithLevel(logger.LevelTrace)
+	ctx := logger.CtxWithLogger(context.Background(), l)
+	defer belt.Flush(ctx)
+
+	flvPath := path.Join(t.TempDir(), "test_dts_monotonicity.flv")
+
+	for _, fileName := range []string{"video0-1v1a.mov"} {
+		t.Run("libx264_aac_flv/"+fileName, func(t *testing.T) {
+			ctx, cancelFn := context.WithCancel(ctx)
+
+			fromURL := path.Join("testdata", fileName)
+
+			input, err := kernel.NewInputFromURL(
+				ctx,
+				fromURL, secret.New(""),
+				kernel.InputConfig{
+					OnPreClose: kernel.HookFunc(func(ctx context.Context, i typesnolibav.Abstract) error {
+						time.Sleep(time.Second) // TODO: remove this ugly hack
+						return nil
+					}),
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer input.Close(ctx)
+
+			// Use FLV output format with 1/1000 timebase (matches production).
+			// ErrorOnNSequentialInvalidDTS=1 causes the pipeline to error out
+			// after 2 consecutive backward DTS packets (1 is tolerated).
+			output, err := kernel.NewOutputFromURL(ctx,
+				flvPath, secret.New(""),
+				kernel.OutputConfig{
+					ErrorOnNSequentialInvalidDTS: 1,
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer output.Close(ctx)
+
+			errCh := make(chan node.Error, 10)
+			inputNode := node.NewFromKernel(
+				ctx,
+				input,
+				processor.OptionQueueSizeInput(1),
+				processor.OptionQueueSizeOutput(1),
+				processor.OptionQueueSizeError(2),
+			)
+			encoderFactory := codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
+				VideoCodec: "libx264",
+				AudioCodec: "aac",
+			})
+			transcoder, err := kernel.NewTranscoder(
+				ctx,
+				codec.NewNaiveDecoderFactory(ctx, nil),
+				encoderFactory,
+				nil,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer transcoder.Close(ctx)
+			transcodingNode := node.NewFromKernel(
+				ctx,
+				transcoder,
+				processor.OptionQueueSizeInput(10),
+				processor.OptionQueueSizeOutput(10),
+				processor.OptionQueueSizeError(2),
+			)
+			inputNode.AddPushTo(ctx, transcodingNode)
+			transcodingNode.AddPushTo(ctx, node.NewFromKernel(
 				ctx,
 				output,
 				processor.OptionQueueSizeInput(600),

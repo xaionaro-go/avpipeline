@@ -82,7 +82,7 @@ func AutoBitRateVideoConfigFromProto(
 		return nil, fmt.Errorf("failed to convert AutoBitRateCalculator: %w", err)
 	}
 
-	return &smtypes.AutoBitRateVideoConfig{
+	result := &smtypes.AutoBitRateVideoConfig{
 		ResolutionsAndBitRates:               AutoBitRateResolutionAndBitRateConfigsFromProto(cfg.ResolutionsAndBitRates),
 		Calculator:                           calc,
 		FPSReducer:                           FPSReducerConfigFromProto(cfg.GetFpsReducer()),
@@ -90,10 +90,18 @@ func AutoBitRateVideoConfigFromProto(
 		AutoByPass:                           cfg.GetAutoByPass(),
 		MaxBitRate:                           smtypes.Ubps(cfg.GetMaxBitRateBps()),
 		MinBitRate:                           smtypes.Ubps(cfg.GetMinBitRateBps()),
+		MinFPSFraction:                       cfg.GetMinFpsFraction(),
 		BitRateIncreaseSlowdown:              time.Duration(cfg.GetBitRateIncreaseSlowdownMs()) * time.Millisecond,
 		ResolutionUpgradeSlowdownMinDuration: time.Duration(cfg.GetResolutionSlowdownDurationUpgradeMs()) * time.Millisecond,
 		ResolutionDowngradeSlowdownDuration:  time.Duration(cfg.GetResolutionSlowdownDurationDowngradeMs()) * time.Millisecond,
-	}, nil
+	}
+	if r := ResolutionFromProto(cfg.GetMinResolution()); r != nil {
+		result.MinResolution = *r
+	}
+	if r := ResolutionFromProto(cfg.GetMaxResolution()); r != nil {
+		result.MaxResolution = *r
+	}
+	return result, nil
 }
 
 func AutoBitRateVideoConfigToProto(
@@ -116,8 +124,11 @@ func AutoBitRateVideoConfigToProto(
 		AutoByPass:                            cfg.AutoByPass,
 		MaxBitRateBps:                         uint64(cfg.MaxBitRate),
 		MinBitRateBps:                         uint64(cfg.MinBitRate),
+		MinFpsFraction:                        cfg.MinFPSFraction,
 		BitRateIncreaseSlowdownMs:             uint64(cfg.BitRateIncreaseSlowdown / time.Millisecond),
 		ResolutionSlowdownDurationUpgradeMs:   uint64(cfg.ResolutionUpgradeSlowdownMinDuration / time.Millisecond),
 		ResolutionSlowdownDurationDowngradeMs: uint64(cfg.ResolutionDowngradeSlowdownDuration / time.Millisecond),
+		MinResolution:                         ResolutionToProto(cfg.MinResolution),
+		MaxResolution:                         ResolutionToProto(cfg.MaxResolution),
 	}, nil
 }

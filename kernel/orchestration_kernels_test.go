@@ -6,14 +6,17 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/asticode/go-astiav"
 	testifyassert "github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -1171,4 +1174,173 @@ func TestSwitch_SendInput_KernelError(t *testing.T) {
 	err := sw.SendInput(ctx, input, outCh)
 	require.Error(t, err)
 	testifyassert.Contains(t, err.Error(), "kernel error")
+}
+
+// --- Retryable WithNetworkConn/WithRawNetworkConn tests ---
+
+// DummyWithNetConn embeds Dummy and adds WithNetworkConn/WithRawNetworkConn support.
+type DummyWithNetConn struct {
+	Dummy
+	WithNetworkConnFn    func(context.Context, func(context.Context, net.Conn) error) error
+	WithRawNetworkConnFn func(context.Context, func(context.Context, syscall.RawConn, string) error) error
+}
+
+var (
+	_ Abstract           = (*DummyWithNetConn)(nil)
+	_ WithNetworkConner  = (*DummyWithNetConn)(nil)
+	_ WithRawNetworkConner = (*DummyWithNetConn)(nil)
+)
+
+func (d *DummyWithNetConn) WithNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, net.Conn) error,
+) error {
+	if d.WithNetworkConnFn != nil {
+		return d.WithNetworkConnFn(ctx, callback)
+	}
+	return nil
+}
+
+func (d *DummyWithNetConn) WithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) error {
+	if d.WithRawNetworkConnFn != nil {
+		return d.WithRawNetworkConnFn(ctx, callback)
+	}
+	return nil
+}
+
+func TestRetryable_WithNetworkConn_NoKernel(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[*DummyWithNetConn](ctx,
+		func(ctx context.Context) (*DummyWithNetConn, error) { return &DummyWithNetConn{}, nil },
+		nil,
+		RetryableOptionStartOnInit[*DummyWithNetConn](false),
+	)
+	err := r.WithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+		return nil
+	})
+	require.Error(t, err)
+	var kernelNotSet ErrKernelNotSet
+	testifyassert.ErrorAs(t, err, &kernelNotSet)
+}
+
+func TestRetryable_WithRawNetworkConn_NoKernel(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[*DummyWithNetConn](ctx,
+		func(ctx context.Context) (*DummyWithNetConn, error) { return &DummyWithNetConn{}, nil },
+		nil,
+		RetryableOptionStartOnInit[*DummyWithNetConn](false),
+	)
+	err := r.WithRawNetworkConn(ctx, func(ctx context.Context, rawConn syscall.RawConn, network string) error {
+		return nil
+	})
+	require.Error(t, err)
+	var kernelNotSet ErrKernelNotSet
+	testifyassert.ErrorAs(t, err, &kernelNotSet)
+}
+
+func TestRetryable_WithNetworkConn_NotImplemented(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) { return &Dummy{}, nil },
+		nil,
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+	time.Sleep(50 * time.Millisecond) // wait for kernel to initialize
+	err := r.WithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+		return nil
+	})
+	require.Error(t, err)
+	var notImpl ErrNotImplemented
+	testifyassert.ErrorAs(t, err, &notImpl)
+}
+
+func TestRetryable_WithRawNetworkConn_NotImplemented(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) { return &Dummy{}, nil },
+		nil,
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+	time.Sleep(50 * time.Millisecond) // wait for kernel to initialize
+	err := r.WithRawNetworkConn(ctx, func(ctx context.Context, rawConn syscall.RawConn, network string) error {
+		return nil
+	})
+	require.Error(t, err)
+	var notImpl ErrNotImplemented
+	testifyassert.ErrorAs(t, err, &notImpl)
+}
+
+func TestRetryable_WithRawNetworkConn_WithKernel(t *testing.T) {
+	ctx := context.Background()
+	callbackCalled := false
+	d := &DummyWithNetConn{
+		WithRawNetworkConnFn: func(ctx context.Context, callback func(context.Context, syscall.RawConn, string) error) error {
+			return callback(ctx, nil, "tcp")
+		},
+	}
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) { return d, nil },
+		nil,
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+	time.Sleep(50 * time.Millisecond) // wait for kernel to initialize
+	err := r.WithRawNetworkConn(ctx, func(ctx context.Context, rawConn syscall.RawConn, network string) error {
+		callbackCalled = true
+		testifyassert.Equal(t, "tcp", network)
+		return nil
+	})
+	require.NoError(t, err)
+	testifyassert.True(t, callbackCalled)
+}
+
+func TestRetryable_WithNetworkConn_WithKernel(t *testing.T) {
+	ctx := context.Background()
+	callbackCalled := false
+	d := &DummyWithNetConn{
+		WithNetworkConnFn: func(ctx context.Context, callback func(context.Context, net.Conn) error) error {
+			return callback(ctx, nil)
+		},
+	}
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) { return d, nil },
+		nil,
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+	time.Sleep(50 * time.Millisecond) // wait for kernel to initialize
+	err := r.WithNetworkConn(ctx, func(ctx context.Context, conn net.Conn) error {
+		callbackCalled = true
+		return nil
+	})
+	require.NoError(t, err)
+	testifyassert.True(t, callbackCalled)
+}
+
+// --- Decoder frame pass-through test ---
+
+func TestDecoder_SendInput_FramePassThrough(t *testing.T) {
+	ctx := context.Background()
+	dec := NewDecoder[*codec.NaiveDecoderFactory](ctx, codec.NewNaiveDecoderFactory(ctx, nil))
+	defer dec.Close(ctx)
+
+	input, cleanup := makeFrameInput(t)
+	defer cleanup()
+
+	outputCh := make(chan packetorframe.OutputUnion, 1)
+	err := dec.SendInput(ctx, input, outputCh)
+	require.NoError(t, err)
+
+	select {
+	case out := <-outputCh:
+		require.NotNil(t, out.Frame, "expected a frame in the output")
+		require.Nil(t, out.Packet, "expected no packet in the output")
+	default:
+		t.Fatal("expected output but channel was empty")
+	}
 }

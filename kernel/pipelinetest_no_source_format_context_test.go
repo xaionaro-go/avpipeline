@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/asticode/go-astiav"
@@ -42,12 +43,12 @@ var _ packet.Source = (*mockRetryableNotReady)(nil)
 type generatorKernel struct {
 	Source      packet.Source
 	Stream      *astiav.Stream
-	PacketCount int
-	generated   int
+	PacketCount int32
+	generated   atomic.Int32
 	closeCh     chan struct{}
 }
 
-func newGeneratorKernel(source packet.Source, stream *astiav.Stream, count int) *generatorKernel {
+func newGeneratorKernel(source packet.Source, stream *astiav.Stream, count int32) *generatorKernel {
 	return &generatorKernel{
 		Source:      source,
 		Stream:      stream,
@@ -72,7 +73,7 @@ func (g *generatorKernel) Generate(
 	ctx context.Context,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	for g.generated < g.PacketCount {
+	for g.generated.Load() < g.PacketCount {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -92,7 +93,7 @@ func (g *generatorKernel) Generate(
 		case outputCh <- packetorframe.OutputUnion{
 			Packet: &pktOut,
 		}:
-			g.generated++
+			g.generated.Add(1)
 		case <-ctx.Done():
 			pkt.Free()
 			return ctx.Err()
@@ -169,7 +170,7 @@ func TestPipeline_ErrNoSourceFormatContext(t *testing.T) {
 	})
 
 	// Wait for generator to finish
-	for generator.generated < generator.PacketCount {
+	for generator.generated.Load() < generator.PacketCount {
 		select {
 		case <-ctx.Done():
 			t.Fatal("context cancelled before generator finished")

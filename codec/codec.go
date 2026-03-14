@@ -38,6 +38,12 @@ const (
 	setPipelinishFlags       = true
 )
 
+// FallbackToSoftwareOnNoHWCodec controls whether the codec initialization
+// falls back to software decoding/encoding when no hardware codec variant
+// is found (e.g. no mjpeg_mediacodec). When false (default), missing HW
+// codec variants cause an error.
+var FallbackToSoftwareOnNoHWCodec = false
+
 type hardwareContextType int
 
 const (
@@ -48,15 +54,16 @@ const (
 )
 
 type codecInternals struct {
-	InitParams            CodecParams
-	codec                 *astiav.Codec
-	codecContext          *astiav.CodecContext
-	hardwareDeviceContext *astiav.HardwareDeviceContext
-	hardwarePixelFormat   astiav.PixelFormat
-	hardwareContextType   hardwareContextType
-	closer                *astikit.Closer
-	quirks                Quirks
-	isDirty               bool
+	InitParams             CodecParams
+	codec                  *astiav.Codec
+	codecContext           *astiav.CodecContext
+	hardwareDeviceContext  *astiav.HardwareDeviceContext
+	hardwareFramesContext  *astiav.HardwareFramesContext
+	hardwarePixelFormat    astiav.PixelFormat
+	hardwareContextType    hardwareContextType
+	closer                 *astikit.Closer
+	quirks                 Quirks
+	isDirty                bool
 }
 
 type Codec struct {
@@ -193,6 +200,31 @@ func (c *codecInternals) isNVENC() bool {
 		return false
 	}
 	return strings.HasSuffix(c.codec.Name(), "_nvenc")
+}
+
+// detectHardwareDeviceType determines the hardware device type from a codec's
+// name suffix. This is the single source of truth for whether a resolved codec
+// is a hardware codec and what device type it needs.
+func detectHardwareDeviceType(codecName string) HardwareDeviceType {
+	switch {
+	case strings.HasSuffix(codecName, "_mediacodec"):
+		return globaltypes.HardwareDeviceTypeMediaCodec
+	case strings.HasSuffix(codecName, "_nvenc"),
+		strings.HasSuffix(codecName, "_cuvid"):
+		return globaltypes.HardwareDeviceTypeCUDA
+	case strings.HasSuffix(codecName, "_qsv"):
+		return globaltypes.HardwareDeviceTypeQSV
+	case strings.HasSuffix(codecName, "_vaapi"):
+		return globaltypes.HardwareDeviceTypeVAAPI
+	case strings.HasSuffix(codecName, "_videotoolbox"):
+		return globaltypes.HardwareDeviceTypeVideoToolbox
+	case strings.HasSuffix(codecName, "_vdpau"):
+		return globaltypes.HardwareDeviceTypeVDPAU
+	case strings.HasSuffix(codecName, "_vulkan"):
+		return globaltypes.HardwareDeviceTypeVulkan
+	default:
+		return globaltypes.HardwareDeviceTypeNone
+	}
 }
 
 func (c *codecInternals) reset(ctx context.Context) (_err error) {
@@ -361,7 +393,7 @@ func newCodec(
 	c.codec = nil
 	if codecName != "" && hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
 		hwCodec := codecName.hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
-		if c.codec != nil {
+		if hwCodec != nil {
 			isHW = true
 			c.codec = hwCodec
 		}
@@ -380,20 +412,30 @@ func newCodec(
 		}
 		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
 	}
-	if !isHW && hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
-		hwCodec := Name(c.codec.Name()).hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
-		if hwCodec != nil {
-			isHW = true
-			c.codec = hwCodec
-		}
-	}
 
-	// MediaCodec codecs are always hardware-accelerated. Auto-detect the hardware
-	// device type so the hardware init path (HW device context, pixel format callback)
-	// is triggered even when the caller didn't explicitly set hardwareDeviceType.
-	if hardwareDeviceType == globaltypes.HardwareDeviceTypeNone && c.isMediaCodec() {
-		logger.Debugf(ctx, "auto-detected MediaCodec codec %q, enabling hardware device type", c.codec.Name())
-		hardwareDeviceType = globaltypes.HardwareDeviceTypeMediaCodec
+	// Determine hardware nature from the resolved codec's name. This handles
+	// the case where the user specified a HW codec directly (e.g. "hevc_mediacodec")
+	// or findCodec resolved to one by codecID.
+	if !isHW {
+		detectedHWType := detectHardwareDeviceType(c.codec.Name())
+		switch {
+		case detectedHWType != globaltypes.HardwareDeviceTypeNone:
+			// The resolved codec is inherently hardware-accelerated.
+			isHW = true
+			hardwareDeviceType = detectedHWType
+			logger.Debugf(ctx, "codec %q is a %s hardware codec", c.codec.Name(), detectedHWType)
+		case hardwareDeviceType != globaltypes.HardwareDeviceTypeNone:
+			// Caller requested hardware, but we got a software codec. Try the HW variant.
+			hwCodec := Name(c.codec.Name()).hwName(ctx, isEncoder, hardwareDeviceType).Codec(ctx, isEncoder)
+			switch {
+			case hwCodec != nil:
+				isHW = true
+				c.codec = hwCodec
+			case FallbackToSoftwareOnNoHWCodec:
+				logger.Warnf(ctx, "no %s codec found for %q, falling back to software", hardwareDeviceType, c.codec.Name())
+				hardwareDeviceType = globaltypes.HardwareDeviceTypeNone
+			}
+		}
 	}
 
 	ctx = belt.WithField(ctx, "codec_id", c.codec.ID())
@@ -619,6 +661,28 @@ func newCodec(
 				c.codecContext.SetSampleRate(int(sampleRate))
 			}
 		}
+		// If the encoder doesn't support the chosen sample format, pick the
+		// best supported one. The kernel-level resampler (kernel/encoder.go)
+		// converts frames at runtime, so the codec context must open with a
+		// format the encoder actually accepts.
+		if c.IsEncoder() {
+			chosenFmt := c.codecContext.SampleFormat()
+			supportedFmts := c.codec.SupportedSampleFormats()
+			if len(supportedFmts) > 0 {
+				supported := false
+				for _, sf := range supportedFmts {
+					if sf == chosenFmt {
+						supported = true
+						break
+					}
+				}
+				if !supported {
+					best := bestSampleFormat(supportedFmts)
+					logger.Warnf(ctx, "sample format '%s' is not supported by encoder '%s', using '%s' instead (resampler will convert at runtime)", chosenFmt, c.codec.Name(), best)
+					c.codecContext.SetSampleFormat(best)
+				}
+			}
+		}
 		logger.Tracef(ctx, "sample_rate: %d; channel_layout: %s; sample_format: %s", c.codecContext.SampleRate(), c.codecContext.ChannelLayout(), c.codecContext.SampleRate())
 	}
 
@@ -648,7 +712,11 @@ func newCodec(
 	}
 	if c.codec.Capabilities()&astiav.CodecCapabilityDelay != 0 {
 		if isEncoder && c.codec.Capabilities()&astiav.CodecCapabilityEncoderReorderedOpaque == 0 {
-			logger.Warnf(ctx, "codec '%s' has 'delay' capability, but doesn't have 'encoder_reordered_opaque' capability, so it is not supported by avpipeline", c.codec.Name())
+			// Encoder has delay but doesn't support opaque round-trip.
+			// The encoder kernel handles this via a FrameInfo FIFO that
+			// tracks input frame timestamps in order, so CopyOpaque is
+			// not required.
+			logger.Debugf(ctx, "codec '%s' has 'delay' but not 'encoder_reordered_opaque'; using FrameInfo FIFO for timestamp tracking", c.codec.Name())
 		} else {
 			// avpipeline uses the opaque field to store packet info when dealing with delayed frames:
 			flags |= astiav.CodecContextFlags(astiav.CodecContextFlagCopyOpaque)
@@ -678,6 +746,17 @@ func newCodec(
 
 	c.setQuirks(ctx)
 	c.logHints(ctx)
+
+	// HwFramesCtx encoders need an explicit hw_frames_ctx allocated and set on the
+	// codec context before avcodec_open2. HwDeviceCtx encoders skip this — they
+	// accept software frames and upload internally (see initHardwarePixelFormat).
+	if isEncoder && c.hardwareContextType == hardwareContextTypeFrames && c.hardwareDeviceContext != nil {
+		err := c.initHardwareFramesContext(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("unable to init hardware frames context: %w", err)
+		}
+	}
+
 	logger.Debugf(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, customOptions)
 	logger.Debugf(ctx, "opening codec %s: type=%v, codec_id=%v, bit_rate=%v, sample_fmt=%v, sample_rate=%v, channel_layout=%v, width=%v, height=%v, pix_fmt=%v",
 		c.codec.Name(), c.codecContext.MediaType(), c.codecContext.CodecID(), c.codecContext.BitRate(),
@@ -842,10 +921,38 @@ func (c *codecInternals) setupPixelFormat(
 		supportedPixFmts[pixFmt] = struct{}{}
 	}
 
-	if _, ok := supportedPixFmts[codecParameters.PixelFormat()]; ok {
-		c.codecContext.SetPixelFormat(codecParameters.PixelFormat())
-		logger.Tracef(ctx, "using pixel format from codec parameters: %s", codecParameters.PixelFormat())
-		return nil
+	paramPixFmt := codecParameters.PixelFormat()
+
+	// For HW encoders using HwDeviceCtx, the codec parameters might carry a
+	// hardware pixel format (e.g. cuda from the decoder). The encoder expects
+	// a software pixel format (nv12, yuv420p) and handles upload internally.
+	// Skip the codec parameters match if the format is not a valid software
+	// pixel format for the hardware device.
+	skipParamPixFmt := false
+	if isEncoder && c.hardwareDeviceContext != nil {
+		if constraints := c.hardwareDeviceContext.HardwareFramesConstraints(); constraints != nil {
+			validSW := constraints.ValidSoftwarePixelFormats()
+			constraints.Free()
+			isSWFormat := false
+			for _, sw := range validSW {
+				if sw == paramPixFmt {
+					isSWFormat = true
+					break
+				}
+			}
+			if !isSWFormat {
+				logger.Debugf(ctx, "codec parameters pixel format %s is not a valid SW format for the HW device; skipping", paramPixFmt)
+				skipParamPixFmt = true
+			}
+		}
+	}
+
+	if !skipParamPixFmt {
+		if _, ok := supportedPixFmts[paramPixFmt]; ok {
+			c.codecContext.SetPixelFormat(paramPixFmt)
+			logger.Tracef(ctx, "using pixel format from codec parameters: %s", paramPixFmt)
+			return nil
+		}
 	}
 
 	switch {
@@ -877,24 +984,38 @@ func (c *Codec) initHardwarePixelFormat(
 	logger.Tracef(ctx, "initHardwarePixelFormat")
 	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v", c.hardwarePixelFormat, _err) }()
 
+	// Prefer HwDeviceCtx over HwFramesCtx because HwDeviceCtx lets the encoder
+	// accept software frames (e.g. nv12) and handle GPU upload internally.
+	// HwFramesCtx requires us to: allocate a hw_frames_ctx, set it on the codec
+	// context, transfer every frame from SW→HW via TransferHardwareData before
+	// encoding, and match the hw_frames_ctx dimensions/format exactly. NVENC
+	// exposes both modes (config[0]=HwFramesCtx/cuda, config[1]=HwDeviceCtx/None);
+	// HwDeviceCtx is the correct choice for our pipeline because frames arrive
+	// from decoders in software format (or are transferred to SW in getScaledFrame).
 	for _, hwCfgs := range c.codec.HardwareConfigs() {
 		logger.Tracef(ctx, "hw config: %v %v %v", hwCfgs.PixelFormat(), hwCfgs.MethodFlags(), hwCfgs.HardwareDeviceType())
 		if hwCfgs.HardwareDeviceType() != astiav.HardwareDeviceType(hardwareDeviceType) {
-			logger.Tracef(ctx, "skipping this config, since it is for another hardware device type")
 			continue
 		}
-		switch {
-		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx):
+		if hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwDeviceCtx) {
 			c.hardwareContextType = hardwareContextTypeDevice
-		case hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx):
-			c.hardwareContextType = hardwareContextTypeFrames
-			continue // TODO: implement this
-		default:
-			logger.Tracef(ctx, "skipping this config, since it doesn't support neither HW frames nor HW device context")
-			continue
+			c.hardwarePixelFormat = hwCfgs.PixelFormat()
+			break
 		}
-		c.hardwarePixelFormat = hwCfgs.PixelFormat()
-		break
+	}
+
+	// Fall back to HwFramesCtx if no HwDeviceCtx config was found.
+	if c.hardwareContextType == undefinedHardwareContextType {
+		for _, hwCfgs := range c.codec.HardwareConfigs() {
+			if hwCfgs.HardwareDeviceType() != astiav.HardwareDeviceType(hardwareDeviceType) {
+				continue
+			}
+			if hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx) {
+				c.hardwareContextType = hardwareContextTypeFrames
+				c.hardwarePixelFormat = hwCfgs.PixelFormat()
+				break
+			}
+		}
 	}
 
 	if c.hardwareContextType == undefinedHardwareContextType {
@@ -958,5 +1079,80 @@ func (c *Codec) initHardwareDeviceContext(
 	c.closer.Add(c.hardwareDeviceContext.Free)
 	c.codecContext.SetHardwareDeviceContext(c.hardwareDeviceContext)
 	logger.Tracef(ctx, "HardwareDeviceContext: %p", c.hardwareDeviceContext)
+	return nil
+}
+
+func (c *Codec) initHardwareFramesContext(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "initHardwareFramesContext(hw_pix_fmt=%s, %dx%d)",
+		c.hardwarePixelFormat,
+		c.codecContext.Width(), c.codecContext.Height(),
+	)
+	defer func() { logger.Debugf(ctx, "/initHardwareFramesContext: %v", _err) }()
+
+	if c.hardwareDeviceContext == nil {
+		return fmt.Errorf("hardware device context is nil")
+	}
+
+	// Determine the correct software pixel format from hardware constraints,
+	// matching the pattern in the reference example (go-astiav hardware_encoding).
+	constraints := c.hardwareDeviceContext.HardwareFramesConstraints()
+	if constraints == nil {
+		return fmt.Errorf("unable to get hardware frames constraints")
+	}
+	defer constraints.Free()
+
+	validSWFormats := constraints.ValidSoftwarePixelFormats()
+	if len(validSWFormats) == 0 {
+		return fmt.Errorf("no valid software pixel formats for this hardware device")
+	}
+
+	// Use the codec context's current pixel format if it's a valid software format.
+	// Otherwise fall back to the first valid software format from constraints.
+	softwarePixelFormat := astiav.PixelFormatNone
+	codecCtxPixFmt := c.codecContext.PixelFormat()
+	for _, swFmt := range validSWFormats {
+		if swFmt == codecCtxPixFmt {
+			softwarePixelFormat = codecCtxPixFmt
+			break
+		}
+	}
+	if softwarePixelFormat == astiav.PixelFormatNone {
+		softwarePixelFormat = validSWFormats[0]
+		logger.Debugf(ctx, "codec context pixel format %s is not a valid SW format for this HW device; using %s",
+			codecCtxPixFmt, softwarePixelFormat)
+	}
+
+	hfc := astiav.AllocHardwareFramesContext(c.hardwareDeviceContext)
+	if hfc == nil {
+		return fmt.Errorf("unable to allocate hardware frames context")
+	}
+
+	hfc.SetWidth(c.codecContext.Width())
+	hfc.SetHeight(c.codecContext.Height())
+	hfc.SetHardwarePixelFormat(c.hardwarePixelFormat)
+	hfc.SetSoftwarePixelFormat(softwarePixelFormat)
+	hfc.SetInitialPoolSize(20)
+
+	if err := hfc.Initialize(); err != nil {
+		hfc.Free()
+		return fmt.Errorf("unable to initialize hardware frames context (hw=%s, sw=%s): %w",
+			c.hardwarePixelFormat, softwarePixelFormat, err)
+	}
+
+	c.hardwareFramesContext = hfc
+	c.closer.Add(hfc.Free)
+
+	// For hw_frames_ctx mode, the codec context pixel format must be set to the
+	// hardware pixel format. The encoder receives hardware frames, and the
+	// SW→HW transfer is handled in SendFrame.
+	c.codecContext.SetPixelFormat(c.hardwarePixelFormat)
+	c.codecContext.SetHardwareFramesContext(hfc)
+
+	logger.Debugf(ctx, "initialized hardware frames context: hw_pix_fmt=%s sw_pix_fmt=%s %dx%d",
+		c.hardwarePixelFormat, softwarePixelFormat,
+		c.codecContext.Width(), c.codecContext.Height(),
+	)
 	return nil
 }

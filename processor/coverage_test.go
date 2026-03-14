@@ -134,7 +134,7 @@ func TestReaderLoop_InputChannelClosed(t *testing.T) {
 	outputCh := make(chan packetorframe.OutputUnion, 10)
 	counters := processortypes.NewCounters()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 }
 
@@ -148,7 +148,7 @@ func TestReaderLoop_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	err := readerLoop(ctx, inputCh, k, outputCh, counters)
+	err := readerLoop(ctx, inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
@@ -166,7 +166,7 @@ func TestReaderLoop_KernelCloseChan(t *testing.T) {
 	outputCh := make(chan packetorframe.OutputUnion, 10)
 	counters := processortypes.NewCounters()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 }
 
@@ -181,7 +181,7 @@ func TestReaderLoop_ProcessesPacketInput(t *testing.T) {
 	inputCh <- pktInput
 	close(inputCh) // close after one message so the loop terminates
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Equal(t, 1, k.SendInputCallCount, "SendInput should have been called once")
 }
@@ -197,7 +197,7 @@ func TestReaderLoop_ProcessesFrameInput(t *testing.T) {
 	inputCh <- frameInput
 	close(inputCh)
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Equal(t, 1, k.SendInputCallCount)
 }
@@ -217,7 +217,7 @@ func TestReaderLoop_SendInputError(t *testing.T) {
 	pktInput := buildTestPacketInput()
 	inputCh <- pktInput
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, sendErr)
 	assert.Contains(t, err.Error(), "unable to send input")
 }
@@ -246,7 +246,7 @@ func TestReaderLoop_DeferredDrainProcessesRemainingPackets(t *testing.T) {
 	inputCh <- buildTestPacketInput()
 	inputCh <- buildTestPacketInput()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "main loop error")
 	assert.Equal(t, 3, callCount, "deferred drain should have processed remaining packets")
@@ -280,7 +280,7 @@ func TestReaderLoop_DeferredDrainHandlesEOFError(t *testing.T) {
 	inputCh <- buildTestPacketInput()
 	inputCh <- buildTestPacketInput()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unable to send input")
 	assert.Contains(t, err.Error(), "main loop error")
@@ -310,7 +310,7 @@ func TestReaderLoop_DeferredDrainHandlesNonEOFError(t *testing.T) {
 	inputCh <- buildTestPacketInput()
 	inputCh <- buildTestPacketInput()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "main loop error")
 	assert.Equal(t, 2, callCount, "drain should stop on non-EOF error from SendInput")
@@ -326,7 +326,7 @@ func TestReaderLoop_DeferredDrainClosedChannel(t *testing.T) {
 	outputCh := make(chan packetorframe.OutputUnion, 10)
 	counters := processortypes.NewCounters()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Equal(t, 0, k.SendInputCallCount, "no inputs should have been processed")
 }
@@ -352,7 +352,7 @@ func TestReaderLoop_DeferredDrainWithFrameInputs(t *testing.T) {
 	inputCh <- buildTestFrameInput()
 	inputCh <- buildTestFrameInput()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.Error(t, err)
 	assert.Equal(t, 3, callCount, "all frame inputs including drain should have been processed")
 }
@@ -369,7 +369,7 @@ func TestReaderLoop_MultipleInputsThenClose(t *testing.T) {
 	inputCh <- buildTestPacketInput()
 	close(inputCh)
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Equal(t, 3, k.SendInputCallCount)
 }
@@ -696,7 +696,7 @@ func TestReaderLoop_DeferredDrainWithContextCanceledError(t *testing.T) {
 	inputCh <- buildTestPacketInput()
 	inputCh <- buildTestPacketInput()
 
-	err := readerLoop(context.Background(), inputCh, k, outputCh, counters)
+	err := readerLoop(context.Background(), inputCh, k, outputCh, counters, &shouldDebugLogTracker{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "main loop error")
 	assert.Equal(t, 2, callCount, "drain should stop on context.Canceled from SendInput")

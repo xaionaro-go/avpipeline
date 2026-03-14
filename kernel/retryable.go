@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"runtime"
 	"runtime/debug"
+	"syscall"
 	"time"
 
 	"github.com/asticode/go-astiav"
@@ -376,6 +378,46 @@ func (r *Retryable[K]) NotifyAboutPacketSource(
 			return nil
 		}
 		return pktSink.NotifyAboutPacketSource(ctx, source)
+	})
+}
+
+var _ WithNetworkConner = (*Retryable[Abstract])(nil)
+
+func (r *Retryable[K]) WithNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, net.Conn) error,
+) error {
+	return xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() error {
+		if !r.KernelIsSet {
+			return ErrKernelNotSet{}
+		}
+		k, ok := any(r.Kernel).(types.WithNetworkConner)
+		if !ok {
+			return ErrNotImplemented{
+				Err: fmt.Errorf("kernel %T does not implement WithNetworkConner", r.Kernel),
+			}
+		}
+		return k.WithNetworkConn(ctx, callback)
+	})
+}
+
+var _ WithRawNetworkConner = (*Retryable[Abstract])(nil)
+
+func (r *Retryable[K]) WithRawNetworkConn(
+	ctx context.Context,
+	callback func(context.Context, syscall.RawConn, string) error,
+) error {
+	return xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() error {
+		if !r.KernelIsSet {
+			return ErrKernelNotSet{}
+		}
+		k, ok := any(r.Kernel).(types.WithRawNetworkConner)
+		if !ok {
+			return ErrNotImplemented{
+				Err: fmt.Errorf("kernel %T does not implement WithRawNetworkConner", r.Kernel),
+			}
+		}
+		return k.WithRawNetworkConn(ctx, callback)
 	})
 }
 

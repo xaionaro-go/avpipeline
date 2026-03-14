@@ -38,6 +38,8 @@ type FromKernel[T kernel.Abstract] struct {
 	OnClosed  func(context.Context) error
 
 	CountersStorage *Counters
+
+	firstSeen shouldDebugLogTracker
 }
 
 var _ globaltypes.ErrorHandler = (*FromKernel[kernel.Abstract])(nil)
@@ -114,6 +116,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 					mediaType := outputPacket.GetMediaType()
 					objSize := uint64(outputPacket.GetSize())
 					p.CountersStorage.Generated.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
+					p.firstSeen.logFirstOutputPacket(ctx, p, &output)
 					select {
 					case <-ctx.Done():
 						p.CountersStorage.Omitted.Packets.Increment(globaltypes.MediaType(mediaType), objSize)
@@ -126,6 +129,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 					mediaType := outputFrame.GetMediaType()
 					objSize := uint64(outputFrame.GetSize())
 					p.CountersStorage.Generated.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
+					p.firstSeen.logFirstOutputFrame(ctx, p, &output)
 					select {
 					case <-ctx.Done():
 						p.CountersStorage.Omitted.Frames.Increment(globaltypes.MediaType(mediaType), objSize)
@@ -175,6 +179,7 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 			p.Kernel,
 			p.preOutputCh,
 			p.CountersStorage,
+			&p.firstSeen,
 		)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
 		if err != nil {

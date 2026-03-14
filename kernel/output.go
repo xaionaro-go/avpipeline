@@ -180,6 +180,9 @@ var (
 func formatFromURL(url *url.URL) string {
 	switch url.Scheme {
 	case "":
+		if url.Path == "/dev/null" {
+			return "null"
+		}
 		ext := filepath.Ext(url.Path)
 		if ext == "" {
 			return ""
@@ -510,6 +513,7 @@ func (o *Output) Close(
 			}
 		}
 		if o.ioContext != nil {
+			o.ioContext.Flush()
 			if err := o.ioContext.Close(); err != nil {
 				result = append(result, fmt.Errorf("unable to close the IO context: %w", err))
 			}
@@ -1157,6 +1161,11 @@ func (o *Output) doWritePacket(
 	pkt.RescaleTs(inputStream.TimeBase(), outputStream.TimeBase())
 	isNoDTS := pkt.Dts() == consts.NoPTSValue
 	isNoPTS := pkt.Pts() == consts.NoPTSValue
+	if isNoDTS && !isNoPTS {
+		logger.Tracef(ctx, "DTS is missing but PTS is set (%d), setting DTS = PTS", pkt.Pts())
+		pkt.SetDts(pkt.Pts())
+		isNoDTS = false
+	}
 	if !isNoDTS && !isNoPTS && pkt.Dts() > pkt.Pts() {
 		logger.Errorf(ctx, "DTS (%d) is greater than PTS (%d), setting DTS = PTS (pict-type: 0x%02X)", pkt.Dts(), pkt.Pts(), int(frameInfo.GetPictureType()))
 		pkt.SetDts(pkt.Pts())
@@ -1170,11 +1179,16 @@ func (o *Output) doWritePacket(
 		}
 		// TODO: do not skip B-frames
 		logger.Errorf(ctx,
-			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d",
+			"received a DTS from the stream's past or has invalid value (%v), ignoring the packet from stream #%d: %d < %d (delta:%d, source:%T, input_tb:%v, output_tb:%v, pts:%d)",
 			outputStream.CodecParameters().MediaType(),
 			outputStream.Index(),
 			pkt.Dts(),
 			outputStream.LastDTS,
+			outputStream.LastDTS-pkt.Dts(),
+			source,
+			inputStream.TimeBase(),
+			outputStream.TimeBase(),
+			pkt.Pts(),
 		)
 		return nil
 	}

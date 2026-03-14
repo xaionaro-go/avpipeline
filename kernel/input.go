@@ -69,6 +69,7 @@ type Input struct {
 	IgnoreZeroDuration bool
 
 	PipelineSideData globaltypes.PipelineSideData
+	liveRotation     *globaltypes.DisplayRotation
 
 	SyncStreamIndex atomic.Int64
 	ClockCalculator *ts.ClockCalculator
@@ -116,9 +117,8 @@ func NewInputFromURL(
 		IgnoreIncorrectDTS: cfg.IgnoreIncorrectDTS,
 		IgnoreZeroDuration: cfg.IgnoreZeroDuration,
 		DisplayRotation:    cfg.DisplayRotation,
-		AutoRotate:         cfg.AutoRotate == nil || *cfg.AutoRotate,
+		AutoRotate:         cfg.AutoRotate != nil && *cfg.AutoRotate,
 	}
-	i.PipelineSideData = append(i.PipelineSideData, globaltypes.AutoRotate(i.AutoRotate))
 	if cfg.OnPreClose != nil {
 		i.OnPreClose = func(ctx context.Context, i *Input) error {
 			return cfg.OnPreClose.FireHook(ctx, i)
@@ -175,6 +175,20 @@ func NewInputFromURL(
 			}
 		}
 	}
+
+	// Set PipelineSideData AFTER processing custom options, because
+	// custom options may override AutoRotate (via "autorotate"/"noautorotate").
+	i.PipelineSideData = append(i.PipelineSideData, globaltypes.AutoRotate(i.AutoRotate))
+
+	// Create a live-updatable rotation value for mid-stream rotation changes
+	// (e.g., smartphone orientation changes). NaN means "use rotation from
+	// codec parameters" (the default).
+	initialRotation := math.NaN()
+	if i.DisplayRotation != nil {
+		initialRotation = *i.DisplayRotation
+	}
+	i.liveRotation = globaltypes.NewDisplayRotation(initialRotation)
+	i.PipelineSideData = append(i.PipelineSideData, i.liveRotation)
 
 	if formatName == "" {
 		if urlParsed != nil {
@@ -343,16 +357,51 @@ func (i *Input) doOpen(
 
 	for _, stream := range i.Streams() {
 		logger.Debugf(ctx, "input stream #%d: %#+v", stream.Index(), spew.Sdump(unsafetools.FieldByNameInValue(reflect.ValueOf(stream.CodecParameters()), "c").Elem().Elem().Interface()))
-		if i.DisplayRotation != nil && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
-			dm := astiav.NewDisplayMatrixFromRotation(*i.DisplayRotation)
-			cp := stream.CodecParameters()
-			if cp == nil {
-				return fmt.Errorf("stream #%d has no codec parameters to set display rotation", stream.Index())
+		if stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+			if i.DisplayRotation != nil {
+				dm := astiav.NewDisplayMatrixFromRotation(*i.DisplayRotation)
+				cp := stream.CodecParameters()
+				if cp == nil {
+					return fmt.Errorf("stream #%d has no codec parameters to set display rotation", stream.Index())
+				}
+				if err := cp.SideData().DisplayMatrix().Add(dm); err != nil {
+					return fmt.Errorf("unable to add display matrix to stream #%d codec parameters: %w", stream.Index(), err)
+				}
+				logger.Infof(ctx, "set display rotation to %f for stream #%d via codec parameters side data", *i.DisplayRotation, stream.Index())
 			}
-			if err := cp.SideData().DisplayMatrix().Add(dm); err != nil {
-				return fmt.Errorf("unable to add display matrix to stream #%d codec parameters: %w", stream.Index(), err)
+
+			// FFmpeg's device demuxers (v4l2, android_camera) set avg_frame_rate
+			// and r_frame_rate on the stream but NOT codecpar->framerate. The
+			// downstream pipeline (decoder → encoder) reads framerate from codec
+			// parameters, so we must propagate it here. Generic libavformat code
+			// also computes packet duration from avg_frame_rate, so packets arrive
+			// with duration already set — which means the framerate-guessing code
+			// in the packet loop never triggers.
+			if stream.CodecParameters().FrameRate().Num() == 0 {
+				if fps := stream.AvgFrameRate(); fps.Num() > 0 && fps.Den() > 0 {
+					logger.Infof(ctx, "stream #%d: propagating avg_frame_rate %v to codec parameters framerate", stream.Index(), fps)
+					stream.CodecParameters().SetFrameRate(fps)
+				}
 			}
-			logger.Infof(ctx, "set display rotation to %f for stream #%d via codec parameters side data", *i.DisplayRotation, stream.Index())
+
+			// Fallback: if the demuxer didn't set avg_frame_rate either (or
+			// FindStreamInfo couldn't determine it), use the configured input
+			// framerate option (DefaultFPS).
+			if i.DefaultFPS.Num() != 0 {
+				fps := i.DefaultFPS
+				if stream.CodecParameters().FrameRate().Num() == 0 {
+					logger.Infof(ctx, "stream #%d: codec parameters framerate is still 0; setting to %v from input options", stream.Index(), fps)
+					stream.CodecParameters().SetFrameRate(fps)
+				}
+				if stream.AvgFrameRate().Num() == 0 {
+					logger.Infof(ctx, "stream #%d: avg_frame_rate is 0; setting to %v from input options", stream.Index(), fps)
+					stream.SetAvgFrameRate(fps)
+				}
+				if stream.RFrameRate().Num() == 0 {
+					logger.Infof(ctx, "stream #%d: r_frame_rate is 0; setting to %v from input options", stream.Index(), fps)
+					stream.SetRFrameRate(fps)
+				}
+			}
 		}
 	}
 
@@ -376,7 +425,7 @@ func (i *Input) FormatName() string {
 
 func (i *Input) initNetworkConn(ctx context.Context) {
 	if i.URLParsed == nil {
-		logger.Errorf(ctx, "cannot init network connection: URLParsed == nil")
+		logger.Debugf(ctx, "skipping network connection init: URLParsed == nil")
 		return
 	}
 
@@ -424,6 +473,17 @@ func (i *Input) Close(
 		errs = append(errs, fmt.Errorf("unable to close network connection: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+// SetDisplayRotation atomically updates the rotation angle used by the decoder.
+// This enables mid-stream rotation changes, e.g. when a smartphone's orientation
+// changes during a live stream. The change takes effect on the next decoded frame.
+func (i *Input) SetDisplayRotation(
+	ctx context.Context,
+	rotation float64,
+) {
+	logger.Debugf(ctx, "SetDisplayRotation(%v)", rotation)
+	i.liveRotation.Store(rotation)
 }
 
 func (i *Input) readIntoPacket(
@@ -699,12 +759,33 @@ func (i *Input) Generate(
 			if frameSecs > 1 || suggestedDuration <= 0 {
 				logger.Tracef(ctx, "the packet had no duration set; cannot use cur.pts - prev.pts: %d-%d=%d as it suggests too large or invalid duration (%f secs); trying last known duration", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, frameSecs)
 				suggestedDuration = lastDuration[streamIndex]
+				frameSecs = stream.TimeBase().Float64() * float64(suggestedDuration)
 			}
 			if frameSecs > 1 || suggestedDuration <= 0 {
 				logger.Warnf(ctx, "the packet had no duration set; but cannot find a reasonable suggestion how to fix it: pts_cur:%d pts_prev:%d suggested_duration:%d time_base:%f", curPkt.Pts(), prevPkt.Pts(), suggestedDuration, stream.TimeBase().Float64())
 			} else {
 				prevPkt.SetDuration(suggestedDuration)
 				logger.Tracef(ctx, "the packet had no duration set; set it to: cur.pts - prev.pts: %d-%d=%d", curPkt.GetPTS(), prevPkt.GetPTS(), prevPkt.GetDuration())
+
+				// Fallback: derive framerate from observed PTS intervals. The primary
+				// mechanism is the demuxer or doOpen setting avg_frame_rate from the
+				// 'framerate' option. This handles edge cases where that didn't happen
+				// (e.g., no 'framerate' option was provided for a device input).
+				if stream.CodecParameters().MediaType() == astiav.MediaTypeVideo &&
+					stream.CodecParameters().FrameRate().Num() == 0 &&
+					frameSecs > 0 {
+					fpsFloat := 1.0 / frameSecs
+					fpsRational := globaltypes.RationalFromApproxFloat64(fpsFloat)
+					fps := astiav.NewRational(fpsRational.Num, fpsRational.Den)
+					logger.Infof(ctx, "stream #%d: derived framerate %v from PTS interval (%f secs)", streamIndex, fps, frameSecs)
+					stream.CodecParameters().SetFrameRate(fps)
+					if stream.AvgFrameRate().Num() == 0 {
+						stream.SetAvgFrameRate(fps)
+					}
+					if stream.RFrameRate().Num() == 0 {
+						stream.SetRFrameRate(fps)
+					}
+				}
 			}
 
 			if err := sendPkt(prevPkt); err != nil {

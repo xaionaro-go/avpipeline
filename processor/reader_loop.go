@@ -15,6 +15,7 @@ import (
 )
 
 type Kernel interface {
+	fmt.Stringer
 	kerneltypes.SendInputer
 	kerneltypes.CloseChaner
 }
@@ -25,6 +26,7 @@ func readerLoop(
 	kernel Kernel,
 	outputCh chan<- packetorframe.OutputUnion,
 	countersPtr *Counters,
+	firstSeen *shouldDebugLogTracker,
 ) (_err error) {
 	logger.Debugf(ctx, "ReaderLoop[%s]: chan %p", kernel, inputChan)
 	defer func() { logger.Debugf(ctx, "/ReaderLoop[%s]: chan %p: %v", kernel, inputChan, _err) }()
@@ -38,6 +40,7 @@ func readerLoop(
 				}
 				mediaType := input.GetMediaType()
 				objSize := uint64(input.GetSize())
+				firstSeen.logFirstInput(ctx, kernel, input)
 				logger.Tracef(ctx, "ReaderLoop[%s](closing): received %#+v", kernel, input)
 				err := kernel.SendInput(ctx, input, outputCh)
 				pkt, frame := input.Unwrap()
@@ -81,6 +84,7 @@ func readerLoop(
 			}
 			mediaType := input.GetMediaType()
 			objSize := uint64(input.GetSize())
+			firstSeen.logFirstInput(ctx, kernel, input)
 			logger.Tracef(ctx, "ReaderLoop[%s]: received %#+v", kernel, input)
 			err := kernel.SendInput(ctx, input, outputCh)
 			pkt, frame := input.Unwrap()

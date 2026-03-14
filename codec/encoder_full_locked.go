@@ -126,10 +126,11 @@ func (e *EncoderFullLocked) SendFrame(
 
 	switch e.MediaType() {
 	case astiav.MediaTypeVideo:
-		// Validate linesize before sending to encoder to catch invalid frames early
+		// Validate linesize before sending to encoder to catch invalid frames early.
+		// Skip for hardware frames (e.g. cuda) where linesize is not set.
 		linesize := f.Linesize()
 		width := f.Width()
-		if linesize[0] < width {
+		if linesize[0] > 0 && linesize[0] < width {
 			return fmt.Errorf("invalid frame: linesize[0]=%d < width=%d (pixel_format=%s)", linesize[0], width, f.PixelFormat())
 		}
 
@@ -161,7 +162,43 @@ func (e *EncoderFullLocked) SendFrame(
 	}
 
 	e.isDirty = true
+
+	if e.hardwareFramesContext != nil && f.PixelFormat() != e.hardwarePixelFormat {
+		// Encoder uses hw_frames_ctx: transfer software frame → hardware.
+		hwFrame, err := e.transferToHardware(ctx, f)
+		if err != nil {
+			return fmt.Errorf("unable to transfer frame to hardware: %w", err)
+		}
+		defer hwFrame.Free()
+		return e.codecContext.SendFrame(hwFrame)
+	}
+
 	return e.codecContext.SendFrame(f)
+}
+
+func (e *EncoderFullLocked) transferToHardware(
+	ctx context.Context,
+	swFrame *astiav.Frame,
+) (*astiav.Frame, error) {
+	hwFrame := astiav.AllocFrame()
+	if err := hwFrame.AllocHardwareBuffer(e.hardwareFramesContext); err != nil {
+		hwFrame.Free()
+		return nil, fmt.Errorf("unable to allocate hardware buffer: %w", err)
+	}
+
+	if err := swFrame.TransferHardwareData(hwFrame); err != nil {
+		hwFrame.Free()
+		return nil, fmt.Errorf("unable to transfer data to hardware frame: %w", err)
+	}
+
+	hwFrame.SetPts(swFrame.Pts())
+	hwFrame.SetDuration(swFrame.Duration())
+	hwFrame.SetPictureType(swFrame.PictureType())
+	hwFrame.SetFlags(swFrame.Flags())
+
+	logger.Tracef(ctx, "transferred frame to hardware: pts=%d pix_fmt=%s->%s",
+		swFrame.Pts(), swFrame.PixelFormat(), hwFrame.PixelFormat())
+	return hwFrame, nil
 }
 
 func (e *EncoderFullLocked) setFrameRateFromDuration(

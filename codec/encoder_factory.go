@@ -194,6 +194,19 @@ func (f *NaiveEncoderFactory) amendVideoCodecParams(
 		}
 	}
 	if f.VideoResolution != nil {
+		targetW, targetH := int(f.VideoResolution.Width), int(f.VideoResolution.Height)
+		frameW, frameH := codecParams.Width(), codecParams.Height()
+
+		// When autorotate applies 90°/270° rotation, the decoded frame dimensions
+		// are the transpose of the configured resolution. Use the post-rotation
+		// dimensions so the encoder matches what the decoder actually produces.
+		if frameW == targetH && frameH == targetW && targetW != targetH {
+			logger.Debugf(ctx, "frame dimensions %dx%d are rotated from configured %dx%d; using post-rotation dimensions",
+				frameW, frameH, targetW, targetH)
+			f.VideoResolution.Width = uint32(frameW)
+			f.VideoResolution.Height = uint32(frameH)
+		}
+
 		logger.Tracef(ctx, "applying video resolution %#+v", f.VideoResolution)
 		codecParams.SetWidth(int(f.VideoResolution.Width))
 		codecParams.SetHeight(int(f.VideoResolution.Height))

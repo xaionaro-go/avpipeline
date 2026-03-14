@@ -1,16 +1,18 @@
 //go:build !android
 // +build !android
 
-// microphone_config_other.go keeps defaults for non-Android builds.
+// microphone_config_other.go provides stub types for non-Android builds.
 
 package android
 
-import "time"
+// InputPreset is a stub for the AAudio input preset enum on non-Android platforms.
+type InputPreset = int32
 
 const (
-	microphoneDefaultSampleRate    = 48000
-	microphoneDefaultChannels      = 1
-	microphoneDefaultFrameSamples  = 1024
-	microphoneDefaultBufferSamples = 4096
-	microphoneDefaultPollInterval  = 10 * time.Millisecond
+	InputPresetGeneric            InputPreset = 1
+	InputPresetCamcorder          InputPreset = 5
+	InputPresetVoiceRecognition   InputPreset = 6
+	InputPresetVoiceCommunication InputPreset = 7
+	InputPresetUnprocessed        InputPreset = 9
+	InputPresetVoicePerformance   InputPreset = 10
 )

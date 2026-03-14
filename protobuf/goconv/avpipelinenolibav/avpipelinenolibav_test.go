@@ -476,6 +476,9 @@ func TestAutoBitRateVideoConfig_RoundTrip(t *testing.T) {
 		AutoByPass:    true,
 		MaxBitRate:    20_000_000,
 		MinBitRate:    500_000,
+		MinFPSFraction: 0.2,
+		MinResolution: codectypes.Resolution{Height: 480},
+		MaxResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 		FPSReducer: smtypes.FPSReducerConfig{
 			{BitrateMin: 0, BitrateMax: 500_000, Fraction: globaltypes.Rational{Num: 1, Den: 2}},
 		},
@@ -492,6 +495,9 @@ func TestAutoBitRateVideoConfig_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.AutoByPass, result.AutoByPass)
 	assert.Equal(t, original.MaxBitRate, result.MaxBitRate)
 	assert.Equal(t, original.MinBitRate, result.MinBitRate)
+	assert.Equal(t, original.MinFPSFraction, result.MinFPSFraction)
+	assert.Equal(t, original.MinResolution, result.MinResolution)
+	assert.Equal(t, original.MaxResolution, result.MaxResolution)
 	assert.Equal(t, original.BitRateIncreaseSlowdown, result.BitRateIncreaseSlowdown)
 	assert.Equal(t, original.ResolutionUpgradeSlowdownMinDuration, result.ResolutionUpgradeSlowdownMinDuration)
 	assert.Equal(t, original.ResolutionDowngradeSlowdownDuration, result.ResolutionDowngradeSlowdownDuration)

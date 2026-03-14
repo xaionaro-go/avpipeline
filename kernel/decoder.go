@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -232,13 +233,22 @@ func (d *Decoder[DF]) getStreamDecoder(
 	var rotation float64
 	if autoRotate && stream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
 		logger.Tracef(ctx, "checking for rotation in stream %d", stream.Index())
-		if sd := stream.CodecParameters().SideData(); sd != nil {
+
+		// Prefer live DisplayRotation from PipelineSideData (supports mid-stream
+		// rotation changes, e.g. smartphone orientation). Fall back to codec
+		// parameters DisplayMatrix for the initial value.
+		if dr, ok := globaltypes.PipelineSideDataLatest[*globaltypes.DisplayRotation](pipelineSideData); ok && dr.IsSet() {
+			rotation = dr.Load()
+			logger.Tracef(ctx, "using live DisplayRotation %v for stream %d", rotation, stream.Index())
+		} else if sd := stream.CodecParameters().SideData(); sd != nil {
 			logger.Tracef(ctx, "stream %d side data types: %v", stream.Index(), sd.Types())
 			if dm, ok := sd.DisplayMatrix().Get(); ok {
 				rotation = dm.Rotation()
 				logger.Tracef(ctx, "found rotation %v in codec parameters for stream %d", rotation, stream.Index())
 			}
 		}
+
+		rotation = normalizeRotation(rotation)
 	}
 
 	decoder = &StreamDecoder{
@@ -291,11 +301,15 @@ func (d *Decoder[DF]) SendInput(
 	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
-	pkt, _ := input.Unwrap()
-	if pkt == nil {
-		return fmt.Errorf("cannot send raw frames, one need to encode them into packets and send as packets")
+	pkt, frm := input.Unwrap()
+	if pkt != nil {
+		return d.sendPacket(ctx, *pkt, outputCh)
 	}
-	return d.sendPacket(ctx, *pkt, outputCh)
+	if frm != nil {
+		outputCh <- packetorframe.OutputUnion{Frame: (*frame.Output)(frm)}
+		return nil
+	}
+	return fmt.Errorf("input contains neither a packet nor a frame")
 }
 
 func (d *Decoder[DF]) sendPacket(
@@ -350,9 +364,15 @@ func (d *Decoder[DF]) sendPacket(
 		{
 			var ok bool
 			if streamInfo, ok = d.StreamInfo.Load(streamIndex); !ok {
+				outputCodecParams := d.getOutputCodecParameters(ctx, streamIndex, decoder)
+				if outputCodecParams.FrameRate().Num() == 0 {
+					if inputFrameRate := input.GetCodecParameters().FrameRate(); inputFrameRate.Num() != 0 {
+						outputCodecParams.SetFrameRate(inputFrameRate)
+					}
+				}
 				streamInfo = &frame.StreamInfo{
 					Source:           d.asSource(streamDecoder.Decoder),
-					CodecParameters:  d.getOutputCodecParameters(ctx, streamIndex, decoder),
+					CodecParameters:  outputCodecParams,
 					StreamIndex:      streamIndex,
 					StreamsCount:     sourceNbStreams(ctx, input.GetSource()),
 					TimeBase:         timeBase,
@@ -360,6 +380,24 @@ func (d *Decoder[DF]) sendPacket(
 					PipelineSideData: nil,
 				}
 				d.StreamInfo.Store(streamIndex, streamInfo)
+			}
+		}
+
+		// Check for mid-stream rotation change via PipelineSideData.
+		// This enables live rotation updates (e.g., smartphone orientation changes)
+		// without restarting the pipeline.
+		if streamDecoder.AutoRotate {
+			if dr, ok := globaltypes.PipelineSideDataLatest[*globaltypes.DisplayRotation](input.PipelineSideData); ok && dr.IsSet() {
+				newRotation := normalizeRotation(dr.Load())
+				if newRotation != streamDecoder.Rotation {
+					logger.Debugf(ctx, "mid-stream rotation change detected: %v° → %v°",
+						streamDecoder.Rotation, newRotation)
+					if streamDecoder.Rotator != nil {
+						streamDecoder.Rotator.Close()
+						streamDecoder.Rotator = nil
+					}
+					streamDecoder.Rotation = newRotation
+				}
 			}
 		}
 
@@ -400,6 +438,13 @@ func (d *Decoder[DF]) sendPacket(
 					}
 					streamDecoder.SentBlankKeyFrame = true
 				}
+				return nil
+			case errors.Is(err, astiav.ErrInvaliddata):
+				// Transient corrupt data (e.g. "No JPEG data found in image"
+				// or "bits N is invalid" from the MJPEG decoder after USB
+				// reconnect). Drop the packet instead of killing the pipeline.
+				logger.Warnf(ctx, "invalid data in packet (pts=%d, dts=%d): %v; dropping",
+					input.Packet.Pts(), input.Packet.Dts(), err)
 				return nil
 			default:
 				return fmt.Errorf("unable to decode the packet: %w", err)
@@ -508,6 +553,17 @@ func (d *Decoder[DF]) drain(
 			}
 			frame.Pool.Put(f)
 			f = rotated
+		}
+
+		// Ensure codec parameters match frame dimensions. This handles both
+		// initial rotation setup and mid-stream rotation changes (including
+		// change back to 0° where dimensions revert to the original).
+		cp := streamInfo.CodecParameters
+		if cp.Width() != f.Width() || cp.Height() != f.Height() {
+			logger.Debugf(ctx, "updating codec parameters dimensions: %dx%d → %dx%d",
+				cp.Width(), cp.Height(), f.Width(), f.Height())
+			cp.SetWidth(f.Width())
+			cp.SetHeight(f.Height())
 		}
 
 		err := d.send(ctx, outputCh, f, streamInfo)
@@ -776,4 +832,13 @@ func (d *Decoder[DF]) Flush(
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// normalizeRotation normalizes a rotation angle to the range [0, 360).
+func normalizeRotation(degrees float64) float64 {
+	degrees = math.Mod(degrees, 360)
+	if degrees < 0 {
+		degrees += 360
+	}
+	return degrees
 }

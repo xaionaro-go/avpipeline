@@ -169,10 +169,6 @@ func (r *Transcoder[DF, EF]) sendPacketNoLock(
 
 	resultCh := make(chan packetorframe.OutputUnion, 1)
 	var wg sync.WaitGroup
-	defer func() {
-		logger.Tracef(ctx, "waiting for the result channel to be closed")
-		wg.Wait()
-	}()
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
@@ -203,6 +199,11 @@ func (r *Transcoder[DF, EF]) sendPacketNoLock(
 	err := r.process(ctx, input, resultCh)
 	logger.Tracef(ctx, "closing the result channels")
 	close(resultCh)
+
+	// Wait for the goroutine to finish draining resultCh before
+	// reading r.activeStreamsCount and r.pendingPacketsAndFrames.
+	logger.Tracef(ctx, "waiting for the result channel to be drained")
+	wg.Wait()
 
 	inputStreamsCount := sourceNbStreams(ctx, input.GetSource())
 	logger.Tracef(ctx, "input streams count: %d (source: %s), active streams count: %d", inputStreamsCount, input.GetSource(), r.activeStreamsCount)

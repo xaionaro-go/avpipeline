@@ -147,11 +147,38 @@ type AutoBitRateVideoConfig struct {
 	MaxBitRate             Ubps
 	MinBitRate             Ubps
 	MinFPSFraction         float64
+	MinResolution          codectypes.Resolution
+	MaxResolution          codectypes.Resolution
 
 	BitRateIncreaseSlowdown                time.Duration
 	ResolutionUpgradeSlowdownMinDuration   time.Duration
 	ResolutionUpgradeSlowdownMovingAverage MovingAverage[uint64]
 	ResolutionDowngradeSlowdownDuration    time.Duration
+}
+
+// AllowedResolutionsAndBitRates returns the subset of ResolutionsAndBitRates
+// filtered by MinResolution and MaxResolution. Zero values mean no limit.
+// Falls back to the full unfiltered set if filtering would produce an empty result.
+func (cfg *AutoBitRateVideoConfig) AllowedResolutionsAndBitRates() AutoBitRateResolutionAndBitRateConfigs {
+	result := cfg.ResolutionsAndBitRates
+	if cfg.MinResolution.Height > 0 {
+		result = result.MinHeight(cfg.MinResolution.Height)
+	}
+	if cfg.MinResolution.Width > 0 {
+		result = result.MinWidth(cfg.MinResolution.Width)
+	}
+	if cfg.MaxResolution.Height > 0 {
+		result = result.MaxHeight(cfg.MaxResolution.Height)
+	}
+	if cfg.MaxResolution.Width > 0 {
+		result = result.MaxWidth(cfg.MaxResolution.Width)
+	}
+	if len(result) == 0 {
+		// Conflicting min/max constraints excluded all resolutions;
+		// fall back to the full set to avoid nil-pointer panics.
+		return cfg.ResolutionsAndBitRates
+	}
+	return result
 }
 
 type FPSReducerConfig []FPSReductionRange
