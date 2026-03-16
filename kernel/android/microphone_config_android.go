@@ -9,7 +9,7 @@ package android
 import (
 	"time"
 
-	aaudiocapi "github.com/xaionaro-go/ndk/capi/aaudio"
+	aaudiocapi "github.com/AndroidGoLab/ndk/capi/aaudio"
 )
 
 // InputPreset represents the AAudio input preset for microphone capture routing.

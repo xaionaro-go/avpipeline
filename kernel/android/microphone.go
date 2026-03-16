@@ -21,8 +21,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
-	"github.com/xaionaro-go/ndk/audio"
-	aaudiocapi "github.com/xaionaro-go/ndk/capi/aaudio"
+	"github.com/AndroidGoLab/ndk/audio"
+	aaudiocapi "github.com/AndroidGoLab/ndk/capi/aaudio"
 	"github.com/xaionaro-go/xsync"
 	"golang.org/x/sys/unix"
 )
