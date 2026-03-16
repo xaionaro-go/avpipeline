@@ -556,8 +556,10 @@ func TestLogLevelFromAstiav(t *testing.T) {
 		expected logger.Level
 	}{
 		{astiav.LogLevelQuiet, logger.LevelUndefined},
-		{astiav.LogLevelPanic, logger.LevelPanic},
-		{astiav.LogLevelFatal, logger.LevelFatal},
+		// FFmpeg's Panic/Fatal don't mean process-exit; they map to Error
+		// to avoid logrus calling os.Exit/panic on transient decode errors.
+		{astiav.LogLevelPanic, logger.LevelError},
+		{astiav.LogLevelFatal, logger.LevelError},
 		{astiav.LogLevelError, logger.LevelError},
 		{astiav.LogLevelWarning, logger.LevelWarning},
 		{astiav.LogLevelInfo, logger.LevelInfo},
@@ -576,19 +578,25 @@ func TestLogLevelFromAstiav_Default(t *testing.T) {
 }
 
 func TestLogLevel_RoundTrip(t *testing.T) {
-	levels := []logger.Level{
-		logger.LevelUndefined,
-		logger.LevelPanic,
-		logger.LevelFatal,
-		logger.LevelError,
-		logger.LevelWarning,
-		logger.LevelInfo,
-		logger.LevelDebug,
-		logger.LevelTrace,
+	// Panic and Fatal intentionally collapse to Error when converting
+	// from astiav (FFmpeg's levels don't mean process-exit), so the
+	// round-trip is lossy for those two levels.
+	tests := []struct {
+		input    logger.Level
+		expected logger.Level
+	}{
+		{logger.LevelUndefined, logger.LevelUndefined},
+		{logger.LevelPanic, logger.LevelError},
+		{logger.LevelFatal, logger.LevelError},
+		{logger.LevelError, logger.LevelError},
+		{logger.LevelWarning, logger.LevelWarning},
+		{logger.LevelInfo, logger.LevelInfo},
+		{logger.LevelDebug, logger.LevelDebug},
+		{logger.LevelTrace, logger.LevelTrace},
 	}
-	for _, level := range levels {
-		roundTripped := LogLevelFromAstiav(LogLevelToAstiav(level))
-		tassert.Equal(t, level, roundTripped, "round-trip failed for %v", level)
+	for _, tt := range tests {
+		roundTripped := LogLevelFromAstiav(LogLevelToAstiav(tt.input))
+		tassert.Equal(t, tt.expected, roundTripped, "round-trip failed for %v", tt.input)
 	}
 }
 
