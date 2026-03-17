@@ -296,7 +296,10 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	curMeasurements := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo)
 	actualOutputBitrate := types.Ubps(curMeasurements.OutputBitRate.Load())
-	totalQueueSizeDerivative := (float64(totalQueue) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
+	var totalQueueSizeDerivative float64
+	if tsDiff > 0 {
+		totalQueueSizeDerivative = (float64(totalQueue) - float64(h.lastTotalQueueSize)) / tsDiff.Seconds()
+	}
 	h.lastTotalQueueSize = totalQueue
 	bitRateRequest := h.Calculator.CalculateBitRate(
 		ctx,
@@ -819,7 +822,7 @@ func (h *AutoBitRateHandler[C]) checkSlowdown(
 	if isUpgrade && h.ResolutionUpgradeSlowdownMovingAverage != nil && h.ResolutionUpgradeSlowdownMovingAverage.Valid() {
 		targetPixels := uint64(videoOutputKey.VideoResolution.Width) * uint64(videoOutputKey.VideoResolution.Height)
 		avgPixels := h.currentDesiredResolutionAvg.Load()
-		if targetPixels > avgPixels {
+		if avgPixels > 0 && targetPixels > avgPixels {
 			// if target resolution is higher than the moving average, we increase the slowdown duration.
 			// the factor is targetPixels / avgPixels.
 			upgradeSlowdown = time.Duration(float64(upgradeSlowdown) * float64(targetPixels) / float64(avgPixels))
@@ -1067,6 +1070,10 @@ func (h *AutoBitRateHandler[C]) temporaryReduceFPS(
 	}
 
 	curBitRate := h.StreamMux.getTrackMeasurements(astiav.MediaTypeVideo).EncodedBitRate.Load()
+	if curBitRate == 0 {
+		logger.Warnf(ctx, "encoded bitrate is 0; skipping FPS reduction")
+		return nil
+	}
 	fpsReductionMultiplier0 := temporaryFPSReductionMultiplier.Float64() * float64(bitrate) / float64(curBitRate)
 	fpsReductionMultiplier1 := float64(bitrate) / float64(bitrate-bitrateBeyondThreshold)
 	fpsReductionMultiplierAvg := (fpsReductionMultiplier0 + fpsReductionMultiplier1) / 2

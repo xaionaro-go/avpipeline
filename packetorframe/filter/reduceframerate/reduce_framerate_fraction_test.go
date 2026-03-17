@@ -217,6 +217,40 @@ func TestReduceFramerate_Video_LargeDurationGap(t *testing.T) {
 	testifyassert.Equal(t, int64(2000), i2.Frame.Frame.Duration())
 }
 
+func TestReduceFramerate_ExactFractionCount(t *testing.T) {
+	ctx := context.Background()
+
+	// Verify that exactly num out of every den frames pass, for various fractions.
+	// The previous floating-point math.Remainder approach failed this for fractions
+	// like 3/4 (accepted only 2 instead of 3) due to IEEE round-to-nearest-even.
+	for den := 1; den <= 20; den++ {
+		for num := 1; num <= den; num++ {
+			f := New(mathcondition.GetterStatic[globaltypes.Rational]{
+				StaticValue: globaltypes.Rational{Num: num, Den: den},
+			})
+
+			cp := astiav.AllocCodecParameters()
+			cp.SetMediaType(astiav.MediaTypeAudio)
+
+			passed := 0
+			for fid := 0; fid < den; fid++ {
+				fr := frame.Input{
+					Frame: astiav.AllocFrame(),
+					StreamInfo: &frame.StreamInfo{
+						CodecParameters: cp,
+					},
+				}
+				in := packetorframe.InputUnion{Frame: &fr}
+				if f.Match(ctx, in) {
+					passed++
+				}
+			}
+			require.Equalf(t, num, passed,
+				"fraction %d/%d: expected %d frames to pass but got %d", num, den, num, passed)
+		}
+	}
+}
+
 func TestReduceFramerate(t *testing.T) {
 	loggerLevel := logger.LevelTrace
 

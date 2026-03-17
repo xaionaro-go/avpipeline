@@ -1,0 +1,20 @@
+name = "proofs"
+version = "0.1.0"
+defaultTargets = ["proofs"]
+
+[[lean_lib]]
+name = "Spec"
+
+[[lean_lib]]
+name = "Proofs"
+
+[[lean_lib]]
+name = "DiffTest"
+
+[[lean_exe]]
+name = "proofs"
+root = "Main"
+
+[[lean_exe]]
+name = "difftest"
+root = "DiffTestMain"

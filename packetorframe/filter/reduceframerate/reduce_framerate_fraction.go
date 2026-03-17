@@ -6,7 +6,6 @@ package reduceframerate
 import (
 	"context"
 	"fmt"
-	"math"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -74,11 +73,14 @@ func (f *Filter) match(
 	}
 	frameID, _ := f.FrameCount.Load(streamIdx)
 	f.FrameCount.Store(streamIdx, frameID+1)
-	eachN := float64(den) / float64(num)
-	nDeviation := math.Remainder(float64(frameID%den), eachN)
-	shouldPass := nDeviation >= 0 && nDeviation < 1.0
+	// Bresenham-style integer acceptance criterion: accept exactly num out of every
+	// den frames. The previous floating-point math.Remainder approach suffered from
+	// IEEE round-to-nearest-even at boundary values, systematically dropping frames
+	// (e.g., 3/4 accepted only 2 frames instead of 3).
+	r := frameID % den
+	shouldPass := (r*num)%den < num
 	if reduceFramerateDebug {
-		logger.Tracef(ctx, "shouldPass: %t: frameID=%d, num=%d, den=%d, eachN=%f, nDeviation=%f", shouldPass, frameID, num, den, eachN, nDeviation)
+		logger.Tracef(ctx, "shouldPass: %t: frameID=%d, num=%d, den=%d, r=%d, scaled=%d", shouldPass, frameID, num, den, r, (r*num)%den)
 	}
 	if !shouldPass {
 		return false
@@ -99,9 +101,9 @@ func (f *Filter) match(
 	}
 	duration := in.GetPTS() - lastSentPTS
 	dur := in.GetDuration()
-	expectedDuration := float64(dur) * float64(den) / float64(num)
-	if duration > int64(expectedDuration)*2 {
-		duration = int64(expectedDuration)
+	expectedDuration := dur * int64(den) / int64(num)
+	if duration > expectedDuration*2 {
+		duration = expectedDuration
 	}
 	in.SetDuration(duration)
 	if reduceFramerateDebug {

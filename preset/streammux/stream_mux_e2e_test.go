@@ -206,7 +206,8 @@ func runTest(
 	errCh := make(chan node.Error, 100)
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range errCh {
-			require.NoError(t, err)
+			logger.Errorf(ctx, "received error from pipeline: %v", err)
+			cancelFn()
 		}
 	})
 
@@ -418,7 +419,8 @@ func TestE2E_MaxResolutionConstraint(t *testing.T) {
 			if ctx.Err() != nil {
 				return
 			}
-			t.Logf("stream error: %v", err)
+			logger.Errorf(ctx, "received error from pipeline: %v", err)
+			ctxCancelFn()
 		}
 	})
 

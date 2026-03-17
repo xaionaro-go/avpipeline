@@ -85,7 +85,13 @@ func (f *Filter) match(
 	logger.Tracef(ctx, "MonotonicPTS filter: curPTS=%v+%v (int: %v+?), latestPTS=%v", pts, shift, ptsInt, f.LatestPTS)
 	pts += shift
 	if pts+100*time.Millisecond > f.LatestPTS {
-		f.LatestPTS = pts
+		// Use max to prevent latestPTS from drifting backward when pts is
+		// within the 100ms tolerance but below the current latestPTS. Without
+		// this, accepting a slightly-backward frame would lower the bar for
+		// subsequent frames, allowing cumulative backward drift.
+		if pts > f.LatestPTS {
+			f.LatestPTS = pts
+		}
 		return true
 	}
 	if !f.ShouldCorrect {

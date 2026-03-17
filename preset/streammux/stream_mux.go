@@ -358,7 +358,11 @@ func (s *StreamMux[C]) removeOutputByIDLocked(
 ) (_err error) {
 	logger.Tracef(ctx, "removeOutputByIDLocked(%v)", outputID)
 	defer func() { logger.Tracef(ctx, "/removeOutputByIDLocked(%v): %v", outputID, _err) }()
-	output, _ := s.Outputs.Load(OutputID(outputID))
+	output, ok := s.Outputs.Load(OutputID(outputID))
+	if !ok || output == nil {
+		logger.Errorf(ctx, "removeOutputByIDLocked: output %v not found in Outputs map", outputID)
+		return fmt.Errorf("output %v not found", outputID)
+	}
 	return s.removeOutputLocked(ctx, output.GetKey())
 }
 
@@ -874,7 +878,12 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 	logger.Tracef(ctx, "createAndConfigureOutput(ctx, %s)", senderKey)
 	defer func() { logger.Tracef(ctx, "/createAndConfigureOutput(ctx, %s): %v", senderKey, _err) }()
 
-	output, isNew, err := s.getOrCreateOutputLocked(ctx, senderKey, nil)
+	var output *Output[C]
+	var isNew bool
+	var err error
+	s.OutputsLocker.Do(ctx, func() {
+		output, isNew, err = s.getOrCreateOutputLocked(ctx, senderKey, nil)
+	})
 	if err != nil {
 		return fmt.Errorf("unable to get-or-create the output %s: %w", senderKey, err)
 	}
@@ -1232,6 +1241,10 @@ func (s *StreamMux[C]) inputBitRateMeasurerLoop(
 			return ctx.Err()
 		case tsNext = <-t.C:
 			duration := tsNext.Sub(tsPrev)
+			if duration <= 0 {
+				tsPrev = tsNext
+				continue
+			}
 
 			inputCounters := s.InputAll.Node.GetCountersPtr()
 			bytesInputReadNext := map[astiav.MediaType]uint64{
@@ -1539,7 +1552,7 @@ func (s *StreamMux[C]) updateSendingLatencyValues(
 		return fmt.Errorf("unable to get the queuer from the output sending node processor %T", outputAudio.SendingNode.GetProcessor())
 	}
 	audioSendingOldestDTS, err := audioQueuer.GetOldestDTSInTheQueue(ctx)
-	audioSendingEarliestDTS := time.Nanosecond * time.Duration(outputVideo.Measurements.LastSendingAudioDTS.Load())
+	audioSendingEarliestDTS := time.Nanosecond * time.Duration(outputAudio.Measurements.LastSendingAudioDTS.Load())
 	switch {
 	case err == nil:
 	case errors.As(err, &kernel.ErrApproximateValue{}):
