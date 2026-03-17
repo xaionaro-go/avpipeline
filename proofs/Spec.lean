@@ -21,3 +21,9 @@ import Spec.StreamMux.BitrateControl
 import Spec.StreamMux.MuxMode
 import Spec.StreamMux.Validation
 import Spec.StreamMux.System
+import Spec.Pipeline.Types
+import Spec.Pipeline.FilterCondition
+import Spec.Pipeline.Barrier
+import Spec.Pipeline.OutputChain
+import Spec.Pipeline.Wiring
+import Spec.Pipeline.Routing

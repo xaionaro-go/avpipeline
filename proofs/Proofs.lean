@@ -20,3 +20,6 @@ import Proofs.StreamMux.BitrateControl
 import Proofs.StreamMux.MuxMode
 import Proofs.StreamMux.Validation
 import Proofs.StreamMux.System
+import Proofs.Pipeline.FilterCondition
+import Proofs.Pipeline.Barrier
+import Proofs.Pipeline.Routing
