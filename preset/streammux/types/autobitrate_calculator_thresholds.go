@@ -62,6 +62,11 @@ func (d *AutoBitrateCalculatorThresholds) CalculateBitRate(
 	ctx context.Context,
 	req CalculateBitRateRequest,
 ) (_ret BitRateChangeRequest) {
+	// Guard against division by zero: when ActualOutputBitrate is zero, we cannot
+	// compute queueDuration and would produce +Inf, cascading into invalid decisions.
+	if req.ActualOutputBitrate <= 0 {
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: true}
+	}
 	queueDuration := time.Duration(float64(req.QueueSize) * 8 / float64(req.ActualOutputBitrate) * float64(time.Second))
 	logger.Tracef(ctx, "CalculateBitRate: %#+v", req)
 	defer func() {

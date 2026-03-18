@@ -5,6 +5,7 @@ package types
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -50,6 +51,12 @@ func (k SenderKey) Compare(b SenderKey) int {
 		if b.VideoCodec == codectypes.NameCopy {
 			return -1
 		}
+		// Neither is Copy: use lexicographic order to ensure total ordering.
+		// Without this, two different non-Copy codecs with identical resolutions
+		// would compare as equal, violating the total ordering contract.
+		if cmp := strings.Compare(string(k.VideoCodec), string(b.VideoCodec)); cmp != 0 {
+			return cmp
+		}
 	}
 	resK := k.VideoResolution.Width * k.VideoResolution.Height
 	resB := b.VideoResolution.Width * b.VideoResolution.Height
@@ -65,6 +72,10 @@ func (k SenderKey) Compare(b SenderKey) int {
 		}
 		if b.AudioCodec == codectypes.NameCopy {
 			return -1
+		}
+		// Neither is Copy: use lexicographic order to ensure total ordering.
+		if cmp := strings.Compare(string(k.AudioCodec), string(b.AudioCodec)); cmp != 0 {
+			return cmp
 		}
 	}
 	if k.AudioSampleRate != b.AudioSampleRate {

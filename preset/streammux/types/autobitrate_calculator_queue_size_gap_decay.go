@@ -77,20 +77,23 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 		return BitRateChangeRequest{BitRate: Ubps(newBitRate), IsCritical: false}
 	}
 
-	// slowdown the increase of bitrate to avoid oscillations
-	if bitRateDiff > 0 {
-		ratio := float64(newBitRate) / float64(max(req.CurrentBitrateSetting, 1))
-		fraction := req.Config.CheckInterval.Seconds() / d.InertiaIncrease.Seconds()
-		if ratio > 1+fraction {
-			logger.Tracef(ctx, "CalculateBitRate: increasing bitrate too fast: ratio=%s, fraction=%s", ratio, fraction)
-			newBitRate = Ubps(float64(req.CurrentBitrateSetting) * (1 + fraction))
-		}
-	} else {
-		ratio := float64(max(req.CurrentBitrateSetting, 1)) / float64(newBitRate)
-		fraction := req.Config.CheckInterval.Seconds() / d.InertiaDecrease.Seconds()
-		if ratio > 1+fraction {
-			logger.Tracef(ctx, "CalculateBitRate: decreasing bitrate too fast: ratio=%s, fraction=%s", ratio, fraction)
-			newBitRate = Ubps(1 + float64(req.CurrentBitrateSetting)/(1+fraction))
+	// Slowdown the increase/decrease of bitrate to avoid oscillations.
+	// Requires Config to compute inertia fractions; skip inertia when Config is nil.
+	if req.Config != nil {
+		if bitRateDiff > 0 {
+			ratio := float64(newBitRate) / float64(max(req.CurrentBitrateSetting, 1))
+			fraction := req.Config.CheckInterval.Seconds() / d.InertiaIncrease.Seconds()
+			if ratio > 1+fraction {
+				logger.Tracef(ctx, "CalculateBitRate: increasing bitrate too fast: ratio=%v, fraction=%v", ratio, fraction)
+				newBitRate = Ubps(float64(req.CurrentBitrateSetting) * (1 + fraction))
+			}
+		} else {
+			ratio := float64(max(req.CurrentBitrateSetting, 1)) / float64(newBitRate)
+			fraction := req.Config.CheckInterval.Seconds() / d.InertiaDecrease.Seconds()
+			if ratio > 1+fraction {
+				logger.Tracef(ctx, "CalculateBitRate: decreasing bitrate too fast: ratio=%v, fraction=%v", ratio, fraction)
+				newBitRate = Ubps(1 + float64(req.CurrentBitrateSetting)/(1+fraction))
+			}
 		}
 	}
 
