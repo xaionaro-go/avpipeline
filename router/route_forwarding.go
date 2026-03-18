@@ -158,8 +158,8 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 				if err := fwd.stop(ctx); err != nil {
 					logger.Errorf(ctx, "unable to stop: %v", err)
 				}
-				if fwd.start(ctx); err != nil {
-					logger.Error(ctx, "unable to start: %v", err)
+				if err := fwd.start(ctx); err != nil {
+					logger.Errorf(ctx, "unable to start: %v", err)
 				}
 				return
 			}

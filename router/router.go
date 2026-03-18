@@ -77,7 +77,7 @@ func (r *Router[T]) init(
 					logger.Errorf(ctx, "got an error on node %p: %v", err.Node, err.Err)
 					continue
 				}
-				belt.WithField(ctx, "route_path", route.Path)
+				ctx = belt.WithField(ctx, "route_path", route.Path)
 				if errors.Is(err.Err, context.Canceled) {
 					logger.Debugf(ctx, "Cancelled: %v", err)
 					continue
@@ -222,7 +222,7 @@ func (r *Router[T]) getRouteLocked(
 
 	switch mode {
 	case GetRouteModeFailIfNotFound:
-		return nil, fmt.Errorf("route '%s' found", path)
+		return nil, fmt.Errorf("route '%s' not found", path)
 	case GetRouteModeWaitUntilCreated:
 		var route *Route[T]
 		var err error
@@ -246,11 +246,11 @@ func (r *Router[T]) getRouteLocked(
 			r.Locker.UDo(ctx, func() {
 				_, err = route.WaitForPublisher(ctx)
 			})
-			if err != nil {
-				return nil, fmt.Errorf("unable to wait for a publisher: %w", err)
-			}
 			if errors.Is(err, io.ErrClosedPipe) {
 				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("unable to wait for a publisher: %w", err)
 			}
 			break
 		}
