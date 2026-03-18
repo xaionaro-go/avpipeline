@@ -398,7 +398,7 @@ func (s *AudioSync) applySyncResult(state *AudioSyncStreamState, shift float64, 
 }
 
 func (s *AudioSync) extractBytes(f *astiav.Frame) ([]byte, error) {
-	return f.Data().Bytes(1)
+	return f.Data().Bytes(0)
 }
 
 func (s *AudioSync) String() string {

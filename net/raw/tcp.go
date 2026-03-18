@@ -64,7 +64,7 @@ func GetTCPSockOption(
 	opt tcpopt.Option,
 ) (_ret tcpopt.Option, _err error) {
 	logger.Tracef(ctx, "GetTCPSockOption: %T:%#+v", opt, opt)
-	defer func() { logger.Tracef(ctx, "/GetTCPSockOption: %v", _ret, _err) }()
+	defer func() { logger.Tracef(ctx, "/GetTCPSockOption: %v, err: %v", _ret, _err) }()
 
 	level, name := opt.Level(), opt.Name()
 

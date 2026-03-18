@@ -56,5 +56,5 @@ func (b Raw) Parse() Parsed {
 type Unknown []byte
 
 func (b Unknown) String() string {
-	return fmt.Sprintf("<unknown_type, raw:%X>", len(b))
+	return fmt.Sprintf("<unknown_type, raw:%X>", []byte(b))
 }
