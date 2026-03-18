@@ -759,7 +759,7 @@ func (s *StreamMux[C]) switchToOutputByProps(
 ) (_err error) {
 	logger.Tracef(ctx, "switchToOutputByProps: %#+v, %v", props, persistent)
 	defer func() {
-		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v, %v: %v", props, persistent, _err)
+		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v: %v", props, persistent, _err)
 	}()
 	senderKey := PartialSenderKeyFromTranscoderConfig(ctx, &props.TranscoderConfig)
 

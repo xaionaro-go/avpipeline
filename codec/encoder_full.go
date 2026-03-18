@@ -162,10 +162,7 @@ func (e *EncoderFull) Drain(
 }
 
 func (e *EncoderFull) IsDirty() bool {
-	ctx := context.TODO()
-	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &e.locker, func() bool {
-		return e.isDirty
-	})
+	return e.isDirty
 }
 
 func (e *EncoderFull) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) (_err error) {

@@ -52,11 +52,7 @@ func (k SenderKey) Compare(b SenderKey) int {
 			return -1
 		}
 		// Neither is Copy: use lexicographic order to ensure total ordering.
-		// Without this, two different non-Copy codecs with identical resolutions
-		// would compare as equal, violating the total ordering contract.
-		if cmp := strings.Compare(string(k.VideoCodec), string(b.VideoCodec)); cmp != 0 {
-			return cmp
-		}
+		return strings.Compare(string(k.VideoCodec), string(b.VideoCodec))
 	}
 	resK := k.VideoResolution.Width * k.VideoResolution.Height
 	resB := b.VideoResolution.Width * b.VideoResolution.Height
@@ -74,9 +70,7 @@ func (k SenderKey) Compare(b SenderKey) int {
 			return -1
 		}
 		// Neither is Copy: use lexicographic order to ensure total ordering.
-		if cmp := strings.Compare(string(k.AudioCodec), string(b.AudioCodec)); cmp != 0 {
-			return cmp
-		}
+		return strings.Compare(string(k.AudioCodec), string(b.AudioCodec))
 	}
 	if k.AudioSampleRate != b.AudioSampleRate {
 		if k.AudioSampleRate > b.AudioSampleRate {
