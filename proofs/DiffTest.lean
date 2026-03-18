@@ -15,3 +15,4 @@ import DiffTest.Statistics
 import DiffTest.Pipeline.FilterCondition
 import DiffTest.Pipeline.Barrier
 import DiffTest.StreamMux.QueueSizeGapDecay
+import DiffTest.StreamMux.Smoothing

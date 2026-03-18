@@ -25,7 +25,8 @@ def main (args : List String) : IO Unit := do
   | ["pipeline-filter"] => DiffTest.Pipeline.FilterCondition.main
   | ["pipeline-barrier"] => DiffTest.Pipeline.Barrier.main
   | ["streammux-gapdecay"] => DiffTest.StreamMux.QueueSizeGapDecay.run
+  | ["streammux-smoothing"] => DiffTest.StreamMux.Smoothing.run
   | _ =>
     IO.eprintln "Usage: difftest <component>"
-    IO.eprintln "Components: condition, drain, graph, quality, reorderdts, monotonic, framerate, bitrate, reduceframerate, router, resampler, rational, units, statistics, pipeline-filter, pipeline-barrier, streammux-gapdecay"
+    IO.eprintln "Components: condition, drain, graph, quality, reorderdts, monotonic, framerate, bitrate, reduceframerate, router, resampler, rational, units, statistics, pipeline-filter, pipeline-barrier, streammux-gapdecay, streammux-smoothing"
     IO.Process.exit 1
