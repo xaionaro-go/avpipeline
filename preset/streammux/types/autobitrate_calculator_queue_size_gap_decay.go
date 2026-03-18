@@ -50,6 +50,15 @@ func (d *AutoBitrateCalculatorQueueSizeGapDecay) CalculateBitRate(
 		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
 	}
 
+	if req.ActualOutputBitrate <= 0 {
+		logger.Debugf(ctx, "CalculateBitRate: actual output bitrate is %v; returning current bitrate", req.ActualOutputBitrate)
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
+	}
+	if d.GapDecay <= 0 {
+		logger.Debugf(ctx, "CalculateBitRate: gap decay is %v; returning current bitrate", d.GapDecay)
+		return BitRateChangeRequest{BitRate: req.CurrentBitrateSetting, IsCritical: false}
+	}
+
 	queueDuration := US(req.QueueDuration) // s
 
 	queueDurationOptimal := max(

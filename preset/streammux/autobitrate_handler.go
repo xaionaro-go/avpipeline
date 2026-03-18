@@ -177,7 +177,17 @@ func (s *StreamMux[C]) removeAutoBitRateHandler(
 ) (_err error) {
 	logger.Debugf(ctx, "removeAutoBitRateHandler()")
 	defer func() { logger.Debugf(ctx, "/removeAutoBitRateHandler(): %v", _err) }()
-	return nil
+
+	h := s.GetAutoBitRateHandler()
+	if h == nil {
+		return nil
+	}
+
+	if !s.swapAutoBitRateHandler(nil, h) {
+		return fmt.Errorf("unable to clear auto bitrate handler, concurrent modification detected")
+	}
+
+	return h.Close(ctx)
 }
 
 type resolutionChangeRequest struct {
@@ -622,7 +632,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 		}
 	case errors.As(err, &errNotThisTime):
 		if errNotThisTime.BitrateBeyondThreshold < 0 {
-			if err := h.temporaryReduceFPS(ctx, req.BitRate, errNotThisTime.BitrateBeyondThreshold); err != nil {
+			if err := h.temporaryReduceFPS(ctx, clampedVideoBitRate, errNotThisTime.BitrateBeyondThreshold); err != nil {
 				logger.Errorf(ctx, "unable to temporary reduce FPS before resolution change: %v", err)
 			}
 		} else {

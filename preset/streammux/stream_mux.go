@@ -165,6 +165,7 @@ func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
 		if err != nil {
 			return fmt.Errorf("unable to stop auto bitrate handler: %w", err)
 		}
+		return nil
 	}
 
 	logger.Debugf(ctx, "enabling automatic bitrate control")
@@ -655,7 +656,7 @@ func (s *StreamMux[C]) enableVideoTranscodingBypassLocked(
 	ctx context.Context,
 ) (_err error) {
 	logger.Tracef(ctx, "enableVideoTranscodingBypassLocked")
-	defer func() { logger.Tracef(ctx, "/enableVideoTranscodingBypassLocked: %v: %v", _err) }()
+	defer func() { logger.Tracef(ctx, "/enableVideoTranscodingBypassLocked: %v", _err) }()
 
 	if !s.IsAllowedDifferentOutputs() {
 		return fmt.Errorf("video transcoding bypass is only allowed in mux modes with different outputs, but current mux mode is %s", s.MuxMode)
@@ -753,7 +754,7 @@ func (s *StreamMux[C]) switchToOutputByProps(
 	props types.SenderProps,
 	persistent bool,
 ) (_err error) {
-	logger.Tracef(ctx, "switchToOutputByProps: %#+v, %v, %v", props, persistent)
+	logger.Tracef(ctx, "switchToOutputByProps: %#+v, %v", props, persistent)
 	defer func() {
 		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v, %v: %v", props, persistent, _err)
 	}()
@@ -1149,7 +1150,7 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 ) (_err error) {
 	cfg := s.getCurrentOutputPropsLocked(ctx)
 	if len(cfg.Output.AudioTrackConfigs) != 1 {
-		return fmt.Errorf("currently we support only exactly one output video track config (have %d)", len(cfg.Output.AudioTrackConfigs))
+		return fmt.Errorf("currently we support only exactly one output audio track config (have %d)", len(cfg.Output.AudioTrackConfigs))
 	}
 	audioCfg := cfg.Output.AudioTrackConfigs[0]
 
@@ -1600,9 +1601,11 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 					return
 				}
 				tsDiff := newTS.Sub(prevTS)
-				audio := s.getTrackMeasurements(astiav.MediaTypeAudio)
-				newValue := audio.SendingLatency.Swap(audio.SendingLatency.Load() + uint64(tsDiff.Nanoseconds()))
-				logger.Debugf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(newValue), tsDiff, tsDiff+nanosecondsToDuration(newValue))
+				video := s.getTrackMeasurements(astiav.MediaTypeVideo)
+				oldValue := video.SendingLatency.Load()
+				computedNew := oldValue + uint64(tsDiff.Nanoseconds())
+				video.SendingLatency.Store(computedNew)
+				logger.Debugf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(oldValue), tsDiff, nanosecondsToDuration(computedNew))
 			}()
 			prevTS = newTS
 		}
