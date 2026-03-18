@@ -94,7 +94,8 @@ type Output[C any] struct {
 	SendingNodeProps      types.SenderNodeProps
 	FPSFractionGetter     FPSFractionGetter
 	InitOnce              sync.Once
-	IsClosedValue         bool
+	IsClosedValue         atomic.Bool
+	CancelFn              context.CancelFunc
 	ParentResourceManager ResourceManager
 
 	Measurements OutputMeasurements
@@ -256,6 +257,7 @@ func newOutput[C any](
 		)),
 		SendingNode:           senderNode,
 		FPSFractionGetter:     fpsFractionGetter,
+		CancelFn:              cancelFn,
 		ParentResourceManager: resourceManager,
 	}
 	customData := OutputCustomData[C]{Output: o}
@@ -491,7 +493,7 @@ func (o *Output[C]) CloseNoDrain(ctx context.Context) (_err error) {
 func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 	logger.Tracef(ctx, "Output.close(%v)", shouldDrain)
 	defer func() { logger.Tracef(ctx, "/Output.close(%v): %v", shouldDrain, _err) }()
-	o.IsClosedValue = true
+	o.IsClosedValue.Store(true)
 
 	var errs []error
 
@@ -521,6 +523,9 @@ func (o *Output[C]) close(ctx context.Context, shouldDrain bool) (_err error) {
 	}
 	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close output node for output %d: %w", o.ID, err))
+	}
+	if o.CancelFn != nil {
+		o.CancelFn()
 	}
 	return errors.Join(errs...)
 }
@@ -608,7 +613,7 @@ func (o *Output[C]) Deinit(
 	}
 
 	if err := o.SendingNode.GetProcessor().Close(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to deinit transcoder node for output %d: %w", o.ID, err))
+		errs = append(errs, fmt.Errorf("unable to deinit sending node for output %d: %w", o.ID, err))
 	}
 
 	return errors.Join(errs...)
@@ -652,6 +657,9 @@ func (o *Output[C]) reconfigureTranscoder(
 	isCopyEncoder, err := o.reconfigureEncoder(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to reconfigure the encoder: %w", err)
+	}
+	if len(cfg.Output.VideoTrackConfigs) == 0 {
+		return fmt.Errorf("no video track configs")
 	}
 	if cfg.Output.VideoTrackConfigs[0].CodecName == codectypes.Name(codec.NameCopy) && !isCopyEncoder {
 		logger.Errorf(ctx, "the encoder is not a copy encoder despite it should be")
@@ -868,8 +876,10 @@ func (o *Output[C]) reconfigureEncoder(
 				encoderFactory.VideoResolution = &videoCfg.Resolution
 			}
 			fps := globaltypes.RationalFromApproxFloat64(videoCfg.AverageFrameRate)
-			encoderFactory.VideoAverageFrameRate = astiav.NewRational(fps.Num, fps.Den)
-			encoderFactory.VideoAverageFrameRate.SetDen(1000)
+			// Rescale to millisecond-precision denominator to avoid rounding artifacts
+			// (e.g. 30/1 becomes 30000/1000).
+			newNum := fps.Num * 1000 / fps.Den
+			encoderFactory.VideoAverageFrameRate = astiav.NewRational(newNum, 1000)
 			encoderFactory.AudioSampleRate = audioCfg.SampleRate
 			return nil
 		}
@@ -988,7 +998,7 @@ func (o *Output[C]) NodesAfterFilter() []node.Abstract {
 }
 
 func (o *Output[C]) IsClosed() bool {
-	return o.IsClosedValue
+	return o.IsClosedValue.Load()
 }
 
 func (o *Output[C]) SetForceNextFrameKey(

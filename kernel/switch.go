@@ -279,7 +279,7 @@ func (sw *Switch[T]) doVerifySwitchOutput(
 		if _ret {
 			return true, fmt.Errorf("got an error from the next kernel: %w", err)
 		}
-		logger.Errorf(ctx, "got an error from the next kernel: %w", err)
+		logger.Errorf(ctx, "got an error from the next kernel: %v", err)
 		return false, nil
 	}
 

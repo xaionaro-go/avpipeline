@@ -351,11 +351,13 @@ func (n *NodeWithCustomData[C, T]) SetPushTos(
 			}
 		}
 
+		// Save old push-tos before overwriting so we can detect removals.
+		oldPushTos := n.PushTos
 		n.PushTos = s
 		close(*xatomic.SwapPointer(&n.ChangeChanPushTo, ptr(make(chan struct{}))))
 
 		if n.Config.CacheHandler != nil {
-			for _, pushTo := range n.PushTos {
+			for _, pushTo := range oldPushTos {
 				if !s.Contains(pushTo) {
 					n.Config.CacheHandler.OnRemovePushTo(ctx, pushTo)
 				}

@@ -941,7 +941,7 @@ func (s *StreamMux[C]) Start(
 	serveCfg node.ServeConfig,
 ) (_err error) {
 	logger.Debugf(ctx, "Start(ctx)")
-	defer logger.Debugf(ctx, "/Start(ctx): %v", _err)
+	defer func() { logger.Debugf(ctx, "/Start(ctx): %v", _err) }()
 
 	ctx, cancelFn := context.WithCancel(ctx)
 
@@ -956,15 +956,16 @@ func (s *StreamMux[C]) Start(
 		defer logger.Debugf(ctx, "Serve: finished the error listening loop")
 		for {
 			select {
-			case err := <-ctx.Done():
-				logger.Debugf(ctx, "stopping listening for errors: %v", err)
+			case <-ctx.Done():
+				logger.Debugf(ctx, "stopping listening for errors: %v", ctx.Err())
 				return
 			case err, ok := <-errCh:
 				if !ok {
 					logger.Debugf(ctx, "the error channel is closed")
 					return
 				}
-				cancelFn()
+				// Classify the error before cancelling: recoverable errors
+				// should not tear down the pipeline.
 				if errors.As(err.Err, &node.ErrAlreadyStarted{}) {
 					logger.Errorf(ctx, "%#+v", err)
 					continue
@@ -977,6 +978,7 @@ func (s *StreamMux[C]) Start(
 					logger.Debugf(ctx, "EOF: %#+v", err)
 					continue
 				}
+				cancelFn()
 				logger.Errorf(ctx, "stopping because received error: %v", err)
 				return
 			}
@@ -1032,6 +1034,7 @@ func (s *StreamMux[C]) WaitForActiveVideoOutput(
 	ctx context.Context,
 ) *Output[C] {
 	t := time.NewTicker(100 * time.Millisecond)
+	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1050,10 +1053,11 @@ func (s *StreamMux[C]) withActiveVideoOutput(
 	callback func(output *Output[C]) error,
 ) error {
 	t := time.NewTicker(100 * time.Millisecond)
+	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-t.C:
 			var err error
 			var done bool
@@ -1170,8 +1174,17 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoderV) {
 			logger.Errorf(ctx, "the video codec is set to '%s', but the encoder is %s", videoCodec, encoderV)
 		} else {
+			// Apply the bitrate update via switchToOutputByProps so the change
+			// propagates to the running encoder (previously the updated local copy
+			// was discarded, making this a dead store).
 			videoCfg.AverageBitRate = uint64(bitRate)
 			cfg.Output.VideoTrackConfigs[0] = videoCfg
+			err := s.switchToOutputByProps(ctx, types.SenderProps{
+				TranscoderConfig: cfg.TranscoderConfig,
+			}, true)
+			if err != nil {
+				return fmt.Errorf("unable to apply bitrate update: %w", err)
+			}
 			return ErrAlreadySet{}
 		}
 	}
@@ -1373,7 +1386,16 @@ func (s *StreamMux[C]) getVideoEncoderLocked(
 		vEnc = vEncoders[0]
 	}
 
-	aEncoders := o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioEncoders
+	// In SplitAV mode the audio encoder lives on the audio output, not the
+	// video output. Fetch it from there to avoid returning nil.
+	audioSource := o
+	if s.MuxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
+		if ao := s.getActiveAudioOutputLocked(ctx); ao != nil {
+			audioSource = ao
+		}
+	}
+
+	aEncoders := audioSource.TranscoderNode.Processor.Kernel.EncoderFactory.AudioEncoders
 	if len(aEncoders) == 1 {
 		aEnc = aEncoders[0]
 	}

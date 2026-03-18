@@ -22,7 +22,7 @@ func tryNewBSFForInBandHeaders(
 
 	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, bitstreamfilter.ParamsGetterToInBandHeaders{})
 	if err != nil {
-		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %w", err)
+		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %v", err)
 		return nil
 	}
 
@@ -39,7 +39,7 @@ func tryNewBSFForOOBHeaders(
 
 	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, bitstreamfilter.ParamsGetterToOOBHeaders{})
 	if err != nil {
-		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %w", err)
+		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %v", err)
 		return nil
 	}
 
@@ -56,7 +56,7 @@ func tryNewBSFForCorrectedOOBHeaders(
 
 	bitstreamFilter, err := kernel.NewBitstreamFilter(ctx, bitstreamfilter.ParamsGetterToCorrectedOOBHeaders{})
 	if err != nil {
-		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %w", err)
+		logger.Errorf(ctx, "unable to initialize the bitstream filter kernel: %v", err)
 		return nil
 	}
 

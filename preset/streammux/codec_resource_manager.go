@@ -171,7 +171,7 @@ func (s *StreamMux[C]) closeUnusedOutputsLocked(
 		if key == outIDOpt.OutputID {
 			return true
 		}
-		if key == activeVideoOutput.ID || key == activeAudioOutput.ID {
+		if (activeVideoOutput != nil && key == activeVideoOutput.ID) || (activeAudioOutput != nil && key == activeAudioOutput.ID) {
 			return true
 		}
 		err := output.ResetTranscoder(ctx)

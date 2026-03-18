@@ -467,7 +467,7 @@ func (r *Transcoder[DF, EF]) ResetSoft(
 		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
 	}
 	if err := r.Decoder.ResetSoft(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+		errs = append(errs, fmt.Errorf("unable to reset the decoder: %w", err))
 	}
 	return errors.Join(errs...)
 }
@@ -483,7 +483,7 @@ func (r *Transcoder[DF, EF]) ResetHard(
 		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
 	}
 	if err := r.Decoder.ResetHard(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("unable to reset the encoder: %w", err))
+		errs = append(errs, fmt.Errorf("unable to reset the decoder: %w", err))
 	}
 	return errors.Join(errs...)
 }
