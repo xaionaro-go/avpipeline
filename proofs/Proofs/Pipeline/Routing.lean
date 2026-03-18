@@ -142,11 +142,112 @@ theorem routing_correct_multi
 The SplitAV topology is a two-hop graph: inputAll → inputAudio/VideoOnly → outputs.
 The proof strategy:
 1. First hop: case-split on media type, show which intermediate node is reached
-2. Second hop: one-hop lemma delivers to the correct output set
+2. Second hop: one-hop lemma delivers to the correct output set -/
 
-The `unfold traceDelivery` tactic unfolds all occurrences simultaneously, which
-makes direct manipulation difficult. We use `sorry` for the two-hop composition
-and leave full mechanization for a follow-up pass. -/
+/-! ### SplitAV edge-from lemmas -/
+
+/-- Helper: filtering edges by src through a mapped list where all elements
+    have a different src yields []. -/
+private theorem filter_map_src_ne {src other : PipeNodeID}
+    (h : (other == src) = false)
+    (xs : List PipeOutputID)
+    (mkE : PipeOutputID → RoutingEdge)
+    (hmk : ∀ id, (mkE id).src = other) :
+    (xs.map mkE).filter (fun e => e.src == src) = [] := by
+  induction xs with
+  | nil => simp
+  | cons x rest ih =>
+    simp only [List.map, List.filter, hmk, h, ite_false, ih]
+
+/-- Helper: filtering edges by src through a mapped list where all elements
+    have that src yields the original mapped list. -/
+private theorem filter_map_src_eq {src : PipeNodeID}
+    (h : (src == src) = true)
+    (xs : List PipeOutputID)
+    (mkE : PipeOutputID → RoutingEdge)
+    (hmk : ∀ id, (mkE id).src = src) :
+    (xs.map mkE).filter (fun e => e.src == src) = xs.map mkE := by
+  induction xs with
+  | nil => simp
+  | cons x rest ih =>
+    simp only [List.map, List.filter, hmk, h, ite_true, ih]
+
+/-- `edgesFrom .inputAll` in a splitAV pipeline returns only the two split edges. -/
+private theorem splitAV_edgesFrom_inputAll (ao vo : List PipeOutputID)
+    (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) :
+    (wireSplitAV ao vo aa av c).edgesFrom .inputAll =
+    [ { src := .inputAll, dst := .inputAudioOnly, condition := audioSubtitleDataCond }
+    , { src := .inputAll, dst := .inputVideoOnly, condition := videoCond } ] := by
+  unfold wireSplitAV WiredPipeline.edgesFrom
+  simp only [List.filter_append, List.filter, List.map]
+  have hAA : (PipeNodeID.inputAll == PipeNodeID.inputAll) = true := by native_decide
+  have hAuA : (PipeNodeID.inputAudioOnly == PipeNodeID.inputAll) = false := by native_decide
+  have hVA : (PipeNodeID.inputVideoOnly == PipeNodeID.inputAll) = false := by native_decide
+  simp only [hAA, ite_true]
+  rw [filter_map_src_ne hAuA ao _ (fun _ => rfl),
+      filter_map_src_ne hVA vo _ (fun _ => rfl)]
+  simp
+
+/-- `edgesFrom .inputAudioOnly` returns the audio output edges. -/
+private theorem splitAV_edgesFrom_audioOnly (ao vo : List PipeOutputID)
+    (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) :
+    (wireSplitAV ao vo aa av c).edgesFrom .inputAudioOnly =
+    ao.map (mkEdge .inputAudioOnly) := by
+  unfold wireSplitAV WiredPipeline.edgesFrom mkEdge
+  simp only [List.filter_append, List.filter, List.map]
+  have hAAu : (PipeNodeID.inputAll == PipeNodeID.inputAudioOnly) = false := by native_decide
+  have hAuAu : (PipeNodeID.inputAudioOnly == PipeNodeID.inputAudioOnly) = true := by native_decide
+  have hVAu : (PipeNodeID.inputVideoOnly == PipeNodeID.inputAudioOnly) = false := by native_decide
+  simp only [hAAu, ite_false, List.nil_append]
+  rw [filter_map_src_eq hAuAu ao _ (fun _ => rfl),
+      filter_map_src_ne hVAu vo _ (fun _ => rfl)]
+  simp
+
+/-- `edgesFrom .inputVideoOnly` returns the video output edges. -/
+private theorem splitAV_edgesFrom_videoOnly (ao vo : List PipeOutputID)
+    (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) :
+    (wireSplitAV ao vo aa av c).edgesFrom .inputVideoOnly =
+    vo.map (mkEdge .inputVideoOnly) := by
+  unfold wireSplitAV WiredPipeline.edgesFrom mkEdge
+  simp only [List.filter_append, List.filter, List.map]
+  have hAV : (PipeNodeID.inputAll == PipeNodeID.inputVideoOnly) = false := by native_decide
+  have hAuV : (PipeNodeID.inputAudioOnly == PipeNodeID.inputVideoOnly) = false := by native_decide
+  have hVV : (PipeNodeID.inputVideoOnly == PipeNodeID.inputVideoOnly) = true := by native_decide
+  simp only [hAV, ite_false, List.nil_append]
+  rw [filter_map_src_ne hAuV ao _ (fun _ => rfl),
+      List.nil_append,
+      filter_map_src_eq hVV vo _ (fun _ => rfl)]
+
+/-! ### SplitAV second-hop lemma
+
+The second hop of the splitAV trace goes from an intermediate node
+(inputAudioOnly or inputVideoOnly) to the output nodes. This is exactly
+the one-hop trace pattern. -/
+
+private theorem splitAV_secondHop_audio (ao vo : List PipeOutputID)
+    (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) (pkt : PipePacket)
+    (fuel : Nat) :
+    traceDelivery (wireSplitAV ao vo aa av c) .inputAudioOnly pkt (fuel + 1)
+    = ao.filter (· == aa) := by
+  exact traceDelivery_onehop _ _ ao _ fuel
+    (splitAV_edgesFrom_audioOnly ao vo aa av c) rfl
+
+private theorem splitAV_secondHop_video (ao vo : List PipeOutputID)
+    (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) (pkt : PipePacket)
+    (fuel : Nat) :
+    traceDelivery (wireSplitAV ao vo aa av c) .inputVideoOnly pkt (fuel + 1)
+    = vo.filter (· == aa) := by
+  exact traceDelivery_onehop _ _ vo _ fuel
+    (splitAV_edgesFrom_videoOnly ao vo aa av c) rfl
+
+/-! ### SplitAV two-hop composition
+
+The proof decomposes traceDelivery at inputAll into two hops:
+1. First hop selects the intermediate node based on media type
+2. Second hop applies the one-hop lemma from intermediate to outputs
+
+We avoid `unfold traceDelivery` (which unfolds all occurrences) by using
+`conv_lhs => unfold traceDelivery` to unfold only the outermost call. -/
 
 private theorem splitAV_op (ao vo : List PipeOutputID) (aa av : PipeOutputID)
     (c : PipeOutputID → OutputChain) (pkt : PipePacket) :
@@ -156,12 +257,40 @@ private theorem splitAV_op (ao vo : List PipeOutputID) (aa av : PipeOutputID)
     | .audio    => ao.filter (· == aa)
     | .subtitle => ao.filter (· == aa)
     | .data     => ao.filter (· == aa) := by
-  -- Two-hop trace: inputAll → (audio/video intermediate) → output nodes.
-  -- First hop selects the intermediate based on media type partition.
-  -- Second hop applies the one-hop trace lemma on the intermediate.
-  -- The proof requires careful fuel management (3 = 2+1 for first hop,
-  -- then 2 = 1+1 for second hop).
-  sorry
+  unfold operationalDelivery
+  show traceDelivery (wireSplitAV ao vo aa av c) .inputAll pkt 3 = _
+  -- Unfold the outermost traceDelivery once using the equation lemma.
+  -- traceDelivery.eq_2: traceDelivery wp src pkt (fuel'+1) = flatMap over filtered edges
+  -- fuel 3 = 2.succ, so fuel' = 2 and the recursive calls use fuel' = 2.
+  rw [show (3 : Nat) = Nat.succ 2 from rfl, traceDelivery.eq_2]
+  -- Rewrite edgesFrom to the two split edges.
+  rw [splitAV_edgesFrom_inputAll]
+  -- Case-split on media type to evaluate the filter conditions.
+  -- The partition lemmas give us the condition match results, and we
+  -- use them to rewrite in the goal before applying the second-hop lemma.
+  cases hmt : pkt.mediaType
+  · -- video: videoCond matches, audioSubtitleDataCond doesn't
+    have ⟨hv, ha⟩ := partition_video pkt hmt
+    -- The filter over the two-element edge list evaluates condition.match pkt
+    -- for each edge. We need to unfold the list operations.
+    simp only [List.filter, ha, hv, ite_true, ite_false,
+               List.flatMap_cons, List.flatMap_nil, List.append_nil]
+    exact splitAV_secondHop_video ao vo aa av c pkt 1
+  · -- audio: audioSubtitleDataCond matches, videoCond doesn't
+    have ⟨hv, ha⟩ := partition_audio pkt hmt
+    simp only [List.filter, ha, hv, ite_true, ite_false,
+               List.flatMap_cons, List.flatMap_nil, List.append_nil]
+    exact splitAV_secondHop_audio ao vo aa av c pkt 1
+  · -- subtitle: audioSubtitleDataCond matches, videoCond doesn't
+    have ⟨hv, ha⟩ := partition_subtitle pkt hmt
+    simp only [List.filter, ha, hv, ite_true, ite_false,
+               List.flatMap_cons, List.flatMap_nil, List.append_nil]
+    exact splitAV_secondHop_audio ao vo aa av c pkt 1
+  · -- data: audioSubtitleDataCond matches, videoCond doesn't
+    have ⟨hv, ha⟩ := partition_data pkt hmt
+    simp only [List.filter, ha, hv, ite_true, ite_false,
+               List.flatMap_cons, List.flatMap_nil, List.append_nil]
+    exact splitAV_secondHop_audio ao vo aa av c pkt 1
 
 theorem routing_correct_splitAV
     (ao vo : List PipeOutputID) (aa av : PipeOutputID) (pkt : PipePacket)
