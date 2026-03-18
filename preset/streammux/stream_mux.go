@@ -412,8 +412,8 @@ func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 			return true
 		})
 	})
-	if s.AutoBitRateHandler != nil {
-		if err := s.AutoBitRateHandler.Close(ctx); err != nil {
+	if h := s.GetAutoBitRateHandler(); h != nil {
+		if err := h.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close auto bitrate handler: %w", err))
 		}
 	}
@@ -481,6 +481,9 @@ func (s *StreamMux[C]) setPreferredOutputs(
 			default:
 				return fmt.Errorf("unable to set preferred output for audio input with key %v: %w", senderKeyAudio, err)
 			}
+		}
+		if outputsToChange == 0 {
+			return nil
 		}
 		if alreadyPreferredCount >= outputsToChange {
 			return ErrOutputsAlreadyPreferred{
@@ -1661,14 +1664,35 @@ func (s *StreamMux[C]) GetLatencies(
 
 	inputAudioDts, inputVideoDTS := audio.InputDTS.Load(), video.InputDTS.Load()
 
-	audioPreTranscodingLatency := nanosecondsToDuration(inputAudioDts - transcodingStartAudioDTS)
-	videoPreTranscodingLatency := nanosecondsToDuration(inputVideoDTS - transcodingStartVideoDTS)
+	// Guard against unsigned underflow: if the minuend is less than the
+	// subtrahend the samples were collected out-of-order and the difference
+	// is meaningless, so we leave the latency at zero.
+	var audioPreTranscodingLatency time.Duration
+	if inputAudioDts >= transcodingStartAudioDTS {
+		audioPreTranscodingLatency = nanosecondsToDuration(inputAudioDts - transcodingStartAudioDTS)
+	}
+	var videoPreTranscodingLatency time.Duration
+	if inputVideoDTS >= transcodingStartVideoDTS {
+		videoPreTranscodingLatency = nanosecondsToDuration(inputVideoDTS - transcodingStartVideoDTS)
+	}
 
-	audioTranscodingLatency := nanosecondsToDuration(transcodingStartAudioDTS - transcodingEndAudioDTS)
-	videoTranscodingLatency := nanosecondsToDuration(transcodingStartVideoDTS - transcodingEndVideoDTS)
+	var audioTranscodingLatency time.Duration
+	if transcodingStartAudioDTS >= transcodingEndAudioDTS {
+		audioTranscodingLatency = nanosecondsToDuration(transcodingStartAudioDTS - transcodingEndAudioDTS)
+	}
+	var videoTranscodingLatency time.Duration
+	if transcodingStartVideoDTS >= transcodingEndVideoDTS {
+		videoTranscodingLatency = nanosecondsToDuration(transcodingStartVideoDTS - transcodingEndVideoDTS)
+	}
 
-	audioTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndAudioDTS - lastSendingAudioDTS)
-	videoTranscodedPreSendLatency := nanosecondsToDuration(transcodingEndVideoDTS - lastSendingVideoDTS)
+	var audioTranscodedPreSendLatency time.Duration
+	if transcodingEndAudioDTS >= lastSendingAudioDTS {
+		audioTranscodedPreSendLatency = nanosecondsToDuration(transcodingEndAudioDTS - lastSendingAudioDTS)
+	}
+	var videoTranscodedPreSendLatency time.Duration
+	if transcodingEndVideoDTS >= lastSendingVideoDTS {
+		videoTranscodedPreSendLatency = nanosecondsToDuration(transcodingEndVideoDTS - lastSendingVideoDTS)
+	}
 
 	logger.Debugf(ctx, "latencies: audio: pre-encoding=%v transcoding=%v transcoded-pre-send=%v sending=%v", audioPreTranscodingLatency, audioTranscodingLatency, audioTranscodedPreSendLatency, nanosecondsToDuration(audio.SendingLatency.Load()))
 	logger.Debugf(ctx, "latencies: video: pre-encoding=%v transcoding=%v transcoded-pre-send=%v (%v-%v) sending=%v", videoPreTranscodingLatency, videoTranscodingLatency, videoTranscodedPreSendLatency, transcodingEndVideoDTS, lastSendingVideoDTS, nanosecondsToDuration(video.SendingLatency.Load()))

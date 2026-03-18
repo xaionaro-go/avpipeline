@@ -115,7 +115,7 @@ func (s *StreamMux[C]) Serve(
 						err = h.HandleError(ctx, nodeErr.Err)
 					}
 					if err == nil {
-						logger.Debugf(ctx, "error from node %T:%s was 4r", nodeErr.Node, nodeErr.Node)
+						logger.Debugf(ctx, "error from node %T:%s was handled", nodeErr.Node, nodeErr.Node)
 						// the error was handled
 						continue
 					}
