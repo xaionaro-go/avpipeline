@@ -61,11 +61,30 @@ func (s *StreamMux[C]) Serve(
 				if customDataer, ok := nodeErr.Node.(node.GetCustomDataer[OutputCustomData[C]]); ok {
 					output := customDataer.GetCustomData().Output
 					assert(ctx, output != nil, fmt.Sprintf("<%s> <%T> <%#+v>", nodeErr.Node, nodeErr.Node, nodeErr.Node))
-					err := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+
+					// Check if the output is active on any input before deciding to close it.
+					// In SplitAV mode, an output may be inactive for one input but active
+					// for another; closing it would destroy the active data path.
+					isActiveOnAnyInput := false
+					if checkErr := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 						if int32(output.ID) == input.OutputSwitch.CurrentValue.Load() {
-							logger.Errorf(ctx, "error from the active output %d (%s) of input %s, node %T:%s: %v", output.ID, output.GetKey(), input.GetType(), nodeErr.Node, nodeErr.Node, nodeErr.Err)
-							return nodeErr.Err
+							isActiveOnAnyInput = true
 						}
+						return nil
+					}); checkErr != nil {
+						logger.Errorf(ctx, "unable to check active outputs: %v", checkErr)
+					}
+
+					var err error
+					if isActiveOnAnyInput {
+						err = s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+							if int32(output.ID) == input.OutputSwitch.CurrentValue.Load() {
+								logger.Errorf(ctx, "error from the active output %d (%s) of input %s, node %T:%s: %v", output.ID, output.GetKey(), input.GetType(), nodeErr.Node, nodeErr.Node, nodeErr.Err)
+								return nodeErr.Err
+							}
+							return nil
+						})
+					} else {
 						switch {
 						case errors.Is(nodeErr.Err, io.EOF):
 							logger.Debugf(ctx, "node <%T> received EOF, closing it", nodeErr.Node)
@@ -84,8 +103,8 @@ func (s *StreamMux[C]) Serve(
 						if err := output.CloseNoDrain(ctx); err != nil {
 							logger.Debugf(ctx, "unable to close output %d: %v", output.ID, err)
 						}
-						return nil
-					})
+					}
+
 					if err == nil {
 						// the error was handled
 						continue
