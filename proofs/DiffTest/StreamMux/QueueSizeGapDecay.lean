@@ -74,9 +74,9 @@ def processLine (line : String) : Except String String := do
         let brd := bitRateDiff dg
         let rawBR := rawNewBitRate req.currentBitRate brd
 
-        -- Apply inertia
+        -- Apply inertia (branch on bitRateDiff, matching Go)
         let finalBR := applyInertia rawBR req.currentBitRate
-            req.checkInterval cfg.inertiaIncrease cfg.inertiaDecrease
+            req.checkInterval cfg.inertiaIncrease cfg.inertiaDecrease brd
 
         -- Critical flag (uses bitRateDiff, not the diff after inertia)
         let crit := isCritical brd finalBR req.actualOutputBitRate req.inputBitRate

@@ -235,11 +235,11 @@ theorem equilibrium_preserves_bitrate
     (hPos : req.currentBitRate ≥ 1) :
     computeNewBitrate cfg req = req.currentBitRate := by
   unfold computeNewBitrate
-  rw [equilibrium_raw_bitrate cfg req hEquil]
-  have : max req.currentBitRate 1 = req.currentBitRate := by omega
-  rw [this]
-  exact applyInertia_identity req.currentBitRate req.checkInterval
-    cfg.inertiaIncrease cfg.inertiaDecrease
+  have hBrd : computeBitRateDiff cfg req = 0 :=
+    equilibrium_no_change cfg req hEquil
+  -- Simplify the let-bindings by substituting hBrd
+  simp only [hBrd, GapDecaySpec.rawNewBitRate, GapDecaySpec.applyInertia]
+  omega
 
 /-! ================================================================
     INV6: Measurement Monotonicity (Convex Combination)

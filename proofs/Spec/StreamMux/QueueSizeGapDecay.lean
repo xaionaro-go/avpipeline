@@ -119,14 +119,18 @@ def inertiaCapIncrease (current checkInterval inertiaIncrease : Int) : Int :=
 def inertiaCapDecrease (current checkInterval inertiaDecrease : Int) : Int :=
   1 + current * inertiaDecrease / (inertiaDecrease + checkInterval)
 
-/-- Apply inertia clamping to the raw new bitrate. -/
-def applyInertia (raw current checkInterval inertiaInc inertiaDec : Int) : Int :=
-  let diff := raw - current
-  if diff > 0 then
+/-- Apply inertia clamping to the raw new bitrate.
+    Go branches on the sign of `bitRateDiff` (the adjustment computed BEFORE
+    the `max(...,1)` floor), not on `raw - current`. When currentBR is very
+    small (e.g. 0) and bitRateDiff < 0, the floor produces raw = 1 > current,
+    yet Go still takes the decrease branch. -/
+def applyInertia (raw current checkInterval inertiaInc inertiaDec : Int)
+    (bitRateDiff : Int := raw - current) : Int :=
+  if bitRateDiff > 0 then
     -- increasing: cap at inertiaCapIncrease
     let cap := inertiaCapIncrease current checkInterval inertiaInc
     min raw cap
-  else if diff < 0 then
+  else if bitRateDiff < 0 then
     -- decreasing: floor at inertiaCapDecrease
     let floor := inertiaCapDecrease current checkInterval inertiaDec
     max raw floor

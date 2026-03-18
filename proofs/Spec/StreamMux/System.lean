@@ -199,11 +199,13 @@ structure CheckOnceInput where
   smoothedDerivative : Int   -- bytes/s (from moving average)
   deriving Repr
 
-/-- Compute new bitrate from the GapDecay calculator with inertia. -/
+/-- Compute new bitrate from the GapDecay calculator with inertia.
+    Go branches on the sign of bitRateDiff, not on raw - current. -/
 def computeNewBitrate (cfg : GapDecayConfig) (req : GapDecayRequest) : Int :=
-  let raw := GapDecaySpec.computeRawNewBitRate cfg req
+  let brd := GapDecaySpec.computeBitRateDiff cfg req
+  let raw := GapDecaySpec.rawNewBitRate req.currentBitRate brd
   GapDecaySpec.applyInertia raw req.currentBitRate req.checkInterval
-    cfg.inertiaIncrease cfg.inertiaDecrease
+    cfg.inertiaIncrease cfg.inertiaDecrease brd
 
 /-- Clamp a bitrate to the configured range.
     Models the clamping in trySetVideoBitrate. -/
