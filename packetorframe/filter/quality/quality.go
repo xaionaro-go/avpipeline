@@ -35,10 +35,12 @@ func (q Quality) Aggregate() *QualityAggregated {
 		switch sq.MediaType {
 		case astiav.MediaTypeAudio:
 			audioContinuitySum += sq.Continuity
+			audioOverlapSum += sq.Overlap
 			audioFrameRateSum += sq.FrameRate
 			audioCount++
 		case astiav.MediaTypeVideo:
 			videoContinuitySum += sq.Continuity
+			videoOverlapSum += sq.Overlap
 			videoFrameRateSum += sq.FrameRate
 			videoCount++
 		}

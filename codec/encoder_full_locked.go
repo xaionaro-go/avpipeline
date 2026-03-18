@@ -393,7 +393,9 @@ func (e *EncoderFullLocked) Flush(
 		// flushing had just been initiated
 		logger.Tracef(ctx, "waiting for the encoder to be flushed")
 		err = e.Drain(ctx, callback)
-		if err != io.EOF {
+		// Drain returns io.EOF on success (encoder fully flushed);
+		// only non-EOF errors indicate a real failure.
+		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("unable to drain: %w", err)
 		}
 	case errors.Is(err, astiav.ErrEof):

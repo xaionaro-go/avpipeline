@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/xsync"
@@ -70,6 +71,9 @@ func (e *EncoderFullLocked) setResolutionGeneric(
 	logger.Infof(ctx, "SetResolution (generic): %v", res)
 	e.InitParams.CodecParameters.SetWidth(int(res.Width))
 	e.InitParams.CodecParameters.SetHeight(int(res.Height))
+	if e.InitParams.CustomOptions == nil {
+		e.InitParams.CustomOptions = astiav.NewDictionary()
+	}
 	e.InitParams.CustomOptions.Set("s", fmt.Sprintf("%dx%d", res.Width, res.Height), 0)
 	defer func() {
 		if _err != nil {

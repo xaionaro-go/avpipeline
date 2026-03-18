@@ -61,7 +61,7 @@ func (m *Measurements) getQualityLocked(
 	for streamKey, sqi := range m.StreamQualityInfo {
 		sq, err := sqi.getStreamQuality(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("getting stream quality for stream index %d: %w", streamKey, err)
+			return nil, fmt.Errorf("getting stream quality for stream index %v: %w", streamKey, err)
 		}
 		result = append(result, &StreamQualityWithMediaType{
 			MediaType:     sqi.MediaType,

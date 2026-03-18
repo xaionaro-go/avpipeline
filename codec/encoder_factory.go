@@ -76,14 +76,22 @@ func (f *NaiveEncoderFactory) VideoCodecID() astiav.CodecID {
 	if f.VideoCodec == NameCopy {
 		return 0
 	}
-	return findEncoderCodec(0, f.VideoCodec).ID()
+	codec := findEncoderCodec(0, f.VideoCodec)
+	if codec == nil {
+		return 0
+	}
+	return codec.ID()
 }
 
 func (f *NaiveEncoderFactory) AudioCodecID() astiav.CodecID {
 	if f.AudioCodec == NameCopy {
 		return 0
 	}
-	return findEncoderCodec(0, f.AudioCodec).ID()
+	codec := findEncoderCodec(0, f.AudioCodec)
+	if codec == nil {
+		return 0
+	}
+	return codec.ID()
 }
 
 type GetDecoderer interface {

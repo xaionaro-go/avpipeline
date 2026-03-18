@@ -111,5 +111,7 @@ func (d *Decoder) LockDo(
 func (d *Decoder) IsDirty(
 	ctx context.Context,
 ) bool {
-	return d.isDirty
+	return xsync.DoR1(xsync.WithNoLogging(ctx, true), &d.locker, func() bool {
+		return d.isDirty
+	})
 }

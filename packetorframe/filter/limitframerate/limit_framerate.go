@@ -51,7 +51,7 @@ func (f *Filter) match(
 	streamIdx := i.GetStreamIndex()
 	logger.Tracef(ctx, "LimitFramerate.Match: %s frame from stream %d: pts:%d, dur:%d", i.GetMediaType(), streamIdx, i.GetPTS(), i.GetDuration())
 	defer func() {
-		logger.Tracef(ctx, "/LimitFramerate.Match: frame %p from stream %d: pts:%d, dur:%d: %v", i.GetMediaType(), streamIdx, i.GetPTS(), i.GetDuration(), _ret)
+		logger.Tracef(ctx, "/LimitFramerate.Match: frame %s from stream %d: pts:%d, dur:%d: %v", i.GetMediaType(), streamIdx, i.GetPTS(), i.GetDuration(), _ret)
 	}()
 	maxFPS := f.FPSLimitGetter.Get(ctx)
 	assert(ctx, maxFPS.Num >= 0, "LimitFramerate: fraction.Num must be >= 0", maxFPS)
