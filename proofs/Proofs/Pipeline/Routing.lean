@@ -36,37 +36,47 @@ private theorem filter_always_edges (s : PipeNodeID) (xs : List PipeOutputID)
     simp only [List.map, List.filter, mkEdge, FilterCondition.match, ite_true]
     exact congrArg _ ih
 
+/-- Key lemma: flatMap over output edges with switch filtering equals
+    list filter by the switch's currentValue. Uses `wp.switchFor s`
+    directly in both the statement and the proof. -/
 private theorem flatMap_switch_filter (ids : List PipeOutputID) (s : PipeNodeID)
-    (sw : SwitchState) (pkt : PipePacket) (wp : WiredPipeline) (fuel : Nat)
-    (h_stable : sw.nextValue = none) :
+    (pkt : PipePacket) (wp : WiredPipeline) (fuel : Nat)
+    (h_stable : (wp.switchFor s).nextValue = none) :
     (ids.map (mkEdge s)).flatMap (fun e =>
       match e.dst with
       | .outputInput id =>
+        let sw := wp.switchFor s
         match (outputSwitchGetState sw id pkt).snd with
         | .pass => [id]
         | _ => []
-      | other => traceDelivery wp other pkt fuel)
-    = ids.filter (· == sw.currentValue) := by
+      | other => traceDelivery wp other pkt s fuel)
+    = ids.filter (· == (wp.switchFor s).currentValue) := by
   induction ids with
   | nil => simp [List.map, List.flatMap, List.filter]
   | cons x rest ih =>
     simp only [List.map, List.flatMap_cons, mkEdge, List.filter]
-    rw [outputSwitch_stable_snd sw x pkt h_stable]
-    by_cases h : sw.currentValue = x
+    rw [outputSwitch_stable_snd (wp.switchFor s) x pkt h_stable]
+    by_cases h : (wp.switchFor s).currentValue = x
     · subst h; simp [BEq.beq, Nat.beq_refl, ih]
-    · simp [show (sw.currentValue == x) = false from by simp [BEq.beq, Nat.beq_eq, h],
-            show (x == sw.currentValue) = false from by simp [BEq.beq, Nat.beq_eq, Ne.symm h],
+    · simp [show ((wp.switchFor s).currentValue == x) = false from
+              by simp [BEq.beq, Nat.beq_eq, h],
+            show (x == (wp.switchFor s).currentValue) = false from
+              by simp [BEq.beq, Nat.beq_eq, Ne.symm h],
             ih]
 
 /-! ## One-hop trace lemma -/
 
+/-- When edges from `src` are exactly `ids.map (mkEdge src)` and the switch
+    for `src` is stable, traceDelivery returns `ids` filtered by the switch's
+    currentValue. -/
 private theorem traceDelivery_onehop (wp : WiredPipeline) (src : PipeNodeID)
-    (ids : List PipeOutputID) (pkt : PipePacket) (fuel : Nat)
+    (ids : List PipeOutputID) (pkt : PipePacket) (parentNode : PipeNodeID) (fuel : Nat)
     (h_edges : wp.edgesFrom src = ids.map (mkEdge src))
-    (h_stable : wp.switchState.nextValue = none) :
-    traceDelivery wp src pkt (fuel + 1) = ids.filter (· == wp.switchState.currentValue) := by
+    (h_stable : (wp.switchFor src).nextValue = none) :
+    traceDelivery wp src pkt parentNode (fuel + 1)
+    = ids.filter (· == (wp.switchFor src).currentValue) := by
   unfold traceDelivery; rw [h_edges, filter_always_edges]; simp only []
-  exact flatMap_switch_filter ids src wp.switchState pkt wp fuel h_stable
+  exact flatMap_switch_filter ids src pkt wp fuel h_stable
 
 /-! ## Edge-from lemmas -/
 
@@ -86,14 +96,32 @@ private theorem multi_edgesFrom (outIDs : List PipeOutputID) (activeID : PipeOut
   | nil => simp [List.map, List.filter]
   | cons id rest ih => simp [List.map, List.filter, h, ih]
 
+/-! ## switchFor reduction lemmas -/
+
+private theorem single_switchFor (mode : MuxMode) (outID : PipeOutputID) (chain : OutputChain) :
+    (wireSingleOutput mode outID chain).switchFor .inputAll =
+    (wireSingleOutput mode outID chain).switchState := by
+  unfold WiredPipeline.switchFor; rfl
+
+private theorem multi_switchFor (outIDs : List PipeOutputID) (activeID : PipeOutputID)
+    (chain : PipeOutputID → OutputChain) :
+    (wireMultiOutput outIDs activeID chain).switchFor .inputAll =
+    (wireMultiOutput outIDs activeID chain).switchState := by
+  unfold WiredPipeline.switchFor; rfl
+
 /-! ## Single-output proofs -/
 
 private theorem single_op (outID : PipeOutputID) (chain : OutputChain) (pkt : PipePacket) :
     operationalDelivery (wireSingleOutput .sameOutputSameTracks outID chain) pkt = [outID] := by
   unfold operationalDelivery
-  exact (traceDelivery_onehop _ _ [outID] _ 2
-    (single_edgesFrom .sameOutputSameTracks outID chain) rfl).trans
-    (by simp [wireSingleOutput, BEq.beq, Nat.beq_refl, List.filter])
+  show traceDelivery _ .inputAll pkt .inputAll 3 = _
+  have h_stable : ((wireSingleOutput .sameOutputSameTracks outID chain).switchFor .inputAll
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireSingleOutput; rfl
+  have h := traceDelivery_onehop _ _ [outID] pkt .inputAll 2
+    (single_edgesFrom .sameOutputSameTracks outID chain) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireSingleOutput, BEq.beq, Nat.beq_refl, List.filter]
 
 theorem routing_correct_single
     (outID : PipeOutputID) (chain : OutputChain) (pkt : PipePacket) :
@@ -107,9 +135,14 @@ private theorem single_diffTracks_op (outID : PipeOutputID) (chain : OutputChain
     operationalDelivery (wireSingleOutput .sameOutputDifferentTracks outID chain) pkt
     = [outID] := by
   unfold operationalDelivery
-  exact (traceDelivery_onehop _ _ [outID] _ 2
-    (single_edgesFrom .sameOutputDifferentTracks outID chain) rfl).trans
-    (by simp [wireSingleOutput, BEq.beq, Nat.beq_refl, List.filter])
+  show traceDelivery _ .inputAll pkt .inputAll 3 = _
+  have h_stable : ((wireSingleOutput .sameOutputDifferentTracks outID chain).switchFor .inputAll
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireSingleOutput; rfl
+  have h := traceDelivery_onehop _ _ [outID] pkt .inputAll 2
+    (single_edgesFrom .sameOutputDifferentTracks outID chain) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireSingleOutput, BEq.beq, Nat.beq_refl, List.filter]
 
 theorem routing_correct_single_diffTracks
     (outID : PipeOutputID) (chain : OutputChain) (pkt : PipePacket) :
@@ -118,6 +151,27 @@ theorem routing_correct_single_diffTracks
   rw [show routingSpec _ _ = [outID] from by unfold routingSpec wireSingleOutput; rfl,
       single_diffTracks_op]
 
+/-! ## Forbid proof -/
+
+private theorem forbid_op (outID : PipeOutputID) (chain : OutputChain) (pkt : PipePacket) :
+    operationalDelivery (wireSingleOutput .forbid outID chain) pkt = [outID] := by
+  unfold operationalDelivery
+  show traceDelivery _ .inputAll pkt .inputAll 3 = _
+  have h_stable : ((wireSingleOutput .forbid outID chain).switchFor .inputAll
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireSingleOutput; rfl
+  have h := traceDelivery_onehop _ _ [outID] pkt .inputAll 2
+    (single_edgesFrom .forbid outID chain) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireSingleOutput, BEq.beq, Nat.beq_refl, List.filter]
+
+theorem routing_correct_forbid
+    (outID : PipeOutputID) (chain : OutputChain) (pkt : PipePacket) :
+    operationalDelivery (wireSingleOutput .forbid outID chain) pkt
+    = routingSpec (wireSingleOutput .forbid outID chain) pkt := by
+  rw [show routingSpec _ _ = [outID] from by unfold routingSpec wireSingleOutput; rfl,
+      forbid_op]
+
 /-! ## Multi-output proof -/
 
 private theorem multi_op (outIDs : List PipeOutputID) (activeID : PipeOutputID)
@@ -125,9 +179,14 @@ private theorem multi_op (outIDs : List PipeOutputID) (activeID : PipeOutputID)
     operationalDelivery (wireMultiOutput outIDs activeID chain) pkt
     = outIDs.filter (· == activeID) := by
   unfold operationalDelivery
-  exact (traceDelivery_onehop _ _ outIDs _ 2
-    (multi_edgesFrom outIDs activeID chain) rfl).trans
-    (by simp [wireMultiOutput])
+  show traceDelivery _ .inputAll pkt .inputAll 3 = _
+  have h_stable : ((wireMultiOutput outIDs activeID chain).switchFor .inputAll
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireMultiOutput; rfl
+  have h := traceDelivery_onehop _ _ outIDs pkt .inputAll 2
+    (multi_edgesFrom outIDs activeID chain) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireMultiOutput]
 
 theorem routing_correct_multi
     (outIDs : List PipeOutputID) (activeID : PipeOutputID) (pkt : PipePacket)
@@ -222,57 +281,55 @@ private theorem splitAV_edgesFrom_videoOnly (ao vo : List PipeOutputID)
 
 The second hop of the splitAV trace goes from an intermediate node
 (inputAudioOnly or inputVideoOnly) to the output nodes. This is exactly
-the one-hop trace pattern. -/
+the one-hop trace pattern, using the per-input switch state. -/
 
 private theorem splitAV_secondHop_audio (ao vo : List PipeOutputID)
     (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) (pkt : PipePacket)
     (fuel : Nat) :
-    traceDelivery (wireSplitAV ao vo aa av c) .inputAudioOnly pkt (fuel + 1)
+    traceDelivery (wireSplitAV ao vo aa av c) .inputAudioOnly pkt .inputAll (fuel + 1)
     = ao.filter (· == aa) := by
-  exact traceDelivery_onehop _ _ ao _ fuel
-    (splitAV_edgesFrom_audioOnly ao vo aa av c) rfl
+  have h_stable : ((wireSplitAV ao vo aa av c).switchFor .inputAudioOnly
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireSplitAV; rfl
+  have h := traceDelivery_onehop _ _ ao pkt .inputAll fuel
+    (splitAV_edgesFrom_audioOnly ao vo aa av c) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireSplitAV]
 
 private theorem splitAV_secondHop_video (ao vo : List PipeOutputID)
     (aa av : PipeOutputID) (c : PipeOutputID → OutputChain) (pkt : PipePacket)
     (fuel : Nat) :
-    traceDelivery (wireSplitAV ao vo aa av c) .inputVideoOnly pkt (fuel + 1)
-    = vo.filter (· == aa) := by
-  exact traceDelivery_onehop _ _ vo _ fuel
-    (splitAV_edgesFrom_videoOnly ao vo aa av c) rfl
+    traceDelivery (wireSplitAV ao vo aa av c) .inputVideoOnly pkt .inputAll (fuel + 1)
+    = vo.filter (· == av) := by
+  have h_stable : ((wireSplitAV ao vo aa av c).switchFor .inputVideoOnly
+      ).nextValue = none := by
+    unfold WiredPipeline.switchFor wireSplitAV; rfl
+  have h := traceDelivery_onehop _ _ vo pkt .inputAll fuel
+    (splitAV_edgesFrom_videoOnly ao vo aa av c) h_stable
+  rw [h]
+  simp [WiredPipeline.switchFor, wireSplitAV]
 
 /-! ### SplitAV two-hop composition
 
 The proof decomposes traceDelivery at inputAll into two hops:
 1. First hop selects the intermediate node based on media type
-2. Second hop applies the one-hop lemma from intermediate to outputs
-
-We avoid `unfold traceDelivery` (which unfolds all occurrences) by using
-`conv_lhs => unfold traceDelivery` to unfold only the outermost call. -/
+2. Second hop applies the one-hop lemma from intermediate to outputs -/
 
 private theorem splitAV_op (ao vo : List PipeOutputID) (aa av : PipeOutputID)
     (c : PipeOutputID → OutputChain) (pkt : PipePacket) :
     operationalDelivery (wireSplitAV ao vo aa av c) pkt =
     match pkt.mediaType with
-    | .video    => vo.filter (· == aa)
+    | .video    => vo.filter (· == av)
     | .audio    => ao.filter (· == aa)
     | .subtitle => ao.filter (· == aa)
     | .data     => ao.filter (· == aa) := by
   unfold operationalDelivery
-  show traceDelivery (wireSplitAV ao vo aa av c) .inputAll pkt 3 = _
-  -- Unfold the outermost traceDelivery once using the equation lemma.
-  -- traceDelivery.eq_2: traceDelivery wp src pkt (fuel'+1) = flatMap over filtered edges
-  -- fuel 3 = 2.succ, so fuel' = 2 and the recursive calls use fuel' = 2.
+  show traceDelivery (wireSplitAV ao vo aa av c) .inputAll pkt .inputAll 3 = _
   rw [show (3 : Nat) = Nat.succ 2 from rfl, traceDelivery.eq_2]
-  -- Rewrite edgesFrom to the two split edges.
   rw [splitAV_edgesFrom_inputAll]
-  -- Case-split on media type to evaluate the filter conditions.
-  -- The partition lemmas give us the condition match results, and we
-  -- use them to rewrite in the goal before applying the second-hop lemma.
   cases hmt : pkt.mediaType
   · -- video: videoCond matches, audioSubtitleDataCond doesn't
     have ⟨hv, ha⟩ := partition_video pkt hmt
-    -- The filter over the two-element edge list evaluates condition.match pkt
-    -- for each edge. We need to unfold the list operations.
     simp only [List.filter, ha, hv, ite_true, ite_false,
                List.flatMap_cons, List.flatMap_nil, List.append_nil]
     exact splitAV_secondHop_video ao vo aa av c pkt 1
@@ -295,7 +352,8 @@ private theorem splitAV_op (ao vo : List PipeOutputID) (aa av : PipeOutputID)
 theorem routing_correct_splitAV
     (ao vo : List PipeOutputID) (aa av : PipeOutputID) (pkt : PipePacket)
     (c : PipeOutputID → OutputChain)
-    (_ : aa ∈ ao ++ vo) (_ : ∀ id, ¬(id ∈ ao ∧ id ∈ vo)) :
+    (_ : aa ∈ ao) (_ : av ∈ vo)
+    (_ : ∀ id, ¬(id ∈ ao ∧ id ∈ vo)) :
     operationalDelivery (wireSplitAV ao vo aa av c) pkt
     = routingSpec (wireSplitAV ao vo aa av c) pkt := by
   rw [splitAV_op]

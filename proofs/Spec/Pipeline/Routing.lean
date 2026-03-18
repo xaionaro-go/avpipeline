@@ -27,17 +27,17 @@ the operational model (`operationalDelivery`). -/
 def routingSpec (wp : WiredPipeline) (pkt : PipePacket) : List PipeOutputID :=
   match wp.mode with
   | .undefined                        => []
-  | .forbid                           => []
+  | .forbid                           => wp.outputs
   | .sameOutputSameTracks             => wp.outputs
   | .sameOutputDifferentTracks        => wp.outputs
   | .differentOutputsSameTracks       =>
       wp.outputs.filter (· == wp.switchState.currentValue)
   | .differentOutputsSameTracksSplitAV =>
       match pkt.mediaType with
-      | .video    => wp.videoOutputs.filter (· == wp.switchState.currentValue)
-      | .audio    => wp.audioOutputs.filter (· == wp.switchState.currentValue)
-      | .subtitle => wp.audioOutputs.filter (· == wp.switchState.currentValue)
-      | .data     => wp.audioOutputs.filter (· == wp.switchState.currentValue)
+      | .video    => wp.videoOutputs.filter (· == wp.videoSwitchState.currentValue)
+      | .audio    => wp.audioOutputs.filter (· == wp.audioSwitchState.currentValue)
+      | .subtitle => wp.audioOutputs.filter (· == wp.audioSwitchState.currentValue)
+      | .data     => wp.audioOutputs.filter (· == wp.audioSwitchState.currentValue)
 
 /-! ## Well-formedness
 
@@ -48,11 +48,19 @@ correctness theorems. -/
 /-- A wired pipeline is well-formed when:
     1. The current switch value is one of the declared outputs.
     2. No pending switch (stable state).
-    3. For SplitAV mode, audio and video outputs are disjoint. -/
+    3. For SplitAV mode, audio and video outputs are disjoint.
+    4. For SplitAV mode, audioSwitchState.currentValue ∈ audioOutputs.
+    5. For SplitAV mode, videoSwitchState.currentValue ∈ videoOutputs. -/
 structure WiredPipeline.WellFormed (wp : WiredPipeline) : Prop where
-  currentInOutputs : wp.switchState.currentValue ∈ wp.outputs
-  stable           : wp.switchState.nextValue = none
-  splitAVDisjoint  : wp.mode = .differentOutputsSameTracksSplitAV →
-                     ∀ id, ¬(id ∈ wp.audioOutputs ∧ id ∈ wp.videoOutputs)
+  currentInOutputs      : wp.switchState.currentValue ∈ wp.outputs
+  stable                : wp.switchState.nextValue = none
+  audioSwitchStable     : wp.audioSwitchState.nextValue = none
+  videoSwitchStable     : wp.videoSwitchState.nextValue = none
+  audioCurrentInOutputs : wp.mode = .differentOutputsSameTracksSplitAV →
+                          wp.audioSwitchState.currentValue ∈ wp.audioOutputs
+  videoCurrentInOutputs : wp.mode = .differentOutputsSameTracksSplitAV →
+                          wp.videoSwitchState.currentValue ∈ wp.videoOutputs
+  splitAVDisjoint       : wp.mode = .differentOutputsSameTracksSplitAV →
+                          ∀ id, ¬(id ∈ wp.audioOutputs ∧ id ∈ wp.videoOutputs)
 
 end Pipeline

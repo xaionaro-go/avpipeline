@@ -29,14 +29,25 @@ The fully wired pipeline graph for a given MuxMode configuration.
 Captures the edges between nodes, the output/switch state, and
 the per-output processing chains. -/
 structure WiredPipeline where
-  mode         : MuxMode
-  outputs      : List PipeOutputID
-  audioOutputs : List PipeOutputID
-  videoOutputs : List PipeOutputID
-  switchState  : SwitchState
-  syncerState  : SwitchState
-  edges        : List RoutingEdge
-  outputChains : PipeOutputID → OutputChain
+  mode              : MuxMode
+  outputs           : List PipeOutputID
+  audioOutputs      : List PipeOutputID
+  videoOutputs      : List PipeOutputID
+  switchState       : SwitchState    -- switch for InputAll (non-SplitAV modes)
+  audioSwitchState  : SwitchState    -- switch for audio input (SplitAV)
+  videoSwitchState  : SwitchState    -- switch for video input (SplitAV)
+  syncerState       : SwitchState
+  edges             : List RoutingEdge
+  outputChains      : PipeOutputID → OutputChain
+
+/-- Select the appropriate switch state based on the parent (source) node.
+    In SplitAV mode, audio and video inputs have independent switches.
+    All other nodes use the default `switchState`. -/
+def WiredPipeline.switchFor (wp : WiredPipeline) (parentNode : PipeNodeID) : SwitchState :=
+  match parentNode with
+  | .inputAudioOnly => wp.audioSwitchState
+  | .inputVideoOnly => wp.videoSwitchState
+  | _               => wp.switchState
 
 /-! ## Wire constructors
 
@@ -49,22 +60,19 @@ topology. -/
     at `outID`. -/
 def wireSingleOutput (mode : MuxMode) (outID : PipeOutputID)
     (chain : OutputChain) : WiredPipeline :=
-  { mode         := mode
-    outputs      := [outID]
-    audioOutputs := []
-    videoOutputs := []
-    switchState  := { currentValue  := outID
-                      nextValue     := none
-                      previousValue := outID
-                      keepUnless    := .always }
-    syncerState  := { currentValue  := outID
-                      nextValue     := none
-                      previousValue := outID
-                      keepUnless    := .always }
-    edges        := [{ src := .inputAll
-                       dst := .outputInput outID
-                       condition := .always }]
-    outputChains := fun _ => chain }
+  let sw : SwitchState := ⟨outID, none, outID, .always⟩
+  { mode              := mode
+    outputs           := [outID]
+    audioOutputs      := []
+    videoOutputs      := []
+    switchState       := sw
+    audioSwitchState  := sw
+    videoSwitchState  := sw
+    syncerState       := sw
+    edges             := [{ src := .inputAll
+                            dst := .outputInput outID
+                            condition := .always }]
+    outputChains      := fun _ => chain }
 
 /-- Wire a multi-output pipeline (DifferentOutputsSameTracks).
     One edge per output from `inputAll` to `outputInput id` with
@@ -72,23 +80,20 @@ def wireSingleOutput (mode : MuxMode) (outID : PipeOutputID)
 def wireMultiOutput (outIDs : List PipeOutputID)
     (activeID : PipeOutputID)
     (chain : PipeOutputID → OutputChain) : WiredPipeline :=
-  { mode         := .differentOutputsSameTracks
-    outputs      := outIDs
-    audioOutputs := []
-    videoOutputs := []
-    switchState  := { currentValue  := activeID
-                      nextValue     := none
-                      previousValue := activeID
-                      keepUnless    := standardKeepUnless false }
-    syncerState  := { currentValue  := activeID
-                      nextValue     := none
-                      previousValue := activeID
-                      keepUnless    := standardKeepUnless false }
-    edges        := outIDs.map fun id =>
-                      { src := .inputAll
-                        dst := .outputInput id
-                        condition := .always }
-    outputChains := chain }
+  let sw : SwitchState := ⟨activeID, none, activeID, standardKeepUnless false⟩
+  { mode              := .differentOutputsSameTracks
+    outputs           := outIDs
+    audioOutputs      := []
+    videoOutputs      := []
+    switchState       := sw
+    audioSwitchState  := sw
+    videoSwitchState  := sw
+    syncerState       := sw
+    edges             := outIDs.map fun id =>
+                           { src := .inputAll
+                             dst := .outputInput id
+                             condition := .always }
+    outputChains      := chain }
 
 /-- Wire a split-AV pipeline (DifferentOutputsSameTracksSplitAV).
     Edges: inputAll→inputAudioOnly (audioSubtitleDataCond),
@@ -106,20 +111,18 @@ def wireSplitAV (audioOuts videoOuts : List PipeOutputID)
   let videoEdges : List RoutingEdge :=
     videoOuts.map fun id =>
       { src := .inputVideoOnly, dst := .outputInput id,  condition := .always }
-  { mode         := .differentOutputsSameTracksSplitAV
-    outputs      := audioOuts ++ videoOuts
-    audioOutputs := audioOuts
-    videoOutputs := videoOuts
-    switchState  := { currentValue  := activeAudio
-                      nextValue     := none
-                      previousValue := activeAudio
-                      keepUnless    := standardKeepUnless false }
-    syncerState  := { currentValue  := activeVideo
-                      nextValue     := none
-                      previousValue := activeVideo
-                      keepUnless    := standardKeepUnless false }
-    edges        := splitEdges ++ audioEdges ++ videoEdges
-    outputChains := chain }
+  let audioSw : SwitchState := ⟨activeAudio, none, activeAudio, standardKeepUnless false⟩
+  let videoSw : SwitchState := ⟨activeVideo, none, activeVideo, standardKeepUnless false⟩
+  { mode              := .differentOutputsSameTracksSplitAV
+    outputs           := audioOuts ++ videoOuts
+    audioOutputs      := audioOuts
+    videoOutputs      := videoOuts
+    switchState       := audioSw
+    audioSwitchState  := audioSw
+    videoSwitchState  := videoSw
+    syncerState       := videoSw
+    edges             := splitEdges ++ audioEdges ++ videoEdges
+    outputChains      := chain }
 
 /-! ## Edge query -/
 
@@ -135,9 +138,12 @@ given source node, following matching edges through the graph. -/
 
 /-- Trace delivery of `pkt` from `src` through the wired pipeline.
     Returns the list of output IDs that the packet reaches.
+    `parentNode` tracks which node we traversed from, so that in SplitAV
+    mode we select the correct per-input switch (audio vs video).
     `fuel` bounds recursion depth to guarantee termination. -/
 def traceDelivery (wp : WiredPipeline) (src : PipeNodeID)
-    (pkt : PipePacket) (fuel : Nat := 3) : List PipeOutputID :=
+    (pkt : PipePacket) (parentNode : PipeNodeID := .inputAll)
+    (fuel : Nat := 3) : List PipeOutputID :=
   match fuel with
   | 0 => []
   | fuel' + 1 =>
@@ -146,11 +152,12 @@ def traceDelivery (wp : WiredPipeline) (src : PipeNodeID)
     matchingEdges.flatMap fun e =>
       match e.dst with
       | .outputInput id =>
-        let (_, decision) := outputSwitchGetState wp.switchState id pkt
+        let sw := wp.switchFor src
+        let (_, decision) := outputSwitchGetState sw id pkt
         match decision with
         | .pass => [id]
         | _     => []
-      | other => traceDelivery wp other pkt fuel'
+      | other => traceDelivery wp other pkt src fuel'
 
 /-! ## Operational delivery
 
