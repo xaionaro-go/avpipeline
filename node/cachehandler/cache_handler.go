@@ -142,7 +142,7 @@ func (h *CacheHandler) Reset(
 	ctx context.Context,
 ) {
 	logger.Debugf(ctx, "Reset")
-	defer func() { logger.Debugf(ctx, "/Reset: %v") }()
+	defer func() { logger.Debugf(ctx, "/Reset") }()
 	h.locker.Do(ctx, func() {
 		for _, p := range h.packetCache {
 			packet.Pool.Put(p.Packet)

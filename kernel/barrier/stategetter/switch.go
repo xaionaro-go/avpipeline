@@ -310,9 +310,11 @@ func (s *SwitchOutput) GetState(
 		}
 
 		if s.Flags.HasAny(types.SwitchFlagFirstPacketAfterSwitchPassBothOutputs) {
-			if previousValue != math.MinInt32 && s.FirstPacketOrFrameAfterSwitch == nil {
-				s.FirstPacketOrFrameAfterSwitch = pkt.Get()
-			}
+			s.CommitMutex.Do(ctx, func() {
+				if previousValue != math.MinInt32 && s.FirstPacketOrFrameAfterSwitch == nil {
+					s.FirstPacketOrFrameAfterSwitch = pkt.Get()
+				}
+			})
 		}
 
 		if s.Flags.HasAny(types.SwitchFlagForbidTakeoverInKeepUnless) {

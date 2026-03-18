@@ -223,7 +223,9 @@ func (n *NodeWithCustomData[C, T]) Flush(ctx context.Context) (_err error) {
 			return fmt.Errorf("unable to flush internal buffers of %v: %w", n, err)
 		}
 
-		n.updateProcInfoLocked(ctx)
+		// Use updateProcInfo (not updateProcInfoLocked) because Flush
+		// is called without holding the node lock.
+		n.updateProcInfo(ctx)
 		if n.IsDrained(ctx) {
 			break
 		}

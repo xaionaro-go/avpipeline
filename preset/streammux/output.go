@@ -1008,6 +1008,5 @@ func (o *Output[C]) SetForceNextFrameKey(
 	logger.Tracef(ctx, "Output[%d].SetForceNextFrameKey(%v)", o.ID, forceNextFrameKey)
 	defer func() { logger.Tracef(ctx, "/Output[%d].SetForceNextFrameKey(%v): %v", o.ID, forceNextFrameKey, _err) }()
 
-	o.TranscoderNode.Processor.Kernel.Encoder.SetForceNextKeyFrame(ctx, forceNextFrameKey)
-	return nil
+	return o.TranscoderNode.Processor.Kernel.Encoder.SetForceNextKeyFrame(ctx, forceNextFrameKey)
 }

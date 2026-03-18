@@ -473,13 +473,17 @@ func (e *Encoder[EF]) sendPacket(
 func (e *Encoder[EF]) SetForceNextKeyFrame(
 	ctx context.Context,
 	v bool,
-) {
+) error {
 	logger.Debugf(ctx, "SetForceNextKeyFrame: %v", v)
+	var errs []error
 	e.Locker.Do(xsync.WithNoLogging(ctx, true), func() {
 		for _, encoder := range e.encoders {
-			encoder.Encoder.SetForceNextKeyFrame(ctx, v)
+			if err := encoder.Encoder.SetForceNextKeyFrame(ctx, v); err != nil {
+				errs = append(errs, fmt.Errorf("unable to set force next key frame on encoder: %w", err))
+			}
 		}
 	})
+	return errors.Join(errs...)
 }
 
 func (e *Encoder[EF]) sendFrame(
@@ -1353,7 +1357,10 @@ func (e *Encoder[EF]) Flush(
 		}
 	}()
 
-	errCh := make(chan error, 1)
+	// Buffer must fit one error per encoder goroutine to avoid deadlock:
+	// if a sender blocks, its wg.Done() never runs, preventing wg.Wait()
+	// and close(errCh), which blocks the range loop.
+	errCh := make(chan error, len(e.encoders))
 
 	var wg sync.WaitGroup
 	wg.Add(1)

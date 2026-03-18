@@ -491,8 +491,8 @@ func (r *Transcoder[DF, EF]) ResetHard(
 func (r *Transcoder[DF, EF]) SetForceNextKeyFrame(
 	ctx context.Context,
 	v bool,
-) {
-	r.Encoder.SetForceNextKeyFrame(ctx, v)
+) error {
+	return r.Encoder.SetForceNextKeyFrame(ctx, v)
 }
 
 func (r *Transcoder[DF, EF]) IsDirty(

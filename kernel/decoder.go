@@ -785,7 +785,10 @@ func (d *Decoder[DF]) Flush(
 		}
 	}()
 
-	errCh := make(chan error, 1)
+	// Buffer must fit one error per decoder goroutine to avoid deadlock:
+	// if a sender blocks, its wg.Done() never runs, preventing wg.Wait()
+	// and close(errCh), which blocks the range loop.
+	errCh := make(chan error, len(d.Decoders))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
