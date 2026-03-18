@@ -199,6 +199,10 @@ func (g *SimpleGraph) ProcessFrame(
 			if err == astiav.ErrEof || err == astiav.ErrEagain {
 				break
 			}
+			// Return collected frames to the pool to avoid a leak.
+			for _, f := range result {
+				frame.Pool.Put(f)
+			}
 			return nil, fmt.Errorf("unable to get frame from filter: %w", err)
 		}
 		result = append(result, outFrame)

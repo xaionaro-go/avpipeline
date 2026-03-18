@@ -31,11 +31,11 @@ func NewGraph(
 		Inputs:      make(map[int]*Buffer),
 		Outputs:     make(map[int]*Buffer),
 	}
-	setFinalizerFree(ctx, g.FilterGraph)
 
 	if g.FilterGraph == nil {
 		return nil, fmt.Errorf("unable to allocate FilterGraph")
 	}
+	setFinalizerFree(ctx, g.FilterGraph)
 
 	useComplex := filterComplex != ""
 	var inputs, outputs []*astiav.FilterInOut

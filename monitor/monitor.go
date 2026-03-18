@@ -244,6 +244,8 @@ func (m *Monitor) observePacket(
 	case <-ctx.Done():
 		return ctx.Err()
 	case m.Events <- event:
+	default:
+		// Drop the event if the buffer is full to avoid stalling the pipeline
 	}
 	return nil
 }
@@ -252,7 +254,11 @@ func (m *Monitor) ObserveInputFrame(
 	ctx context.Context,
 	frame frame.Input,
 ) {
-	m.observeFrame(ctx, frame.Frame, frame.StreamInfo)
+	err := m.observeFrame(ctx, frame.Frame, frame.StreamInfo)
+	if err != nil {
+		logger.Errorf(ctx, "monitor observe input frame failed: %v", err)
+		return
+	}
 }
 
 func (m *Monitor) observeFrame(

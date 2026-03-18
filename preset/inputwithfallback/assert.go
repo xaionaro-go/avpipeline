@@ -13,5 +13,5 @@ func assert(
 	mustBeTrue bool,
 	extraArgs ...any,
 ) {
-	internal.Assert(ctx, mustBeTrue, extraArgs)
+	internal.Assert(ctx, mustBeTrue, extraArgs...)
 }

@@ -98,8 +98,7 @@ func (k *BaseWithFormatContext[H]) NotifyAboutPacketSource(
 	defer func() { logger.Debugf(ctx, "/NotifyAboutPacketSource(ctx, %T): %v", source, _ret) }()
 
 	if handler, ok := any(k.Handler).(packet.NotifyAboutPacketSourcer); ok {
-		handler.NotifyAboutPacketSource(ctx, source)
-		return
+		return handler.NotifyAboutPacketSource(ctx, source)
 	}
 
 	var errs []error

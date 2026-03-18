@@ -121,5 +121,5 @@ func (s *SwitchPacketCondition) Match(
 
 func (s *SwitchPacketCondition) String() string {
 	currentValue := s.CurrentValue.Load()
-	return fmt.Sprintf("SwitchCondition(%t: req:%d; cur:%d)", currentValue == s.RequiredValue, currentValue, s.RequiredValue)
+	return fmt.Sprintf("SwitchCondition(%t: req:%d; cur:%d)", currentValue == s.RequiredValue, s.RequiredValue, currentValue)
 }

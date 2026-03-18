@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
@@ -22,12 +21,13 @@ func (v IsKeyFrame) Match(
 	_ context.Context,
 	input packetorframe.InputUnion,
 ) bool {
+	// Use the nil-safe IsKey() methods instead of Flags().Has() to avoid
+	// nil dereferences when Frame or Packet is nil inside the union member.
 	if input.Frame != nil {
-		return bool(v) == input.Frame.Flags().Has(astiav.FrameFlagKey)
+		return bool(v) == input.Frame.IsKey()
 	}
 	if input.Packet == nil {
 		return false
 	}
-	isKeyFrame := input.Packet.Flags().Has(astiav.PacketFlagKey)
-	return bool(v) == isKeyFrame
+	return bool(v) == input.Packet.IsKey()
 }

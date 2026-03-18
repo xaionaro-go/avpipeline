@@ -181,8 +181,12 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		observability.Go(ctx, func(ctx context.Context) {
 			defer i.switchingProcN.Add(-1)
 			inputNext := i.getInputChainByID(ctx, InputID(to))
+			if inputNext == nil {
+				logger.Errorf(ctx, "Switch: target input %d not found", to)
+				return
+			}
 			if err := inputNext.Unpause(ctx); err != nil {
-				logger.Errorf(ctx, "Switch: unable to unpause the previous input %d: %v", to, err)
+				logger.Errorf(ctx, "Switch: unable to unpause the next input %d: %v", to, err)
 			}
 		})
 
@@ -207,6 +211,10 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		observability.Go(ctx, func(ctx context.Context) {
 			defer i.switchingProcN.Add(-1)
 			inputPrev := i.getInputChainByID(ctx, InputID(prevNext))
+			if inputPrev == nil {
+				logger.Errorf(ctx, "Switch: previous requested input %d not found", prevNext)
+				return
+			}
 			if err := inputPrev.Pause(ctx); err != nil {
 				logger.Errorf(ctx, "Switch: unable to pause the previous requested input %d: %v", prevNext, err)
 			}
@@ -257,6 +265,10 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 			observability.Go(ctx, func(ctx context.Context) {
 				defer i.switchingProcN.Add(-1)
 				inputPrev := i.getInputChainByID(ctx, InputID(inputID))
+				if inputPrev == nil {
+					logger.Errorf(ctx, "Switch: previous input %d not found", inputID)
+					return
+				}
 				if err := inputPrev.Pause(ctx); err != nil {
 					logger.Errorf(ctx, "Switch: unable to pause the previous input %d: %v", inputID, err)
 				}

@@ -76,7 +76,7 @@ func (h *AutoHeaders) sendInputLocked(
 			outputCh,
 		)
 	}
-	if h.CallCount.Add(1) > 1 {
+	if h.CallCount.Load() > 0 {
 		// there is no real reason to limit the amount of calls;
 		// but this is just for early misbehavior detection
 		return fmt.Errorf("this kernel is supposed to be used only once")
@@ -90,6 +90,10 @@ func (h *AutoHeaders) sendInputLocked(
 			return fmt.Errorf("unable to detect appropriate fixer kernel: %w", err)
 		}
 	}
+
+	// Only increment on success so that a transient failure doesn't permanently
+	// prevent recovery on the next call.
+	h.CallCount.Add(1)
 	if newKernel == nil {
 		newKernel = &kernel.Passthrough{} // no fixing is needed
 	}
@@ -154,8 +158,7 @@ func (h *AutoHeaders) detectAppropriateFixerKernel(
 	})
 	logger.Debugf(ctx, "output format: '%s'", outputFormatName)
 
-	isOOBHeadersInput := input.IsOOBHeaders()
-	isOOBHeadersInput = isOOBHeadersByFormatName(ctx, inputFormatName)
+	isOOBHeadersInput := input.IsOOBHeaders() || isOOBHeadersByFormatName(ctx, inputFormatName)
 	isOOBHeadersOutput := isOOBHeadersByFormatName(ctx, outputFormatName)
 	logger.Debugf(ctx, "isOOBHeaders: input:%t output:%t", isOOBHeadersInput, isOOBHeadersOutput)
 
