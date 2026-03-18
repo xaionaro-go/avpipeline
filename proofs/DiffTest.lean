@@ -12,3 +12,4 @@ import DiffTest.Resampler
 import DiffTest.Rational
 import DiffTest.Units
 import DiffTest.Statistics
+import DiffTest.Pipeline.FilterCondition

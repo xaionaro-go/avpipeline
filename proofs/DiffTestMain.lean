@@ -22,7 +22,8 @@ def main (args : List String) : IO Unit := do
   | ["rational"] => DiffTest.Rational.main
   | ["units"] => DiffTest.Units.main
   | ["statistics"] => DiffTest.Statistics.main
+  | ["pipeline-filter"] => DiffTest.Pipeline.FilterCondition.main
   | _ =>
     IO.eprintln "Usage: difftest <component>"
-    IO.eprintln "Components: condition, drain, graph, quality, reorderdts, monotonic, framerate, bitrate, reduceframerate, router, resampler, rational, units, statistics"
+    IO.eprintln "Components: condition, drain, graph, quality, reorderdts, monotonic, framerate, bitrate, reduceframerate, router, resampler, rational, units, statistics, pipeline-filter"
     IO.Process.exit 1
