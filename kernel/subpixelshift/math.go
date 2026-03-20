@@ -108,7 +108,7 @@ func fillGaps(
 					continue
 				}
 
-				var accSum, accWeight float64
+				var accSum float64
 				var neighbors int
 				for d := 0; d < 4; d++ {
 					nx := x + offX[d]
@@ -119,16 +119,14 @@ func fillGaps(
 					if weightSum[ny][nx] <= threshold {
 						continue
 					}
-					val := sum[ny][nx] / weightSum[ny][nx]
-					accSum += val
-					accWeight += 1.0
+					accSum += sum[ny][nx] / weightSum[ny][nx]
 					neighbors++
 				}
 				if neighbors == 0 {
 					continue
 				}
 
-				sum[y][x] = accSum / accWeight * 1.0
+				sum[y][x] = accSum / float64(neighbors)
 				weightSum[y][x] = 1.0
 				filled++
 			}
