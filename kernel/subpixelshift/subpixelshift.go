@@ -39,7 +39,7 @@ type Kernel struct {
 	hrChromaAccum   *hrGrid // chroma accumulation grid (half-res, 2 planes: U, V)
 	lastWidth       int
 	lastHeight      int
-	rgbWarnedOnce   bool
+	rgbWarnedOnce   atomic.Bool
 }
 
 type bufferedFrame struct {
@@ -560,10 +560,10 @@ func (k *Kernel) warnOnRGBMode(ctx context.Context) {
 	if ColorMode(k.ColorMode.Load()) != ColorModeRGB {
 		return
 	}
-	if k.rgbWarnedOnce {
+	if k.rgbWarnedOnce.Load() {
 		return
 	}
-	k.rgbWarnedOnce = true
+	k.rgbWarnedOnce.Store(true)
 	logger.Warnf(ctx, "ColorModeRGB is not yet implemented; falling back to YUV processing")
 }
 
