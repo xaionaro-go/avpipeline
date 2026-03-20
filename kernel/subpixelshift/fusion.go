@@ -119,7 +119,8 @@ func fuseFrame(
 			nearY := clampInt(int(math.Round(lrBaseY)), 0, lrH-1)
 			mdx, mdy := mf.displacementAt(nearX, nearY)
 
-			// Subtract motion to compensate: where was this pixel in the LR frame?
+			// Subtract motion to compensate: the displacement tells us how
+			// content moved, so we reverse it to find where to sample.
 			lx := lrBaseX - mdx
 			ly := lrBaseY - mdy
 

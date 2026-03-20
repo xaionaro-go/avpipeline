@@ -120,7 +120,7 @@ func (k *Kernel) SendInput(
 		return k.passthrough(ctx, input, outputCh)
 	}
 
-	return k.processVideoFrame(ctx, frameInput, input, outputCh)
+	return k.processVideoFrame(ctx, frameInput, outputCh)
 }
 
 func (k *Kernel) passthrough(
@@ -144,7 +144,6 @@ func (k *Kernel) passthrough(
 func (k *Kernel) processVideoFrame(
 	ctx context.Context,
 	frameInput *frame.Input,
-	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
 	yPlane := extractYPlane(frameInput)
@@ -190,11 +189,11 @@ func (k *Kernel) processVideoFrame(
 		if k.filled < halfBuf {
 			switch startupMode {
 			case StartupModePassthrough:
-				resultErr = k.bicubicUpscale(ctx, bf, frameInput, scale, outputCh)
+				resultErr = k.bilinearUpscaleFallback(ctx, bf, frameInput, scale, outputCh)
 			case StartupModeBuffer:
 				// No output yet; accumulating frames.
 			default:
-				resultErr = k.bicubicUpscale(ctx, bf, frameInput, scale, outputCh)
+				resultErr = k.bilinearUpscaleFallback(ctx, bf, frameInput, scale, outputCh)
 			}
 			return
 		}
@@ -205,26 +204,25 @@ func (k *Kernel) processVideoFrame(
 }
 
 // extractYPlane reads the Y (luma) plane from the frame as a 2D float64 slice.
+// It uses alignment=1 when reading bytes so the Y plane linesize in the
+// extracted buffer equals the frame width exactly.
 func extractYPlane(f *frame.Input) [][]float64 {
 	w := f.Width()
 	h := f.Height()
-	linesize := f.Linesize()
-	yLinesize := linesize[0]
-
-	if yLinesize <= 0 || w <= 0 || h <= 0 {
+	if w <= 0 || h <= 0 {
 		return nil
 	}
 
-	// Read the raw image bytes with alignment=1 to get actual pixel data.
+	// Bytes(1) packs planes with alignment=1, so Y linesize == width.
 	b, err := f.Data().Bytes(1)
-	if err != nil || len(b) < h*yLinesize {
+	if err != nil || len(b) < h*w {
 		return nil
 	}
 
 	plane := make([][]float64, h)
 	for y := 0; y < h; y++ {
 		row := make([]float64, w)
-		rowStart := y * yLinesize
+		rowStart := y * w
 		for x := 0; x < w; x++ {
 			row[x] = float64(b[rowStart+x])
 		}
@@ -376,25 +374,20 @@ func (k *Kernel) buildOutputFrame(
 		return fmt.Errorf("making output frame writable: %w", err)
 	}
 
-	linesize := outFrame.Linesize()
-	yLinesize := linesize[0]
-	uLinesize := linesize[1]
-	vLinesize := linesize[2]
-
-	// Build output image bytes: Y from hrPlane, U/V=128 (neutral chroma).
+	// Use alignment=1 for SetBytes so linesize == width for Y, width/2 for chroma.
 	chromaH := hrH / 2
 	chromaW := hrW / 2
 
-	ySize := yLinesize * hrH
-	uSize := uLinesize * chromaH
-	vSize := vLinesize * chromaH
+	ySize := hrW * hrH
+	uSize := chromaW * chromaH
+	vSize := chromaW * chromaH
 	totalSize := ySize + uSize + vSize
 
 	buf := make([]byte, totalSize)
 
 	// Y plane.
 	for y := 0; y < hrH; y++ {
-		rowOff := y * yLinesize
+		rowOff := y * hrW
 		for x := 0; x < hrW; x++ {
 			v := math.Round(clampFloat(hrPlane[y][x], 0, 255))
 			buf[rowOff+x] = byte(v)
@@ -404,7 +397,7 @@ func (k *Kernel) buildOutputFrame(
 	// U plane: fill with 128.
 	uOff := ySize
 	for y := 0; y < chromaH; y++ {
-		rowOff := uOff + y*uLinesize
+		rowOff := uOff + y*chromaW
 		for x := 0; x < chromaW; x++ {
 			buf[rowOff+x] = 128
 		}
@@ -413,7 +406,7 @@ func (k *Kernel) buildOutputFrame(
 	// V plane: fill with 128.
 	vOff := ySize + uSize
 	for y := 0; y < chromaH; y++ {
-		rowOff := vOff + y*vLinesize
+		rowOff := vOff + y*chromaW
 		for x := 0; x < chromaW; x++ {
 			buf[rowOff+x] = 128
 		}
@@ -441,9 +434,9 @@ func (k *Kernel) buildOutputFrame(
 	return nil
 }
 
-// bicubicUpscale produces a single-frame upscale using bilinear interpolation
-// on the Y plane (startup fallback).
-func (k *Kernel) bicubicUpscale(
+// bilinearUpscaleFallback produces a single-frame upscale using bilinear
+// interpolation on the Y plane (startup fallback before enough frames accumulate).
+func (k *Kernel) bilinearUpscaleFallback(
 	ctx context.Context,
 	bf *bufferedFrame,
 	refInput *frame.Input,
