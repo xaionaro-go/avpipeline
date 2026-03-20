@@ -65,6 +65,45 @@ func (mf *motionField) displacementAt(x, y int) (float64, float64) {
 	return mf.fieldX[cy][cx], mf.fieldY[cy][cx]
 }
 
+// scaled returns a new motion field with all displacements multiplied by s.
+// For 4:2:0 chroma, pass s=0.5 to convert luma-space motion to chroma-space.
+func (mf motionField) scaled(s float64) motionField {
+	if mf.isGlobal {
+		return motionField{
+			isGlobal:   true,
+			dx:         mf.dx * s,
+			dy:         mf.dy * s,
+			confidence: mf.confidence,
+		}
+	}
+
+	h := len(mf.fieldX)
+	if h == 0 {
+		return mf
+	}
+	w := len(mf.fieldX[0])
+
+	fx := make([][]float64, h)
+	fy := make([][]float64, h)
+	for y := 0; y < h; y++ {
+		rowX := make([]float64, w)
+		rowY := make([]float64, w)
+		for x := 0; x < w; x++ {
+			rowX[x] = mf.fieldX[y][x] * s
+			rowY[x] = mf.fieldY[y][x] * s
+		}
+		fx[y] = rowX
+		fy[y] = rowY
+	}
+
+	return motionField{
+		isGlobal:   false,
+		fieldX:     fx,
+		fieldY:     fy,
+		confidence: mf.confidence,
+	}
+}
+
 func clampInt(v, lo, hi int) int {
 	if v < lo {
 		return lo

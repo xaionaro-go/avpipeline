@@ -31,23 +31,33 @@ type Kernel struct {
 	BlockSize   uberatomic.Int32
 	StartupMode uberatomic.Int32
 
-	mu         xsync.Mutex
-	ringBuffer []*bufferedFrame
-	head       int
-	filled     int
-	hrAccum    *hrGrid
-	lastWidth  int
-	lastHeight int
+	mu              xsync.Mutex
+	ringBuffer      []*bufferedFrame
+	head            int
+	filled          int
+	hrAccum         *hrGrid // luma accumulation grid
+	hrChromaAccum   *hrGrid // chroma accumulation grid (half-res, 2 planes: U, V)
+	lastWidth       int
+	lastHeight      int
+	rgbWarnedOnce   bool
 }
 
 type bufferedFrame struct {
-	planes [][]float64
+	planes []planeData // [0]=Y (full res), [1]=U (half res), [2]=V (half res)
 	motion motionField
 	width  int
 	height int
 	pts    int64
 	dts    int64
 	dur    int64
+}
+
+// yPlane returns the luma plane data, or nil if no planes are present.
+func (bf *bufferedFrame) yPlane() [][]float64 {
+	if len(bf.planes) == 0 {
+		return nil
+	}
+	return bf.planes[0].data
 }
 
 var _ kerneltypes.Abstract = (*Kernel)(nil)
@@ -146,7 +156,9 @@ func (k *Kernel) processVideoFrame(
 	frameInput *frame.Input,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	yPlane := extractYPlane(frameInput)
+	k.warnOnRGBMode(ctx)
+
+	planes := extractPlanes(frameInput)
 	w := frameInput.Width()
 	h := frameInput.Height()
 
@@ -166,7 +178,7 @@ func (k *Kernel) processVideoFrame(
 		}
 
 		bf := &bufferedFrame{
-			planes: yPlane,
+			planes: planes,
 			motion: codecMF,
 			width:  w,
 			height: h,
@@ -203,27 +215,51 @@ func (k *Kernel) processVideoFrame(
 	return resultErr
 }
 
-// extractYPlane reads the Y (luma) plane from the frame as a 2D float64 slice.
-// It uses alignment=1 when reading bytes so the Y plane linesize in the
-// extracted buffer equals the frame width exactly.
-func extractYPlane(f *frame.Input) [][]float64 {
+// extractPlanes reads the Y, U, and V planes from a YUV420P frame as float64
+// slices. It uses alignment=1 when reading bytes so linesizes equal the plane
+// widths exactly. Returns nil if the frame is too small or unreadable.
+func extractPlanes(f *frame.Input) []planeData {
 	w := f.Width()
 	h := f.Height()
 	if w <= 0 || h <= 0 {
 		return nil
 	}
 
-	// Bytes(1) packs planes with alignment=1, so Y linesize == width.
+	chromaW := w / 2
+	chromaH := h / 2
+
+	ySize := w * h
+	uSize := chromaW * chromaH
+	vSize := chromaW * chromaH
+	totalSize := ySize + uSize + vSize
+
+	// Bytes(1) packs planes with alignment=1: Y then U then V contiguously.
 	b, err := f.Data().Bytes(1)
-	if err != nil || len(b) < h*w {
+	if err != nil || len(b) < totalSize {
 		return nil
 	}
 
-	plane := make([][]float64, h)
-	for y := 0; y < h; y++ {
-		row := make([]float64, w)
-		rowStart := y * w
-		for x := 0; x < w; x++ {
+	yData := bytesToFloat64Plane(b[:ySize], w, h)
+	uData := bytesToFloat64Plane(b[ySize:ySize+uSize], chromaW, chromaH)
+	vData := bytesToFloat64Plane(b[ySize+uSize:totalSize], chromaW, chromaH)
+
+	return []planeData{
+		{data: yData, width: w, height: h},
+		{data: uData, width: chromaW, height: chromaH},
+		{data: vData, width: chromaW, height: chromaH},
+	}
+}
+
+// bytesToFloat64Plane converts a flat byte buffer into a 2D float64 slice.
+func bytesToFloat64Plane(
+	b []byte,
+	width, height int,
+) [][]float64 {
+	plane := make([][]float64, height)
+	for y := 0; y < height; y++ {
+		row := make([]float64, width)
+		rowStart := y * width
+		for x := 0; x < width; x++ {
 			row[x] = float64(b[rowStart+x])
 		}
 		plane[y] = row
@@ -238,9 +274,12 @@ func (k *Kernel) flushBuffer() {
 	k.head = 0
 	k.filled = 0
 	k.hrAccum = nil
+	k.hrChromaAccum = nil
 }
 
-// performSR orchestrates multi-frame super-resolution fusion.
+// performSR orchestrates multi-frame super-resolution fusion for Y, U, and V.
+// Motion estimation runs on the Y plane only. The same motion field is applied
+// to chroma planes with displacements scaled by 0.5 (4:2:0 half-resolution).
 func (k *Kernel) performSR(
 	ctx context.Context,
 	scale int,
@@ -259,19 +298,28 @@ func (k *Kernel) performSR(
 
 	hrW := ref.width * scale
 	hrH := ref.height * scale
+	chromaHRW := (ref.width / 2) * scale
+	chromaHRH := (ref.height / 2) * scale
 
-	// Init or reset accumulation grid.
+	// Init or reset luma accumulation grid (1 plane).
 	if k.hrAccum == nil || k.hrAccum.width != hrW || k.hrAccum.height != hrH {
 		k.hrAccum = newHRGrid(hrW, hrH, 1)
 	} else {
 		k.hrAccum.reset()
 	}
 
+	// Init or reset chroma accumulation grid (2 planes: U, V).
+	if k.hrChromaAccum == nil || k.hrChromaAccum.width != chromaHRW || k.hrChromaAccum.height != chromaHRH {
+		k.hrChromaAccum = newHRGrid(chromaHRW, chromaHRH, 2)
+	} else {
+		k.hrChromaAccum.reset()
+	}
+
 	// Fuse each buffered frame.
 	for i := 0; i < k.filled; i++ {
 		idx := k.bufferIndex(i, bufSize)
 		bf := k.ringBuffer[idx]
-		if bf == nil || bf.planes == nil {
+		if bf == nil || len(bf.planes) == 0 {
 			continue
 		}
 
@@ -293,11 +341,22 @@ func (k *Kernel) performSR(
 			confidence = 0.1
 		}
 
-		fuseFrame(k.hrAccum, 0, bf.planes, mf, scale, age, confidence)
+		// Fuse luma (Y) plane.
+		fuseFrame(k.hrAccum, 0, bf.planes[0].data, mf, scale, age, confidence)
+
+		// Fuse chroma (U, V) planes with halved motion for 4:2:0.
+		if len(bf.planes) >= 3 {
+			chromaMF := mf.scaled(0.5)
+			fuseFrame(k.hrChromaAccum, 0, bf.planes[1].data, chromaMF, scale, age, confidence)
+			fuseFrame(k.hrChromaAccum, 1, bf.planes[2].data, chromaMF, scale, age, confidence)
+		}
 	}
 
-	hrPlane := extractHRPlane(&k.hrAccum.planes[0], hrW, hrH, 0.001)
-	return k.buildOutputFrame(ctx, hrPlane, hrW, hrH, ref, refInput, outputCh)
+	hrY := extractHRPlane(&k.hrAccum.planes[0], hrW, hrH, 0.001)
+	hrU := extractHRPlane(&k.hrChromaAccum.planes[0], chromaHRW, chromaHRH, 0.001)
+	hrV := extractHRPlane(&k.hrChromaAccum.planes[1], chromaHRW, chromaHRH, 0.001)
+
+	return k.buildOutputFrame(ctx, hrY, hrU, hrV, hrW, hrH, ref, refInput, outputCh)
 }
 
 // referenceIndex returns the ring buffer index of the center (reference) frame.
@@ -341,20 +400,22 @@ func (k *Kernel) estimateMotion(
 func (k *Kernel) phaseCorrelation(
 	ref, cur *bufferedFrame,
 ) motionField {
-	if ref.planes == nil || cur.planes == nil {
+	refY := ref.yPlane()
+	curY := cur.yPlane()
+	if refY == nil || curY == nil {
 		return zeroMotionField()
 	}
-	mf, err := estimateGlobalMotion(ref.planes, cur.planes)
+	mf, err := estimateGlobalMotion(refY, curY)
 	if err != nil {
 		return zeroMotionField()
 	}
 	return mf
 }
 
-// buildOutputFrame constructs the output astiav.Frame from the HR luma plane.
+// buildOutputFrame constructs the output astiav.Frame from the HR Y, U, and V planes.
 func (k *Kernel) buildOutputFrame(
 	ctx context.Context,
-	hrPlane [][]float64,
+	hrY, hrU, hrV [][]float64,
 	hrW, hrH int,
 	ref *bufferedFrame,
 	refInput *frame.Input,
@@ -386,31 +447,13 @@ func (k *Kernel) buildOutputFrame(
 	buf := make([]byte, totalSize)
 
 	// Y plane.
-	for y := 0; y < hrH; y++ {
-		rowOff := y * hrW
-		for x := 0; x < hrW; x++ {
-			v := math.Round(clampFloat(hrPlane[y][x], 0, 255))
-			buf[rowOff+x] = byte(v)
-		}
-	}
+	writePlaneToBuffer(buf[:ySize], hrY, hrW, hrH)
 
-	// U plane: fill with 128.
-	uOff := ySize
-	for y := 0; y < chromaH; y++ {
-		rowOff := uOff + y*chromaW
-		for x := 0; x < chromaW; x++ {
-			buf[rowOff+x] = 128
-		}
-	}
+	// U plane.
+	writePlaneToBuffer(buf[ySize:ySize+uSize], hrU, chromaW, chromaH)
 
-	// V plane: fill with 128.
-	vOff := ySize + uSize
-	for y := 0; y < chromaH; y++ {
-		rowOff := vOff + y*chromaW
-		for x := 0; x < chromaW; x++ {
-			buf[rowOff+x] = 128
-		}
-	}
+	// V plane.
+	writePlaneToBuffer(buf[ySize+uSize:totalSize], hrV, chromaW, chromaH)
 
 	if err := outFrame.Data().SetBytes(buf, 1); err != nil {
 		outFrame.Free()
@@ -434,8 +477,32 @@ func (k *Kernel) buildOutputFrame(
 	return nil
 }
 
+// writePlaneToBuffer writes a float64 2D plane into a byte buffer, clamping
+// values to [0, 255]. If the plane is nil or undersized, fills with 128
+// (neutral chroma / mid-gray luma).
+func writePlaneToBuffer(
+	buf []byte,
+	plane [][]float64,
+	width, height int,
+) {
+	if len(plane) < height {
+		for i := range buf {
+			buf[i] = 128
+		}
+		return
+	}
+
+	for y := 0; y < height; y++ {
+		rowOff := y * width
+		row := plane[y]
+		for x := 0; x < width; x++ {
+			buf[rowOff+x] = byte(math.Round(clampFloat(row[x], 0, 255)))
+		}
+	}
+}
+
 // bilinearUpscaleFallback produces a single-frame upscale using bilinear
-// interpolation on the Y plane (startup fallback before enough frames accumulate).
+// interpolation on all planes (startup fallback before enough frames accumulate).
 func (k *Kernel) bilinearUpscaleFallback(
 	ctx context.Context,
 	bf *bufferedFrame,
@@ -443,7 +510,7 @@ func (k *Kernel) bilinearUpscaleFallback(
 	scale int,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	if bf.planes == nil {
+	if len(bf.planes) == 0 {
 		return k.passthrough(ctx,
 			packetorframe.InputUnion{Frame: refInput},
 			outputCh,
@@ -452,18 +519,52 @@ func (k *Kernel) bilinearUpscaleFallback(
 
 	hrW := bf.width * scale
 	hrH := bf.height * scale
-	hrPlane := make2D(hrH, hrW)
+
+	hrY := bilinearUpscalePlane(bf.planes[0].data, hrW, hrH, scale)
+
+	chromaHRW := (bf.width / 2) * scale
+	chromaHRH := (bf.height / 2) * scale
+
+	var hrU, hrV [][]float64
+	if len(bf.planes) >= 3 {
+		hrU = bilinearUpscalePlane(bf.planes[1].data, chromaHRW, chromaHRH, scale)
+		hrV = bilinearUpscalePlane(bf.planes[2].data, chromaHRW, chromaHRH, scale)
+	}
+
+	return k.buildOutputFrame(ctx, hrY, hrU, hrV, hrW, hrH, bf, refInput, outputCh)
+}
+
+// bilinearUpscalePlane upscales a single plane by the given scale factor
+// using bilinear interpolation.
+func bilinearUpscalePlane(
+	plane [][]float64,
+	hrW, hrH int,
+	scale int,
+) [][]float64 {
+	hr := make2D(hrH, hrW)
 	scaleF := float64(scale)
 
 	for hy := 0; hy < hrH; hy++ {
 		for hx := 0; hx < hrW; hx++ {
 			lx := float64(hx) / scaleF
 			ly := float64(hy) / scaleF
-			hrPlane[hy][hx] = bilinearSample(bf.planes, lx, ly)
+			hr[hy][hx] = bilinearSample(plane, lx, ly)
 		}
 	}
+	return hr
+}
 
-	return k.buildOutputFrame(ctx, hrPlane, hrW, hrH, bf, refInput, outputCh)
+// warnOnRGBMode logs a one-time warning when ColorModeRGB is set, since RGB
+// processing is not yet implemented and falls back to YUV processing.
+func (k *Kernel) warnOnRGBMode(ctx context.Context) {
+	if ColorMode(k.ColorMode.Load()) != ColorModeRGB {
+		return
+	}
+	if k.rgbWarnedOnce {
+		return
+	}
+	k.rgbWarnedOnce = true
+	logger.Warnf(ctx, "ColorModeRGB is not yet implemented; falling back to YUV processing")
 }
 
 func ptrFrameOutput(o frame.Output) *frame.Output {
