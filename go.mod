@@ -57,9 +57,10 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
-	golang.org/x/image v0.31.0 // indirect
+	github.com/xaionaro-go/thermalmaster v0.0.0-20260322193013-09333653660a // indirect
+	golang.org/x/image v0.37.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	gonum.org/v1/plot v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120174246-409b4a993575 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -87,7 +88,7 @@ require (
 	github.com/xaionaro-go/spinlock v0.0.0-20200518175509-30e6d1ce68a1 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
-	golang.org/x/sys v0.40.0
+	golang.org/x/sys v0.42.0
 	lukechampine.com/blake3 v1.4.1 // indirect
 	tailscale.com v1.86.5
 )
