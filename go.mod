@@ -30,7 +30,7 @@ require (
 	github.com/xaionaro-go/xsync v0.0.0-20260103200624-2cd14b984747
 	go.uber.org/atomic v1.11.0
 	gocv.io/x/gocv v0.41.0
-	google.golang.org/grpc v1.79.2
+	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
 )
 
