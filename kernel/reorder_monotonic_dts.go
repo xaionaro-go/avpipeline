@@ -165,7 +165,17 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 	if len(r.ItemQueue) >= cap(r.ItemQueue) {
 		if r.DiscardUnorderedItems {
 			logger.Warnf(ctx, "the queue is full, discarding the DTS-oldest item")
-			heap.Pop(&r.ItemQueue)
+			discarded := heap.Pop(&r.ItemQueue)
+			discardedKey := InternalStreamKey{StreamIndex: discarded.GetStreamIndex()}
+			if reorderMonotonicDTSConsiderSource {
+				discardedKey.Source = discarded.GetSource()
+			}
+			if sq := r.StreamsDTSs[discardedKey]; sq != nil {
+				heap.Pop(sq)
+				if len(*sq) == 0 {
+					r.emptyQueuesCount++
+				}
+			}
 		} else {
 			logger.Warnf(ctx, "the queue is full, flushing one item from the queue to make space")
 			if err := r.sendOneItemFromQueue(ctx, outputCh); err != nil {

@@ -53,6 +53,9 @@ func (f *Filter) getFromStream(
 				}
 			}
 		})
+		if s == nil {
+			return nil
+		}
 		f.FromStream[streamIndex] = s
 		return s
 	})
@@ -75,6 +78,9 @@ func (f *Filter) getToStream(
 				}
 			}
 		})
+		if s == nil {
+			return nil
+		}
 		f.ToStream[streamIndex] = s
 		return s
 	})
@@ -86,6 +92,9 @@ func (f *Filter) Match(
 ) bool {
 	streamFrom := f.getFromStream(ctx, pkt.GetStreamIndex())
 	streamTo := f.getToStream(ctx, pkt.GetStreamIndex())
+	if streamFrom == nil || streamTo == nil {
+		return true
+	}
 	pkt.RescaleTs(streamFrom.TimeBase(), streamTo.TimeBase())
 	return true
 }
