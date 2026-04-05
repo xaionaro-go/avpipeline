@@ -752,11 +752,11 @@ func TestRetryable_PauseBeforeKernelSet_PausesBarrier(t *testing.T) {
 	// Unpause-then-Pause before the kernel opens. This is the
 	// critical scenario: between Unpause closing the barrier and
 	// the opener goroutine acquiring KernelLocker, Pause acquires
-	// it first and sees !KernelIsSet. The fix records PauseRequested
-	// and flips the barrier back to paused, so IsPaused must
-	// report true after Pause returns. Without the fix, the
-	// barrier stays closed, IsPaused returns false, and the opener
-	// goroutine proceeds to set up a kernel the caller didn't want.
+	// it first and sees !KernelIsSet. The fix flips the barrier
+	// back to paused, so IsPaused must report true after Pause
+	// returns. Without the fix, the barrier stays closed,
+	// IsPaused returns false, and the opener goroutine proceeds
+	// to set up a kernel the caller didn't want.
 	testifyassert.NoError(t, r.Unpause(ctx))
 	testifyassert.NoError(t, r.Pause(ctx))
 	testifyassert.True(

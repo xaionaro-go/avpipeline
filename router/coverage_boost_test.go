@@ -89,11 +89,9 @@ func TestRouteForwarding_DoCloseLocked_StopLockedError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Stop the forwarder first (which nils out StreamForwarder).
-	var wg sync.WaitGroup
 	fwd.Locker.Do(ctx, func() {
-		err = fwd.stopLocked(ctx, &wg)
+		err = fwd.stopLocked(ctx)
 	})
-	wg.Wait()
 	assert.NoError(t, err)
 	assert.Nil(t, fwd.StreamForwarder)
 	assert.Nil(t, fwd.Output)
@@ -1321,11 +1319,9 @@ func TestRouteForwarding_StopLocked_StreamForwarderStopError(t *testing.T) {
 	err = fwd.StreamForwarder.Stop(ctx)
 	assert.NoError(t, err)
 
-	var wg sync.WaitGroup
 	fwd.Locker.Do(ctx, func() {
-		err = fwd.stopLocked(ctx, &wg)
+		err = fwd.stopLocked(ctx)
 	})
-	wg.Wait()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already closed")
 

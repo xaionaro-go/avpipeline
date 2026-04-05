@@ -24,6 +24,7 @@ import (
 	"github.com/AndroidGoLab/ndk/audio"
 	aaudiocapi "github.com/AndroidGoLab/ndk/capi/aaudio"
 	"github.com/xaionaro-go/xsync"
+	"golang.org/x/sys/unix"
 )
 
 // AAudio natively supports S16 (and Float). We hardcode S16 as the
@@ -203,19 +204,22 @@ func (k *Microphone) Generate(
 	buffer := make([]byte, bufferBytes)
 	pending := make([]byte, 0, bufferBytes)
 
-	// Start PTS at 0 so audio shares an epoch with video. The Input kernel
-	// calibrates v4l2/android_camera video DTS to start at 0 (see the
-	// shiftCalibration mechanism in kernel/input.go), so emitting audio
-	// with a CLOCK_MONOTONIC-seeded PTS would give the two streams
-	// divergent epochs (0 vs ~device-uptime). The FLV muxer writes DTS as
-	// uint32 relative to the first packet's DTS, so a divergent epoch
-	// wraps the counter and poisons downstream consumers. Starting both
-	// streams at 0 keeps their timestamps in the same epoch; any initial
-	// wall-time skew between the camera's first frame and the mic's first
-	// sample is bounded by the capture-device startup gap (typically
-	// milliseconds) and is compensated for by downstream sync kernels.
-	pts := int64(0)
-	logger.Infof(ctx, "initial audio PTS: %d (sample_rate=%d)", pts, k.Config.SampleRate)
+	// Seed PTS from CLOCK_MONOTONIC so audio timestamps live on the same
+	// wall-time epoch as v4l2/android_camera video timestamps (which are
+	// also CLOCK_MONOTONIC-based). A reconnect keeps advancing from the
+	// current monotonic reading instead of restarting at 0, preserving
+	// audio/video epoch alignment across device disconnect/reopen.
+	//
+	// TODO: audio/video epoch alignment relies on the video capture
+	// chain also using CLOCK_MONOTONIC timestamps. If a synchronization
+	// kernel needs to align different epochs, it must do so here from
+	// actual timestamps — zeroing out capture timestamps at the source
+	// destroys the only wall-time reference the sync stage has.
+	pts, err := monotonicPTS(k.Config.SampleRate)
+	if err != nil {
+		return fmt.Errorf("unable to get initial monotonic PTS: %w", err)
+	}
+	logger.Infof(ctx, "initial audio PTS from CLOCK_MONOTONIC: %d (sample_rate=%d)", pts, k.Config.SampleRate)
 
 	readTimeoutNanos := k.Config.PollInterval.Nanoseconds()
 	if readTimeoutNanos <= 0 {
@@ -445,6 +449,21 @@ func disableSensorPrivacy(ctx context.Context) {
 		return
 	}
 	logger.Infof(ctx, "disabled microphone sensor privacy")
+}
+
+// monotonicPTS returns the current CLOCK_MONOTONIC time converted to audio
+// samples at the given sample rate. This produces PTS values in the same epoch
+// as v4l2/android_camera video timestamps, enabling the receiving side's DTS
+// reorder buffer to interleave audio and video without discarding either as
+// "too old".
+func monotonicPTS(sampleRate int) (int64, error) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return 0, fmt.Errorf("ClockGettime(CLOCK_MONOTONIC): %w", err)
+	}
+	pts := int64(ts.Sec)*int64(sampleRate) +
+		int64(ts.Nsec)*int64(sampleRate)/1_000_000_000
+	return pts, nil
 }
 
 func channelLayoutFromCount(channels int) (astiav.ChannelLayout, error) {

@@ -31,23 +31,13 @@ import (
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
 	"github.com/xaionaro-go/unsafetools"
+	"github.com/xaionaro-go/xsync"
 )
 
 const (
 	inputDefaultWidth  = 1920
 	inputDefaultHeight = 1080
 	inputDefaultFPS    = 30
-
-	// inputShiftCalibrationMaxPackets caps how many packets are buffered
-	// at startup to find the minimum raw DTS/PTS across streams before
-	// the PTS/DTS shift is committed. The min across streams (not the
-	// first captured packet) is the only basis that keeps every shifted
-	// timestamp non-negative. Exceeding this many packets without seeing
-	// at least one from every stream forces commit on the min seen so
-	// far; a stream that stays silent longer than that is rare and the
-	// cost of further buffering (memory + startup latency) would exceed
-	// the benefit.
-	inputShiftCalibrationMaxPackets = 60
 )
 
 type InputConfig = kerneltypes.InputConfig
@@ -84,8 +74,16 @@ type Input struct {
 
 	SyncStreamIndex atomic.Int64
 	ClockCalculator *ts.ClockCalculator
-	PTSShift        atomic.Int64
-	DTSShift        atomic.Int64
+	// PTSShifts and DTSShifts hold the per-stream shift applied to raw
+	// PTS/DTS when ForceStartPTS/ForceStartDTS are configured. Each
+	// stream's shift is computed from the first packet of THAT stream
+	// as (targetPTS - firstRawPTS) so every subsequent packet from the
+	// same stream remains non-negative relative to the target — a
+	// global shift computed from the first stream would overshift
+	// later-arriving streams with a lower raw timestamp and wrap them
+	// past zero.
+	PTSShifts xsync.Map[int, int64]
+	DTSShifts xsync.Map[int, int64]
 
 	OutputFilters []packetcondition.Condition
 
@@ -136,8 +134,6 @@ func NewInputFromURL(
 		}
 	}
 	i.SyncStreamIndex.Store(math.MinInt64)
-	i.PTSShift.Store(math.MinInt64)
-	i.DTSShift.Store(math.MinInt64)
 	defaultFPS := float64(inputDefaultFPS)
 
 	var formatName string
@@ -702,64 +698,39 @@ func (i *Input) Generate(
 		}
 	}()
 
-	// The PTS/DTS shift calibration holds back the first few packets so
-	// the committed shift is based on the minimum raw timestamp across
-	// every stream, not the first packet's — see shiftCalibration for
-	// the full rationale.
-	wantPTSCalibration := i.ForceStartPTS != globaltypes.PTSKeep
-	wantDTSCalibration := i.ForceStartDTS != globaltypes.PTSKeep
-	var calibration *shiftCalibration
-	var calibrationBuffered []*astiav.Packet
-	if wantPTSCalibration || wantDTSCalibration {
-		calibration = newShiftCalibration(
-			wantPTSCalibration,
-			wantDTSCalibration,
-			i.ForceStartPTS,
-			i.ForceStartDTS,
-			i.FormatContext.NbStreams(),
-			inputShiftCalibrationMaxPackets,
-		)
-	}
+	wantPTSShift := i.ForceStartPTS != globaltypes.PTSKeep
+	wantDTSShift := i.ForceStartDTS != globaltypes.PTSKeep
 
-	commitCalibration := func(ctx context.Context) {
-		ptsShift, dtsShift, hasPTSShift, hasDTSShift := calibration.Commit()
-		if hasPTSShift {
-			i.PTSShift.Store(ptsShift)
-			logger.Infof(ctx, "applying PTS shift of %d to input packets (min raw PTS across streams; %d packets calibrated, %d streams seen)", ptsShift, calibration.BufferedPackets(), calibration.StreamsSeen())
-		}
-		if hasDTSShift {
-			i.DTSShift.Store(dtsShift)
-			logger.Infof(ctx, "applying DTS shift of %d to input packets (min raw DTS across streams; %d packets calibrated, %d streams seen)", dtsShift, calibration.BufferedPackets(), calibration.StreamsSeen())
-		}
-	}
-	defer func() {
-		if calibration != nil && calibration.Active() {
-			// Flushing calibration buffer in the deferred cleanup path
-			// would fight with the outer prevPkts-flushing defer, so
-			// packets that never made it out of the buffer are simply
-			// released here. This only matches paths where Generate
-			// returns (close/EOF/error) before calibration committed.
-			for _, pkt := range calibrationBuffered {
-				pkt.Unref()
-				pkt.Free()
+	// applyPerStreamShift computes the shift for a stream on that
+	// stream's FIRST packet and caches it; every subsequent packet from
+	// the same stream is shifted by the cached value. A global shift
+	// computed from the first-read stream would poison later-arriving
+	// streams whose raw DTS begins below the first stream's, since
+	// target - firstStreamDTS + laterStreamDTS can easily go negative
+	// and wrap the FLV muxer's uint32 DTS field to ~4.29e9.
+	applyPerStreamShift := func(ctx context.Context, pkt *astiav.Packet, streamIndex int) {
+		if wantPTSShift && pkt.Pts() != astiav.NoPtsValue {
+			shift, ok := i.PTSShifts.Load(streamIndex)
+			if !ok {
+				shift = i.ForceStartPTS - pkt.Pts()
+				i.PTSShifts.Store(streamIndex, shift)
+				logger.Infof(ctx, "stream #%d: applying PTS shift of %d", streamIndex, shift)
 			}
-			calibrationBuffered = nil
+			pkt.SetPts(pkt.Pts() + shift)
 		}
-	}()
-
-	applyShift := func(pkt *astiav.Packet) {
-		if wantPTSCalibration && pkt.Pts() != astiav.NoPtsValue {
-			pkt.SetPts(pkt.Pts() + i.PTSShift.Load())
-		}
-		if wantDTSCalibration && pkt.Dts() != astiav.NoPtsValue {
-			pkt.SetDts(pkt.Dts() + i.DTSShift.Load())
+		if wantDTSShift && pkt.Dts() != astiav.NoPtsValue {
+			shift, ok := i.DTSShifts.Load(streamIndex)
+			if !ok {
+				shift = i.ForceStartDTS - pkt.Dts()
+				i.DTSShifts.Store(streamIndex, shift)
+				logger.Infof(ctx, "stream #%d: applying DTS shift of %d", streamIndex, shift)
+			}
+			pkt.SetDts(pkt.Dts() + shift)
 		}
 	}
 
 	// processPacket handles a single packet after its PTS/DTS shift has
-	// already been applied (or no shift is needed). It mirrors the body
-	// of the read loop so flushing the calibration buffer can reuse the
-	// same duration-fixup, DTS-fallback, and sendPkt logic.
+	// already been applied (or no shift is needed).
 	processPacket := func(
 		ctx context.Context,
 		pkt *astiav.Packet,
@@ -898,22 +869,6 @@ func (i *Input) Generate(
 		case io.EOF:
 			pkt.Free()
 			logger.Debugf(ctx, "end of input reached")
-			// Flush any packets still sitting in the calibration
-			// buffer — otherwise a short input whose calibration never
-			// committed during the loop would drop everything.
-			if calibration != nil && calibration.Active() && len(calibrationBuffered) > 0 {
-				commitCalibration(ctx)
-				flushed := calibrationBuffered
-				calibrationBuffered = nil
-				for _, bufPkt := range flushed {
-					applyShift(bufPkt)
-					bufStreamIndex := bufPkt.StreamIndex()
-					bufStream := avconv.FindStreamByIndex(ctx, i.FormatContext, bufStreamIndex)
-					if perr := processPacket(ctx, bufPkt, bufStreamIndex, bufStream); perr != nil {
-						return perr
-					}
-				}
-			}
 			return io.EOF
 		default:
 			pkt.Free()
@@ -933,44 +888,7 @@ func (i *Input) Generate(
 			len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
 		)
 
-		if calibration != nil && calibration.Active() {
-			rawPTS := pkt.Pts()
-			rawDTS := pkt.Dts()
-			calibrationBuffered = append(calibrationBuffered, pkt)
-			shouldCommit := calibration.Observe(
-				streamIndex,
-				rawPTS, rawPTS != astiav.NoPtsValue,
-				rawDTS, rawDTS != astiav.NoPtsValue,
-			)
-			if !shouldCommit {
-				continue
-			}
-			if calibration.StreamsSeen() < calibration.TotalStreams {
-				logger.Warnf(ctx,
-					"committing PTS/DTS shift calibration after %d packets without seeing every stream (seen %d of %d) — shift may be non-optimal for the unseen streams",
-					calibration.BufferedPackets(), calibration.StreamsSeen(), calibration.TotalStreams,
-				)
-			}
-			commitCalibration(ctx)
-
-			// Re-process every buffered packet through the shift-and-process
-			// path so nothing is lost and downstream observes the packets
-			// in their original arrival order (DTS now corrected by the
-			// committed shift).
-			flushed := calibrationBuffered
-			calibrationBuffered = nil
-			for _, bufPkt := range flushed {
-				applyShift(bufPkt)
-				bufStreamIndex := bufPkt.StreamIndex()
-				bufStream := avconv.FindStreamByIndex(ctx, i.FormatContext, bufStreamIndex)
-				if err := processPacket(ctx, bufPkt, bufStreamIndex, bufStream); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-
-		applyShift(pkt)
+		applyPerStreamShift(ctx, pkt, streamIndex)
 
 		if err := processPacket(ctx, pkt, streamIndex, stream); err != nil {
 			return err

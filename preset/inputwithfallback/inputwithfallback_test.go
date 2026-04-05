@@ -2,7 +2,6 @@ package inputwithfallback
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1391,7 +1390,7 @@ func TestInputChainAsCondition_Match_AddsInputChainAsSideData(t *testing.T) {
 // Pausing a chain whose underlying kernel has not yet been opened is
 // a no-op in Retryable (nothing to close), so the tests wait for the
 // retry kernel to open before calling Pause — otherwise the barrier
-// state stays "unpaused" and subsequent invariant checks misfire.
+// state stays "unpaused" and subsequent assertions misfire.
 
 // newPauseTestIWF builds an InputWithFallback with a cancellable
 // context and arranges cleanup so retry loops exit before Close
@@ -1446,37 +1445,10 @@ func waitForKernelOpen(
 	t.Fatalf("kernel for chain %d did not open within timeout", chain.ID)
 }
 
-// TestInputWithFallback_PauseChain_SoleActive_Rejected is the primary
-// regression check: pausing the last unpaused chain must fail and
-// leave the chain's state untouched, never closing its kernel.
-func TestInputWithFallback_PauseChain_SoleActive_Rejected(t *testing.T) {
-	f1 := &mockInputFactory{name: "primary"}
-	f2 := &mockInputFactory{name: "fallback"}
-	iwf, ctx := newPauseTestIWF(t, f1, f2)
-
-	// Unpause chain 0 and wait for its kernel to open so subsequent
-	// Pause calls actually flip the barrier.
-	require.NoError(t, iwf.InputChains[0].Unpause(ctx))
-	waitForKernelOpen(t, iwf.InputChains[0])
-	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx))
-	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
-
-	// Pausing the sole active chain must fail with the sentinel error
-	// — and must not touch the chain's state.
-	err := iwf.PauseChain(ctx, 0)
-	require.Error(t, err)
-	var sentinel ErrCannotPauseSoleActiveChain
-	testifyassert.True(t, errors.As(err, &sentinel),
-		"expected ErrCannotPauseSoleActiveChain, got %T: %v", err, err)
-	testifyassert.Equal(t, InputID(0), sentinel.ID)
-	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx),
-		"rejected PauseChain must not mutate the chain's paused state")
-}
-
-// TestInputWithFallback_PauseChain_WithOtherActive_Succeeds covers the
-// good path: when another chain is already unpaused, pausing a second
-// one is safe and PauseChain honors the request.
-func TestInputWithFallback_PauseChain_WithOtherActive_Succeeds(t *testing.T) {
+// TestInputWithFallback_PauseChain_Succeeds covers the happy path:
+// PauseChain pauses the requested chain regardless of how many other
+// chains remain active.
+func TestInputWithFallback_PauseChain_Succeeds(t *testing.T) {
 	f1 := &mockInputFactory{name: "primary"}
 	f2 := &mockInputFactory{name: "fallback"}
 	iwf, ctx := newPauseTestIWF(t, f1, f2)
@@ -1494,27 +1466,21 @@ func TestInputWithFallback_PauseChain_WithOtherActive_Succeeds(t *testing.T) {
 	testifyassert.True(t, iwf.InputChains[0].IsPaused(ctx))
 	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
 
-	// Now pausing chain 1 must fail — it is the sole active chain.
-	err := iwf.PauseChain(ctx, 1)
-	require.Error(t, err)
-	testifyassert.True(t, errors.As(err, &ErrCannotPauseSoleActiveChain{}))
-	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
+	// Pausing chain 1 is also permitted — callers may intend to
+	// suspend all chains.
+	require.NoError(t, iwf.PauseChain(ctx, 1))
+	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
 }
 
 // TestInputWithFallback_PauseChain_AlreadyPaused_NoOp verifies that
-// pausing an already-paused chain is a silent no-op (no error, no
-// invariant check). This matters because the gRPC layer may receive
-// idempotent stop requests.
+// pausing an already-paused chain is a silent no-op. This matters
+// because the gRPC layer may receive idempotent stop requests.
 func TestInputWithFallback_PauseChain_AlreadyPaused_NoOp(t *testing.T) {
 	ctx := context.Background()
 	f1 := &mockInputFactory{name: "primary"}
 	f2 := &mockInputFactory{name: "fallback"}
 	iwf := newTestIWF(t, f1, f2)
 
-	// Both chains start paused. Pausing chain 1 is a no-op even
-	// though the "sole active chain" count (0 unpaused chains) would
-	// otherwise fail the invariant — because the count does not
-	// change.
 	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
 	require.NoError(t, iwf.PauseChain(ctx, 1))
 	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
@@ -1533,8 +1499,7 @@ func TestInputWithFallback_PauseChain_InvalidID(t *testing.T) {
 }
 
 // TestInputWithFallback_UnpauseChain_Succeeds covers the symmetric
-// unpause path. Unpause has no invariant to enforce, so it simply
-// delegates.
+// unpause path.
 func TestInputWithFallback_UnpauseChain_Succeeds(t *testing.T) {
 	factory := &mockInputFactory{name: "test-factory"}
 	iwf, ctx := newPauseTestIWF(t, factory)
@@ -1554,15 +1519,6 @@ func TestInputWithFallback_UnpauseChain_InvalidID(t *testing.T) {
 	err := iwf.UnpauseChain(ctx, InputID(5))
 	require.Error(t, err)
 	testifyassert.Contains(t, err.Error(), "not found")
-}
-
-// TestErrCannotPauseSoleActiveChain_ErrorMessage pins the error message
-// so callers can rely on it in log output / status codes.
-func TestErrCannotPauseSoleActiveChain_ErrorMessage(t *testing.T) {
-	e := ErrCannotPauseSoleActiveChain{ID: 3}
-	msg := e.Error()
-	testifyassert.Contains(t, msg, "3")
-	testifyassert.Contains(t, msg, "sole active chain")
 }
 
 // TestInputWithFallback_Close_NoDeadlockWithActiveChain is the

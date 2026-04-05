@@ -184,12 +184,10 @@ func TestInput_FramerateDerivationFromPTS(t *testing.T) {
 }
 
 // TestInput_ForceStartDTSNoNegativeOutput verifies that when ForceStartDTS
-// is configured, the shift calibration emits every packet with DTS
-// (and PTS) at or above the target — regardless of how the first read
-// packet compares to later packets. A shift committed from the first
-// packet alone would leave later packets with lower raw DTS negative,
-// which the FLV muxer writes as uint32 and wraps to ~4.29e9, poisoning
-// every downstream consumer.
+// is configured, the per-stream shift keeps every emitted packet at or
+// above ForceStartDTS. Each stream's shift is computed from its own
+// first packet, so a second stream arriving with a lower raw DTS does
+// not wrap around.
 // Agent-generated test.
 func TestInput_ForceStartDTSNoNegativeOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -244,12 +242,12 @@ func TestInput_ForceStartDTSNoNegativeOutput(t *testing.T) {
 	assertT.Equal(t, forceStart, minPTS, "the minimum PTS across output packets must match ForceStartPTS")
 }
 
-// TestInput_ForceStartCalibrationSingleStream verifies the shift
-// calibration's correctness on a well-behaved single-stream input: the
-// committed shift equals ForceStartDTS minus the raw DTS of the first
-// (and only) source of packets.
+// TestInput_ForceStartPerStreamShiftSingleStream verifies the
+// per-stream shift on a well-behaved single-stream input: the stored
+// shift for that stream equals ForceStartDTS minus the raw DTS of the
+// stream's first packet.
 // Agent-generated test.
-func TestInput_ForceStartCalibrationSingleStream(t *testing.T) {
+func TestInput_ForceStartPerStreamShiftSingleStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -273,16 +271,13 @@ func TestInput_ForceStartCalibrationSingleStream(t *testing.T) {
 	}
 	close(outputCh)
 
-	// Calibration must have committed (otherwise we would have released
-	// packets without sending them).
-	assertT.NotEqual(t, int64(math.MinInt64), input.DTSShift.Load(),
-		"DTS shift must be committed after packets were drained")
-	assertT.NotEqual(t, int64(math.MinInt64), input.PTSShift.Load(),
-		"PTS shift must be committed after packets were drained")
-
 	// testsrc emits PTS=0, 1, 2, ... in its native 25fps time base. The
-	// shift maps raw 0 to forceStart, so the stored shift equals
-	// forceStart exactly.
-	assertT.Equal(t, forceStart, input.DTSShift.Load())
-	assertT.Equal(t, forceStart, input.PTSShift.Load())
+	// per-stream shift maps raw 0 to forceStart, so the stored shift
+	// equals forceStart exactly.
+	dtsShift, ok := input.DTSShifts.Load(0)
+	require.True(t, ok, "per-stream DTS shift must be set after packets were drained")
+	assertT.Equal(t, forceStart, dtsShift)
+	ptsShift, ok := input.PTSShifts.Load(0)
+	require.True(t, ok, "per-stream PTS shift must be set after packets were drained")
+	assertT.Equal(t, forceStart, ptsShift)
 }

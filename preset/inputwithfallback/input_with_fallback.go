@@ -146,25 +146,9 @@ func (i *InputWithFallback[K, DF, C]) GetInputChainsCount(
 	})
 }
 
-// ErrCannotPauseSoleActiveChain is returned by PauseChain when pausing the
-// target chain would leave zero unpaused chains. Pausing the only active
-// chain closes its underlying kernel, which stops packet production and
-// leaves the pipeline with no input source — a state callers generally
-// do not intend.
-type ErrCannotPauseSoleActiveChain struct {
-	ID InputID
-}
-
-func (e ErrCannotPauseSoleActiveChain) Error() string {
-	return fmt.Sprintf("cannot pause input chain %d: it is the sole active chain; pausing it would leave zero active chains and stop the pipeline", e.ID)
-}
-
-// PauseChain pauses the input chain at the given ID, enforcing the
-// invariant that at least one chain remains unpaused. If pausing would
-// leave zero active chains, it returns ErrCannotPauseSoleActiveChain
-// without touching the chain. Pausing an already-paused chain is a
-// no-op (and does not trigger the invariant check, since the active-chain
-// count is unchanged).
+// PauseChain pauses the input chain at the given ID. Pausing all chains
+// will suspend packet production until at least one chain is unpaused.
+// Pausing an already-paused chain is a no-op.
 func (i *InputWithFallback[K, DF, C]) PauseChain(
 	ctx context.Context,
 	id InputID,
@@ -182,30 +166,10 @@ func (i *InputWithFallback[K, DF, C]) pauseChainLocked(
 	if chain == nil {
 		return fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
 	}
-	// No-op: already paused means the active-chain count does not
-	// decrease, so skip the invariant check.
-	if chain.IsPaused(ctx) {
-		return nil
-	}
-	// Count unpaused chains other than the target. If zero remain,
-	// pausing the target would violate the invariant.
-	otherActive := 0
-	for _, c := range i.InputChains {
-		if c == chain {
-			continue
-		}
-		if !c.IsPaused(ctx) {
-			otherActive++
-		}
-	}
-	if otherActive == 0 {
-		return ErrCannotPauseSoleActiveChain{ID: id}
-	}
 	return chain.Pause(ctx)
 }
 
-// UnpauseChain unpauses the input chain at the given ID. Unpausing
-// never violates the active-chain invariant, so no guard is needed.
+// UnpauseChain unpauses the input chain at the given ID.
 func (i *InputWithFallback[K, DF, C]) UnpauseChain(
 	ctx context.Context,
 	id InputID,

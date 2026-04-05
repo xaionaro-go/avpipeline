@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,8 +54,7 @@ func TestRouteForwarding_StopLocked_NilStreamForwarderAndOutput(t *testing.T) {
 	fwd := &RouteForwarding[any]{}
 	// stopLocked with nil StreamForwarder and nil Output should not panic.
 	fwd.Locker.Do(ctx, func() {
-		var wg sync.WaitGroup
-		err := fwd.stopLocked(ctx, &wg)
+		err := fwd.stopLocked(ctx)
 		assert.NoError(t, err)
 	})
 }
@@ -298,11 +296,9 @@ func TestRouteForwarding_StopLocked_WithOutput(t *testing.T) {
 		Output: output,
 	}
 
-	var wg sync.WaitGroup
 	fwd.Locker.Do(ctx, func() {
-		err = fwd.stopLocked(ctx, &wg)
+		err = fwd.stopLocked(ctx)
 	})
-	wg.Wait()
 	// Output.Close fails here because the fwd was never actually added as
 	// a publisher to the output route, so RemovePublisherLocked returns
 	// "publisher not found". stopLocked now surfaces that error instead

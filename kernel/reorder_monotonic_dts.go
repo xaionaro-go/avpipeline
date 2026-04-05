@@ -26,15 +26,6 @@ import (
 
 const (
 	reorderMonotonicDTSConsiderSource = true
-
-	// reorderMonotonicDTSDiffResetRatio multiplies MaxDTSDifference to
-	// form a "pathological gap" threshold. When the observed DTS gap
-	// crosses this threshold, ReorderMonotonicDTS treats the previously
-	// tracked timestamps as poisoned (e.g. an upstream FLV muxer wrote
-	// a negative int64 to a uint32 timestamp field and wrapped to ~4.29e9)
-	// and resets its tracking instead of discarding every subsequent
-	// packet indefinitely.
-	reorderMonotonicDTSDiffResetRatio = 1000
 )
 
 type InternalStreamKey struct {
@@ -166,11 +157,7 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 ) (_err error) {
 	dts := item.GetDTS()
 	newItemDTS := avconv.Duration(dts, item.GetTimeBase())
-	shouldContinue, err := r.enforceLowDTSDifference(ctx, newItemDTS, outputCh)
-	if err != nil {
-		return fmt.Errorf("unable to enforce low enough DTS difference: %w", err)
-	}
-	if !shouldContinue {
+	if !r.enforceLowDTSDifference(ctx, newItemDTS) {
 		logger.Debugf(ctx, "skipping the item")
 		return nil
 	}
@@ -243,58 +230,33 @@ func (r *ReorderMonotonicDTS) EmptyQueuesCount(ctx context.Context) uint {
 func (r *ReorderMonotonicDTS) enforceLowDTSDifference(
 	ctx context.Context,
 	newItemDTS time.Duration,
-	outputCh chan<- packetorframe.OutputUnion,
-) (bool, error) {
-	currentDTSOptional := r.CurrentDTS()
-	if !currentDTSOptional.IsSet() {
-		return true, nil
+) bool {
+	var reference time.Duration
+	var hasReference bool
+	if currentDTSOptional := r.CurrentDTS(); currentDTSOptional.IsSet() {
+		reference = currentDTSOptional.Get()
+		hasReference = true
+	} else if r.PrevDTS != 0 {
+		// Queue is empty but we have already emitted packets; use the
+		// last emitted DTS as the frontier so we still reject poisoned
+		// timestamps that arrive after a drain.
+		reference = r.PrevDTS
+		hasReference = true
+	}
+	if !hasReference {
+		return true
 	}
 
-	currentDTS := currentDTSOptional.Get()
-	dtsDiff := newItemDTS - currentDTS
-	resetThreshold := r.MaxDTSDifference * reorderMonotonicDTSDiffResetRatio
-	if resetThreshold > 0 && (-dtsDiff > resetThreshold || dtsDiff > resetThreshold) {
-		// A pathologically large gap in either direction almost always
-		// means an upstream timestamp wrap (e.g. FLV muxer wrote a
-		// negative int64 to a uint32 field, wrapping to ~4.29e9).
-		// Flush the queue and accept the new item: discarding either
-		// side could starve a stream permanently if that side's
-		// packets keep arriving at the poisoned range, whereas
-		// flushing resets the reference and lets whichever epoch
-		// "wins" going forward drive the pipeline instead of blocking
-		// it.
-		logger.Errorf(ctx, "DTS gap %v exceeds reset threshold %v; flushing queue (current %v, new %v) — upstream timestamps are likely corrupted", dtsDiff, resetThreshold, currentDTS, newItemDTS)
-		for len(r.ItemQueue) > 0 {
-			if err := r.sendOneItemFromQueue(ctx, outputCh); err != nil {
-				return false, err
-			}
-		}
-		r.PrevDTS = 0
-		return true, nil
-	}
+	dtsDiff := newItemDTS - reference
 	switch {
 	case -dtsDiff > r.MaxDTSDifference:
-		logger.Warnf(ctx, "received too old item (packet or frame): DTS:%v is lesser than %v-%v; discarding it", newItemDTS, currentDTS, r.MaxDTSDifference)
-		return false, nil
+		logger.Errorf(ctx, "ReorderMonotonicDTS: DTS gap %v exceeds pathological threshold %v, discarding packet", -dtsDiff, r.MaxDTSDifference)
+		return false
 	case dtsDiff > r.MaxDTSDifference:
-		logger.Warnf(ctx, "received an item way newer than previously known items (packets or/and frames): DTS %v is greater than %v+%v; submitting old items", newItemDTS, currentDTS, r.MaxDTSDifference)
-		for {
-			currentDTS := r.CurrentDTS()
-			if !currentDTS.IsSet() {
-				break
-			}
-			if currentDTS.Get()+r.MaxDTSDifference >= newItemDTS {
-				break
-			}
-
-			if err := r.sendOneItemFromQueue(ctx, outputCh); err != nil {
-				return false, err
-			}
-
-		}
+		logger.Errorf(ctx, "ReorderMonotonicDTS: DTS gap %v exceeds pathological threshold %v, discarding packet", dtsDiff, r.MaxDTSDifference)
+		return false
 	}
-
-	return true, nil
+	return true
 }
 
 func (r *ReorderMonotonicDTS) sendOneItemFromQueue(
@@ -358,25 +320,11 @@ func (r *ReorderMonotonicDTS) doSendItem(
 	}()
 	dts := avconv.Duration(item.GetDTS(), item.GetTimeBase())
 	if r.PrevDTS > dts {
-		// A pathologically large backward jump in PrevDTS means the
-		// value was poisoned by an upstream timestamp wrap (e.g. FLV's
-		// uint32 timestamp field wrapped to ~4.29e9). Reset PrevDTS
-		// and accept the new packet instead of discarding every
-		// subsequent one indefinitely. Comparing in Duration units
-		// means this trips only on gross real-time corruption, not on
-		// raw-integer differences caused by unrelated timebases.
-		resetThreshold := r.MaxDTSDifference * reorderMonotonicDTSDiffResetRatio
-		gap := r.PrevDTS - dts
-		switch {
-		case resetThreshold > 0 && gap > resetThreshold:
-			logger.Errorf(ctx, "PrevDTS %v is pathologically ahead of new item DTS %v (gap %v); resetting PrevDTS — upstream timestamps are likely corrupted", r.PrevDTS, dts, gap)
-			r.PrevDTS = dts
-		case r.DiscardUnorderedItems:
+		if r.DiscardUnorderedItems {
 			logger.Warnf(ctx, "DTS went backwards: previous DTS was %v, now it is %v (%d); discarding the item", r.PrevDTS, dts, item.GetDTS())
 			return nil
-		default:
-			return fmt.Errorf("DTS went backwards: previous DTS was %v, now it is %v (%d)", r.PrevDTS, dts, item.GetDTS())
 		}
+		return fmt.Errorf("DTS went backwards: previous DTS was %v, now it is %v (%d)", r.PrevDTS, dts, item.GetDTS())
 	}
 	r.PrevDTS = dts
 

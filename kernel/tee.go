@@ -160,39 +160,32 @@ func (t Tee[K]) Close(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// CloseChan returns a channel that is closed as soon as ANY non-nil child
+// kernel's CloseChan closes. This matches Generate's first-error-wins
+// semantics: if any child closes, the Tee is effectively closed.
 func (t Tee[K]) CloseChan() <-chan struct{} {
 	if len(t) == 0 {
 		return nil
 	}
-	// collect non-nil child channels
 	var chans []<-chan struct{}
 	for _, k := range t {
-		ch := k.CloseChan()
-		if ch != nil {
+		if ch := k.CloseChan(); ch != nil {
 			chans = append(chans, ch)
 		}
 	}
 	if len(chans) == 0 {
 		return nil
 	}
-	merged := make(chan struct{})
-	observability.Go(context.Background(), func(ctx context.Context) {
-		var wg sync.WaitGroup
-		for _, ch := range chans {
-			wg.Add(1)
-			ch := ch
-			observability.Go(ctx, func(ctx context.Context) {
-				defer wg.Done()
-				select {
-				case <-ch:
-				case <-ctx.Done():
-				}
-			})
-		}
-		wg.Wait()
-		close(merged)
-	})
-	return merged
+	result := make(chan struct{})
+	var once sync.Once
+	for _, ch := range chans {
+		ch := ch
+		observability.Go(context.Background(), func(ctx context.Context) {
+			<-ch
+			once.Do(func() { close(result) })
+		})
+	}
+	return result
 }
 
 // WithOutputFormatContext implements packet.Source: calls every child

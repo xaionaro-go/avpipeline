@@ -120,8 +120,7 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 	defer fwd.WaitGroup.Done()
 	defer func() {
 		if _err != nil {
-			var wg sync.WaitGroup
-			fwd.stopLocked(ctx, &wg)
+			fwd.stopLocked(ctx)
 		}
 	}()
 
@@ -194,14 +193,11 @@ func (fwd *RouteForwarding[T]) stop(
 ) (_err error) {
 	logger.Debugf(ctx, "stop")
 	defer func() { logger.Debugf(ctx, "/stop: %v", _err) }()
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.stopLocked, ctx, &wg)
+	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.stopLocked, ctx)
 }
 
 func (fwd *RouteForwarding[T]) stopLocked(
 	ctx context.Context,
-	wg *sync.WaitGroup,
 ) (_err error) {
 	logger.Debugf(ctx, "stopLocked")
 	defer func() { logger.Debugf(ctx, "/stopLocked: %v", _err) }()
@@ -238,21 +234,18 @@ func (fwd *RouteForwarding[T]) Close(
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	defer fwd.WaitGroup.Wait()
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	return xsync.DoA2R1(ctx, &fwd.Locker, fwd.doCloseLocked, ctx, &wg)
+	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.doCloseLocked, ctx)
 }
 
 func (fwd *RouteForwarding[T]) doCloseLocked(
 	ctx context.Context,
-	wg *sync.WaitGroup,
 ) (_err error) {
 	if fwd.CancelFunc == nil {
 		return nil
 	}
 	fwd.CancelFunc()
 	fwd.CancelFunc = nil
-	err := fwd.stopLocked(ctx, wg)
+	err := fwd.stopLocked(ctx)
 	if err != nil {
 		return err
 	}

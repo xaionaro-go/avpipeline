@@ -35,7 +35,6 @@ type Retryable[K Abstract] struct {
 	KernelLocker      xsync.CtxLocker
 	KernelError       error
 	KernelOpenBarrier xatomic.Pointer[chan struct{}]
-	PauseRequested    bool
 }
 
 func NewRetryable[K Abstract](
@@ -184,9 +183,14 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			r.KernelIsSet = true
 			// If Pause was called while the kernel was being opened,
 			// honour that pause intent now. Otherwise the caller's pause
-			// would silently be lost.
-			if r.PauseRequested {
-				logger.Debugf(ctx, "PauseRequested is set, applying pause to the freshly opened kernel")
+			// would silently be lost. We detect this by checking the
+			// barrier directly (non-blocking): if it is paused (channel
+			// open), close the freshly-opened kernel.
+			select {
+			case <-*r.KernelOpenBarrier.Load():
+				// barrier is open (closed channel) — fine, continue
+			default:
+				logger.Debugf(ctx, "pause was requested during kernel open; closing kernel")
 				var zeroValue K
 				closeErr := r.Kernel.Close(ctx)
 				if closeErr != nil {
@@ -194,8 +198,6 @@ func (r *Retryable[K]) openKernelIfNeeded(
 				}
 				r.Kernel = zeroValue
 				r.KernelIsSet = false
-				r.PauseRequested = false
-				r.pauseKernelOpening(ctx)
 			}
 			return
 		}
@@ -319,12 +321,6 @@ func (r *Retryable[K]) String() string {
 }
 
 func (r *Retryable[K]) Unpause(ctx context.Context) (_err error) {
-	// Clear any deferred pause intent: the caller is explicitly asking
-	// for the kernel to be opened, which overrides a prior Pause that
-	// was recorded while the kernel was not yet set.
-	r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
-		r.PauseRequested = false
-	})
 	r.unpauseKernelOpening(ctx)
 	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
@@ -365,13 +361,12 @@ func (r *Retryable[K]) Pause(ctx context.Context) (_err error) {
 func (r *Retryable[K]) pauseLocked(ctx context.Context) error {
 	if !r.KernelIsSet {
 		// The kernel has not been opened yet, so there is nothing to
-		// close. Record the pause intent so that openKernelIfNeeded
-		// applies it as soon as the kernel is opened, and flip the
-		// barrier so that openKernelIfNeeded does not start opening a
-		// fresh kernel. Without this, the caller's pause would
+		// close. Flip the barrier so that openKernelIfNeeded does not
+		// start opening a fresh kernel, and so that any concurrent
+		// open that already has a kernel will close it upon seeing
+		// the paused barrier. Without this, the caller's pause would
 		// silently be lost and any in-flight open would proceed.
-		logger.Debugf(ctx, "kernel is not set, recording pause intent")
-		r.PauseRequested = true
+		logger.Debugf(ctx, "kernel is not set, flipping barrier to paused")
 		r.pauseKernelOpening(ctx)
 		return nil
 	}
@@ -381,7 +376,6 @@ func (r *Retryable[K]) pauseLocked(ctx context.Context) error {
 	}
 	logger.Debugf(ctx, "unset kernel")
 	r.KernelIsSet = false
-	r.PauseRequested = false
 	r.pauseKernelOpening(ctx)
 	return nil
 }
