@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/asticode/go-astiav"
@@ -180,4 +181,108 @@ func TestInput_FramerateDerivationFromPTS(t *testing.T) {
 				"r_frame_rate should be derived from PTS intervals")
 		}
 	}
+}
+
+// TestInput_ForceStartDTSNoNegativeOutput verifies that when ForceStartDTS
+// is configured, the shift calibration emits every packet with DTS
+// (and PTS) at or above the target — regardless of how the first read
+// packet compares to later packets. A shift committed from the first
+// packet alone would leave later packets with lower raw DTS negative,
+// which the FLV muxer writes as uint32 and wraps to ~4.29e9, poisoning
+// every downstream consumer.
+// Agent-generated test.
+func TestInput_ForceStartDTSNoNegativeOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const forceStart = int64(100)
+	startPTS := forceStart
+	startDTS := forceStart
+	input, err := NewInputFromURL(ctx, "testsrc=duration=0.4:rate=25", secret.New(""), InputConfig{
+		CustomOptions: types.DictionaryItems{
+			{Key: "f", Value: "lavfi"},
+		},
+		ForceStartPTS: &startPTS,
+		ForceStartDTS: &startDTS,
+	})
+	require.NoError(t, err)
+	defer input.Close(ctx)
+
+	outputCh := make(chan packetorframe.OutputUnion, 100)
+	err = input.Generate(ctx, outputCh)
+	if !errors.Is(err, io.EOF) {
+		require.NoError(t, err)
+	}
+	close(outputCh)
+
+	packetCount := 0
+	minDTS := int64(math.MaxInt64)
+	minPTS := int64(math.MaxInt64)
+	for out := range outputCh {
+		pkt := out.Packet
+		require.NotNil(t, pkt)
+		dts := pkt.GetDTS()
+		pts := pkt.GetPTS()
+		if dts != astiav.NoPtsValue {
+			assertT.GreaterOrEqual(t, dts, forceStart,
+				"every output packet's DTS must be at or above ForceStartDTS")
+			if dts < minDTS {
+				minDTS = dts
+			}
+		}
+		if pts != astiav.NoPtsValue {
+			assertT.GreaterOrEqual(t, pts, forceStart,
+				"every output packet's PTS must be at or above ForceStartPTS")
+			if pts < minPTS {
+				minPTS = pts
+			}
+		}
+		packetCount++
+	}
+	require.Greater(t, packetCount, 2, "should have produced at least a few packets")
+	assertT.Equal(t, forceStart, minDTS, "the minimum DTS across output packets must match ForceStartDTS")
+	assertT.Equal(t, forceStart, minPTS, "the minimum PTS across output packets must match ForceStartPTS")
+}
+
+// TestInput_ForceStartCalibrationSingleStream verifies the shift
+// calibration's correctness on a well-behaved single-stream input: the
+// committed shift equals ForceStartDTS minus the raw DTS of the first
+// (and only) source of packets.
+// Agent-generated test.
+func TestInput_ForceStartCalibrationSingleStream(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const forceStart = int64(500)
+	startPTS := forceStart
+	startDTS := forceStart
+	input, err := NewInputFromURL(ctx, "testsrc=duration=0.2:rate=25", secret.New(""), InputConfig{
+		CustomOptions: types.DictionaryItems{
+			{Key: "f", Value: "lavfi"},
+		},
+		ForceStartPTS: &startPTS,
+		ForceStartDTS: &startDTS,
+	})
+	require.NoError(t, err)
+	defer input.Close(ctx)
+
+	outputCh := make(chan packetorframe.OutputUnion, 100)
+	err = input.Generate(ctx, outputCh)
+	if !errors.Is(err, io.EOF) {
+		require.NoError(t, err)
+	}
+	close(outputCh)
+
+	// Calibration must have committed (otherwise we would have released
+	// packets without sending them).
+	assertT.NotEqual(t, int64(math.MinInt64), input.DTSShift.Load(),
+		"DTS shift must be committed after packets were drained")
+	assertT.NotEqual(t, int64(math.MinInt64), input.PTSShift.Load(),
+		"PTS shift must be committed after packets were drained")
+
+	// testsrc emits PTS=0, 1, 2, ... in its native 25fps time base. The
+	// shift maps raw 0 to forceStart, so the stored shift equals
+	// forceStart exactly.
+	assertT.Equal(t, forceStart, input.DTSShift.Load())
+	assertT.Equal(t, forceStart, input.PTSShift.Load())
 }

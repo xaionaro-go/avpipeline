@@ -2,6 +2,7 @@ package inputwithfallback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1379,4 +1380,234 @@ func TestInputChainAsCondition_Match_AddsInputChainAsSideData(t *testing.T) {
 	// Verify that the input chain was added as pipeline side data
 	sideData := input.Input.Frame.PipelineSideData
 	testifyassert.NotEmpty(t, sideData)
+}
+
+// --- PauseChain / UnpauseChain ---
+//
+// Chains are created paused (StartOnInit=false). These tests exercise
+// the public wrapper methods directly, explicitly unpausing chains
+// first so the active-chain counter reflects the state under test.
+//
+// Pausing a chain whose underlying kernel has not yet been opened is
+// a no-op in Retryable (nothing to close), so the tests wait for the
+// retry kernel to open before calling Pause — otherwise the barrier
+// state stays "unpaused" and subsequent invariant checks misfire.
+
+// newPauseTestIWF builds an InputWithFallback with a cancellable
+// context and arranges cleanup so retry loops exit before Close
+// runs. InputWithFallback.Close holds InputChainsLocker while closing
+// each chain's processor, which cancels the processor ctx and trips
+// Retryable.retry's OnError path; that OnError also tries to take
+// InputChainsLocker and deadlocks. Cancelling the top-level ctx
+// first forces retry to bail out cleanly before Close grabs the
+// lock.
+func newPauseTestIWF(
+	t *testing.T,
+	factories ...*mockInputFactory,
+) (*InputWithFallback[*inputKernel, codec.DecoderFactory, struct{}], context.Context) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
+	for _, f := range factories {
+		iFactories = append(iFactories, f)
+	}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](ctx, iFactories)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cancel()
+		// Give retry goroutines a moment to observe ctx cancel and
+		// release InputChainsLocker-targeting paths before Close
+		// takes the lock.
+		time.Sleep(25 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	})
+	return iwf, ctx
+}
+
+// waitForKernelOpen waits until the Retryable kernel inside the given
+// chain has been opened. Required because Unpause schedules the open
+// asynchronously, and Pause is a no-op while the kernel is unset.
+func waitForKernelOpen(
+	t *testing.T,
+	chain *InputChain[*inputKernel, codec.DecoderFactory, struct{}],
+) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		k := chain.Input.Processor.Kernel
+		k.KernelLocker.ManualLock(context.Background())
+		isSet := k.KernelIsSet
+		k.KernelLocker.ManualUnlock(context.Background())
+		if isSet {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("kernel for chain %d did not open within timeout", chain.ID)
+}
+
+// TestInputWithFallback_PauseChain_SoleActive_Rejected is the primary
+// regression check: pausing the last unpaused chain must fail and
+// leave the chain's state untouched, never closing its kernel.
+func TestInputWithFallback_PauseChain_SoleActive_Rejected(t *testing.T) {
+	f1 := &mockInputFactory{name: "primary"}
+	f2 := &mockInputFactory{name: "fallback"}
+	iwf, ctx := newPauseTestIWF(t, f1, f2)
+
+	// Unpause chain 0 and wait for its kernel to open so subsequent
+	// Pause calls actually flip the barrier.
+	require.NoError(t, iwf.InputChains[0].Unpause(ctx))
+	waitForKernelOpen(t, iwf.InputChains[0])
+	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx))
+	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
+
+	// Pausing the sole active chain must fail with the sentinel error
+	// — and must not touch the chain's state.
+	err := iwf.PauseChain(ctx, 0)
+	require.Error(t, err)
+	var sentinel ErrCannotPauseSoleActiveChain
+	testifyassert.True(t, errors.As(err, &sentinel),
+		"expected ErrCannotPauseSoleActiveChain, got %T: %v", err, err)
+	testifyassert.Equal(t, InputID(0), sentinel.ID)
+	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx),
+		"rejected PauseChain must not mutate the chain's paused state")
+}
+
+// TestInputWithFallback_PauseChain_WithOtherActive_Succeeds covers the
+// good path: when another chain is already unpaused, pausing a second
+// one is safe and PauseChain honors the request.
+func TestInputWithFallback_PauseChain_WithOtherActive_Succeeds(t *testing.T) {
+	f1 := &mockInputFactory{name: "primary"}
+	f2 := &mockInputFactory{name: "fallback"}
+	iwf, ctx := newPauseTestIWF(t, f1, f2)
+
+	// Unpause both chains and wait for their kernels to open.
+	require.NoError(t, iwf.InputChains[0].Unpause(ctx))
+	require.NoError(t, iwf.InputChains[1].Unpause(ctx))
+	waitForKernelOpen(t, iwf.InputChains[0])
+	waitForKernelOpen(t, iwf.InputChains[1])
+	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx))
+	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
+
+	// Pause chain 0; chain 1 remains as the sole active chain.
+	require.NoError(t, iwf.PauseChain(ctx, 0))
+	testifyassert.True(t, iwf.InputChains[0].IsPaused(ctx))
+	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
+
+	// Now pausing chain 1 must fail — it is the sole active chain.
+	err := iwf.PauseChain(ctx, 1)
+	require.Error(t, err)
+	testifyassert.True(t, errors.As(err, &ErrCannotPauseSoleActiveChain{}))
+	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
+}
+
+// TestInputWithFallback_PauseChain_AlreadyPaused_NoOp verifies that
+// pausing an already-paused chain is a silent no-op (no error, no
+// invariant check). This matters because the gRPC layer may receive
+// idempotent stop requests.
+func TestInputWithFallback_PauseChain_AlreadyPaused_NoOp(t *testing.T) {
+	ctx := context.Background()
+	f1 := &mockInputFactory{name: "primary"}
+	f2 := &mockInputFactory{name: "fallback"}
+	iwf := newTestIWF(t, f1, f2)
+
+	// Both chains start paused. Pausing chain 1 is a no-op even
+	// though the "sole active chain" count (0 unpaused chains) would
+	// otherwise fail the invariant — because the count does not
+	// change.
+	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
+	require.NoError(t, iwf.PauseChain(ctx, 1))
+	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
+}
+
+// TestInputWithFallback_PauseChain_InvalidID rejects out-of-range IDs
+// with a descriptive error rather than panicking.
+func TestInputWithFallback_PauseChain_InvalidID(t *testing.T) {
+	ctx := context.Background()
+	factory := &mockInputFactory{name: "test-factory"}
+	iwf := newTestIWF(t, factory)
+
+	err := iwf.PauseChain(ctx, InputID(5))
+	require.Error(t, err)
+	testifyassert.Contains(t, err.Error(), "not found")
+}
+
+// TestInputWithFallback_UnpauseChain_Succeeds covers the symmetric
+// unpause path. Unpause has no invariant to enforce, so it simply
+// delegates.
+func TestInputWithFallback_UnpauseChain_Succeeds(t *testing.T) {
+	factory := &mockInputFactory{name: "test-factory"}
+	iwf, ctx := newPauseTestIWF(t, factory)
+
+	testifyassert.True(t, iwf.InputChains[0].IsPaused(ctx))
+	require.NoError(t, iwf.UnpauseChain(ctx, 0))
+	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx))
+}
+
+// TestInputWithFallback_UnpauseChain_InvalidID rejects out-of-range
+// IDs symmetrically with PauseChain.
+func TestInputWithFallback_UnpauseChain_InvalidID(t *testing.T) {
+	ctx := context.Background()
+	factory := &mockInputFactory{name: "test-factory"}
+	iwf := newTestIWF(t, factory)
+
+	err := iwf.UnpauseChain(ctx, InputID(5))
+	require.Error(t, err)
+	testifyassert.Contains(t, err.Error(), "not found")
+}
+
+// TestErrCannotPauseSoleActiveChain_ErrorMessage pins the error message
+// so callers can rely on it in log output / status codes.
+func TestErrCannotPauseSoleActiveChain_ErrorMessage(t *testing.T) {
+	e := ErrCannotPauseSoleActiveChain{ID: 3}
+	msg := e.Error()
+	testifyassert.Contains(t, msg, "3")
+	testifyassert.Contains(t, msg, "sole active chain")
+}
+
+// TestInputWithFallback_Close_NoDeadlockWithActiveChain is the
+// regression check for the Close/onInputChainError deadlock:
+// InputWithFallback.Close used to hold InputChainsLocker while
+// cancelling each chain's processor ctx. Cancelling the ctx tripped
+// Retryable.retry's OnError path, which called onInputChainError,
+// which tried to take InputChainsLocker and blocked forever because
+// Close was still holding it. Close must therefore snapshot the
+// chains and release the lock before closing them so the error
+// handler can acquire the lock.
+//
+// The test unpauses one chain so its Retryable kernel opens and the
+// processor goroutine is actively running Generate; that is the
+// configuration that triggers the error callback when Close cancels
+// the ctx. Close without the fix blocks indefinitely; with the fix
+// it returns promptly.
+func TestInputWithFallback_Close_NoDeadlockWithActiveChain(t *testing.T) {
+	ctx := context.Background()
+	f1 := &mockInputFactory{name: "primary"}
+	f2 := &mockInputFactory{name: "fallback"}
+	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
+	iFactories = append(iFactories, f1, f2)
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](ctx, iFactories)
+	require.NoError(t, err)
+
+	// Unpause chain 0 and wait for its kernel to open. Once the
+	// kernel is open, the processor's goroutine is actively inside
+	// Retryable.Generate / retry(), which is the exact state that
+	// would trigger the deadlock on Close.
+	require.NoError(t, iwf.InputChains[0].Unpause(ctx))
+	waitForKernelOpen(t, iwf.InputChains[0])
+
+	// Close must return within a bounded time. Without the fix it
+	// deadlocks (Close holds InputChainsLocker while waiting on the
+	// processor's goroutine, which is blocked in onInputChainError
+	// trying to acquire InputChainsLocker).
+	done := make(chan error, 1)
+	go func() {
+		done <- iwf.Close(ctx)
+	}()
+	select {
+	case err := <-done:
+		testifyassert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close deadlocked: did not return within 5 seconds")
+	}
 }

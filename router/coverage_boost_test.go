@@ -780,10 +780,10 @@ func TestRouteForwarding_WaiterGoroutine_PublishersChangeChan_RouteClose(t *test
 	_ = fwd.Close(ctx)
 }
 
-// TestRouteForwarding_WaiterGoroutine_PublishersChangeChan_StillOpen is skipped because
-// it triggers a known race condition in the production code: the waiter goroutine
-// at route_forwarding.go:148 reads src.PublishersChangeChan without holding the lock,
-// while AddPublisherLocked at route.go:301 writes to it under the lock.
+// TestRouteForwarding_WaiterGoroutine_PublishersChangeChan_StillOpen previously
+// triggered a race condition where the waiter goroutine read src.PublishersChangeChan
+// without holding the lock. This has been fixed: the waiter now uses
+// src.getPublishersChangeChan(ctx) which reads the channel under the route's lock.
 
 // === route_forwarding_to_remote.go: Close with both StreamForwarder and Output set ===
 

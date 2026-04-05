@@ -210,7 +210,9 @@ func (r *Route[T]) AddPublisher(
 		_ret, _err = r.AddPublisherLocked(ctx, publisher, &wg)
 		callbackFunc = r.OnPublisherAdded
 	})
-	callbackFunc(ctx, r, publisher)
+	if _err == nil && callbackFunc != nil {
+		callbackFunc(ctx, r, publisher)
+	}
 	return
 }
 

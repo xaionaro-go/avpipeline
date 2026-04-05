@@ -139,6 +139,7 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 		defer fwd.WaitGroup.Done()
 		logger.Debugf(ctx, "waiter")
 		defer logger.Debugf(ctx, "/waiter")
+		ch := src.getPublishersChangeChan(ctx)
 		for {
 			logger.Debugf(ctx, "waiter: waiting")
 			select {
@@ -148,7 +149,8 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 					logger.Errorf(ctx, "unable to stop: %v", err)
 				}
 				return
-			case <-src.PublishersChangeChan:
+			case <-ch:
+				ch = src.getPublishersChangeChan(ctx)
 				isStillOpen := src.IsOpen(ctx)
 				logger.Debugf(ctx, "<-src[%s].PublishersChangeChan: %t", src, isStillOpen)
 				if isStillOpen {
@@ -214,14 +216,17 @@ func (fwd *RouteForwarding[T]) stopLocked(
 		fwd.StreamForwarder = nil
 	}
 	if fwd.Output != nil {
-		wg.Add(1)
 		output := fwd.Output
-		observability.Go(ctx, func(ctx context.Context) {
-			defer wg.Done()
-			if err := output.Close(ctx); err != nil {
-				logger.Errorf(ctx, "fwd.Output.Close: %v", err)
-			}
-		})
+		// Close synchronously so the error becomes part of the returned
+		// error set. Previously this ran in a goroutine tracked by the
+		// caller's wg, but the caller's wg.Wait is deferred AFTER the
+		// return, so any error written there could never reach the
+		// caller. The output's Close uses its own locker (distinct from
+		// fwd.Locker) so this does not introduce a lock-order cycle.
+		if err := output.Close(ctx); err != nil {
+			logger.Errorf(ctx, "fwd.Output.Close: %v", err)
+			errs = append(errs, fmt.Errorf("fwd.Output.Close: %w", err))
+		}
 		fwd.Output = nil
 	}
 	return errors.Join(errs...)

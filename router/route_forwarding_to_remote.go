@@ -107,7 +107,9 @@ func (fwd *RouteForwardingToRemote[T]) init(
 	observability.Go(ctx, func(ctx context.Context) {
 		for err := range fwd.ErrChan {
 			logger.Errorf(ctx, "got an error: %v", err)
-			_ = fwd.Close(ctx)
+			if closeErr := fwd.Close(ctx); closeErr != nil {
+				logger.Errorf(ctx, "failed to close forwarder after error: %v", closeErr)
+			}
 		}
 	})
 	return nil

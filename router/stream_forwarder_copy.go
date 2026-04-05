@@ -111,6 +111,7 @@ func (fwd *StreamForwarderCopy[CS, PS]) addPushingFurther(
 		fwd.AutoFixer.Serve(ctx, node.ServeConfig{
 			DebugData: fwd,
 		}, errCh)
+		close(errCh)
 	})
 	return nil
 }

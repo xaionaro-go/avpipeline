@@ -751,9 +751,9 @@ func TestTee_CloseChan_AllNilChildren(t *testing.T) {
 
 func TestReorderMonotonicDTS_NewReorderMonotonicDTS(t *testing.T) {
 	ctx := context.Background()
-	r := NewReorderMonotonicDTS(ctx, nil, 100, 1000, false)
+	r := NewReorderMonotonicDTS(ctx, nil, 100, time.Duration(1000), false)
 	require.NotNil(t, r)
-	testifyassert.Equal(t, uint64(1000), r.MaxDTSDifference)
+	testifyassert.Equal(t, time.Duration(1000), r.MaxDTSDifference)
 	testifyassert.False(t, r.Started)
 	testifyassert.False(t, r.DiscardUnorderedItems)
 }
@@ -1320,6 +1320,89 @@ func TestRetryable_WithNetworkConn_WithKernel(t *testing.T) {
 	})
 	require.NoError(t, err)
 	testifyassert.True(t, callbackCalled)
+}
+
+// dummyWithQueueSize embeds Dummy and implements GetInternalQueueSize and GetOldestDTSInTheQueue,
+// used by stress tests for the Retryable kernel.
+type dummyWithQueueSize struct {
+	Dummy
+}
+
+var (
+	_ Abstract              = (*dummyWithQueueSize)(nil)
+	_ GetInternalQueueSizer = (*dummyWithQueueSize)(nil)
+)
+
+func (d *dummyWithQueueSize) GetInternalQueueSize(ctx context.Context) map[string]uint64 {
+	return map[string]uint64{"dummy": 0}
+}
+
+func (d *dummyWithQueueSize) GetOldestDTSInTheQueue(ctx context.Context) (time.Duration, error) {
+	return 0, nil
+}
+
+// TestRetryable_GetInternalQueueSize_ConcurrentWithPause stresses concurrent calls
+// to GetInternalQueueSize/GetOldestDTSInTheQueue against Pause/Unpause, which race
+// against r.Kernel writes in openKernelIfNeeded/pauseLocked. Without proper
+// locking of the r.Kernel read, this test would panic on a torn interface or
+// dereference a stale pointer.
+func TestRetryable_GetInternalQueueSize_ConcurrentWithPause(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) { return &dummyWithQueueSize{}, nil },
+		nil,
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+
+	stop := make(chan struct{})
+	done := make(chan struct{}, 3)
+
+	// Reader A: GetInternalQueueSize in a loop
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = r.GetInternalQueueSize(ctx)
+		}
+	}()
+
+	// Reader B: GetOldestDTSInTheQueue in a loop
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = r.GetOldestDTSInTheQueue(ctx)
+		}
+	}()
+
+	// Writer: Pause/Unpause in a loop
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = r.Pause(ctx)
+			_ = r.Unpause(ctx)
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	for i := 0; i < 3; i++ {
+		<-done
+	}
 }
 
 // --- Decoder frame pass-through test ---

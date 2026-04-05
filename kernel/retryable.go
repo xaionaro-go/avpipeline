@@ -35,6 +35,7 @@ type Retryable[K Abstract] struct {
 	KernelLocker      xsync.CtxLocker
 	KernelError       error
 	KernelOpenBarrier xatomic.Pointer[chan struct{}]
+	PauseRequested    bool
 }
 
 func NewRetryable[K Abstract](
@@ -81,10 +82,14 @@ var (
 // implements that interface and is currently available. This allows downstream
 // code to get the actual source kernel rather than the Retryable wrapper.
 func (r *Retryable[K]) OriginalPacketSource() packet.Source {
-	if !r.KernelIsSet {
+	ctx := context.Background()
+	snap := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() kernelSnapshot[K] {
+		return kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
+	})
+	if !snap.isSet {
 		return nil
 	}
-	if src, ok := any(r.Kernel).(packet.Source); ok {
+	if src, ok := any(snap.kernel).(packet.Source); ok {
 		return src
 	}
 	return nil
@@ -136,21 +141,30 @@ func (r *Retryable[K]) openKernelIfNeeded(
 
 	for {
 
-		err := func() error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-r.ClosureSignaler.CloseChan():
-				return io.EOF
-			case <-*r.KernelOpenBarrier.Load():
-				return nil
-			}
-		}()
-		if err != nil {
-			logger.Errorf(ctx, "unable to open the kernel, because we are finishing: %v", err)
+		// Check barrier without blocking: openKernelIfNeeded runs
+		// holding KernelLocker, so blocking here would prevent any
+		// concurrent Pause/Unpause from making progress and can
+		// deadlock with a Pause that flipped the barrier between
+		// Unpause closing it and this goroutine acquiring the lock.
+		// If the barrier is currently paused, honour the pause and
+		// return: the next Unpause will spawn a fresh goroutine.
+		select {
+		case <-ctx.Done():
+			logger.Errorf(ctx, "unable to open the kernel, because we are finishing: %v", ctx.Err())
 			if r.KernelError == nil {
-				r.KernelError = err
+				r.KernelError = ctx.Err()
 			}
+			return
+		case <-r.ClosureSignaler.CloseChan():
+			logger.Errorf(ctx, "unable to open the kernel, because the retryable is being closed")
+			if r.KernelError == nil {
+				r.KernelError = io.EOF
+			}
+			return
+		case <-*r.KernelOpenBarrier.Load():
+			// barrier is open (closed channel) — proceed.
+		default:
+			logger.Debugf(ctx, "openKernelIfNeeded: barrier is paused, deferring kernel open")
 			return
 		}
 
@@ -168,6 +182,21 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			logger.Debugf(ctx, "set kernel")
 			r.Kernel = k
 			r.KernelIsSet = true
+			// If Pause was called while the kernel was being opened,
+			// honour that pause intent now. Otherwise the caller's pause
+			// would silently be lost.
+			if r.PauseRequested {
+				logger.Debugf(ctx, "PauseRequested is set, applying pause to the freshly opened kernel")
+				var zeroValue K
+				closeErr := r.Kernel.Close(ctx)
+				if closeErr != nil {
+					logger.Errorf(ctx, "unable to close kernel while applying deferred pause: %v", closeErr)
+				}
+				r.Kernel = zeroValue
+				r.KernelIsSet = false
+				r.PauseRequested = false
+				r.pauseKernelOpening(ctx)
+			}
 			return
 		}
 
@@ -251,6 +280,13 @@ func (r *Retryable[K]) getKernel(
 	}
 
 	r.openKernelIfNeeded(ctx)
+	if !r.KernelIsSet && r.KernelError == nil {
+		// openKernelIfNeeded deferred the open (barrier is paused).
+		// We cannot return a zero-value kernel: callers will
+		// dereference it. Surface a sentinel error instead so the
+		// retry loop stops cleanly.
+		return zeroValue, ErrKernelNotSet{}
+	}
 	return r.Kernel, r.KernelError
 }
 
@@ -275,10 +311,20 @@ func (r *Retryable[K]) GetObjectID() globaltypes.ObjectID {
 }
 
 func (r *Retryable[K]) String() string {
-	return fmt.Sprintf("Retry(%T:%s)", r.Kernel, r.Kernel)
+	ctx := context.Background()
+	snap := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() kernelSnapshot[K] {
+		return kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
+	})
+	return fmt.Sprintf("Retry(%T:%s)", snap.kernel, snap.kernel)
 }
 
 func (r *Retryable[K]) Unpause(ctx context.Context) (_err error) {
+	// Clear any deferred pause intent: the caller is explicitly asking
+	// for the kernel to be opened, which overrides a prior Pause that
+	// was recorded while the kernel was not yet set.
+	r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
+		r.PauseRequested = false
+	})
 	r.unpauseKernelOpening(ctx)
 	observability.Go(ctx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
@@ -318,7 +364,15 @@ func (r *Retryable[K]) Pause(ctx context.Context) (_err error) {
 
 func (r *Retryable[K]) pauseLocked(ctx context.Context) error {
 	if !r.KernelIsSet {
-		logger.Debugf(ctx, "kernel is not set, nothing to stop")
+		// The kernel has not been opened yet, so there is nothing to
+		// close. Record the pause intent so that openKernelIfNeeded
+		// applies it as soon as the kernel is opened, and flip the
+		// barrier so that openKernelIfNeeded does not start opening a
+		// fresh kernel. Without this, the caller's pause would
+		// silently be lost and any in-flight open would proceed.
+		logger.Debugf(ctx, "kernel is not set, recording pause intent")
+		r.PauseRequested = true
+		r.pauseKernelOpening(ctx)
 		return nil
 	}
 	err := r.Kernel.Close(ctx)
@@ -327,6 +381,7 @@ func (r *Retryable[K]) pauseLocked(ctx context.Context) error {
 	}
 	logger.Debugf(ctx, "unset kernel")
 	r.KernelIsSet = false
+	r.PauseRequested = false
 	r.pauseKernelOpening(ctx)
 	return nil
 }
@@ -423,23 +478,26 @@ func (r *Retryable[K]) WithRawNetworkConn(
 
 var _ GetInternalQueueSizer = (*Retryable[Abstract])(nil)
 
+type kernelSnapshot[K Abstract] struct {
+	kernel K
+	isSet  bool
+}
+
 func (r *Retryable[K]) GetInternalQueueSize(
 	ctx context.Context,
 ) map[string]uint64 {
-	if _, ok := any(r.Kernel).(GetInternalQueueSizer); !ok {
-		return nil
-	}
-	kernel := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() *K {
-		if r.KernelIsSet {
-			return &r.Kernel
-		}
-		return nil
+	snap := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() kernelSnapshot[K] {
+		return kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
 	})
-	if kernel == nil {
+	if !snap.isSet {
 		logger.Debugf(ctx, "GetInternalQueueSize: kernel is not set")
 		return nil
 	}
-	return any(*kernel).(GetInternalQueueSizer).GetInternalQueueSize(ctx)
+	queuer, ok := any(snap.kernel).(GetInternalQueueSizer)
+	if !ok {
+		return nil
+	}
+	return queuer.GetInternalQueueSize(ctx)
 }
 
 type ErrRetry struct {
@@ -455,17 +513,14 @@ var _ types.GetOldestDTSInTheQueuer = (*Retryable[Abstract])(nil)
 func (r *Retryable[K]) GetOldestDTSInTheQueue(
 	ctx context.Context,
 ) (time.Duration, error) {
-	kernel := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() *K {
-		if r.KernelIsSet {
-			return &r.Kernel
-		}
-		return nil
+	snap := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() kernelSnapshot[K] {
+		return kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
 	})
-	if kernel == nil {
+	if !snap.isSet {
 		return 0, ErrKernelNotSet{}
 	}
 
-	queuer, ok := any(*kernel).(types.GetOldestDTSInTheQueuer)
+	queuer, ok := any(snap.kernel).(types.GetOldestDTSInTheQueuer)
 	if !ok {
 		return 0, ErrNotImplemented{}
 	}

@@ -710,6 +710,63 @@ func TestRetryable_Close(t *testing.T) {
 	testifyassert.NoError(t, err)
 }
 
+// TestRetryable_PauseBeforeKernelSet_PausesBarrier is the direct
+// regression test for BUG 1: pauseLocked used to return early
+// without flipping the barrier when !KernelIsSet. As a result, any
+// concurrent or subsequent opener would proceed and set KernelIsSet
+// even though the caller had asked for a pause. This test creates
+// a retryable with StartOnInit=false (so the kernel is never opened
+// on its own), calls Pause, then verifies that the retryable is
+// considered paused and that Unpause-then-Pause re-paused state
+// is observable.
+func TestRetryable_PauseBeforeKernelSet_PausesBarrier(t *testing.T) {
+	ctx := context.Background()
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) {
+			return &Dummy{}, nil
+		},
+		nil,
+		RetryableOptionStartOnInit[Abstract](false),
+	)
+	defer r.Close(ctx)
+
+	// Kernel has never been set. Retryable starts paused.
+	testifyassert.True(t, r.IsPaused(ctx))
+
+	// Unpause — closes the barrier, spawns a goroutine which opens
+	// the kernel. Wait until the kernel is opened.
+	testifyassert.NoError(t, r.Unpause(ctx))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !r.IsPaused(ctx) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	testifyassert.False(t, r.IsPaused(ctx), "retryable should be unpaused after Unpause()")
+
+	// Pause — closes the kernel, flips barrier to paused.
+	testifyassert.NoError(t, r.Pause(ctx))
+	testifyassert.True(t, r.IsPaused(ctx))
+
+	// Unpause-then-Pause before the kernel opens. This is the
+	// critical scenario: between Unpause closing the barrier and
+	// the opener goroutine acquiring KernelLocker, Pause acquires
+	// it first and sees !KernelIsSet. The fix records PauseRequested
+	// and flips the barrier back to paused, so IsPaused must
+	// report true after Pause returns. Without the fix, the
+	// barrier stays closed, IsPaused returns false, and the opener
+	// goroutine proceeds to set up a kernel the caller didn't want.
+	testifyassert.NoError(t, r.Unpause(ctx))
+	testifyassert.NoError(t, r.Pause(ctx))
+	testifyassert.True(
+		t, r.IsPaused(ctx),
+		"after Unpause()+Pause() the retryable must be paused — "+
+			"without the fix, pauseLocked returns early on !KernelIsSet "+
+			"and leaves the barrier open",
+	)
+}
+
 func TestRetryable_OriginalPacketSource_NotSet(t *testing.T) {
 	ctx := context.Background()
 	r := NewRetryable[Abstract](ctx,

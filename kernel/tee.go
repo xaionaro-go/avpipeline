@@ -176,19 +176,22 @@ func (t Tee[K]) CloseChan() <-chan struct{} {
 		return nil
 	}
 	merged := make(chan struct{})
-	go func() {
+	observability.Go(context.Background(), func(ctx context.Context) {
 		var wg sync.WaitGroup
 		for _, ch := range chans {
 			wg.Add(1)
 			ch := ch
-			go func() {
+			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
-				<-ch
-			}()
+				select {
+				case <-ch:
+				case <-ctx.Done():
+				}
+			})
 		}
 		wg.Wait()
 		close(merged)
-	}()
+	})
 	return merged
 }
 

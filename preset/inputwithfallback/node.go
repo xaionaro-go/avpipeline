@@ -206,14 +206,23 @@ func (i *InputWithFallback[K, DF, C]) Flush(
 
 func (i *InputWithFallback[K, DF, C]) Close(ctx context.Context) error {
 	var errs []error
+	// Snapshot the input chains under the lock, then clear the slice
+	// and release the lock before calling Close on each chain.
+	// Holding InputChainsLocker while closing chains causes a deadlock:
+	// closing a chain cancels its processor ctx, which trips
+	// Retryable.retry's OnError path; that OnError calls
+	// onInputChainError, which tries to take InputChainsLocker —
+	// blocking forever because Close is holding it.
+	var chains []*InputChain[K, DF, C]
 	i.InputChainsLocker.Do(ctx, func() {
-		for _, inputChain := range i.InputChains {
-			if err := inputChain.Close(ctx); err != nil {
-				errs = append(errs, fmt.Errorf("unable to close input chain %v: %w", inputChain, err))
-			}
-		}
+		chains = i.InputChains
 		i.InputChains = nil
 	})
+	for _, inputChain := range chains {
+		if err := inputChain.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close input chain %v: %w", inputChain, err))
+		}
+	}
 	if err := i.PreOutput.Processor.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close pre-output processor: %w", err))
 	}

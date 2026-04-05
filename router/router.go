@@ -53,12 +53,14 @@ func (r *Router[T]) Close(
 ) error {
 	r.Locker.Do(ctx, func() { // to make sure we don't have anybody adding more processes
 		close(r.RouterCloseChan)
-		r.WaitGroup.Wait()
 		// NOTE: We intentionally do NOT close ErrorChan here because Serve
 		// goroutines may still be running and sending errors. The init()
 		// goroutine exits via RouterCloseChan instead.
 		close(r.RoutesChangedChan)
 	})
+	// Wait outside the lock: route Serve goroutines may call onRouteClosed ->
+	// RemoveRoute, which needs r.Locker. Holding it here would deadlock.
+	r.WaitGroup.Wait()
 	return nil
 }
 

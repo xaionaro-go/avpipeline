@@ -303,6 +303,11 @@ func TestRouteForwarding_StopLocked_WithOutput(t *testing.T) {
 		err = fwd.stopLocked(ctx, &wg)
 	})
 	wg.Wait()
-	assert.NoError(t, err)
+	// Output.Close fails here because the fwd was never actually added as
+	// a publisher to the output route, so RemovePublisherLocked returns
+	// "publisher not found". stopLocked now surfaces that error instead
+	// of silently dropping it (see route_forwarding.go: BUG 40 fix). The
+	// output reference is still cleared unconditionally.
+	assert.Error(t, err)
 	assert.Nil(t, fwd.Output)
 }

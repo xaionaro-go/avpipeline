@@ -37,6 +37,17 @@ const (
 	inputDefaultWidth  = 1920
 	inputDefaultHeight = 1080
 	inputDefaultFPS    = 30
+
+	// inputShiftCalibrationMaxPackets caps how many packets are buffered
+	// at startup to find the minimum raw DTS/PTS across streams before
+	// the PTS/DTS shift is committed. The min across streams (not the
+	// first captured packet) is the only basis that keeps every shifted
+	// timestamp non-negative. Exceeding this many packets without seeing
+	// at least one from every stream forces commit on the min seen so
+	// far; a stream that stays silent longer than that is rare and the
+	// cost of further buffering (memory + startup latency) would exceed
+	// the benefit.
+	inputShiftCalibrationMaxPackets = 60
 )
 
 type InputConfig = kerneltypes.InputConfig
@@ -690,57 +701,71 @@ func (i *Input) Generate(
 			}
 		}
 	}()
-	for {
-		select {
-		case <-i.CloseChan():
-			logger.Debugf(ctx, "input is closed, stopping packet generation")
-			return io.EOF
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		pkt := packet.Pool.Get()
-		err := i.readIntoPacket(ctx, pkt)
-		switch err {
-		case nil:
-		case io.EOF:
-			pkt.Free()
-			logger.Debugf(ctx, "end of input reached")
-			return io.EOF
-		default:
-			pkt.Free()
-			return fmt.Errorf("unable to read a packet: %w", err)
-		}
 
-		streamIndex := pkt.StreamIndex()
-		stream := avconv.FindStreamByIndex(ctx, i.FormatContext, streamIndex)
-		codecParams := stream.CodecParameters()
-		logger.Tracef(
-			ctx,
-			"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, extraData:%s",
-			codecParams.MediaType(),
-			streamIndex,
-			pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), stream.TimeBase(),
-			pkt.Flags().Has(astiav.PacketFlagKey),
-			len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
+	// The PTS/DTS shift calibration holds back the first few packets so
+	// the committed shift is based on the minimum raw timestamp across
+	// every stream, not the first packet's — see shiftCalibration for
+	// the full rationale.
+	wantPTSCalibration := i.ForceStartPTS != globaltypes.PTSKeep
+	wantDTSCalibration := i.ForceStartDTS != globaltypes.PTSKeep
+	var calibration *shiftCalibration
+	var calibrationBuffered []*astiav.Packet
+	if wantPTSCalibration || wantDTSCalibration {
+		calibration = newShiftCalibration(
+			wantPTSCalibration,
+			wantDTSCalibration,
+			i.ForceStartPTS,
+			i.ForceStartDTS,
+			i.FormatContext.NbStreams(),
+			inputShiftCalibrationMaxPackets,
 		)
-		if i.ForceStartPTS != globaltypes.PTSKeep && pkt.Pts() != astiav.NoPtsValue {
-			if i.PTSShift.Load() == math.MinInt64 {
-				ptsShift := i.ForceStartPTS - pkt.Pts()
-				i.PTSShift.Store(ptsShift)
-				logger.Infof(ctx, "applying PTS shift of %d to input packets", ptsShift)
+	}
+
+	commitCalibration := func(ctx context.Context) {
+		ptsShift, dtsShift, hasPTSShift, hasDTSShift := calibration.Commit()
+		if hasPTSShift {
+			i.PTSShift.Store(ptsShift)
+			logger.Infof(ctx, "applying PTS shift of %d to input packets (min raw PTS across streams; %d packets calibrated, %d streams seen)", ptsShift, calibration.BufferedPackets(), calibration.StreamsSeen())
+		}
+		if hasDTSShift {
+			i.DTSShift.Store(dtsShift)
+			logger.Infof(ctx, "applying DTS shift of %d to input packets (min raw DTS across streams; %d packets calibrated, %d streams seen)", dtsShift, calibration.BufferedPackets(), calibration.StreamsSeen())
+		}
+	}
+	defer func() {
+		if calibration != nil && calibration.Active() {
+			// Flushing calibration buffer in the deferred cleanup path
+			// would fight with the outer prevPkts-flushing defer, so
+			// packets that never made it out of the buffer are simply
+			// released here. This only matches paths where Generate
+			// returns (close/EOF/error) before calibration committed.
+			for _, pkt := range calibrationBuffered {
+				pkt.Unref()
+				pkt.Free()
 			}
+			calibrationBuffered = nil
+		}
+	}()
+
+	applyShift := func(pkt *astiav.Packet) {
+		if wantPTSCalibration && pkt.Pts() != astiav.NoPtsValue {
 			pkt.SetPts(pkt.Pts() + i.PTSShift.Load())
 		}
-		if i.ForceStartDTS != globaltypes.PTSKeep && pkt.Dts() != astiav.NoPtsValue {
-			if i.DTSShift.Load() == math.MinInt64 {
-				dtsShift := i.ForceStartDTS - pkt.Dts()
-				i.DTSShift.Store(dtsShift)
-				logger.Infof(ctx, "applying DTS shift of %d to input packets", dtsShift)
-			}
+		if wantDTSCalibration && pkt.Dts() != astiav.NoPtsValue {
 			pkt.SetDts(pkt.Dts() + i.DTSShift.Load())
 		}
+	}
 
+	// processPacket handles a single packet after its PTS/DTS shift has
+	// already been applied (or no shift is needed). It mirrors the body
+	// of the read loop so flushing the calibration buffer can reuse the
+	// same duration-fixup, DTS-fallback, and sendPkt logic.
+	processPacket := func(
+		ctx context.Context,
+		pkt *astiav.Packet,
+		streamIndex int,
+		stream *astiav.Stream,
+	) error {
 		prevPkt := prevPkts[streamIndex]
 		curPkt := ptr(packet.BuildOutput(
 			pkt,
@@ -832,13 +857,11 @@ func (i *Input) Generate(
 						curPkt.GetPTS() != astiav.NoPtsValue { // PTS is set (thus duration can be calculated)
 						assert(ctx, curPkt.GetPTS() >= 0, "previous packet PTS is negative")
 						logger.Tracef(ctx, "the packet has no duration set; waiting for the next packet to suggest a duration")
-						prevPkt = nil
 						prevPkts[streamIndex] = curPkt
-						continue
-					} else {
-						logger.Tracef(ctx, "the packet has no duration set; using the last known duration")
-						curPkt.SetDuration(lastDuration[streamIndex])
+						return nil
 					}
+					logger.Tracef(ctx, "the packet has no duration set; using the last known duration")
+					curPkt.SetDuration(lastDuration[streamIndex])
 				}
 
 				if curPkt.GetDuration() <= 1 && curPkt.GetMediaType() == astiav.MediaTypeVideo {
@@ -851,14 +874,105 @@ func (i *Input) Generate(
 					}
 				}
 			} else {
-				prevPkt = nil
 				delete(prevPkts, streamIndex)
 			}
 		}
 
 		// no correction is needed, let's send immediately
-		err = sendPkt(curPkt)
-		if err != nil {
+		return sendPkt(curPkt)
+	}
+
+	for {
+		select {
+		case <-i.CloseChan():
+			logger.Debugf(ctx, "input is closed, stopping packet generation")
+			return io.EOF
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		pkt := packet.Pool.Get()
+		err := i.readIntoPacket(ctx, pkt)
+		switch err {
+		case nil:
+		case io.EOF:
+			pkt.Free()
+			logger.Debugf(ctx, "end of input reached")
+			// Flush any packets still sitting in the calibration
+			// buffer — otherwise a short input whose calibration never
+			// committed during the loop would drop everything.
+			if calibration != nil && calibration.Active() && len(calibrationBuffered) > 0 {
+				commitCalibration(ctx)
+				flushed := calibrationBuffered
+				calibrationBuffered = nil
+				for _, bufPkt := range flushed {
+					applyShift(bufPkt)
+					bufStreamIndex := bufPkt.StreamIndex()
+					bufStream := avconv.FindStreamByIndex(ctx, i.FormatContext, bufStreamIndex)
+					if perr := processPacket(ctx, bufPkt, bufStreamIndex, bufStream); perr != nil {
+						return perr
+					}
+				}
+			}
+			return io.EOF
+		default:
+			pkt.Free()
+			return fmt.Errorf("unable to read a packet: %w", err)
+		}
+
+		streamIndex := pkt.StreamIndex()
+		stream := avconv.FindStreamByIndex(ctx, i.FormatContext, streamIndex)
+		codecParams := stream.CodecParameters()
+		logger.Tracef(
+			ctx,
+			"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, extraData:%s",
+			codecParams.MediaType(),
+			streamIndex,
+			pkt.Pos(), pkt.Pts(), pkt.Dts(), pkt.Duration(), stream.TimeBase(),
+			pkt.Flags().Has(astiav.PacketFlagKey),
+			len(pkt.Data()), extradata.Raw(codecParams.ExtraData()),
+		)
+
+		if calibration != nil && calibration.Active() {
+			rawPTS := pkt.Pts()
+			rawDTS := pkt.Dts()
+			calibrationBuffered = append(calibrationBuffered, pkt)
+			shouldCommit := calibration.Observe(
+				streamIndex,
+				rawPTS, rawPTS != astiav.NoPtsValue,
+				rawDTS, rawDTS != astiav.NoPtsValue,
+			)
+			if !shouldCommit {
+				continue
+			}
+			if calibration.StreamsSeen() < calibration.TotalStreams {
+				logger.Warnf(ctx,
+					"committing PTS/DTS shift calibration after %d packets without seeing every stream (seen %d of %d) — shift may be non-optimal for the unseen streams",
+					calibration.BufferedPackets(), calibration.StreamsSeen(), calibration.TotalStreams,
+				)
+			}
+			commitCalibration(ctx)
+
+			// Re-process every buffered packet through the shift-and-process
+			// path so nothing is lost and downstream observes the packets
+			// in their original arrival order (DTS now corrected by the
+			// committed shift).
+			flushed := calibrationBuffered
+			calibrationBuffered = nil
+			for _, bufPkt := range flushed {
+				applyShift(bufPkt)
+				bufStreamIndex := bufPkt.StreamIndex()
+				bufStream := avconv.FindStreamByIndex(ctx, i.FormatContext, bufStreamIndex)
+				if err := processPacket(ctx, bufPkt, bufStreamIndex, bufStream); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		applyShift(pkt)
+
+		if err := processPacket(ctx, pkt, streamIndex, stream); err != nil {
 			return err
 		}
 	}
