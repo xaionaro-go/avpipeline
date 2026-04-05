@@ -70,6 +70,22 @@ func (p *mockPublisher) isClosed() bool {
 // Verify the mock implements Publisher[any].
 var _ Publisher[any] = (*mockPublisher)(nil)
 
+// mockConsumer implements Consumer[any] for testing purposes.
+type mockConsumer struct {
+	name string
+}
+
+func newMockConsumer(name string) *mockConsumer {
+	return &mockConsumer{name: name}
+}
+
+func (c *mockConsumer) String() string {
+	return c.name
+}
+
+// Verify the mock implements Consumer[any].
+var _ Consumer[any] = (*mockConsumer)(nil)
+
 // waitForServing waits for the route's Serve goroutine to start.
 // This must be called before cancelling the context to avoid a race
 // where the Serve goroutine hasn't read Processor yet.

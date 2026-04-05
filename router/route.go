@@ -31,11 +31,9 @@ type Route[T any] struct {
 	CustomData         T
 	OnPublisherAdded   FuncPublisherEvent[T]
 	OnPublisherRemoved FuncPublisherEvent[T]
+	OnConsumerAdded    func(context.Context, *Route[T], Consumer[T])
+	OnConsumerRemoved  func(context.Context, *Route[T], Consumer[T])
 	ShouldFixPTS       atomic.Bool
-
-	// not supported, yet (TODO: fix)
-	OnConsumerAdded   func(context.Context, *Route[T], Consumer[T])
-	OnConsumerRemoved func(context.Context, *Route[T], Consumer[T])
 
 	// read only:
 	Path       RoutePath
@@ -47,6 +45,7 @@ type Route[T any] struct {
 	// access only when Locker is locked:
 	Publishers           Publishers[T]
 	PublishersChangeChan chan struct{}
+	Consumers            []Consumer[T]
 
 	// internal:
 	CancelFunc context.CancelFunc
@@ -308,10 +307,21 @@ func (r *Route[T]) AddPublisherLocked(
 func (r *Route[T]) RemovePublisher(
 	ctx context.Context,
 	publisher Publisher[T],
-) (Publishers[T], error) {
+) (_ret Publishers[T], _err error) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	return xsync.DoA3R2(ctx, &r.Node.Locker, r.RemovePublisherLocked, ctx, publisher, &wg)
+
+	var callbackFunc FuncPublisherEvent[T]
+	r.Locker().Do(ctx, func() {
+		_ret, _err = r.RemovePublisherLocked(ctx, publisher, &wg)
+		if _err == nil {
+			callbackFunc = r.OnPublisherRemoved
+		}
+	})
+	if callbackFunc != nil {
+		callbackFunc(ctx, r, publisher)
+	}
+	return
 }
 
 func (r *Route[T]) RemovePublisherLocked(
@@ -319,14 +329,6 @@ func (r *Route[T]) RemovePublisherLocked(
 	publisher Publisher[T],
 	wg *sync.WaitGroup,
 ) (Publishers[T], error) {
-	if r.OnPublisherRemoved != nil {
-		callback := r.OnPublisherRemoved
-		wg.Add(1)
-		observability.Go(ctx, func(ctx context.Context) {
-			defer wg.Done()
-			callback(ctx, r, publisher)
-		})
-	}
 	for idx, candidate := range r.Publishers {
 		if publisher == candidate {
 			r.Publishers = slices.Delete(r.Publishers, idx, idx+1)
@@ -339,6 +341,98 @@ func (r *Route[T]) RemovePublisherLocked(
 		}
 	}
 	return nil, ErrPublisherNotFound{}
+}
+
+func (r *Route[T]) GetConsumers(
+	ctx context.Context,
+) []Consumer[T] {
+	return xsync.DoR1(ctx, &r.Node.Locker, func() []Consumer[T] {
+		return slices.Clone(r.Consumers)
+	})
+}
+
+func (r *Route[T]) AddConsumer(
+	ctx context.Context,
+	consumer Consumer[T],
+) (_ret []Consumer[T], _err error) {
+	logger.Debugf(ctx, "AddConsumer[%s](ctx, %s)", r, consumer)
+	defer func() {
+		logger.Debugf(ctx, "/AddConsumer[%s](ctx, %s): len(ret):%d, %v", r, consumer, len(_ret), _err)
+	}()
+
+	var callback func(context.Context, *Route[T], Consumer[T])
+	r.Locker().Do(ctx, func() {
+		_ret, _err = r.AddConsumerLocked(ctx, consumer)
+		if _err == nil {
+			callback = r.OnConsumerAdded
+		}
+	})
+	if callback != nil {
+		callback(ctx, r, consumer)
+	}
+	return
+}
+
+func (r *Route[T]) AddConsumerLocked(
+	ctx context.Context,
+	consumer Consumer[T],
+) (_ret []Consumer[T], _err error) {
+	if consumer == nil {
+		return nil, fmt.Errorf("consumer == nil")
+	}
+	logger.Debugf(ctx, "AddConsumerLocked[%s](ctx, %s/%p)", r, consumer, consumer)
+	defer func() {
+		logger.Debugf(ctx, "/AddConsumerLocked[%s](ctx, %s/%p): len(ret):%d, %v", r, consumer, consumer, len(_ret), _err)
+	}()
+
+	if !r.IsNodeOpen {
+		return nil, ErrRouteClosed{}
+	}
+	if slices.Contains(r.Consumers, consumer) {
+		return nil, ErrAlreadyAConsumer{}
+	}
+	r.Consumers = append(r.Consumers, consumer)
+	return r.Consumers, nil
+}
+
+func (r *Route[T]) RemoveConsumer(
+	ctx context.Context,
+	consumer Consumer[T],
+) (_ret []Consumer[T], _err error) {
+	logger.Debugf(ctx, "RemoveConsumer[%s](ctx, %s)", r, consumer)
+	defer func() {
+		logger.Debugf(ctx, "/RemoveConsumer[%s](ctx, %s): len(ret):%d, %v", r, consumer, len(_ret), _err)
+	}()
+
+	var callback func(context.Context, *Route[T], Consumer[T])
+	r.Locker().Do(ctx, func() {
+		_ret, _err = r.RemoveConsumerLocked(ctx, consumer)
+		if _err == nil {
+			callback = r.OnConsumerRemoved
+		}
+	})
+	if callback != nil {
+		callback(ctx, r, consumer)
+	}
+	return
+}
+
+func (r *Route[T]) RemoveConsumerLocked(
+	ctx context.Context,
+	consumer Consumer[T],
+) (_ret []Consumer[T], _err error) {
+	logger.Debugf(ctx, "RemoveConsumerLocked[%s](ctx, %s/%p)", r, consumer, consumer)
+	defer func() {
+		logger.Debugf(ctx, "/RemoveConsumerLocked[%s](ctx, %s/%p): len(ret):%d, %v", r, consumer, consumer, len(_ret), _err)
+	}()
+
+	for idx, candidate := range r.Consumers {
+		if consumer == candidate {
+			r.Consumers = slices.Delete(r.Consumers, idx, idx+1)
+			return r.Consumers, nil
+		}
+	}
+	return nil, ErrConsumerNotFound{}
 }
 
 func (r *Route[T]) IsOpen(ctx context.Context) (_ret bool) {

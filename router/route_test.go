@@ -556,3 +556,94 @@ func TestRoute_LockDo(t *testing.T) {
 	})
 	assert.True(t, executed)
 }
+
+func TestRoute_OnConsumerAddedFires(t *testing.T) {
+	_, route := newTestRouteViaRouter(t, "test/stream")
+	ctx := context.Background()
+
+	var callCount atomic.Int32
+	var lastConsumer Consumer[any]
+	route.Locker().Do(ctx, func() {
+		route.OnConsumerAdded = func(ctx context.Context, r *Route[any], c Consumer[any]) {
+			callCount.Add(1)
+			lastConsumer = c
+		}
+	})
+
+	c := newMockConsumer("consumer1")
+	consumers, err := route.AddConsumer(ctx, c)
+	require.NoError(t, err)
+	require.Len(t, consumers, 1)
+	assert.Same(t, c, consumers[0])
+	assert.Equal(t, int32(1), callCount.Load())
+	assert.Same(t, c, lastConsumer)
+
+	// Adding a second consumer should fire again.
+	c2 := newMockConsumer("consumer2")
+	consumers, err = route.AddConsumer(ctx, c2)
+	require.NoError(t, err)
+	require.Len(t, consumers, 2)
+	assert.Equal(t, int32(2), callCount.Load())
+	assert.Same(t, c2, lastConsumer)
+
+	// Duplicate should NOT fire the callback.
+	_, err = route.AddConsumer(ctx, c)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAlreadyAConsumer{}))
+	assert.Equal(t, int32(2), callCount.Load())
+}
+
+func TestRoute_OnConsumerRemovedFires(t *testing.T) {
+	_, route := newTestRouteViaRouter(t, "test/stream")
+	ctx := context.Background()
+
+	var callCount atomic.Int32
+	var lastConsumer Consumer[any]
+	route.Locker().Do(ctx, func() {
+		route.OnConsumerRemoved = func(ctx context.Context, r *Route[any], c Consumer[any]) {
+			callCount.Add(1)
+			lastConsumer = c
+		}
+	})
+
+	c := newMockConsumer("consumer1")
+	_, err := route.AddConsumer(ctx, c)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), callCount.Load())
+
+	consumers, err := route.RemoveConsumer(ctx, c)
+	require.NoError(t, err)
+	assert.Empty(t, consumers)
+	assert.Equal(t, int32(1), callCount.Load())
+	assert.Same(t, c, lastConsumer)
+
+	// Removing a non-existent consumer should NOT fire the callback.
+	_, err = route.RemoveConsumer(ctx, c)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrConsumerNotFound{}))
+	assert.Equal(t, int32(1), callCount.Load())
+}
+
+func TestRoute_OnConsumerHooksNilSafe(t *testing.T) {
+	_, route := newTestRouteViaRouter(t, "test/stream")
+	ctx := context.Background()
+
+	// Both hooks left as nil — operations must not panic.
+	c := newMockConsumer("consumer1")
+	consumers, err := route.AddConsumer(ctx, c)
+	require.NoError(t, err)
+	require.Len(t, consumers, 1)
+
+	got := route.GetConsumers(ctx)
+	require.Len(t, got, 1)
+	assert.Same(t, c, got[0])
+
+	consumers, err = route.RemoveConsumer(ctx, c)
+	require.NoError(t, err)
+	assert.Empty(t, consumers)
+
+	// Adding nil must error cleanly, without invoking callbacks.
+	_, err = route.AddConsumer(ctx, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil")
+}

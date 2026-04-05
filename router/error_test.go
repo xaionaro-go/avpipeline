@@ -146,6 +146,8 @@ func TestAllErrors_AreDistinct(t *testing.T) {
 		ErrAlreadyHasPublisher{},
 		ErrAlreadyAPublisher{},
 		ErrPublisherNotFound{},
+		ErrAlreadyAConsumer{},
+		ErrConsumerNotFound{},
 	}
 
 	messages := make(map[string]bool)
@@ -164,6 +166,8 @@ func TestAllErrors_HaveNonEmptyMessages(t *testing.T) {
 		ErrAlreadyHasPublisher{},
 		ErrAlreadyAPublisher{},
 		ErrPublisherNotFound{},
+		ErrAlreadyAConsumer{},
+		ErrConsumerNotFound{},
 	}
 	for _, err := range errs {
 		assert.NotEmpty(t, err.Error(), "error should have a non-empty message")

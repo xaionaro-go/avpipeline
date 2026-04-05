@@ -209,6 +209,22 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) Stop(
 	return xsync.DoA1R1(ctx, &fwd.Mutex, fwd.stop, ctx)
 }
 
+// Activate satisfies the OnDemandActivator contract by delegating to
+// Start. It is a semantic alias that lets on-demand wiring treat the
+// forwarder as an OnDemandActivator without knowing the internal
+// Start/Stop vocabulary.
+func (fwd *StreamForwarderTranscoding[CS, PS]) Activate(ctx context.Context) error {
+	return fwd.Start(ctx)
+}
+
+// Deactivate satisfies the OnDemandActivator contract by delegating to
+// Stop.
+func (fwd *StreamForwarderTranscoding[CS, PS]) Deactivate(ctx context.Context) error {
+	return fwd.Stop(ctx)
+}
+
+var _ OnDemandActivator = (*StreamForwarderTranscoding[any, *ProcessorRouting])(nil)
+
 func (fwd *StreamForwarderTranscoding[CS, PS]) stop(
 	ctx context.Context,
 ) (_err error) {

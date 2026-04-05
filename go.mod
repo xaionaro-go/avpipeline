@@ -24,6 +24,7 @@ require (
 	github.com/xaionaro-go/proxy v0.0.0-20250525144747-579f5a891c15
 	github.com/xaionaro-go/secret v0.0.0-20250111141743-ced12e1082c2
 	github.com/xaionaro-go/tcp v0.0.0-20260103194940-f10157ebd88d
+	github.com/xaionaro-go/thermalmaster v0.0.0-20260322193013-09333653660a
 	github.com/xaionaro-go/typing v0.0.0-20221123235249-2229101d38ba
 	github.com/xaionaro-go/unsafetools v0.0.0-20241024014258-a46e1ce3763e
 	github.com/xaionaro-go/xcontext v0.0.0-20250111150717-e70e1f5b299c
@@ -43,6 +44,7 @@ require (
 	github.com/brettbuddin/fourier v0.1.1 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+	github.com/google/gousb v1.1.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
@@ -50,6 +52,8 @@ require (
 	github.com/k2-fsa/sherpa-onnx-go-linux v1.12.28 // indirect
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.12.28 // indirect
 	github.com/k2-fsa/sherpa-onnx-go-windows v1.12.28 // indirect
+	github.com/mazznoer/colorgrad v0.11.1 // indirect
+	github.com/mazznoer/csscolorparser v0.1.8 // indirect
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12 // indirect
 	github.com/montanaflynn/stats v0.6.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -57,7 +61,6 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/xaionaro-go/ndk v0.0.0-20250420195304-361bb98583bf // indirect
-	github.com/xaionaro-go/thermalmaster v0.0.0-20260322193013-09333653660a // indirect
 	golang.org/x/image v0.37.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/text v0.35.0 // indirect

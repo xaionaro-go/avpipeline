@@ -252,6 +252,42 @@ func (fwd *RouteForwarding[T]) doCloseLocked(
 	return nil
 }
 
+// Activate satisfies the OnDemandActivator contract at the
+// RouteForwarding level. It delegates to the inner StreamForwarder if
+// that forwarder implements OnDemandActivator, which is the case when a
+// TranscoderConfig was provided (StreamForwarderTranscoding). Callers
+// use this to bring a stopped on-demand transcoder online without
+// needing to hold a direct pointer to the StreamForwarder.
+func (fwd *RouteForwarding[T]) Activate(ctx context.Context) error {
+	activator, ok := fwd.onDemandActivator(ctx)
+	if !ok {
+		return fmt.Errorf("inner StreamForwarder does not implement OnDemandActivator")
+	}
+	return activator.Activate(ctx)
+}
+
+// Deactivate satisfies the OnDemandActivator contract at the
+// RouteForwarding level. See Activate for details.
+func (fwd *RouteForwarding[T]) Deactivate(ctx context.Context) error {
+	activator, ok := fwd.onDemandActivator(ctx)
+	if !ok {
+		return fmt.Errorf("inner StreamForwarder does not implement OnDemandActivator")
+	}
+	return activator.Deactivate(ctx)
+}
+
+func (fwd *RouteForwarding[T]) onDemandActivator(
+	ctx context.Context,
+) (OnDemandActivator, bool) {
+	return xsync.DoR2(ctx, &fwd.Locker, func() (OnDemandActivator, bool) {
+		if fwd.StreamForwarder == nil {
+			return nil, false
+		}
+		activator, ok := fwd.StreamForwarder.(OnDemandActivator)
+		return activator, ok
+	})
+}
+
 func (fwd *RouteForwarding[T]) String() string {
 	switch {
 	case fwd.Input != nil && fwd.Output != nil:
