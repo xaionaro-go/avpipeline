@@ -90,7 +90,9 @@ type ReorderMonotonicDTS struct {
 	StartCondition        kernelcondition.Condition[*ReorderMonotonicDTS]
 	Started               bool
 	PrevDTS               time.Duration
-	DiscardUnorderedItems bool
+	MaxDTSSeenPerStream      map[InternalStreamKey]time.Duration
+	MaxForwardGapPerStream   map[InternalStreamKey]time.Duration
+	DiscardUnorderedItems    bool
 
 	emptyQueuesCount         int
 	ConditionArgumentNewItem *packetorframe.InputUnion
@@ -111,6 +113,8 @@ func NewReorderMonotonicDTS(
 		StreamsDTSs:           make(map[InternalStreamKey]*xsort.OrderedAsc[int64]),
 		MaxDTSDifference:      maxDTSDifference,
 		StartCondition:        startCondition,
+		MaxDTSSeenPerStream:    make(map[InternalStreamKey]time.Duration),
+		MaxForwardGapPerStream: make(map[InternalStreamKey]time.Duration),
 		DiscardUnorderedItems: discardUnorderedItems,
 	}
 }
@@ -156,37 +160,29 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	dts := item.GetDTS()
-	newItemDTS := avconv.Duration(dts, item.GetTimeBase())
-	if !r.enforceLowDTSDifference(ctx, newItemDTS) {
-		logger.Debugf(ctx, "skipping the item")
-		return nil
-	}
-
-	if len(r.ItemQueue) >= cap(r.ItemQueue) {
-		if r.DiscardUnorderedItems {
-			logger.Warnf(ctx, "the queue is full, discarding the DTS-oldest item")
-			discarded := heap.Pop(&r.ItemQueue)
-			discardedKey := InternalStreamKey{StreamIndex: discarded.GetStreamIndex()}
-			if reorderMonotonicDTSConsiderSource {
-				discardedKey.Source = discarded.GetSource()
-			}
-			if sq := r.StreamsDTSs[discardedKey]; sq != nil {
-				heap.Pop(sq)
-				if len(*sq) == 0 {
-					r.emptyQueuesCount++
-				}
-			}
-		} else {
-			logger.Warnf(ctx, "the queue is full, flushing one item from the queue to make space")
-			if err := r.sendOneItemFromQueue(ctx, outputCh); err != nil {
-				return nil
-			}
+	// HW decoders (e.g. hevc_cuvid) may emit packets with DTS=NoPtsValue
+	// while PTS is valid. Fall back to PTS and update the item so the
+	// heap comparison (which reads item.GetDTS()) uses the corrected value.
+	if dts == astiav.NoPtsValue {
+		dts = item.GetPTS()
+		if dts != astiav.NoPtsValue {
+			item.SetDTS(dts)
 		}
 	}
-	heap.Push(&r.ItemQueue, item)
-	top := r.ItemQueue[0]
-	logger.Tracef(ctx, "the earliest DTS is now %v (raw %d in timebase %v)",
-		avconv.Duration(top.GetDTS(), top.GetTimeBase()), top.GetDTS(), top.GetTimeBase())
+	if dts == astiav.NoPtsValue {
+		// Both DTS and PTS absent — cannot be sorted. Send directly,
+		// bypassing the reorder buffer.
+		logger.Debugf(ctx, "skipping reorder for item with no DTS/PTS on stream %d", item.GetStreamIndex())
+		select {
+		case outputCh <- item.CloneAsReferencedOutput():
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.CloseChan():
+			return io.EOF
+		}
+	}
+	newItemDTS := avconv.Duration(dts, item.GetTimeBase())
 
 	streamKey := InternalStreamKey{
 		StreamIndex: item.GetStreamIndex(),
@@ -194,6 +190,16 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 	if reorderMonotonicDTSConsiderSource {
 		streamKey.Source = item.GetSource()
 	}
+
+	r.updateStreamDTSReference(ctx, streamKey, newItemDTS)
+
+	if len(r.ItemQueue) >= cap(r.ItemQueue) {
+		r.makeRoomInQueue(ctx, outputCh)
+	}
+	heap.Push(&r.ItemQueue, item)
+	top := r.ItemQueue[0]
+	logger.Tracef(ctx, "the earliest DTS is now %v (raw %d in timebase %v)",
+		avconv.Duration(top.GetDTS(), top.GetTimeBase()), top.GetDTS(), top.GetTimeBase())
 	logger.Tracef(ctx, "pushing DTS:%d to stream queue %v", dts, streamKey)
 	if _, ok := r.StreamsDTSs[streamKey]; !ok {
 		logger.Tracef(ctx, "initializing stream %v", streamKey)
@@ -237,50 +243,74 @@ func (r *ReorderMonotonicDTS) EmptyQueuesCount(ctx context.Context) uint {
 	})
 }
 
-func (r *ReorderMonotonicDTS) enforceLowDTSDifference(
+// updateStreamDTSReference tracks the per-stream DTS high-water mark and
+// warns on anomalous DTS jumps (stream restarts, mid-stream consumer joins).
+func (r *ReorderMonotonicDTS) updateStreamDTSReference(
 	ctx context.Context,
+	streamKey InternalStreamKey,
 	newItemDTS time.Duration,
-) bool {
-	var reference time.Duration
-	var hasReference bool
-	if currentDTSOptional := r.CurrentDTS(); currentDTSOptional.IsSet() {
-		reference = currentDTSOptional.Get()
-		hasReference = true
-	} else if r.PrevDTS != 0 {
-		// Queue is empty but we have already emitted packets; use the
-		// last emitted DTS as the frontier so we still reject poisoned
-		// timestamps that arrive after a drain.
-		reference = r.PrevDTS
-		hasReference = true
+) {
+	if newItemDTS == avconv.NoDuration {
+		return
 	}
+
+	reference, hasReference := r.MaxDTSSeenPerStream[streamKey]
+
+	if !hasReference || newItemDTS > reference {
+		r.MaxDTSSeenPerStream[streamKey] = newItemDTS
+	}
+
 	if !hasReference {
-		return true
+		return
 	}
 
 	dtsDiff := newItemDTS - reference
 	switch {
 	case -dtsDiff > r.MaxDTSDifference:
-		// New item's DTS is far BEHIND the reference. This typically
-		// happens when a publisher reconnects or a consumer joins after
-		// the route already had traffic — PrevDTS reflects the old
-		// publisher's high DTS while the new publisher starts at 0.
-		// Reset the reference so the new stream's packets flow through.
-		logger.Warnf(ctx, "ReorderMonotonicDTS: new DTS %v is %v behind reference %v (> MaxDTSDifference %v); resetting reference (likely stream restart)",
-			newItemDTS, -dtsDiff, reference, r.MaxDTSDifference)
-		r.PrevDTS = newItemDTS
-		return true
-	case dtsDiff > r.MaxDTSDifference:
-		// New item's DTS is far AHEAD of the reference. This is normal
-		// when a consumer connects mid-stream: the first real media
-		// packet carries the publisher's current DTS (~13s) while the
-		// consumer's reference is still 0 (or from a metadata packet).
-		// Reset the reference and accept so the stream can start.
-		logger.Warnf(ctx, "ReorderMonotonicDTS: large forward DTS gap %v (threshold %v, ref=%v, new=%v); resetting reference for mid-stream consumer join",
-			dtsDiff, r.MaxDTSDifference, reference, newItemDTS)
-		r.PrevDTS = newItemDTS
-		return true
+		// Backward DTS jump within this stream beyond MaxDTSDifference.
+		// Reset this stream's high-water mark to the new epoch.
+		logger.Warnf(ctx, "ReorderMonotonicDTS: stream %v: new DTS %v is %v behind reference %v (> MaxDTSDifference %v); resetting reference (stream restart)",
+			streamKey, newItemDTS, -dtsDiff, reference, r.MaxDTSDifference)
+		r.MaxDTSSeenPerStream[streamKey] = newItemDTS
+	case dtsDiff > 0:
+		// Forward gap — log only when a new per-stream record is set.
+		prevMax, hasPrev := r.MaxForwardGapPerStream[streamKey]
+		if !hasPrev {
+			prevMax = time.Second
+			r.MaxForwardGapPerStream[streamKey] = prevMax
+		}
+		if dtsDiff > prevMax {
+			logger.Warnf(ctx, "ReorderMonotonicDTS: stream %v: max forward DTS gap changed from %v to %v (ref=%v, new=%v)",
+				streamKey, prevMax, dtsDiff, reference, newItemDTS)
+			r.MaxForwardGapPerStream[streamKey] = dtsDiff
+		}
 	}
-	return true
+}
+
+func (r *ReorderMonotonicDTS) makeRoomInQueue(
+	ctx context.Context,
+	outputCh chan<- packetorframe.OutputUnion,
+) {
+	if r.DiscardUnorderedItems {
+		logger.Warnf(ctx, "the queue is full, discarding the DTS-oldest item")
+		discarded := heap.Pop(&r.ItemQueue)
+		discardedKey := InternalStreamKey{StreamIndex: discarded.GetStreamIndex()}
+		if reorderMonotonicDTSConsiderSource {
+			discardedKey.Source = discarded.GetSource()
+		}
+		sq := r.StreamsDTSs[discardedKey]
+		if sq == nil {
+			return
+		}
+		heap.Pop(sq)
+		if len(*sq) == 0 {
+			r.emptyQueuesCount++
+		}
+		return
+	}
+
+	logger.Warnf(ctx, "the queue is full, flushing one item from the queue to make space")
+	_ = r.sendOneItemFromQueue(ctx, outputCh)
 }
 
 func (r *ReorderMonotonicDTS) sendOneItemFromQueue(
@@ -343,6 +373,20 @@ func (r *ReorderMonotonicDTS) doSendItem(
 		logger.Tracef(ctx, "/sending out item: DTS:%d, stream:%d: %v", item.GetDTS(), item.GetStreamIndex(), _err)
 	}()
 	dts := avconv.Duration(item.GetDTS(), item.GetTimeBase())
+	if dts == avconv.NoDuration {
+		// Defense-in-depth: pushToQueue should have handled NoPTS via
+		// PTS fallback or direct send. If we still get one here, pass
+		// through without touching PrevDTS.
+		logger.Warnf(ctx, "unexpected NoPTS item in doSendItem (stream %d); passing through", item.GetStreamIndex())
+		select {
+		case outputCh <- item.CloneAsReferencedOutput():
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.CloseChan():
+			return io.EOF
+		}
+	}
 	if r.PrevDTS > dts {
 		switch {
 		case r.MaxDTSDifference > 0 && r.PrevDTS-dts > r.MaxDTSDifference:

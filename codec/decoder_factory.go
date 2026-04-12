@@ -38,6 +38,8 @@ type NaiveDecoderFactory struct {
 var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
 
 type NaiveDecoderFactoryParams struct {
+	VideoCodec            Name
+	AudioCodec            Name
 	HardwareDeviceType    HardwareDeviceType
 	HardwareDeviceName    HardwareDeviceName
 	VideoOptions          *astiav.Dictionary
@@ -114,7 +116,7 @@ func (f *NaiveDecoderFactory) newDecoder(
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeAudio:
 		decInput = DecoderInput{
-			CodecName:             "",
+			CodecName:             f.AudioCodec,
 			CodecParameters:       codecParameters,
 			HardwareDeviceType:    0,
 			HardwareDeviceName:    "",
@@ -126,7 +128,7 @@ func (f *NaiveDecoderFactory) newDecoder(
 		}
 	case astiav.MediaTypeVideo:
 		decInput = DecoderInput{
-			CodecName:             "",
+			CodecName:             f.VideoCodec,
 			CodecParameters:       codecParameters,
 			HardwareDeviceType:    f.HardwareDeviceType,
 			HardwareDeviceName:    f.HardwareDeviceName,
@@ -166,7 +168,7 @@ func (f *NaiveDecoderFactory) reset(
 }
 
 func (f *NaiveDecoderFactory) String() string {
-	return "NaiveDecoderFactory"
+	return fmt.Sprintf("NaiveDecoderFactory(%s/%s)", f.VideoCodec, f.AudioCodec)
 }
 
 var _ ResourcesGetter = (*NaiveDecoderFactory)(nil)

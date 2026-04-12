@@ -16,7 +16,9 @@ const (
 )
 
 const (
-	noDuration = time.Duration(math.MinInt64)
+	// NoDuration is the Duration equivalent of AV_NOPTS_VALUE (math.MinInt64).
+	// Timestamps with this value have no meaningful DTS/PTS.
+	NoDuration = time.Duration(math.MinInt64)
 )
 
 func init() {
@@ -27,14 +29,14 @@ func init() {
 
 func Duration(t int64, timeBase astiav.Rational) time.Duration {
 	if uint64(t) == avNoPTSValue {
-		return noDuration
+		return NoDuration
 	}
 
 	return time.Duration(float64(t) * timeBase.Float64() * float64(time.Second))
 }
 
 func FromDuration(d time.Duration, timeBase astiav.Rational) int64 {
-	if d == noDuration {
+	if d == NoDuration {
 		return math.MinInt64 // equivalent to avNoPTSValue
 	}
 

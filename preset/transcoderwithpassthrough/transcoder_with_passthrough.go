@@ -233,6 +233,8 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
+				VideoCodec:         decoderVideoCodecName(cfg),
+				AudioCodec:         decoderAudioCodecName(cfg),
 				HardwareDeviceType: globaltypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
 				HardwareDeviceName: globaltypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
 				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
@@ -676,4 +678,18 @@ func (s *TranscoderWithPassthrough[C, P]) Wait(
 	defer func() { logger.Tracef(ctx, "/Wait: %v", _err) }()
 	s.waitGroup.Wait()
 	return nil
+}
+
+func decoderVideoCodecName(cfg types.TranscoderConfig) codec.Name {
+	if cfg.Input == nil || len(cfg.Input.VideoTrackConfigs) == 0 {
+		return ""
+	}
+	return codec.Name(cfg.Input.VideoTrackConfigs[0].CodecName)
+}
+
+func decoderAudioCodecName(cfg types.TranscoderConfig) codec.Name {
+	if cfg.Input == nil || len(cfg.Input.AudioTrackConfigs) == 0 {
+		return ""
+	}
+	return codec.Name(cfg.Input.AudioTrackConfigs[0].CodecName)
 }
