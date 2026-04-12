@@ -74,8 +74,8 @@ func encodeTestFrames(ctx context.Context, t *testing.T, width, height int) (*as
 	})
 	require.NoError(t, err)
 
-	pixFmt := enc.CodecContext().PixelFormat()
-	timeBase := enc.CodecContext().TimeBase()
+	pixFmt := enc.CodecContext(ctx).PixelFormat()
+	timeBase := enc.CodecContext(ctx).TimeBase()
 	var packets []*astiav.Packet
 	for i := int64(0); i < 10; i++ {
 		frame := astiav.AllocFrame()
@@ -105,7 +105,7 @@ func encodeTestFrames(ctx context.Context, t *testing.T, width, height int) (*as
 	// Extract codec parameters for decoders.
 	decCP := astiav.AllocCodecParameters()
 	t.Cleanup(decCP.Free)
-	require.NoError(t, enc.CodecContext().ToCodecParameters(decCP))
+	require.NoError(t, enc.CodecContext(ctx).ToCodecParameters(decCP))
 	t.Logf("codec parameters from ToCodecParameters: extradata_size=%d", len(decCP.ExtraData()))
 
 	// The encoder uses CodecFlag2LocalHeader (for streaming), so SPS/PPS are
@@ -177,8 +177,8 @@ func TestMediaCodec_AutoDetectHWDevice(t *testing.T) {
 	decCP, _, enc := encodeTestFrames(ctx, t, 256, 256)
 	defer func() { _ = enc.Close(ctx) }()
 
-	t.Logf("encoder pixel format: %s", enc.CodecContext().PixelFormat())
-	assert.NotNil(t, enc.HardwareDeviceContext(),
+	t.Logf("encoder pixel format: %s", enc.CodecContext(ctx).PixelFormat())
+	assert.NotNil(t, enc.HardwareDeviceContext(ctx),
 		"MediaCodec encoder should auto-detect hardware device type")
 
 	// No HardwareDeviceType set — auto-detection should kick in.
@@ -189,9 +189,9 @@ func TestMediaCodec_AutoDetectHWDevice(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	assert.NotNil(t, dec.HardwareDeviceContext(),
+	assert.NotNil(t, dec.HardwareDeviceContext(ctx),
 		"MediaCodec decoder should auto-detect hardware device type and create HW device context")
-	t.Logf("decoder pixel format: %s", dec.CodecContext().PixelFormat())
+	t.Logf("decoder pixel format: %s", dec.CodecContext(ctx).PixelFormat())
 }
 
 // TestMediaCodec_EncodeDecodeRoundTrip encodes frames with h264_mediacodec,
@@ -219,7 +219,7 @@ func TestMediaCodec_EncodeDecodeRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	assert.NotNil(t, dec.HardwareDeviceContext(),
+	assert.NotNil(t, dec.HardwareDeviceContext(ctx),
 		"MediaCodec decoder should have auto-detected HW device context")
 
 	// Decode.

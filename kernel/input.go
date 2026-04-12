@@ -343,7 +343,7 @@ func (i *Input) doOpen(
 		}
 	default:
 		if cfg.ForceRealTime == nil {
-			if urltools.IsFileURL(urlString) {
+			if urltools.IsFileURL(ctx, urlString) {
 				i.ForceRealTime = true
 			}
 		}
@@ -442,15 +442,15 @@ func (i *Input) initNetworkConn(ctx context.Context) {
 func (i *Input) Close(
 	ctx context.Context,
 ) (_err error) {
+	if i == nil {
+		return nil
+	}
 	if i.isClosing.Swap(true) {
 		return fmt.Errorf("already closed or closing")
 	}
 	f, l := getCaller()
 	logger.Debugf(ctx, "Close[%s]: called from %s:%d", i, f, l)
 	defer func() { logger.Debugf(ctx, "/Close[%s]: %v", i, _err) }()
-	if i == nil {
-		return nil
-	}
 
 	logger.Debugf(ctx, "interrupting IO before close")
 	i.Interrupt()

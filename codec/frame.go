@@ -49,19 +49,19 @@ func (f *Frame) FrameDuration() time.Duration {
 	return toDuration(f.Packet.Duration(), f.InputPacket.Stream.TimeBase().Float64())
 }
 
-func (f *Frame) TransferFromHardwareToRAM() error {
+func (f *Frame) TransferFromHardwareToRAM(ctx context.Context) error {
 	if f.Decoder == nil {
 		return fmt.Errorf("decoder is nil")
 	}
-	if f.Decoder.HardwareDeviceContext() == nil {
+	if f.Decoder.HardwareDeviceContext(ctx) == nil {
 		return fmt.Errorf("is not a hardware-backed frame")
 	}
 
 	if f.Frame == nil {
 		return fmt.Errorf("frame is nil")
 	}
-	if f.Frame.PixelFormat() != f.Decoder.HardwarePixelFormat() {
-		return fmt.Errorf("unexpected pixel format: %v != %v", f.Frame.PixelFormat(), f.Decoder.HardwarePixelFormat())
+	if f.Frame.PixelFormat() != f.Decoder.HardwarePixelFormat(ctx) {
+		return fmt.Errorf("unexpected pixel format: %v != %v", f.Frame.PixelFormat(), f.Decoder.HardwarePixelFormat(ctx))
 	}
 
 	if err := f.Frame.TransferHardwareData(f.RAMFrame); err != nil {

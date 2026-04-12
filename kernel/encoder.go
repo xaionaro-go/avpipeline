@@ -207,16 +207,16 @@ func (e *Encoder[EF]) initOutputStream(
 
 	var outputStream *astiav.Stream
 	e.outputFormatContextLocker.Do(xsync.WithNoLogging(ctx, true), func() {
-		outputStream = e.outputFormatContext.NewStream(encoder.Codec())
+		outputStream = e.outputFormatContext.NewStream(encoder.Codec(ctx))
 	})
 	if outputStream == nil {
 		return fmt.Errorf("unable to initialize an output stream")
 	}
-	if err := encoder.ToCodecParameters(outputStream.CodecParameters()); err != nil {
+	if err := encoder.ToCodecParameters(ctx, outputStream.CodecParameters()); err != nil {
 		return fmt.Errorf("unable to copy codec parameters from the encoder to the output stream: %w", err)
 	}
 
-	err := e.configureOutputStream(ctx, outputStream, streamIndex, encoder.CodecContext().TimeBase())
+	err := e.configureOutputStream(ctx, outputStream, streamIndex, encoder.CodecContext(ctx).TimeBase())
 	if err != nil {
 		return fmt.Errorf("unable to configure the stream: %w", err)
 	}
@@ -353,7 +353,7 @@ func (e *Encoder[EF]) initEncoderFor(
 	if err != nil {
 		return fmt.Errorf("cannot initialize an encoder for stream %d: %w", streamIndex, err)
 	}
-	if !codec.IsDummyEncoder(encoderInstance) && encoderInstance.CodecContext() == nil {
+	if !codec.IsDummyEncoder(encoderInstance) && encoderInstance.CodecContext(ctx) == nil {
 		return fmt.Errorf("the encoder factory produced an encoder %T with nil CodecContext", encoderInstance)
 	}
 
@@ -588,7 +588,7 @@ func (e *Encoder[EF]) sendFrame(
 			initTS := getInitTSer.GetInitTS()
 			if streamEncoder.LastInitTS.Before(initTS) {
 				logger.Debugf(ctx, "updating the codec parameters")
-				streamEncoder.Encoder.ToCodecParameters(outputStream.CodecParameters())
+				streamEncoder.Encoder.ToCodecParameters(ctx, outputStream.CodecParameters())
 				streamEncoder.LastInitTS = initTS
 			}
 			return nil
@@ -608,7 +608,7 @@ func (e *Encoder[EF]) sendFrame(
 	outputMediaType := outputStream.CodecParameters().MediaType()
 	if encoderExtraDefensive {
 		inputMediaType := input.GetMediaType()
-		encoderMediaType := streamEncoder.Encoder.MediaType()
+		encoderMediaType := streamEncoder.Encoder.MediaType(ctx)
 		assert(ctx, inputMediaType == encoderMediaType, inputMediaType, encoderMediaType)
 		assert(ctx, outputMediaType == encoderMediaType, outputMediaType, encoderMediaType)
 
@@ -640,7 +640,7 @@ func (e *Encoder[EF]) sendFrame(
 			PictureType: input.Frame.PictureType(),
 		}
 
-		if encoder.Codec() == nil {
+		if encoder.Codec(ctx) == nil {
 			logger.Errorf(ctx, "the encoder is closed; dropping the frame")
 			return nil
 		}
@@ -750,6 +750,21 @@ func (e *Encoder[EF]) drain(
 		opaque := pkt.Opaque()
 		logger.Tracef(ctx, "encoder.ReceivePacket(): got the %dth %s packet, resulting size: %d (pts: %d); opaque size: %d", packetCount, outputStream.CodecParameters().MediaType(), pkt.Size(), pkt.Pts(), len(opaque))
 
+		// Hardware encoders (e.g. h264_rkmpp) may not populate
+		// AVCodecContext.extradata until the first frame is encoded.
+		// Update the output stream's codec parameters so that
+		// downstream consumers (FLV muxer, RTMP servers) receive
+		// correct SPS/PPS in the stream header.
+		if outputStream.CodecParameters().ExtraData() == nil {
+			if cc := encoder.CodecContext(ctx); cc != nil {
+				if err := cc.ToCodecParameters(outputStream.CodecParameters()); err != nil {
+					logger.Warnf(ctx, "unable to update output stream codec parameters from encoder: %v", err)
+				} else {
+					logger.Debugf(ctx, "updated output stream codec parameters from encoder (extradata was empty)")
+				}
+			}
+		}
+
 		pkt.SetStreamIndex(outputStream.Index())
 
 		if opaque != nil {
@@ -855,16 +870,16 @@ func (e *streamEncoderLocked) fitFrameForEncoding(
 	ctx context.Context,
 	input frame.Input,
 ) (fittedFrames []*astiav.Frame, _err error) {
-	logger.Tracef(ctx, "fitFrameForEncoding: %s", e.MediaType())
-	defer func() { logger.Tracef(ctx, "/fitFrameForEncoding: %s: %v %v", e.MediaType(), fittedFrames, _err) }()
+	logger.Tracef(ctx, "fitFrameForEncoding: %s", e.MediaType(ctx))
+	defer func() { logger.Tracef(ctx, "/fitFrameForEncoding: %s: %v %v", e.MediaType(ctx), fittedFrames, _err) }()
 
-	switch e.MediaType() {
+	switch e.MediaType(ctx) {
 	case astiav.MediaTypeVideo:
 		res := e.GetResolution(ctx)
 		if res == nil {
 			return nil, fmt.Errorf("unable to get the resolution from the encoder")
 		}
-		encoderPixelFormat := e.CodecContext().PixelFormat()
+		encoderPixelFormat := e.CodecContext(ctx).PixelFormat()
 		if encoderDebug {
 			logger.Tracef(ctx, "input frame: %dx%d/%s (%s); encoder resolution: %s, encoder pixel format: %s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), input.CodecParameters.CodecID(), res, encoderPixelFormat)
 		}
@@ -874,10 +889,10 @@ func (e *streamEncoderLocked) fitFrameForEncoding(
 				return []*astiav.Frame{input.Frame}, nil
 			}
 		}
-		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext().PixelFormat())
+		logger.Tracef(ctx, "scaling the frame from %dx%d/%s to %s/%s", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext(ctx).PixelFormat())
 		scaledFrame, err := e.getScaledFrame(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("unable to scale the frame from %dx%d/%s to %s/%s: %w", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext().PixelFormat(), err)
+			return nil, fmt.Errorf("unable to scale the frame from %dx%d/%s to %s/%s: %w", input.Frame.Width(), input.Frame.Height(), input.PixelFormat(), res, e.CodecContext(ctx).PixelFormat(), err)
 		}
 		if encoderCopyTimeAfterScaling {
 			scaledFrame.SetPts(input.Frame.Pts())
@@ -903,7 +918,7 @@ func (e *streamEncoderLocked) fitFrameForEncoding(
 		}
 		return resampledFrames, nil
 	default:
-		logger.Debugf(ctx, "unsupported media type: %s", e.MediaType())
+		logger.Debugf(ctx, "unsupported media type: %s", e.MediaType(ctx))
 		return []*astiav.Frame{input.Frame}, nil
 	}
 }
@@ -1046,7 +1061,11 @@ func (e *streamEncoderLocked) getScaledFrame(
 
 	if encoderRescaleEnableCropping {
 		if frameSrc == input.Frame {
-			frameSrc = frame.CloneAsWritable(frameSrc)
+			cloned, cloneErr := frame.CloneAsWritable(frameSrc)
+			if cloneErr != nil {
+				return nil, fmt.Errorf("unable to clone frame as writable: %w", cloneErr)
+			}
+			frameSrc = cloned
 		}
 		err = frameSrc.ApplyCropping(0)
 		if err != nil {
@@ -1057,7 +1076,7 @@ func (e *streamEncoderLocked) getScaledFrame(
 	if encoderRescaleEnableTightPacking {
 		if getDecoderer, ok := input.Source.(codec.GetDecoderer); ok {
 			decoder := getDecoderer.GetDecoder()
-			if strings.HasSuffix(decoder.Codec.Codec().Name(), "_mediacodec") {
+			if strings.HasSuffix(decoder.Codec.Codec(ctx).Name(), "_mediacodec") {
 				frameSrc, err = tightPack(ctx, frameSrc)
 				if err != nil {
 					return nil, fmt.Errorf("unable to tight-pack the frame: %w", err)
@@ -1125,9 +1144,9 @@ func (e *streamEncoderLocked) prepareScaler(
 	inputResolution := input.GetResolution()
 
 	outputResolution := e.GetResolution(ctx)
-	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext().PixelFormat())
+	logger.Tracef(ctx, "prepareScaler: %v/%v->%v/%v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext(ctx).PixelFormat())
 	defer func() {
-		logger.Tracef(ctx, "/prepareScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext().PixelFormat(), _err)
+		logger.Tracef(ctx, "/prepareScaler: %v/%v->%v/%v: %v", inputResolution, input.PixelFormat(), outputResolution, e.CodecContext(ctx).PixelFormat(), _err)
 	}()
 
 	if outputResolution == nil {
@@ -1135,7 +1154,7 @@ func (e *streamEncoderLocked) prepareScaler(
 	}
 
 	if e.Scaler != nil {
-		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == *outputResolution && input.PixelFormat() == e.Scaler.SourcePixelFormat() && e.CodecContext().PixelFormat() == e.Scaler.DestinationPixelFormat() {
+		if e.Scaler.SourceResolution() == inputResolution && e.Scaler.DestinationResolution() == *outputResolution && input.PixelFormat() == e.Scaler.SourcePixelFormat() && e.CodecContext(ctx).PixelFormat() == e.Scaler.DestinationPixelFormat() {
 			logger.Tracef(ctx, "reusing the scaler")
 			return nil
 		}
@@ -1144,12 +1163,19 @@ func (e *streamEncoderLocked) prepareScaler(
 		}
 	}
 
+	// Free the previous frame before allocating a new one to avoid leaking
+	// C-heap memory: Go's GC doesn't account for the C-side buffer size, so
+	// relying on the finalizer alone causes unbounded growth on resolution changes.
+	if e.ScaledFrame != nil {
+		e.ScaledFrame.Free()
+	}
+
 	e.ScaledFrame = astiav.AllocFrame()
 	setFinalizerFree(ctx, e.ScaledFrame)
 	e.ScaledFrame.SetWidth(int(outputResolution.Width))
 	e.ScaledFrame.SetHeight(int(outputResolution.Height))
-	e.ScaledFrame.SetPixelFormat(e.CodecContext().PixelFormat())
-	if err := e.ScaledFrame.AllocBuffer(0); err != nil { // TODO(memleak): make sure the buffer is not already allocated, otherwise it may lead to a memleak
+	e.ScaledFrame.SetPixelFormat(e.CodecContext(ctx).PixelFormat())
+	if err := e.ScaledFrame.AllocBuffer(0); err != nil {
 		return fmt.Errorf("unable to allocate a buffer for the scaled frame: %w", err)
 	}
 

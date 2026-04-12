@@ -51,7 +51,7 @@ func TestGetRouteMode_String(t *testing.T) {
 		mode     GetRouteMode
 		expected string
 	}{
-		{GetRouteModeFailIfNotFound, "fail-if-no-found"},
+		{GetRouteModeFailIfNotFound, "fail-if-not-found"},
 		{GetRouteModeWaitUntilCreated, "wait-until-created"},
 		{GetRouteModeWaitForPublisher, "wait-for-publisher"},
 		{GetRouteModeCreateTemporaryIfNotFound, "create-temporary-if-not-found"},

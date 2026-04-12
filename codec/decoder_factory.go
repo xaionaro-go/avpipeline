@@ -197,7 +197,7 @@ func (f *NaiveDecoderFactory) getResources(
 			for _, decoder := range f.VideoDecoders {
 				if decoder == d {
 					return &Resources{
-						HWDeviceContext: decoder.HardwareDeviceContext(),
+						HWDeviceContext: decoder.HardwareDeviceContext(ctx),
 					}
 				}
 			}
@@ -218,7 +218,7 @@ func (f *NaiveDecoderFactory) getResources(
 		}
 		d := f.VideoDecoders[0]
 		return &Resources{
-			HWDeviceContext: d.HardwareDeviceContext(),
+			HWDeviceContext: d.HardwareDeviceContext(ctx),
 		}
 	case astiav.MediaTypeAudio:
 		return nil

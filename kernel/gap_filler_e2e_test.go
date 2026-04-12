@@ -140,6 +140,7 @@ func compareFrames(f1, f2 *astiav.Frame, plane int) float64 {
 }
 
 func TestGapFillerE2E_FLV_Interpolation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -187,7 +188,7 @@ LOOP:
 		select {
 		case out := <-outputCh:
 			receivedFrames = append(receivedFrames, out.Frame.Frame)
-		case <-time.After(20 * time.Second): // MCI is REALLY slow
+		case <-time.After(500 * time.Millisecond): // frames are produced synchronously during SendInput
 			break LOOP
 		}
 	}
@@ -214,6 +215,7 @@ LOOP:
 }
 
 func TestGapFillerE2E_VideoStrategiesCombined(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -261,7 +263,7 @@ func TestGapFillerE2E_VideoStrategiesCombined(t *testing.T) {
 				select {
 				case out := <-outputCh:
 					receivedFrames = append(receivedFrames, out.Frame.Frame)
-				case <-time.After(1 * time.Second):
+				case <-time.After(200 * time.Millisecond):
 					break LOOP
 				}
 			}
@@ -278,6 +280,7 @@ func TestGapFillerE2E_VideoStrategiesCombined(t *testing.T) {
 }
 
 func TestGapFillerE2E_AudioStrategies(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -324,7 +327,7 @@ func TestGapFillerE2E_AudioStrategies(t *testing.T) {
 				select {
 				case out := <-outputCh:
 					receivedFrames = append(receivedFrames, out.Frame.Frame)
-				case <-time.After(1 * time.Second):
+				case <-time.After(200 * time.Millisecond):
 					break LOOP
 				}
 			}

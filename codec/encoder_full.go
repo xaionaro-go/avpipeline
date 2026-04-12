@@ -47,7 +47,7 @@ func (e *EncoderFull) asLocked() *EncoderFullLocked {
 }
 
 func (e *EncoderFull) String() string {
-	ctx := context.TODO()
+	ctx := context.Background()
 	if !e.locker.ManualTryRLock(ctx) {
 		return "Encoder(<locked>; assuming: " + string(e.InitParams.CodecName) + ")"
 	}
@@ -162,7 +162,7 @@ func (e *EncoderFull) Drain(
 }
 
 func (e *EncoderFull) IsDirty() bool {
-	return e.isDirty
+	return e.isDirty.Load()
 }
 
 func (e *EncoderFull) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) (_err error) {

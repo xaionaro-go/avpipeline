@@ -111,11 +111,11 @@ func (a *ScreenCapturer[C]) RemovePushTo(
 	return a.Output().RemovePushTo(ctx, dst)
 }
 
-func (a *ScreenCapturer[C]) IsServing() bool {
+func (a *ScreenCapturer[C]) IsServing(ctx context.Context) bool {
 	if a == nil {
 		return false
 	}
-	return a.Input().IsServing() && a.Output().IsServing()
+	return a.Input().IsServing(ctx) && a.Output().IsServing(ctx)
 }
 
 func (a *ScreenCapturer[C]) GetCountersPtr() *nodetypes.Counters {

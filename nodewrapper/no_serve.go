@@ -102,8 +102,8 @@ func (n *NoServe[N]) RemovePushTo(
 	return fmt.Errorf("NoServe cannot remove PushTo")
 }
 
-func (n *NoServe[N]) IsServing() bool {
-	return n.Node.IsServing()
+func (n *NoServe[N]) IsServing(ctx context.Context) bool {
+	return n.Node.IsServing(ctx)
 }
 
 func (n *NoServe[N]) GetCountersPtr() *nodetypes.Counters {

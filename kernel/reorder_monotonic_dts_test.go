@@ -116,12 +116,13 @@ func TestReorderMonotonicDTS(t *testing.T) {
 	}
 }
 
-// TestReorderMonotonicDTS_PathologicalGapDiscards feeds good packets,
-// then a packet whose DTS is beyond MaxDTSDifference from the current
-// frontier. The bad packet must be discarded; the good packets must
-// still flow through normally.
+// TestReorderMonotonicDTS_LargeForwardGapAccepted feeds good packets,
+// then a packet whose DTS is far beyond MaxDTSDifference from the
+// current frontier (simulating a consumer connecting mid-stream).
+// The gap packet must be accepted with PrevDTS reset; good packets
+// must still flow through normally.
 // Agent-generated test.
-func TestReorderMonotonicDTS_PathologicalGapDiscards(t *testing.T) {
+func TestReorderMonotonicDTS_LargeForwardGapAccepted(t *testing.T) {
 	l := logrus.Default().WithLevel(logger.LevelError)
 	ctx := logger.CtxWithLogger(context.Background(), l)
 	logger.SetDefault(func() logger.Logger {
@@ -169,10 +170,10 @@ func TestReorderMonotonicDTS_PathologicalGapDiscards(t *testing.T) {
 	inputPoisoned := packet.BuildInput(pktPoisoned, &packet.StreamInfo{Stream: stream, Source: packetSource})
 	require.NoError(t, k.SendInput(ctx, packetorframe.InputUnion{Packet: &inputPoisoned}, chOut))
 
-	// With a single stream the good packets have already been emitted to
-	// chOut by the reorder logic; the poisoned packet must NOT appear.
+	// With the forward-gap-accept fix, the large-DTS packet is treated
+	// as a legitimate mid-stream connect and accepted (PrevDTS reset).
 	// Drain what's available and assert.
-	sawPoisoned := false
+	sawLargeDTS := false
 	emitted := 0
 drain:
 	for {
@@ -180,16 +181,16 @@ drain:
 		case item := <-chOut:
 			emitted++
 			if item.GetDTS() == poisonedDTS {
-				sawPoisoned = true
+				sawLargeDTS = true
 			}
 			continue
 		default:
 			break drain
 		}
 	}
-	require.False(t, sawPoisoned, "poisoned packet must not be forwarded")
-	require.GreaterOrEqual(t, emitted, goodCount-1,
-		"good packets must flow through normally (got %d emitted)", emitted,
+	require.True(t, sawLargeDTS, "large forward-gap packet must be accepted (mid-stream connect)")
+	require.GreaterOrEqual(t, emitted, goodCount,
+		"all packets (good + gap) must flow through (got %d emitted)", emitted,
 	)
 }
 

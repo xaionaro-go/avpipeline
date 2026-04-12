@@ -111,5 +111,5 @@ func (d *Decoder) LockDo(
 func (d *Decoder) IsDirty(
 	ctx context.Context,
 ) bool {
-	return d.isDirty
+	return d.isDirty.Load()
 }

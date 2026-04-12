@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	androidkernel "github.com/xaionaro-go/avpipeline/kernel/android"
+	androidkernel "github.com/xaionaro-go/avpipeline/kernel/extra/android"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 

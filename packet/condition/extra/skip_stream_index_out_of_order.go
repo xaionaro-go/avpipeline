@@ -44,7 +44,7 @@ func (i *SkipStreamIndexOutOfOrder) Match(
 }
 
 func (i *SkipStreamIndexOutOfOrder) String() string {
-	ctx := xsync.WithNoLogging(context.TODO(), true)
+	ctx := xsync.WithNoLogging(context.Background(), true)
 	if !i.Locker.ManualTryRLock(ctx) {
 		return "SkipStreamIndexOutOfOrder"
 	}

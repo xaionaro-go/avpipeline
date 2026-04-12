@@ -140,13 +140,10 @@ func (r *Retryable[K]) openKernelIfNeeded(
 
 	for {
 
-		// Check barrier without blocking: openKernelIfNeeded runs
-		// holding KernelLocker, so blocking here would prevent any
-		// concurrent Pause/Unpause from making progress and can
-		// deadlock with a Pause that flipped the barrier between
-		// Unpause closing it and this goroutine acquiring the lock.
-		// If the barrier is currently paused, honour the pause and
-		// return: the next Unpause will spawn a fresh goroutine.
+		// Block on the barrier until unpaused. Unpause closes the
+		// barrier channel atomically (no KernelLocker needed), so
+		// blocking here while holding KernelLocker is safe — there
+		// is no lock-order inversion.
 		select {
 		case <-ctx.Done():
 			logger.Errorf(ctx, "unable to open the kernel, because we are finishing: %v", ctx.Err())
@@ -162,9 +159,6 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			return
 		case <-*r.KernelOpenBarrier.Load():
 			// barrier is open (closed channel) — proceed.
-		default:
-			logger.Debugf(ctx, "openKernelIfNeeded: barrier is paused, deferring kernel open")
-			return
 		}
 
 		k, err := r.Factory(ctx)
@@ -313,10 +307,19 @@ func (r *Retryable[K]) GetObjectID() globaltypes.ObjectID {
 }
 
 func (r *Retryable[K]) String() string {
-	ctx := context.Background()
-	snap := xsync.DoR1(xsync.WithEnableDeadlock(ctx, false), &r.KernelLocker, func() kernelSnapshot[K] {
-		return kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
-	})
+	ctx := xsync.WithEnableDeadlock(context.Background(), false)
+	// Use non-blocking lock to avoid deadlock when openKernelIfNeeded
+	// holds KernelLocker while blocked on KernelOpenBarrier — any
+	// goroutine calling String() (e.g. from debug logging in
+	// AddPushTo) would block forever on the same lock.
+	if !r.KernelLocker.ManualTryLock(ctx) {
+		return "Retry(<locked>)"
+	}
+	snap := kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
+	r.KernelLocker.ManualUnlock(ctx)
+	if !snap.isSet {
+		return fmt.Sprintf("Retry(%T:<not set>)", snap.kernel)
+	}
 	return fmt.Sprintf("Retry(%T:%s)", snap.kernel, snap.kernel)
 }
 
@@ -393,28 +396,60 @@ func (r *Retryable[K]) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	r.retry(ctx, func(k K) error {
-		pktSrc, ok := Abstract(k).(packet.Source)
-		if !ok {
-			return nil
-		}
-		pktSrc.WithOutputFormatContext(ctx, callback)
-		return nil
-	})
+	// Use non-blocking lock to avoid stalling callers when the init
+	// goroutine holds KernelLocker during the factory retry loop
+	// (e.g., output destination not yet reachable). Format context
+	// queries are read-only — returning nil is safe when the kernel
+	// is not yet ready.
+	ctx = xsync.WithEnableDeadlock(ctx, false)
+	if !r.KernelLocker.ManualTryLock(ctx) {
+		logger.Debugf(ctx, "WithOutputFormatContext: kernel lock busy, calling callback with nil")
+		callback(nil)
+		return
+	}
+	snap := kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
+	r.KernelLocker.ManualUnlock(ctx)
+
+	if !snap.isSet {
+		logger.Debugf(ctx, "WithOutputFormatContext: kernel not set, calling callback with nil")
+		callback(nil)
+		return
+	}
+	pktSrc, ok := Abstract(snap.kernel).(packet.Source)
+	if !ok {
+		return
+	}
+	pktSrc.WithOutputFormatContext(ctx, callback)
 }
 
 func (r *Retryable[K]) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	r.retry(ctx, func(k K) error {
-		pktSink, ok := Abstract(k).(packet.Sink)
-		if !ok {
-			return nil
-		}
-		pktSink.WithInputFormatContext(ctx, callback)
-		return nil
-	})
+	// Use non-blocking lock to avoid stalling callers when the init
+	// goroutine holds KernelLocker during the factory retry loop
+	// (e.g., output destination not yet reachable). Format context
+	// queries are read-only — returning nil is safe when the kernel
+	// is not yet ready.
+	ctx = xsync.WithEnableDeadlock(ctx, false)
+	if !r.KernelLocker.ManualTryLock(ctx) {
+		logger.Debugf(ctx, "WithInputFormatContext: kernel lock busy, calling callback with nil")
+		callback(nil)
+		return
+	}
+	snap := kernelSnapshot[K]{kernel: r.Kernel, isSet: r.KernelIsSet}
+	r.KernelLocker.ManualUnlock(ctx)
+
+	if !snap.isSet {
+		logger.Debugf(ctx, "WithInputFormatContext: kernel not set, calling callback with nil")
+		callback(nil)
+		return
+	}
+	pktSink, ok := Abstract(snap.kernel).(packet.Sink)
+	if !ok {
+		return
+	}
+	pktSink.WithInputFormatContext(ctx, callback)
 }
 
 func (r *Retryable[K]) NotifyAboutPacketSource(

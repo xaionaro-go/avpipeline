@@ -19,7 +19,7 @@ func (ErrRouteClosed) Unwrap() error  { return nil }
 
 type ErrAlreadyHasPublisher struct{}
 
-func (ErrAlreadyHasPublisher) Error() string  { return "is already has a publisher" }
+func (ErrAlreadyHasPublisher) Error() string  { return "already has a publisher" }
 func (ErrAlreadyHasPublisher) Unwrap() error  { return nil }
 
 type ErrAlreadyAPublisher struct{}

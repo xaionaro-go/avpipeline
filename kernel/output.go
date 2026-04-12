@@ -156,7 +156,8 @@ type Output struct {
 	PreallocatedSubtitleStreams []*OutputStream
 	PreallocatedDataStreams     []*OutputStream
 
-	sendingAllowed   bool
+	sendingAllowed        bool
+	firstVideoPacketSeen bool
 	openFinished     chan struct{}
 	openError        error
 	pendingPackets   []pendingPacket
@@ -636,8 +637,26 @@ func (o *Output) initOutputStreamFor(
 		}
 	}
 
+	// Save the muxer-set timebase before configureOutputStream, which
+	// copies all parameters (including timebase) from the input stream.
+	// After WriteHeader the muxer has already chosen the correct
+	// timebase for the container (e.g. 1/1000 for FLV); overwriting it
+	// with the encoder's codec timebase (e.g. 1/48000 for AAC) makes
+	// the RescaleTs in doWritePacket a no-op, causing raw sample counts
+	// to be written as milliseconds into the stream.
+	savedTimeBase := outputStream.TimeBase()
+
 	if err := o.configureOutputStream(ctx, outputStream, inputSource, inputStream); err != nil {
 		return nil, err
+	}
+
+	if o.headerSent && savedTimeBase.Den() != 0 {
+		logger.Debugf(
+			ctx,
+			"restoring muxer-set timebase %s (was overwritten to %s by configureOutputStream)",
+			savedTimeBase, outputStream.TimeBase(),
+		)
+		outputStream.SetTimeBase(savedTimeBase)
 	}
 
 	return outputStream, nil
@@ -778,6 +797,40 @@ func (o *Output) getOutputStream(
 	return outputStream, nil
 }
 
+// getOutputStreamFromPacket initializes an output stream directly from the
+// packet's stream metadata, without requiring a full source format context.
+// This is the lazy-init fallback for when WithOutputFormatContext does not
+// invoke its callback (e.g. the upstream Retryable kernel has not connected
+// yet).
+func (o *Output) getOutputStreamFromPacket(
+	ctx context.Context,
+	inputSource packet.Source,
+	inputStream *astiav.Stream,
+) (*OutputStream, error) {
+	streamIndex := inputStream.Index()
+	if existing := o.OutputStreams[streamIndex]; existing != nil {
+		return existing, nil
+	}
+
+	outputStream, err := o.initOutputStreamFor(ctx, inputSource, inputStream)
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize output stream for input stream #%d: %w", streamIndex, err)
+	}
+
+	o.OutputStreams[streamIndex] = outputStream
+	o.InputStreams[streamIndex] = OutputInputStream{
+		Source: inputSource,
+		Stream: inputStream,
+	}
+
+	if outputStream.CodecParameters().MediaType() == astiav.MediaTypeVideo {
+		o.waitingKeyFrames[streamIndex] = struct{}{}
+		logger.Debugf(ctx, "len(waitingKeyFrames): increase -> %d (lazy init)", len(o.waitingKeyFrames))
+	}
+
+	return outputStream, nil
+}
+
 func (o *Output) SendInput(
 	ctx context.Context,
 	input packetorframe.InputUnion,
@@ -830,6 +883,23 @@ func (o *Output) sendPacket(
 			outputStream = o.OutputStreams[inputPkt.GetStreamIndex()]
 			if outputStream != nil {
 				err = nil
+			}
+		}
+		if errors.As(err, &ErrNoSourceFormatContext{}) {
+			// The source's WithOutputFormatContext did not invoke the callback
+			// (e.g. the upstream Retryable kernel is not ready yet). Fall back
+			// to initializing the output stream directly from the packet's own
+			// stream metadata so that we do not silently discard the packet.
+			if inputStream := inputPkt.GetStream(); inputStream != nil && inputStream.CodecParameters() != nil &&
+				inputStream.CodecParameters().CodecID() != astiav.CodecIDNone {
+				logger.Debugf(ctx, "source format context unavailable; lazily initializing output stream from packet stream #%d", inputStream.Index())
+				var initErr error
+				outputStream, initErr = o.getOutputStreamFromPacket(ctx, inputPkt.GetSource(), inputStream)
+				if initErr != nil {
+					logger.Warnf(ctx, "lazy output stream init failed: %v", initErr)
+				} else {
+					err = nil
+				}
 			}
 		}
 	})
@@ -936,9 +1006,12 @@ func (o *Output) send(
 		}
 	}
 	if *o.Config.WaitForOutputStreams.VideoBeforeAudio && expectedStreamsVideoCount > 0 {
-		// we have to skip non-key-video packets here, otherwise mediamtx (https://github.com/bluenviron/mediamtx)
-		// does not see the video track:
-		if mediaType != astiav.MediaTypeVideo {
+		// Block non-video packets only until the first video packet is seen.
+		// Previously this blocked audio permanently, which deadlocked with
+		// WaitForOutputStreams requiring audio streams to exist.
+		if mediaType == astiav.MediaTypeVideo {
+			o.firstVideoPacketSeen = true
+		} else if !o.firstVideoPacketSeen {
 			logger.Debugf(ctx, "skipping a non-video (%s) packet to avoid MediaMTX from losing the video track", mediaType)
 			return nil
 		}
@@ -1028,6 +1101,16 @@ func (o *Output) send(
 			)
 			err = o.FormatContext.WriteHeader(o.Dictionary)
 			o.headerSent = true
+			// Flush the IO buffer immediately so that RTMP servers
+			// (particularly AVD's proxied listener) receive the header
+			// without waiting for the buffer to fill. Without this,
+			// slow producers (e.g. phone h264_mediacodec at 30fps)
+			// may never fill the default 32KB AVIO buffer, causing
+			// the receiving side's avformat_find_stream_info to block
+			// indefinitely.
+			if err == nil && o.ioContext != nil {
+				o.ioContext.Flush()
+			}
 			logger.Debugf(ctx, "wrote the header: %v", err)
 		})
 	}
@@ -1258,6 +1341,13 @@ func (o *Output) doWritePacket(
 			return
 		}
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
+		// Flush after every packet for real-time streaming. Without
+		// this, data stays in the AVIO 32KB buffer and slow producers
+		// (phone h264_mediacodec at 30fps) never fill it, causing
+		// the receiving side to starve.
+		if err == nil && o.ioContext != nil {
+			o.ioContext.Flush()
+		}
 	})
 	if err != nil {
 		err = fmt.Errorf(

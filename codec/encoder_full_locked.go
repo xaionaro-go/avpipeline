@@ -79,15 +79,15 @@ func newEncoderFullLocked(
 		InitTS:             time.Now(),
 		AverageFPS:         indicator.NewMAMA[float64](60, 0.1, 0.01),
 	}
-	switch e.MediaType() {
+	switch e.MediaType(ctx) {
 	case astiav.MediaTypeVideo:
 		e.ForceNextKeyFrame = true
 	}
 	return e, nil
 }
 
-func (e *EncoderFullLocked) MediaType() astiav.MediaType {
-	return e.mediaTypeLocked()
+func (e *EncoderFullLocked) MediaType(ctx context.Context) astiav.MediaType {
+	return e.mediaTypeLocked(ctx)
 }
 
 func (e *EncoderFullLocked) AsLocked() *EncoderFull {
@@ -104,7 +104,7 @@ func (e *EncoderFullLocked) UnlockDo(
 }
 
 func (e *EncoderFullLocked) String() string {
-	ctx := context.TODO()
+	ctx := context.Background()
 	if !e.locker.ManualTryRLock(ctx) {
 		return "Encoder(<locked>)"
 	}
@@ -124,7 +124,7 @@ func (e *EncoderFullLocked) SendFrame(
 	logger.Tracef(ctx, "SendFrame: pts:%d, pixel_format:%s, linesize:%v, width:%d, height:%d", f.Pts(), f.PixelFormat(), f.Linesize(), f.Width(), f.Height())
 	defer func() { logger.Tracef(ctx, "/SendFrame: %v", _err) }()
 
-	switch e.MediaType() {
+	switch e.MediaType(ctx) {
 	case astiav.MediaTypeVideo:
 		// Validate linesize before sending to encoder to catch invalid frames early.
 		// Skip for hardware frames (e.g. cuda) where linesize is not set.
@@ -161,7 +161,7 @@ func (e *EncoderFullLocked) SendFrame(
 		}
 	}
 
-	e.isDirty = true
+	e.isDirty.Store(true)
 
 	if e.hardwareFramesContext != nil && f.PixelFormat() != e.hardwarePixelFormat {
 		// Encoder uses hw_frames_ctx: transfer software frame → hardware.
@@ -320,7 +320,7 @@ func (e *EncoderFullLocked) reinitEncoder(
 	e.Quality = newEncoder.Quality
 	e.Next = newEncoder.Next
 
-	switch e.MediaType() {
+	switch e.MediaType(ctx) {
 	case astiav.MediaTypeVideo:
 		e.ForceNextKeyFrame = true
 	}
@@ -363,13 +363,13 @@ func (e *EncoderFullLocked) Flush(
 		if _err != nil {
 			return
 		}
-		switch e.MediaType() {
+		switch e.MediaType(ctx) {
 		case astiav.MediaTypeVideo:
 			e.ForceNextKeyFrame = true
 		}
-		if e.isDirty {
+		if e.isDirty.Load() {
 			logger.Errorf(ctx, "%v is still dirty after flush; forcing isDirty:false", e)
-			e.isDirty = false
+			e.isDirty.Store(false)
 		}
 	}()
 
@@ -439,12 +439,12 @@ func (e *EncoderFullLocked) Drain(
 			packet.Pool.Pool.Put(pkt)
 			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
-				e.isDirty = false
+				e.isDirty.Store(false)
 				return io.EOF
 			}
 			if isEAgain {
 				if caps&astiav.CodecCapabilityDelay == 0 {
-					e.isDirty = false
+					e.isDirty.Store(false)
 				}
 				return nil
 			}
@@ -463,7 +463,7 @@ func (e *EncoderFullLocked) Drain(
 }
 
 func (e *EncoderFullLocked) IsDirty() bool {
-	return e.isDirty
+	return e.isDirty.Load()
 }
 
 func (e *EncoderFullLocked) LockDo(ctx context.Context, fn func(context.Context, Encoder) error) error {
@@ -485,10 +485,10 @@ func (e *EncoderFullLocked) checkCallCount(context.Context) context.CancelFunc {
 	}
 }
 
-func (e *EncoderFullLocked) Codec() *astiav.Codec {
+func (e *EncoderFullLocked) Codec(context.Context) *astiav.Codec {
 	return e.codec
 }
 
-func (e *EncoderFullLocked) CodecContext() *astiav.CodecContext {
+func (e *EncoderFullLocked) CodecContext(context.Context) *astiav.CodecContext {
 	return e.codecContext
 }

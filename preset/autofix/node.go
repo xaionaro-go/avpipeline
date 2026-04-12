@@ -49,7 +49,7 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 
 	a.serveMu.Lock()
 	if a.AutoHeadersNode != nil {
-		if a.AutoHeadersNode.IsServing() {
+		if a.AutoHeadersNode.IsServing(ctx) {
 			a.serveMu.Unlock()
 			logger.Errorf(ctx, "AutoHeadersNode[%p] is already serving", a.AutoHeadersNode)
 			errCh <- node.Error{
@@ -68,7 +68,7 @@ func (a *AutoFixerWithCustomData[T]) Serve(
 		})
 	}
 	if a.MapStreamIndicesNode != nil {
-		if a.MapStreamIndicesNode.IsServing() {
+		if a.MapStreamIndicesNode.IsServing(ctx) {
 			a.serveMu.Unlock()
 			logger.Errorf(ctx, "MapStreamIndicesNode[%p] is already serving", a.MapStreamIndicesNode)
 			errCh <- node.Error{
@@ -160,11 +160,11 @@ func (a *AutoFixerWithCustomData[T]) RemovePushTo(
 	return a.Output().RemovePushTo(ctx, dst)
 }
 
-func (a *AutoFixerWithCustomData[T]) IsServing() bool {
+func (a *AutoFixerWithCustomData[T]) IsServing(ctx context.Context) bool {
 	if a == nil {
 		return false
 	}
-	return a.Input().IsServing() && a.Output().IsServing()
+	return a.Input().IsServing(ctx) && a.Output().IsServing(ctx)
 }
 
 func (a *AutoFixerWithCustomData[T]) GetCountersPtr() *nodetypes.Counters {

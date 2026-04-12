@@ -46,7 +46,9 @@ type NaiveEncoderFactoryParams struct {
 	VideoQuality          Quality
 	VideoResolution       *Resolution
 	VideoAverageFrameRate astiav.Rational
+	AudioQuality          Quality
 	AudioSampleRate       audio.SampleRate
+	AudioChannels         audio.Channel
 	Options               []Option
 }
 
@@ -157,6 +159,9 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 			Options:            optsCombined,
 		}
 	case astiav.MediaTypeAudio:
+		if err := f.amendAudioCodecParams(ctx, codecParams); err != nil {
+			return nil, fmt.Errorf("unable to amend audio codec parameters: %w", err)
+		}
 		encParams = &CodecParams{
 			CodecName:       f.AudioCodec,
 			CodecParameters: codecParams,
@@ -223,5 +228,41 @@ func (f *NaiveEncoderFactory) amendVideoCodecParams(
 		logger.Tracef(ctx, "applying video average frame rate %s", f.VideoAverageFrameRate)
 		codecParams.SetFrameRate(f.VideoAverageFrameRate)
 	}
+	return errors.Join(errs...)
+}
+
+// amendAudioCodecParams applies configured audio parameters (quality, sample
+// rate, channel layout) to codecParams so the encoder uses the requested
+// values instead of the input stream's defaults.
+func (f *NaiveEncoderFactory) amendAudioCodecParams(
+	ctx context.Context,
+	codecParams *astiav.CodecParameters,
+) (_err error) {
+	logger.Tracef(ctx, "amendAudioCodecParams")
+	defer func() { logger.Tracef(ctx, "/amendAudioCodecParams: %v", _err) }()
+
+	var errs []error
+	if f.AudioQuality != nil {
+		logger.Tracef(ctx, "applying audio quality %v", f.AudioQuality)
+		if err := f.AudioQuality.Apply(codecParams); err != nil {
+			errs = append(errs, fmt.Errorf("unable to apply audio quality %#+v: %w", f.AudioQuality, err))
+		}
+	}
+
+	if f.AudioSampleRate > 0 {
+		logger.Tracef(ctx, "applying audio sample rate %d", f.AudioSampleRate)
+		codecParams.SetSampleRate(int(f.AudioSampleRate))
+	}
+
+	if f.AudioChannels > 0 {
+		logger.Tracef(ctx, "applying audio channels %d", f.AudioChannels)
+		layout, err := channelLayoutFromCount(f.AudioChannels)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("unable to apply audio channels %d: %w", f.AudioChannels, err))
+		} else {
+			codecParams.SetChannelLayout(layout)
+		}
+	}
+
 	return errors.Join(errs...)
 }

@@ -86,11 +86,12 @@ func TestEncoderCopy_Close(t *testing.T) {
 }
 
 func TestEncoderCopy_NilCodecAndContext(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderCopy{}
-	assert.Nil(t, e.Codec())
-	assert.Nil(t, e.CodecContext())
-	assert.Nil(t, e.HardwareDeviceContext())
-	assert.Equal(t, astiav.PixelFormat(0), e.HardwarePixelFormat())
+	assert.Nil(t, e.Codec(ctx))
+	assert.Nil(t, e.CodecContext(ctx))
+	assert.Nil(t, e.HardwareDeviceContext(ctx))
+	assert.Equal(t, astiav.PixelFormat(0), e.HardwarePixelFormat(ctx))
 }
 
 func TestEncoderCopy_SendFrame_ReturnsError(t *testing.T) {
@@ -150,7 +151,7 @@ func TestEncoderCopy_IsDirty_False(t *testing.T) {
 
 func TestEncoderCopy_ToCodecParameters_NoError(t *testing.T) {
 	e := EncoderCopy{}
-	assert.NoError(t, e.ToCodecParameters(nil))
+	assert.NoError(t, e.ToCodecParameters(context.Background(), nil))
 }
 
 func TestEncoderCopy_LockDo(t *testing.T) {
@@ -166,13 +167,15 @@ func TestEncoderCopy_LockDo(t *testing.T) {
 }
 
 func TestEncoderCopy_MediaType_Panics(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderCopy{}
-	assert.Panics(t, func() { e.MediaType() })
+	assert.Panics(t, func() { e.MediaType(ctx) })
 }
 
 func TestEncoderCopy_TimeBase_Panics(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderCopy{}
-	assert.Panics(t, func() { e.TimeBase() })
+	assert.Panics(t, func() { e.TimeBase(ctx) })
 }
 
 func TestIsEncoderCopy(t *testing.T) {
@@ -193,11 +196,12 @@ func TestEncoderRaw_Close(t *testing.T) {
 }
 
 func TestEncoderRaw_NilCodecAndContext(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderRaw{}
-	assert.Nil(t, e.Codec())
-	assert.Nil(t, e.CodecContext())
-	assert.Nil(t, e.HardwareDeviceContext())
-	assert.Equal(t, astiav.PixelFormat(0), e.HardwarePixelFormat())
+	assert.Nil(t, e.Codec(ctx))
+	assert.Nil(t, e.CodecContext(ctx))
+	assert.Nil(t, e.HardwareDeviceContext(ctx))
+	assert.Equal(t, astiav.PixelFormat(0), e.HardwarePixelFormat(ctx))
 }
 
 func TestEncoderRaw_SendFrame_ReturnsError(t *testing.T) {
@@ -637,7 +641,7 @@ func TestNewDecoder_Video(t *testing.T) {
 	defer func() { _ = dec.Close(ctx) }()
 
 	assert.Contains(t, dec.String(), "Decoder")
-	assert.Equal(t, astiav.MediaTypeVideo, dec.MediaType())
+	assert.Equal(t, astiav.MediaTypeVideo, dec.MediaType(ctx))
 	assert.False(t, dec.IsDirty(ctx))
 }
 
@@ -658,7 +662,7 @@ func TestNewDecoder_Audio(t *testing.T) {
 	require.NotNil(t, dec)
 	defer func() { _ = dec.Close(ctx) }()
 
-	assert.Equal(t, astiav.MediaTypeAudio, dec.MediaType())
+	assert.Equal(t, astiav.MediaTypeAudio, dec.MediaType(ctx))
 }
 
 func TestNewDecoder_InvalidCodec(t *testing.T) {
@@ -724,8 +728,8 @@ func TestNewEncoder_Video_Libx264(t *testing.T) {
 	defer func() { _ = enc.Close(ctx) }()
 
 	assert.Contains(t, enc.String(), "Encoder")
-	assert.NotNil(t, enc.Codec())
-	assert.NotNil(t, enc.CodecContext())
+	assert.NotNil(t, enc.Codec(ctx))
+	assert.NotNil(t, enc.CodecContext(ctx))
 	assert.False(t, enc.IsDirty())
 }
 
@@ -753,7 +757,7 @@ func TestNewEncoder_Audio_Aac(t *testing.T) {
 	require.NotNil(t, enc)
 	defer func() { _ = enc.Close(ctx) }()
 
-	assert.Equal(t, astiav.MediaTypeAudio, enc.MediaType())
+	assert.Equal(t, astiav.MediaTypeAudio, enc.MediaType(ctx))
 }
 
 // --- Encoder encode cycle ---
@@ -786,7 +790,7 @@ func TestEncoder_SendReceive_Video(t *testing.T) {
 	t.Cleanup(frame.Free)
 	frame.SetWidth(64)
 	frame.SetHeight(64)
-	frame.SetPixelFormat(enc.CodecContext().PixelFormat())
+	frame.SetPixelFormat(enc.CodecContext(ctx).PixelFormat())
 	require.NoError(t, frame.AllocBuffer(0))
 	frame.SetPts(0)
 	frame.SetFlags(frame.Flags().Add(astiav.FrameFlagKey))
@@ -826,6 +830,24 @@ func TestDecoder_SendPacket_DropNonKeyFrame(t *testing.T) {
 	err = dec.SendPacket(ctx, pkt)
 	assert.Error(t, err)
 	assert.IsType(t, ErrNotKeyFrame{}, err)
+}
+
+func TestDecoder_SendPacket_IntraOnlyCodecAcceptsNonKeyFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		codecID astiav.CodecID
+	}{
+		{"rawvideo", astiav.CodecIDRawvideo},
+		{"wrapped_avframe", astiav.CodecIDWrappedAvframe},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.True(t, isIntraOnlyCodec(tc.codecID))
+		})
+	}
+
+	// Verify inter-frame codecs are NOT intra-only.
+	assert.False(t, isIntraOnlyCodec(astiav.CodecIDH264))
+	assert.False(t, isIntraOnlyCodec(astiav.CodecIDH265))
 }
 
 // --- NaiveDecoderFactory lifecycle ---
@@ -986,7 +1008,7 @@ func TestEncoder_Flush(t *testing.T) {
 	t.Cleanup(frame.Free)
 	frame.SetWidth(64)
 	frame.SetHeight(64)
-	frame.SetPixelFormat(enc.CodecContext().PixelFormat())
+	frame.SetPixelFormat(enc.CodecContext(ctx).PixelFormat())
 	require.NoError(t, frame.AllocBuffer(0))
 	frame.SetPts(0)
 	frame.SetFlags(frame.Flags().Add(astiav.FrameFlagKey))
@@ -1030,7 +1052,7 @@ func TestCodec_MIMETypes(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.NotEmpty(t, mimeTypes)
 	assert.Contains(t, mimeTypes, "video/H264")
 	assert.Contains(t, mimeTypes, "video/avc") // Android MIME type
@@ -1050,7 +1072,7 @@ func TestCodec_MIMETypes_Audio(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.NotEmpty(t, mimeTypes)
 	assert.Contains(t, mimeTypes, "audio/mp4a-latm")
 }
@@ -1068,7 +1090,7 @@ func TestCodec_GetAndroidMIMEType(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "video/hevc", androidMIME)
 }
 
@@ -1262,12 +1284,13 @@ func TestNaiveDecoderFactory_PreInitFunc(t *testing.T) {
 // --- Codec TimeBase ---
 
 func TestCodec_TimeBase_Encoder(t *testing.T) {
+	ctx := context.Background()
 	enc := newTestVideoEncoder(t)
 	encFull, ok := enc.(*EncoderFull)
 	if !ok {
 		t.Skip("not a full encoder")
 	}
-	tb := encFull.TimeBase()
+	tb := encFull.TimeBase(ctx)
 	// TimeBase should match what we set: 1/30
 	assert.Equal(t, 1, tb.Num())
 	assert.Equal(t, 30, tb.Den())
@@ -1286,7 +1309,7 @@ func TestCodec_TimeBase_Decoder(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	tb := dec.Codec.TimeBase()
+	tb := dec.Codec.TimeBase(ctx)
 	// Decoder time base should be non-zero after initialization
 	_ = tb // no panic is sufficient
 }
@@ -1294,28 +1317,31 @@ func TestCodec_TimeBase_Decoder(t *testing.T) {
 // --- Codec HardwareDeviceContext / HardwarePixelFormat ---
 
 func TestCodec_HardwareDeviceContext_Software(t *testing.T) {
+	ctx := context.Background()
 	enc := newTestVideoEncoder(t)
 	encFull, ok := enc.(*EncoderFull)
 	if !ok {
 		t.Skip("not a full encoder")
 	}
-	assert.Nil(t, encFull.HardwareDeviceContext())
+	assert.Nil(t, encFull.HardwareDeviceContext(ctx))
 }
 
 func TestCodec_HardwarePixelFormat_Software(t *testing.T) {
+	ctx := context.Background()
 	enc := newTestVideoEncoder(t)
 	encFull, ok := enc.(*EncoderFull)
 	if !ok {
 		t.Skip("not a full encoder")
 	}
 	// Software codecs have no hardware pixel format (should be 0 / None)
-	pf := encFull.HardwarePixelFormat()
+	pf := encFull.HardwarePixelFormat(ctx)
 	assert.Equal(t, astiav.PixelFormat(0), pf)
 }
 
 // --- Codec ToCodecParameters ---
 
 func TestCodec_ToCodecParameters_Encoder(t *testing.T) {
+	ctx := context.Background()
 	enc := newTestVideoEncoder(t)
 	encFull, ok := enc.(*EncoderFull)
 	if !ok {
@@ -1323,7 +1349,7 @@ func TestCodec_ToCodecParameters_Encoder(t *testing.T) {
 	}
 	cp := astiav.AllocCodecParameters()
 	t.Cleanup(cp.Free)
-	err := encFull.ToCodecParameters(cp)
+	err := encFull.ToCodecParameters(ctx, cp)
 	require.NoError(t, err)
 	assert.Equal(t, astiav.MediaTypeVideo, cp.MediaType())
 	assert.Equal(t, 64, cp.Width())
@@ -1345,7 +1371,7 @@ func TestCodec_ToCodecParameters_Decoder(t *testing.T) {
 
 	outCP := astiav.AllocCodecParameters()
 	t.Cleanup(outCP.Free)
-	err = dec.Codec.ToCodecParameters(outCP)
+	err = dec.Codec.ToCodecParameters(ctx, outCP)
 	require.NoError(t, err)
 	assert.Equal(t, astiav.CodecIDH264, outCP.CodecID())
 }
@@ -1385,18 +1411,20 @@ func TestCodec_Reset_Encoder(t *testing.T) {
 // --- EncoderRaw additional methods ---
 
 func TestEncoderRaw_MediaType_Panics(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderRaw{}
-	assert.Panics(t, func() { e.MediaType() })
+	assert.Panics(t, func() { e.MediaType(ctx) })
 }
 
 func TestEncoderRaw_TimeBase_Panics(t *testing.T) {
+	ctx := context.Background()
 	e := EncoderRaw{}
-	assert.Panics(t, func() { e.TimeBase() })
+	assert.Panics(t, func() { e.TimeBase(ctx) })
 }
 
 func TestEncoderRaw_ToCodecParameters_NoError(t *testing.T) {
 	e := EncoderRaw{}
-	assert.NoError(t, e.ToCodecParameters(nil))
+	assert.NoError(t, e.ToCodecParameters(context.Background(), nil))
 }
 
 func TestEncoderRaw_GetResolution_Nil(t *testing.T) {
@@ -1455,12 +1483,13 @@ func TestFrame_FrameDuration_NilInputPacket(t *testing.T) {
 }
 
 func TestFrame_TransferFromHardwareToRAM_NilDecoder(t *testing.T) {
+	ctx := context.Background()
 	f := Frame{
 		Frame:   astiav.AllocFrame(),
 		Decoder: nil,
 	}
 	t.Cleanup(f.Frame.Free)
-	err := f.TransferFromHardwareToRAM()
+	err := f.TransferFromHardwareToRAM(ctx)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "decoder is nil")
 }
@@ -1506,7 +1535,7 @@ func TestCodec_MIMETypes_HEVC(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "video/H265")
 	assert.Contains(t, mimeTypes, "video/HEVC")
 	assert.Contains(t, mimeTypes, "video/hevc")
@@ -1525,9 +1554,9 @@ func TestCodec_MIMETypes_Opus(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "audio/opus")
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "audio/opus", androidMIME)
 }
 
@@ -1546,9 +1575,9 @@ func TestCodec_MIMETypes_VP9(t *testing.T) {
 	}
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "video/VP9")
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "video/x-vnd.on2.vp9", androidMIME)
 }
 
@@ -1567,9 +1596,9 @@ func TestCodec_MIMETypes_MP3(t *testing.T) {
 	}
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "audio/mpeg")
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "audio/mpeg", androidMIME)
 }
 
@@ -1586,9 +1615,9 @@ func TestCodec_MIMETypes_MPEG4(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "video/mp4v-es")
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "video/mp4v-es", androidMIME)
 }
 
@@ -1607,9 +1636,9 @@ func TestCodec_MIMETypes_Flac(t *testing.T) {
 	}
 	defer func() { _ = dec.Close(ctx) }()
 
-	mimeTypes := dec.Codec.GetMIMEType()
+	mimeTypes := dec.Codec.GetMIMEType(ctx)
 	assert.Contains(t, mimeTypes, "audio/flac")
-	androidMIME := dec.Codec.GetAndroidMIMEType()
+	androidMIME := dec.Codec.GetAndroidMIMEType(ctx)
 	assert.Equal(t, "audio/flac", androidMIME)
 }
 
@@ -1808,7 +1837,7 @@ func TestDecoderLocked_ToCodecParameters(t *testing.T) {
 	t.Cleanup(outCP.Free)
 
 	err = dec.LockDo(ctx, func(ctx context.Context, dl *DecoderLocked) error {
-		return dl.ToCodecParameters(outCP)
+		return dl.ToCodecParameters(ctx, outCP)
 	})
 	require.NoError(t, err)
 	assert.Equal(t, astiav.CodecIDH264, outCP.CodecID())
@@ -1829,7 +1858,7 @@ func TestEncoder_Reset_AfterSendFrame(t *testing.T) {
 	t.Cleanup(frame.Free)
 	frame.SetWidth(64)
 	frame.SetHeight(64)
-	frame.SetPixelFormat(enc.CodecContext().PixelFormat())
+	frame.SetPixelFormat(enc.CodecContext(ctx).PixelFormat())
 	require.NoError(t, frame.AllocBuffer(0))
 	frame.SetPts(0)
 	frame.SetFlags(frame.Flags().Add(astiav.FrameFlagKey))
@@ -1908,7 +1937,7 @@ func encodeTestFrames(
 ) []*astiav.Packet {
 	t.Helper()
 	var packets []*astiav.Packet
-	timeBase := enc.CodecContext().TimeBase()
+	timeBase := enc.CodecContext(ctx).TimeBase()
 	for i := int64(0); i < count; i++ {
 		frame := astiav.AllocFrame()
 		defer frame.Free()
@@ -1988,7 +2017,7 @@ func TestNewDecoder_H264_CUVID(t *testing.T) {
 	defer func() { _ = dec.Close(ctx) }()
 
 	assert.Equal(t, "h264_cuvid", dec.codec.Name())
-	assert.NotNil(t, dec.HardwareDeviceContext())
+	assert.NotNil(t, dec.HardwareDeviceContext(ctx))
 }
 
 func TestCUVID_EncodeDecodeRoundTrip(t *testing.T) {
@@ -2016,14 +2045,14 @@ func TestCUVID_EncodeDecodeRoundTrip(t *testing.T) {
 	defer func() { _ = enc.Close(ctx) }()
 
 	// Send several frames to get at least one encoded packet.
-	pixFmt := enc.CodecContext().PixelFormat()
+	pixFmt := enc.CodecContext(ctx).PixelFormat()
 	packets := encodeTestFrames(t, ctx, enc, width, height, pixFmt, 10)
 	require.NotEmpty(t, packets, "encoder did not produce any packets")
 
 	// Extract codec parameters from encoder for the decoder.
 	decCP := astiav.AllocCodecParameters()
 	t.Cleanup(decCP.Free)
-	require.NoError(t, enc.CodecContext().ToCodecParameters(decCP))
+	require.NoError(t, enc.CodecContext(ctx).ToCodecParameters(decCP))
 
 	// Create a CUVID decoder.
 	dec, err := NewDecoder(ctx, DecoderInput{
@@ -2034,7 +2063,7 @@ func TestCUVID_EncodeDecodeRoundTrip(t *testing.T) {
 	defer func() { _ = dec.Close(ctx) }()
 
 	assert.Equal(t, "h264_cuvid", dec.codec.Name())
-	assert.NotNil(t, dec.HardwareDeviceContext())
+	assert.NotNil(t, dec.HardwareDeviceContext(ctx))
 
 	// Decode the packets.
 	decodedCount := decodeAllPackets(t, ctx, dec, packets, width, height)
@@ -2065,14 +2094,14 @@ func TestCUVID_TransferFromHardwareToRAM(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = enc.Close(ctx) }()
 
-	pixFmt := enc.CodecContext().PixelFormat()
+	pixFmt := enc.CodecContext(ctx).PixelFormat()
 	packets := encodeTestFrames(t, ctx, enc, width, height, pixFmt, 10)
 	require.NotEmpty(t, packets)
 
 	// Decode with CUVID.
 	decCP := astiav.AllocCodecParameters()
 	t.Cleanup(decCP.Free)
-	require.NoError(t, enc.CodecContext().ToCodecParameters(decCP))
+	require.NoError(t, enc.CodecContext(ctx).ToCodecParameters(decCP))
 
 	dec, err := NewDecoder(ctx, DecoderInput{
 		CodecParameters:    decCP,
@@ -2102,7 +2131,7 @@ func TestCUVID_TransferFromHardwareToRAM(t *testing.T) {
 			}
 
 			// The frame should be in CUDA pixel format.
-			assert.Equal(t, dl.HardwarePixelFormat(), hwFrame.PixelFormat(),
+			assert.Equal(t, dl.HardwarePixelFormat(ctx), hwFrame.PixelFormat(),
 				"decoded frame should have hardware pixel format")
 
 			f := &Frame{
@@ -2110,11 +2139,11 @@ func TestCUVID_TransferFromHardwareToRAM(t *testing.T) {
 				Decoder:  dl,
 				RAMFrame: ramFrame,
 			}
-			err = f.TransferFromHardwareToRAM()
+			err = f.TransferFromHardwareToRAM(ctx)
 			require.NoError(t, err)
 
 			// After transfer, the frame should have a non-hardware pixel format.
-			assert.NotEqual(t, dl.HardwarePixelFormat(), f.Frame.PixelFormat())
+			assert.NotEqual(t, dl.HardwarePixelFormat(ctx), f.Frame.PixelFormat())
 			assert.Equal(t, width, f.Frame.Width())
 			assert.Equal(t, height, f.Frame.Height())
 			transferredCount++
@@ -2147,8 +2176,8 @@ func TestInitHardwarePixelFormat_PrefersHwDeviceCtx(t *testing.T) {
 
 	assert.Equal(t, hardwareContextTypeDevice, dec.hardwareContextType,
 		"should prefer HwDeviceCtx over HwFramesCtx for h264_cuvid")
-	assert.NotNil(t, dec.HardwareDeviceContext())
-	assert.NotEqual(t, astiav.PixelFormatNone, dec.HardwarePixelFormat())
+	assert.NotNil(t, dec.HardwareDeviceContext(ctx))
+	assert.NotEqual(t, astiav.PixelFormatNone, dec.HardwarePixelFormat(ctx))
 }
 
 func TestNewDecoder_CUVID_FlushDrain(t *testing.T) {
@@ -2175,13 +2204,13 @@ func TestNewDecoder_CUVID_FlushDrain(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = enc.Close(ctx) }()
 
-	pixFmt := enc.CodecContext().PixelFormat()
+	pixFmt := enc.CodecContext(ctx).PixelFormat()
 	packets := encodeTestFrames(t, ctx, enc, width, height, pixFmt, 5)
 	require.NotEmpty(t, packets)
 
 	decCP := astiav.AllocCodecParameters()
 	t.Cleanup(decCP.Free)
-	require.NoError(t, enc.CodecContext().ToCodecParameters(decCP))
+	require.NoError(t, enc.CodecContext(ctx).ToCodecParameters(decCP))
 
 	dec, err := NewDecoder(ctx, DecoderInput{
 		CodecParameters:    decCP,

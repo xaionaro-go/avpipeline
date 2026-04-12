@@ -98,10 +98,10 @@ func (k *frameGeneratingKernel) Generate(
 }
 
 // waitForServing waits until the node reports IsServing == true.
-func waitForServing(t *testing.T, n Abstract, timeout time.Duration) {
+func waitForServing(ctx context.Context, t *testing.T, n Abstract, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
-	for !n.IsServing() {
+	for !n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for node to start serving")
@@ -112,10 +112,10 @@ func waitForServing(t *testing.T, n Abstract, timeout time.Duration) {
 }
 
 // waitForNotServing waits until the node reports IsServing == false.
-func waitForNotServing(t *testing.T, n Abstract, timeout time.Duration) {
+func waitForNotServing(ctx context.Context, t *testing.T, n Abstract, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
-	for n.IsServing() {
+	for n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for node to stop serving")
@@ -143,7 +143,7 @@ func TestServe_PushPacketToSingleDestination(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -175,7 +175,7 @@ func TestServe_PushFrameToSingleDestination(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for frames to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -206,7 +206,7 @@ func TestServe_PushToMultipleDestinations(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(300 * time.Millisecond)
@@ -239,7 +239,7 @@ func TestServe_PushToWithCondition(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -266,7 +266,7 @@ func TestServe_NoPushTos(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -294,7 +294,7 @@ func TestServe_PushToDestinationWithDiscardInputChan(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -328,7 +328,7 @@ func TestServe_FrameDropVideoEnabled(t *testing.T) {
 		FrameDropVideo: true,
 	}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -359,7 +359,7 @@ func TestServe_FrameDropAudioEnabled(t *testing.T) {
 		FrameDropAudio: true,
 	}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -389,7 +389,7 @@ func TestServe_InputFilterRejectsData(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -414,13 +414,13 @@ func TestServe_ContextCancellationStopsServing(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
-	tassert.True(t, n.IsServing())
+	waitForServing(ctx, t, n, 5*time.Second)
+	tassert.True(t, n.IsServing(ctx))
 
 	cancel()
 
-	waitForNotServing(t, n, 5*time.Second)
-	tassert.False(t, n.IsServing())
+	waitForNotServing(ctx, t, n, 5*time.Second)
+	tassert.False(t, n.IsServing(ctx))
 }
 
 // TestServe_ErrorChanReceivesProcessorError tests that processor errors
@@ -434,7 +434,7 @@ func TestServe_ErrorChanReceivesProcessorError(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Close processor to trigger EOF
 	err := n.Processor.Close(ctx)
@@ -462,7 +462,7 @@ func TestServe_ErrChanFull(t *testing.T) {
 	errCh := make(chan Error)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Close processor to trigger EOF; since errCh is full, it should log but not block
 	err := n.Processor.Close(ctx)
@@ -495,7 +495,7 @@ func TestServe_WithCacheHandler(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	// Give time for packets to flow through
 	time.Sleep(200 * time.Millisecond)
@@ -658,7 +658,7 @@ func TestServe_PushToWithAcceptingCondition(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -688,7 +688,7 @@ func TestServe_PushToWithInputFilterAccepts(t *testing.T) {
 	errCh := make(chan Error, 10)
 	go n.Serve(ctx, ServeConfig{}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -728,7 +728,7 @@ func TestServe_FrameDropOther(t *testing.T) {
 		FrameDropOther: true,
 	}, errCh)
 
-	waitForServing(t, n, 5*time.Second)
+	waitForServing(ctx, t, n, 5*time.Second)
 
 	time.Sleep(200 * time.Millisecond)
 

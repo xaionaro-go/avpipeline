@@ -121,7 +121,10 @@ func (c *HaarCascade) SendInput(
 	}
 
 	// Clone the frame as writable so we can modify pixel data.
-	writableFrame := frame.CloneAsWritable(frameInput.Frame)
+	writableFrame, err := frame.CloneAsWritable(frameInput.Frame)
+	if err != nil {
+		return fmt.Errorf("unable to clone frame as writable: %w", err)
+	}
 
 	// Convert frame to Go image.
 	img, err := writableFrame.Data().GuessImageFormat()

@@ -197,7 +197,7 @@ func (i *InputChain[K, DF, C]) Serve(
 }
 
 func (i *InputChain[K, DF, C]) String() string {
-	ctx := context.TODO()
+	ctx := context.Background()
 	if !i.Input.Processor.Kernel.KernelLocker.ManualTryLock(ctx) {
 		return fmt.Sprintf("InputChain(<unable to lock>; factory:%s)", i.InputFactory)
 	}

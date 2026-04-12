@@ -30,31 +30,31 @@ func (EncoderCopy) Close(ctx context.Context) error {
 	return nil
 }
 
-func (EncoderCopy) Codec() *astiav.Codec {
+func (EncoderCopy) Codec(context.Context) *astiav.Codec {
 	return nil
 }
 
-func (EncoderCopy) CodecContext() *astiav.CodecContext {
+func (EncoderCopy) CodecContext(context.Context) *astiav.CodecContext {
 	return nil
 }
 
-func (EncoderCopy) MediaType() astiav.MediaType {
+func (EncoderCopy) MediaType(context.Context) astiav.MediaType {
 	panic(fmt.Errorf("'copy' needs to be processed manually"))
 }
 
-func (EncoderCopy) ToCodecParameters(cp *astiav.CodecParameters) error {
+func (EncoderCopy) ToCodecParameters(context.Context, *astiav.CodecParameters) error {
 	return nil
 }
 
-func (EncoderCopy) HardwareDeviceContext() *astiav.HardwareDeviceContext {
+func (EncoderCopy) HardwareDeviceContext(context.Context) *astiav.HardwareDeviceContext {
 	return nil
 }
 
-func (EncoderCopy) HardwarePixelFormat() astiav.PixelFormat {
+func (EncoderCopy) HardwarePixelFormat(context.Context) astiav.PixelFormat {
 	return 0
 }
 
-func (EncoderCopy) TimeBase() astiav.Rational {
+func (EncoderCopy) TimeBase(context.Context) astiav.Rational {
 	panic(fmt.Errorf("'copy' needs to be processed manually"))
 }
 

@@ -22,31 +22,31 @@ func (EncoderRaw) Close(ctx context.Context) error {
 	return nil
 }
 
-func (EncoderRaw) Codec() *astiav.Codec {
+func (EncoderRaw) Codec(context.Context) *astiav.Codec {
 	return nil
 }
 
-func (EncoderRaw) CodecContext() *astiav.CodecContext {
+func (EncoderRaw) CodecContext(context.Context) *astiav.CodecContext {
 	return nil
 }
 
-func (EncoderRaw) MediaType() astiav.MediaType {
+func (EncoderRaw) MediaType(context.Context) astiav.MediaType {
 	panic(fmt.Errorf("'raw' needs to be processed manually"))
 }
 
-func (EncoderRaw) ToCodecParameters(cp *astiav.CodecParameters) error {
+func (EncoderRaw) ToCodecParameters(context.Context, *astiav.CodecParameters) error {
 	return nil
 }
 
-func (EncoderRaw) HardwareDeviceContext() *astiav.HardwareDeviceContext {
+func (EncoderRaw) HardwareDeviceContext(context.Context) *astiav.HardwareDeviceContext {
 	return nil
 }
 
-func (EncoderRaw) HardwarePixelFormat() astiav.PixelFormat {
+func (EncoderRaw) HardwarePixelFormat(context.Context) astiav.PixelFormat {
 	return 0
 }
 
-func (EncoderRaw) TimeBase() astiav.Rational {
+func (EncoderRaw) TimeBase(context.Context) astiav.Rational {
 	panic(fmt.Errorf("'raw' needs to be processed manually"))
 }
 

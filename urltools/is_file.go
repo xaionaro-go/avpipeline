@@ -10,8 +10,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
-func IsFileURL(urlString string) (_ret bool) {
-	ctx := context.TODO()
+func IsFileURL(ctx context.Context, urlString string) (_ret bool) {
 	logger.Tracef(ctx, "IsFileURL: %s", urlString)
 	defer func() { logger.Tracef(ctx, "/IsFileURL: %s: %v", urlString, _ret) }()
 	url, err := url.Parse(urlString)

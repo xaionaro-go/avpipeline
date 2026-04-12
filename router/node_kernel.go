@@ -28,13 +28,18 @@ type SourceInfo struct {
 
 type NodeKernel struct {
 	*closuresignaler.ClosureSignaler
-	Locker         xsync.Mutex
-	Config         nodeKernelConfig
-	PreviousSource map[int]packet.Source // map[streamID]Source
-	SourceInfo     map[packet.Source]*SourceInfo
-	FormatContext  *astiav.FormatContext
-	OutputStreams  map[int]*astiav.Stream
-	LatestPTS      time.Duration
+	Locker            xsync.Mutex
+	Config            nodeKernelConfig
+	PreviousSource    map[int]packet.Source // map[streamID]Source
+	SourceInfo        map[packet.Source]*SourceInfo
+	FormatContext     *astiav.FormatContext
+	OutputStreams     map[int]*astiav.Stream
+	LatestPTS         time.Duration
+	audioTimestampDetected bool
+	audioSampleRate        int64 // non-zero when rate correction is needed
+	audioTimeBaseDen       int64
+	audioEpochOffset       time.Duration
+	audioEpochComputed     bool
 }
 
 var _ kernel.Abstract = (*NodeKernel)(nil)
@@ -152,16 +157,40 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 	logger.Tracef(ctx, "makeTimeMoveOnlyForward")
 	defer func() { logger.Tracef(ctx, "/makeTimeMoveOnlyForward: %v", _err) }()
 
-	if input.GetMediaType() != astiav.MediaTypeVideo {
-		// TODO: investigate this
-		//
-		// This is actually weird, I'd expect audio clock to be much more stable than video clock.
-		// However if I calculate shifts using audio clock I for some reason get a huge jump in PTS
-		// when I switch from av1_nvenc to copy in a streammux-powered client.
-		//
-		// Keep this as is for now... It works at least for me. But if there are issues with audio sync,
-		// feel free to create ticket on GitHub or send me an email: xaionaro@gmail.com, opensource@dx.center.
-		logger.Tracef(ctx, "Not a video stream, skipping")
+	switch input.GetMediaType() {
+	case astiav.MediaTypeAudio:
+		k.detectAudioTimestampMismatch(ctx, input)
+
+		// Step 1: Rate correction. Phone may send audio timestamps in
+		// sample-count units (e.g. 44100 Hz) instead of the declared
+		// timebase (1/1000). Rescale: corrected = raw * tbDen / sampleRate.
+		if k.audioSampleRate > 0 {
+			input.SetDTS(input.GetDTS() * k.audioTimeBaseDen / k.audioSampleRate)
+			input.SetPTS(input.GetPTS() * k.audioTimeBaseDen / k.audioSampleRate)
+		}
+
+		// Step 2: Epoch alignment. After rate correction, audio may still
+		// be offset from video (phone starts audio capture before video).
+		// Compute the offset once and subtract from all audio timestamps.
+		timeBase := input.GetTimeBase()
+		if !k.audioEpochComputed && k.audioTimestampDetected && k.LatestPTS > 0 {
+			correctedDTS := avconv.Duration(input.GetDTS(), timeBase)
+			k.audioEpochOffset = correctedDTS - k.LatestPTS
+			k.audioEpochComputed = true
+			logger.Debugf(ctx, "Audio epoch offset: %v (correctedDTS=%v, videoPTS=%v)",
+				k.audioEpochOffset, correctedDTS, k.LatestPTS)
+		}
+		if k.audioEpochOffset != 0 {
+			offset := avconv.FromDuration(k.audioEpochOffset, timeBase)
+			input.SetDTS(input.GetDTS() - offset)
+			input.SetPTS(input.GetPTS() - offset)
+		}
+		return nil
+	case astiav.MediaTypeVideo:
+		// Handled below.
+	default:
+		// Subtitle/data streams may use different clock sources and
+		// should not receive video-derived shifts.
 		return nil
 	}
 
@@ -205,12 +234,12 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 		logger.Tracef(ctx, "New time shift %v is less than the previous one %v, keeping the previous one", newTimeShift, sourceInfo.TimeShift)
 		return nil
 	}
+	sourceInfo.TimeShift = newTimeShift
 	if !k.Config.ShouldFixPTS {
-		logger.Errorf(ctx, "PTS fixing is disabled, not applying the new time shift (%v)", newTimeShift)
+		logger.Debugf(ctx, "PTS fixing is disabled, not applying the new time shift (%v) to video; recorded for audio use", newTimeShift)
 		return errSkip{}
 	}
 	logger.Tracef(ctx, "Setting PTS to %d (offset %d) from %d for source %v", newPTS, ptsOffset, input.GetPTS(), packetSource)
-	sourceInfo.TimeShift = newTimeShift
 
 	input.SetPTS(newPTS)
 	input.SetDTS(input.GetDTS() + ptsOffset)
@@ -230,6 +259,64 @@ func (k *NodeKernel) Close(ctx context.Context) (_err error) {
 	defer func() { logger.Tracef(ctx, "/Close(): %v", _err) }()
 	k.ClosureSignaler.Close(ctx)
 	return nil
+}
+
+// detectAudioTimestampMismatch checks whether audio timestamps are in
+// sample-count units rather than the declared timebase (e.g. phone sends
+// 44100 Hz sample counts as RTMP millisecond timestamps, making audio DTS
+// grow ~44x faster than video). Once confirmed, audioSampleRate and
+// audioTimeBaseDen are stored so the caller can rescale precisely:
+// corrected = raw * timeBaseDen / sampleRate.
+func (k *NodeKernel) detectAudioTimestampMismatch(
+	ctx context.Context,
+	input packetorframe.Abstract,
+) {
+	if k.audioTimestampDetected {
+		return
+	}
+
+	// Wait until we have a video reference to compare against.
+	if k.LatestPTS <= 0 {
+		return
+	}
+
+	timeBase := input.GetTimeBase()
+	audioDTS := avconv.Duration(input.GetDTS(), timeBase)
+
+	// Need a meaningful divergence before we can confirm.
+	const detectionThreshold = 2 * time.Second
+	if audioDTS-k.LatestPTS < detectionThreshold {
+		return
+	}
+
+	codecParams := input.GetCodecParameters()
+	if codecParams == nil {
+		return
+	}
+	sampleRate := int64(codecParams.SampleRate())
+	tbDen := int64(timeBase.Den())
+	if sampleRate <= 0 || tbDen <= 0 {
+		return
+	}
+	expectedRatio := sampleRate / tbDen
+	if expectedRatio <= 1 {
+		return
+	}
+
+	// Verify the actual divergence matches the expected sample-rate ratio.
+	actualRatio := int64(audioDTS) / int64(k.LatestPTS)
+	if actualRatio < expectedRatio/2 || actualRatio > expectedRatio*2 {
+		logger.Debugf(ctx, "Audio DTS divergence (actual ratio %d) does not match sample-rate ratio %d; not correcting",
+			actualRatio, expectedRatio)
+		k.audioTimestampDetected = true
+		return
+	}
+
+	k.audioTimestampDetected = true
+	k.audioSampleRate = sampleRate
+	k.audioTimeBaseDen = tbDen
+	logger.Debugf(ctx, "Detected audio sample-rate timestamps: rescaling by %d/%d (audioDTS=%v, videoPTS=%v)",
+		tbDen, sampleRate, audioDTS, k.LatestPTS)
 }
 
 func (k *NodeKernel) CloseChan() <-chan struct{} {

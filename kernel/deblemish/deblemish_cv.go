@@ -71,7 +71,10 @@ func (d *Deblemish) sendInputFaceOnly(
 	frameInput *frame.Input,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	writableFrame := frame.CloneAsWritable(frameInput.Frame)
+	writableFrame, err := frame.CloneAsWritable(frameInput.Frame)
+	if err != nil {
+		return fmt.Errorf("unable to clone frame as writable: %w", err)
+	}
 
 	img, err := writableFrame.Data().GuessImageFormat()
 	if err != nil {

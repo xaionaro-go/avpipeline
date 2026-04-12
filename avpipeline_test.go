@@ -329,7 +329,7 @@ func TestServe_BasicPipeline(t *testing.T) {
 	// Wait for nodes to start serving
 	deadline := time.After(2 * time.Second)
 	for {
-		if n1.IsServing() && n2.IsServing() {
+		if n1.IsServing(ctx) && n2.IsServing(ctx) {
 			break
 		}
 		select {
@@ -340,8 +340,8 @@ func TestServe_BasicPipeline(t *testing.T) {
 		}
 	}
 
-	tassert.True(t, n1.IsServing())
-	tassert.True(t, n2.IsServing())
+	tassert.True(t, n1.IsServing(ctx))
+	tassert.True(t, n2.IsServing(ctx))
 
 	cancel()
 	wg.Wait()
@@ -369,7 +369,7 @@ func TestServe_DuplicateNode(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if shared.IsServing() {
+		if shared.IsServing(ctx) {
 			break
 		}
 		select {
@@ -418,7 +418,7 @@ func TestServe_DiamondTopology(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if root.IsServing() && mid1.IsServing() && mid2.IsServing() && sink.IsServing() {
+		if root.IsServing(ctx) && mid1.IsServing(ctx) && mid2.IsServing(ctx) && sink.IsServing(ctx) {
 			break
 		}
 		select {
@@ -455,7 +455,7 @@ func TestServe_DrainAfterCancel(t *testing.T) {
 	// Wait for serving to start
 	deadline := time.After(2 * time.Second)
 	for {
-		if n1.IsServing() {
+		if n1.IsServing(ctx) {
 			break
 		}
 		select {
@@ -504,7 +504,7 @@ func TestWaitForDrain_ContextCancel(t *testing.T) {
 	// Wait for serving to start
 	deadline := time.After(2 * time.Second)
 	for {
-		if n.IsServing() {
+		if n.IsServing(ctx) {
 			break
 		}
 		select {
@@ -626,7 +626,7 @@ func TestServe_NodeTreeFilter(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if n1.IsServing() {
+		if n1.IsServing(ctx) {
 			break
 		}
 		select {
@@ -639,7 +639,7 @@ func TestServe_NodeTreeFilter(t *testing.T) {
 
 	// n2 should NOT be serving since the tree filter only matched n1 (not n2's subtree)
 	time.Sleep(100 * time.Millisecond)
-	tassert.False(t, n2.IsServing(), "n2 should not be served")
+	tassert.False(t, n2.IsServing(ctx), "n2 should not be served")
 
 	cancel()
 	wg.Wait()
@@ -669,7 +669,7 @@ func TestServe_NodeFilter(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if n2.IsServing() {
+		if n2.IsServing(ctx) {
 			break
 		}
 		select {
@@ -681,8 +681,8 @@ func TestServe_NodeFilter(t *testing.T) {
 	}
 
 	// n1 should NOT be serving (filtered out)
-	tassert.False(t, n1.IsServing(), "n1 should be skipped by filter")
-	tassert.True(t, n2.IsServing(), "n2 should be served")
+	tassert.False(t, n1.IsServing(ctx), "n1 should be skipped by filter")
+	tassert.True(t, n2.IsServing(ctx), "n2 should be served")
 
 	cancel()
 	wg.Wait()
@@ -945,7 +945,7 @@ func TestIsDrained_NotDrained(t *testing.T) {
 	// Wait for serving to start
 	deadline := time.After(2 * time.Second)
 	for {
-		if n.IsServing() {
+		if n.IsServing(ctx) {
 			break
 		}
 		select {
@@ -989,7 +989,7 @@ func TestIsDrained_ChainWithNonDrainedNode(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if n1.IsServing() && n2.IsServing() {
+		if n1.IsServing(ctx) && n2.IsServing(ctx) {
 			break
 		}
 		select {

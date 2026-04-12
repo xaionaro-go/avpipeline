@@ -23,7 +23,7 @@ func NodeToGRPC(
 		Id:          uint64(n.GetObjectID()),
 		Type:        fmt.Sprintf("%T", n),
 		Description: n.String(),
-		IsServing:   n.IsServing(),
+		IsServing:   n.IsServing(ctx),
 		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), n.GetProcessor().CountersPtr()),
 	}
 
@@ -41,7 +41,11 @@ func NodeToGRPC(
 
 	nextLayer, err := avpipeline.NextLayer(ctx, n)
 	if err != nil {
-		panic(err)
+		// Log instead of panicking — NextLayer may fail transiently
+		// (e.g., concurrent node removal) and callers use this for
+		// debug/monitoring serialization.
+		result.Description += fmt.Sprintf(" [NextLayer error: %v]", err)
+		return result
 	}
 
 	for _, nextNode := range nextLayer {

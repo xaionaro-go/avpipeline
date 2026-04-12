@@ -31,6 +31,7 @@ type OutputAudioTrackConfig struct {
 	AverageBitRate  uint64           `yaml:"average_bit_rate"`
 	CustomOptions   DictionaryItems  `yaml:"custom_options"`
 	SampleRate      audio.SampleRate `yaml:"sample_rate"`
+	Channels        audio.Channel    `yaml:"channels"`
 }
 
 // TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)

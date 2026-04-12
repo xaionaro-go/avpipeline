@@ -110,7 +110,7 @@ func New[K InputKernel, DF codec.DecoderFactory, C any](
 func (i *InputWithFallback[K, DF, C]) String() string {
 	cur := i.InputSwitch.CurrentValue.Load()
 	next := i.InputSwitch.NextValue.Load()
-	ctx := context.TODO()
+	ctx := context.Background()
 	if !i.InputChainsLocker.ManualTryLock(ctx) {
 		return fmt.Sprintf("InputWithFallback(<locked>; cur:%d, next:%d)", cur, next)
 	}

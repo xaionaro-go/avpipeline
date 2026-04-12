@@ -24,11 +24,11 @@ func (c *Codec) platformSpecificHWSanityChecks(ctx context.Context) {
 	logger.Tracef(ctx, "platformSpecificHWSanityChecks")
 	defer func() { logger.Tracef(ctx, "/platformSpecificHWSanityChecks") }()
 
-	if c.MediaType() != astiav.MediaTypeVideo {
+	if c.MediaType(ctx) != astiav.MediaTypeVideo {
 		return
 	}
 
-	mimeType := c.GetAndroidMIMEType()
+	mimeType := c.GetAndroidMIMEType(ctx)
 	if len(mimeType) == 0 {
 		logger.Tracef(ctx, "no mime types found")
 		return

@@ -3,6 +3,8 @@
 package frame
 
 import (
+	"fmt"
+
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/pool"
 )
@@ -23,16 +25,19 @@ func CloneAsReferenced(src *astiav.Frame) *astiav.Frame {
 	return dst
 }
 
-func CopyWritable(dst, src *astiav.Frame) {
+func CopyWritable(dst, src *astiav.Frame) error {
 	dst.Ref(src)
-	err := dst.MakeWritable()
-	if err != nil {
-		panic(err)
+	if err := dst.MakeWritable(); err != nil {
+		return fmt.Errorf("unable to make frame writable: %w", err)
 	}
+	return nil
 }
 
-func CloneAsWritable(src *astiav.Frame) *astiav.Frame {
+func CloneAsWritable(src *astiav.Frame) (*astiav.Frame, error) {
 	dst := Pool.Get()
-	CopyWritable(dst, src)
-	return dst
+	if err := CopyWritable(dst, src); err != nil {
+		Pool.Put(dst)
+		return nil, err
+	}
+	return dst, nil
 }

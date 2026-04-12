@@ -38,6 +38,11 @@ type Sender interface {
 }
 type NodeRetryOutput = node.NodeWithCustomData[Sender, *processor.FromKernel[*kernel.Retryable[*kernel.Output]]]
 
+const (
+	initialRetryDelay = time.Second
+	maxRetryDelay     = 30 * time.Second
+)
+
 func newRetryOutputNode(
 	ctx context.Context,
 	sender Sender,
@@ -49,6 +54,8 @@ func newRetryOutputNode(
 	logger.Tracef(ctx, "newRetryOutputNode")
 	defer func() { logger.Tracef(ctx, "/newRetryOutputNode") }()
 
+	retryDelay := initialRetryDelay
+
 	outputKernel := kernel.NewRetryable(xlogger.CtxWithMaxLoggingLevel(ctx, logger.LevelWarning),
 		func(ctx context.Context) (*kernel.Output, error) {
 			if waitForInputFunc != nil {
@@ -57,11 +64,20 @@ func newRetryOutputNode(
 					return nil, fmt.Errorf("unable to wait for input: %w", err)
 				}
 			}
-			return kernel.NewOutputFromURL(ctx, dstURL, streamKey, cfg)
+			output, err := kernel.NewOutputFromURL(ctx, dstURL, streamKey, cfg)
+			if err == nil {
+				retryDelay = initialRetryDelay
+			}
+			return output, err
 		},
 		func(ctx context.Context, k *kernel.Output, err error) error {
-			logger.Debugf(ctx, "connection ended: %v", err)
-			time.Sleep(time.Second)
+			logger.Debugf(ctx, "connection ended: %v; reconnecting in %v", err, retryDelay)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay):
+			}
+			retryDelay = min(retryDelay*2, maxRetryDelay)
 			return kernel.ErrRetry{Err: err}
 		},
 	)

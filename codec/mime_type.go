@@ -3,14 +3,15 @@
 package codec
 
 import (
+	"context"
 	"slices"
 
 	"github.com/asticode/go-astiav"
 )
 
-func (c *Codec) GetMIMEType() []string {
-	result := c.getIANAMIMETypes()
-	if androidMIMEType := c.GetAndroidMIMEType(); androidMIMEType != "" {
+func (c *Codec) GetMIMEType(ctx context.Context) []string {
+	result := c.getIANAMIMETypes(ctx)
+	if androidMIMEType := c.GetAndroidMIMEType(ctx); androidMIMEType != "" {
 		if !slices.Contains(result, androidMIMEType) {
 			return append(result, androidMIMEType)
 		}
@@ -18,8 +19,8 @@ func (c *Codec) GetMIMEType() []string {
 	return result
 }
 
-func (c *Codec) getIANAMIMETypes() []string {
-	switch c.CodecContext().CodecID() {
+func (c *Codec) getIANAMIMETypes(ctx context.Context) []string {
+	switch c.CodecContext(ctx).CodecID() {
 	case astiav.CodecIDH264:
 		return []string{"video/H264"}
 	case astiav.CodecIDHevc:
@@ -58,8 +59,8 @@ func (c *Codec) getIANAMIMETypes() []string {
 	return nil
 }
 
-func (c *Codec) GetAndroidMIMEType() string {
-	switch c.CodecContext().CodecID() {
+func (c *Codec) GetAndroidMIMEType(ctx context.Context) string {
+	switch c.CodecContext(ctx).CodecID() {
 	case astiav.CodecIDH264:
 		return "video/avc"
 	case astiav.CodecIDHevc:

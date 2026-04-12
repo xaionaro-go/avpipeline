@@ -880,7 +880,11 @@ func (o *Output[C]) reconfigureEncoder(
 			// (e.g. 30/1 becomes 30000/1000).
 			newNum := fps.Num * 1000 / fps.Den
 			encoderFactory.VideoAverageFrameRate = astiav.NewRational(newNum, 1000)
+			if audioCfg.AverageBitRate != 0 {
+				encoderFactory.AudioQuality = quality.ConstantBitrate(audioCfg.AverageBitRate)
+			}
 			encoderFactory.AudioSampleRate = audioCfg.SampleRate
+			encoderFactory.AudioChannels = audioCfg.Channels
 			return nil
 		}
 
@@ -902,6 +906,10 @@ func (o *Output[C]) reconfigureEncoder(
 
 		if audioCfg.SampleRate != encoderFactory.AudioSampleRate {
 			return fmt.Errorf("unable to change the audio sample rate on the fly, yet: '%d' != '%d'", audioCfg.SampleRate, encoderFactory.AudioSampleRate)
+		}
+
+		if audioCfg.Channels != encoderFactory.AudioChannels {
+			return fmt.Errorf("unable to change the audio channels on the fly, yet: '%d' != '%d'", audioCfg.Channels, encoderFactory.AudioChannels)
 		}
 
 		{

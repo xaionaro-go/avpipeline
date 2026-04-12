@@ -212,14 +212,19 @@ func (k *Microphone) Generate(
 	//
 	// TODO: audio/video epoch alignment relies on the video capture
 	// chain also using CLOCK_MONOTONIC timestamps. If a synchronization
-	// kernel needs to align different epochs, it must do so here from
-	// actual timestamps — zeroing out capture timestamps at the source
-	// destroys the only wall-time reference the sync stage has.
-	pts, err := monotonicPTS(k.Config.SampleRate)
-	if err != nil {
-		return fmt.Errorf("unable to get initial monotonic PTS: %w", err)
-	}
-	logger.Infof(ctx, "initial audio PTS from CLOCK_MONOTONIC: %d (sample_rate=%d)", pts, k.Config.SampleRate)
+	// Seed audio PTS at 0 to share the same epoch as the video Input
+	// kernel, which applies a per-stream DTS shift to start at 0.
+	// Without this, the microphone's CLOCK_MONOTONIC-based PTS starts
+	// at device uptime (~hours/days in sample units), creating a
+	// massive gap with video DTS. The FLV muxer's uint32 timestamp
+	// field then wraps the video or audio DTS, and the downstream
+	// ReorderMonotonicDTS kernel discards packets as "too old".
+	//
+	// A sync-kernel-level epoch alignment would be the theoretically
+	// correct fix, but no such mechanism exists today. Zeroing both
+	// sources is the only way to keep the pipeline functional.
+	pts := int64(0)
+	logger.Infof(ctx, "initial audio PTS: %d (sample_rate=%d)", pts, k.Config.SampleRate)
 
 	readTimeoutNanos := k.Config.PollInterval.Nanoseconds()
 	if readTimeoutNanos <= 0 {

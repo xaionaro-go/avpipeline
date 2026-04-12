@@ -98,8 +98,8 @@ func (rm *outputAsResourceManager[C]) canReuse(
 	// we can reuse the resources only if pixel format is the same
 	decoder := getDecoderer.GetDecoderer.GetDecoder()
 	if params.PixelFormat() != astiav.PixelFormatNone {
-		if params.PixelFormat() != decoder.CodecContext().PixelFormat() {
-			logger.Tracef(ctx, "pixel format mismatch: params=%v vs decoder=%v", params.PixelFormat(), decoder.CodecContext().PixelFormat())
+		if params.PixelFormat() != decoder.CodecContext(ctx).PixelFormat() {
+			logger.Tracef(ctx, "pixel format mismatch: params=%v vs decoder=%v", params.PixelFormat(), decoder.CodecContext(ctx).PixelFormat())
 			return false
 		}
 	}

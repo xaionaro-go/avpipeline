@@ -1720,7 +1720,8 @@ func (s *StreamMux[C]) IsAllowedDifferentOutputs() bool {
 	case types.MuxModeDifferentOutputsSameTracks, types.MuxModeDifferentOutputsSameTracksSplitAV:
 		return true
 	default:
-		panic(fmt.Sprintf("unknown MuxMode: %v", s.MuxMode))
+		// Unknown MuxMode — deny different outputs as the safe default.
+		return false
 	}
 }
 

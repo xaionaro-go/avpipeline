@@ -102,12 +102,21 @@ func (h *AutoHeaders) sendInputLocked(
 	h.Processor.Kernel = newKernel
 	h.IsSet = true
 
-	// to get the input finally processed
-	return h.Processor.Kernel.SendInput(
+	// to get the input finally processed. If the chosen bitstream filter
+	// fails on the first packet (e.g. h264_mediacodec produces a format
+	// that the filter doesn't recognize), fall back to passthrough mode
+	// rather than killing the consumer.
+	err := h.Processor.Kernel.SendInput(
 		ctx,
 		input,
 		outputCh,
 	)
+	if err != nil && newKernel != (&kernel.Passthrough{}) {
+		logger.Warnf(ctx, "bitstream filter failed on first packet, falling back to passthrough: %v", err)
+		h.Processor.Kernel = &kernel.Passthrough{}
+		return h.Processor.Kernel.SendInput(ctx, input, outputCh)
+	}
+	return err
 }
 
 func (h *AutoHeaders) detectAppropriateFixerKernel(

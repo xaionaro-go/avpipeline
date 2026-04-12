@@ -154,6 +154,7 @@ func testTranscoder(
 }
 
 func TestTranscoderNoFailure(t *testing.T) {
+	t.Parallel()
 	testTranscoder(t, "libx264", codec.NameCopy)
 }
 
@@ -161,6 +162,7 @@ func TestTranscoderNoFailure(t *testing.T) {
 // FrameInfo FIFO for timestamp tracking (AAC has 'delay' capability but
 // not 'encoder_reordered_opaque').
 func TestTranscoderAACEncoder(t *testing.T) {
+	t.Parallel()
 	testTranscoder(t, "libx264", "aac")
 }
 
@@ -169,6 +171,7 @@ func TestTranscoderAACEncoder(t *testing.T) {
 // This test is designed to catch the "DTS from the stream's past" errors
 // observed in production with split_av mode + AAC + FLV.
 func TestTranscoderAACEncoderFLV(t *testing.T) {
+	t.Parallel()
 	l := logrus.Default().WithLevel(logger.LevelTrace)
 	ctx := logger.CtxWithLogger(context.Background(), l)
 	defer belt.Flush(ctx)

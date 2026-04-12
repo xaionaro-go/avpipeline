@@ -30,7 +30,7 @@ type Abstract interface {
 	Serve(context.Context, ServeConfig, chan<- Error)
 
 	GetObjectID() globaltypes.ObjectID
-	IsServing() bool
+	IsServing(context.Context) bool
 
 	GetPushTos(context.Context) PushTos
 	AddPushTo(context.Context, Abstract, ...packetorframefiltercondition.Condition)
@@ -86,7 +86,7 @@ func (n *MyFancyNodePlaceholder) String() string {
 	return "MyFancyNodePlaceholder"
 }
 
-func (n *MyFancyNodePlaceholder) IsServing() bool {
+func (n *MyFancyNodePlaceholder) IsServing(context.Context) bool {
 	return false
 }
 
@@ -262,11 +262,11 @@ func (n *NodeWithCustomData[C, T]) SetCustomData(v C) {
 	n.CustomData = v
 }
 
-func (n *NodeWithCustomData[C, T]) IsServing() bool {
+func (n *NodeWithCustomData[C, T]) IsServing(ctx context.Context) bool {
 	if n == nil {
 		return false
 	}
-	return xsync.DoR1(context.TODO(), &n.Locker, func() bool {
+	return xsync.DoR1(ctx, &n.Locker, func() bool {
 		return n.IsServingValue
 	})
 }

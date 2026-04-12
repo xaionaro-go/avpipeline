@@ -274,7 +274,7 @@ func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
 
 	codecParams := astiav.AllocCodecParameters()
 	defer codecParams.Free()
-	decoder.ToCodecParameters(codecParams)
+	decoder.ToCodecParameters(ctx, codecParams)
 	f, err := frame.NewBlankVideo(ctx, codecParams)
 	if err != nil {
 		return fmt.Errorf("unable to create a blank frame: %w", err)
@@ -346,7 +346,7 @@ func (d *Decoder[DF]) sendPacket(
 	}
 
 	if !encoderForceCopyTime {
-		input.RescaleTs(input.GetTimeBase(), streamDecoder.TimeBase())
+		input.RescaleTs(input.GetTimeBase(), streamDecoder.TimeBase(ctx))
 	}
 
 	streamIndex := input.GetStreamIndex()
@@ -631,7 +631,7 @@ func (d *Decoder[DF]) getOutputCodecParameters(
 
 	codecParams := astiav.AllocCodecParameters()
 	setFinalizerFree(ctx, codecParams)
-	decoder.ToCodecParameters(codecParams)
+	decoder.ToCodecParameters(ctx, codecParams)
 	switch codecParams.MediaType() {
 	case astiav.MediaTypeVideo:
 		codecParams.SetCodecID(astiav.CodecIDRawvideo)

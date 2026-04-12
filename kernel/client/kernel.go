@@ -8,6 +8,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -30,45 +31,45 @@ func (k *Kernel) SendInput(
 	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	panic("not implemented")
+	return kernel.ErrNotImplemented{}
 }
 
 func (k *Kernel) String() string {
-	panic("not implemented")
+	return "client.Kernel"
 }
 
 func (k *Kernel) Close(ctx context.Context) error {
-	panic("not implemented")
+	return kernel.ErrNotImplemented{}
 }
 
 func (k *Kernel) CloseChan() <-chan struct{} {
-	panic("not implemented")
+	return nil
 }
 
 func (k *Kernel) Generate(
 	ctx context.Context,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
-	panic("not implemented")
+	return kernel.ErrNotImplemented{}
 }
 
 func (k *Kernel) WithOutputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	panic("not implemented")
+	logger.Warnf(ctx, "WithOutputFormatContext is not implemented for client.Kernel")
 }
 
 func (k *Kernel) WithInputFormatContext(
 	ctx context.Context,
 	callback func(*astiav.FormatContext),
 ) {
-	panic("not implemented")
+	logger.Warnf(ctx, "WithInputFormatContext is not implemented for client.Kernel")
 }
 
 func (k *Kernel) NotifyAboutPacketSource(
 	ctx context.Context,
 	source packet.Source,
 ) error {
-	panic("not implemented")
+	return kernel.ErrNotImplemented{}
 }

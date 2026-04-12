@@ -914,20 +914,20 @@ func (h *AutoBitRateHandler[C]) getCurrentEncoderState(
 ) (curRes codec.Resolution, curVCodecName, curACodecName codec.Name, curASampleRate audio.SampleRate) {
 	encV, encA := h.StreamMux.GetEncoders(ctx)
 	if encA != nil {
-		curACodecName = codec.Name(encA.Codec().Name())
-		curASampleRate = audio.SampleRate(encA.CodecContext().SampleRate())
+		curACodecName = codec.Name(encA.Codec(ctx).Name())
+		curASampleRate = audio.SampleRate(encA.CodecContext(ctx).SampleRate())
 	}
 	if codec.IsEncoderCopy(encV) {
 		curVCodecName = codec.NameCopy
 		return
 	}
 	if encV != nil {
-		encVCtx := encV.CodecContext()
+		encVCtx := encV.CodecContext(ctx)
 		curRes = codec.Resolution{
 			Width:  uint32(encVCtx.Width()),
 			Height: uint32(encVCtx.Height()),
 		}
-		curVCodecName = codec.Name(encV.Codec().Name())
+		curVCodecName = codec.Name(encV.Codec(ctx).Name())
 	}
 	return
 }

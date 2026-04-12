@@ -287,7 +287,12 @@ func (r *Route[T]) AddPublisherLocked(
 				publishersToRemove = append(publishersToRemove, publisher)
 			}
 			for _, publisher := range publishersToRemove {
-				removePublisher(ctx, publisher)
+				publisher := publisher
+				wg.Add(1)
+				observability.Go(ctx, func(ctx context.Context) {
+					defer wg.Done()
+					removePublisher(ctx, publisher)
+				})
 			}
 			r.Publishers = newPublishers
 		default:

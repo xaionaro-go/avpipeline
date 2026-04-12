@@ -9,7 +9,7 @@ import (
 
 type Linesize = libavnolibav.Linesize
 
-func LinesizeFromProtobuf(input []uint32) Linesize {
+func LinesizeFromProtobuf(input []uint32) (Linesize, error) {
 	return libavnolibav.LinesizeFromProtobuf(input)
 }
 

@@ -3,6 +3,7 @@
 package packet
 
 import (
+	"fmt"
 	"runtime"
 
 	"github.com/asticode/go-astiav"
@@ -26,17 +27,20 @@ func CloneAsReferenced(src *astiav.Packet) *astiav.Packet {
 	return dst
 }
 
-func CopyWritable(dst, src *astiav.Packet) {
+func CopyWritable(dst, src *astiav.Packet) error {
 	dst.Ref(src)
 	runtime.KeepAlive(src)
-	err := dst.MakeWritable()
-	if err != nil {
-		panic(err)
+	if err := dst.MakeWritable(); err != nil {
+		return fmt.Errorf("unable to make packet writable: %w", err)
 	}
+	return nil
 }
 
-func CloneAsWritable(src *astiav.Packet) *astiav.Packet {
+func CloneAsWritable(src *astiav.Packet) (*astiav.Packet, error) {
 	dst := Pool.Get()
-	CopyWritable(dst, src)
-	return dst
+	if err := CopyWritable(dst, src); err != nil {
+		Pool.Put(dst)
+		return nil, err
+	}
+	return dst, nil
 }

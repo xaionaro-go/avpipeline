@@ -189,6 +189,7 @@ func TestVideoGapLarge(t *testing.T) {
 }
 
 func TestVideoGapInterpolate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfg := DefaultGapFillerConfig()
 	cfg.GapsStrategyVideo = GapsStrategyVideoInterpolate

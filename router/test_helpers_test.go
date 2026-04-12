@@ -89,10 +89,10 @@ var _ Consumer[any] = (*mockConsumer)(nil)
 // waitForServing waits for the route's Serve goroutine to start.
 // This must be called before cancelling the context to avoid a race
 // where the Serve goroutine hasn't read Processor yet.
-func waitForServing(t *testing.T, route *Route[any]) {
+func waitForServing(ctx context.Context, t *testing.T, route *Route[any]) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
-	for !route.Node.IsServing() {
+	for !route.Node.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to start")
@@ -102,10 +102,10 @@ func waitForServing(t *testing.T, route *Route[any]) {
 }
 
 // waitForNotServing waits for the route's Serve goroutine to stop.
-func waitForNotServing(t *testing.T, route *Route[any]) {
+func waitForNotServing(ctx context.Context, t *testing.T, route *Route[any]) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
-	for route.Node != nil && route.Node.IsServing() {
+	for route.Node != nil && route.Node.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to stop")
@@ -141,7 +141,7 @@ func newTestRouter(t *testing.T) *Router[any] {
 		// to ErrorChan will occur.
 		for _, route := range routes {
 			deadline := time.After(5 * time.Second)
-			for route.Node != nil && route.Node.IsServing() {
+			for route.Node != nil && route.Node.IsServing(cleanupCtx) {
 				select {
 				case <-deadline:
 					t.Logf("warning: route %s Serve goroutine did not stop in time", route.Path)

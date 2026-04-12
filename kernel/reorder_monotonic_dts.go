@@ -208,7 +208,7 @@ func (r *ReorderMonotonicDTS) pushToQueue(
 		r.emptyQueuesCount--
 	}
 	heap.Push(r.StreamsDTSs[streamKey], dts)
-	if r.emptyQueuesCount != 0 {
+	if r.emptyQueuesCount != 0 && !r.Started {
 		logger.Tracef(ctx, "not all streams have items yet (emptyQueuesCount: %d), waiting...", r.emptyQueuesCount)
 		return
 	}
@@ -260,11 +260,25 @@ func (r *ReorderMonotonicDTS) enforceLowDTSDifference(
 	dtsDiff := newItemDTS - reference
 	switch {
 	case -dtsDiff > r.MaxDTSDifference:
-		logger.Errorf(ctx, "ReorderMonotonicDTS: DTS gap %v exceeds pathological threshold %v, discarding packet", -dtsDiff, r.MaxDTSDifference)
-		return false
+		// New item's DTS is far BEHIND the reference. This typically
+		// happens when a publisher reconnects or a consumer joins after
+		// the route already had traffic — PrevDTS reflects the old
+		// publisher's high DTS while the new publisher starts at 0.
+		// Reset the reference so the new stream's packets flow through.
+		logger.Warnf(ctx, "ReorderMonotonicDTS: new DTS %v is %v behind reference %v (> MaxDTSDifference %v); resetting reference (likely stream restart)",
+			newItemDTS, -dtsDiff, reference, r.MaxDTSDifference)
+		r.PrevDTS = newItemDTS
+		return true
 	case dtsDiff > r.MaxDTSDifference:
-		logger.Errorf(ctx, "ReorderMonotonicDTS: DTS gap %v exceeds pathological threshold %v, discarding packet", dtsDiff, r.MaxDTSDifference)
-		return false
+		// New item's DTS is far AHEAD of the reference. This is normal
+		// when a consumer connects mid-stream: the first real media
+		// packet carries the publisher's current DTS (~13s) while the
+		// consumer's reference is still 0 (or from a metadata packet).
+		// Reset the reference and accept so the stream can start.
+		logger.Warnf(ctx, "ReorderMonotonicDTS: large forward DTS gap %v (threshold %v, ref=%v, new=%v); resetting reference for mid-stream consumer join",
+			dtsDiff, r.MaxDTSDifference, reference, newItemDTS)
+		r.PrevDTS = newItemDTS
+		return true
 	}
 	return true
 }
@@ -330,11 +344,28 @@ func (r *ReorderMonotonicDTS) doSendItem(
 	}()
 	dts := avconv.Duration(item.GetDTS(), item.GetTimeBase())
 	if r.PrevDTS > dts {
-		if r.DiscardUnorderedItems {
-			logger.Warnf(ctx, "DTS went backwards: previous DTS was %v, now it is %v (%d); discarding the item", r.PrevDTS, dts, item.GetDTS())
+		switch {
+		case r.MaxDTSDifference > 0 && r.PrevDTS-dts > r.MaxDTSDifference:
+			// Large backwards jump — likely a stream restart or cross-stream DTS
+			// epoch mismatch (e.g. audio retained CLOCK_MONOTONIC timestamps while
+			// video was corrected to stream-relative).
+			//
+			// Intentionally overrides DiscardUnorderedItems: epoch resets must be
+			// accepted to restore stream continuity. DiscardUnorderedItems handles
+			// small backward jitter, not full epoch mismatches. This is a
+			// defense-in-depth measure; the primary fix is in
+			// makeTimeMoveOnlyForward which aligns audio/video epochs.
+			logger.Warnf(ctx, "DTS went far backwards: previous DTS was %v, now it is %v (%d); resetting reference (stream restart or epoch mismatch)",
+				r.PrevDTS, dts, item.GetDTS())
+			// Proceed to r.PrevDTS = dts below.
+		case r.DiscardUnorderedItems:
+			logger.Warnf(ctx, "DTS went backwards: previous DTS was %v, now it is %v (%d); discarding the item",
+				r.PrevDTS, dts, item.GetDTS())
 			return nil
+		default:
+			return fmt.Errorf("DTS went backwards: previous DTS was %v, now it is %v (%d)",
+				r.PrevDTS, dts, item.GetDTS())
 		}
-		return fmt.Errorf("DTS went backwards: previous DTS was %v, now it is %v (%d)", r.PrevDTS, dts, item.GetDTS())
 	}
 	r.PrevDTS = dts
 

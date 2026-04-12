@@ -398,9 +398,10 @@ func TestInputWithFallback_GetInputs(t *testing.T) {
 // --- IsServing tests ---
 
 func TestInputWithFallback_IsServing_NotServing(t *testing.T) {
+	ctx := context.Background()
 	factory := &mockInputFactory{name: "test-factory"}
 	iwf := newTestIWF(t, factory)
-	testifyassert.False(t, iwf.IsServing())
+	testifyassert.False(t, iwf.IsServing(ctx))
 }
 
 // --- GetObjectID tests ---
@@ -936,7 +937,7 @@ func TestInputWithFallback_Serve_CancelledImmediately(t *testing.T) {
 	cancel() // Cancel immediately
 
 	errCh := make(chan node.Error, 10)
-	testifyassert.False(t, iwf.IsServing())
+	testifyassert.False(t, iwf.IsServing(ctx))
 
 	done := make(chan struct{})
 	go func() {
@@ -952,7 +953,7 @@ func TestInputWithFallback_Serve_CancelledImmediately(t *testing.T) {
 	}
 
 	// After Serve returns, IsServing should be false
-	testifyassert.False(t, iwf.IsServing())
+	testifyassert.False(t, iwf.IsServing(ctx))
 }
 
 func TestInputWithFallback_Serve_DoubleStartError(t *testing.T) {

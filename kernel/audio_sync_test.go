@@ -201,6 +201,7 @@ func TestAudioSync_Consistency(t *testing.T) {
 }
 
 func TestAudioSync_LargeDelay(t *testing.T) {
+	t.Parallel()
 	config := DefaultAudioSyncConfig()
 	config.Syncer = &gccphat.Factory{WindowSize: 16384, HopSize: 8192, MaxLag: 150000}
 	config.ConfidenceThreshold = 0.1

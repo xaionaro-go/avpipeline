@@ -1,6 +1,7 @@
 package urltools
 
 import (
+	"context"
 	"net/url"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestIsFileURL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			assert.Equal(t, tc.expected, IsFileURL(tc.input))
+			assert.Equal(t, tc.expected, IsFileURL(context.Background(), tc.input))
 		})
 	}
 }

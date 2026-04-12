@@ -46,9 +46,9 @@ func TestRoute_OpenNodeLocked_AlreadyOpen(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for Serve goroutine to start, then cancel and wait for it to stop.
-	waitForServing(t, route)
+	waitForServing(ctx, t, route)
 	route.CancelFunc()
-	waitForNotServing(t, route)
+	waitForNotServing(ctx, t, route)
 
 	// Allow the deferred r.Close(ctx) in the newRoute goroutine to complete.
 	time.Sleep(200 * time.Millisecond)
@@ -97,9 +97,9 @@ func TestRoute_ResetNode(t *testing.T) {
 	assert.True(t, route.IsOpen(ctx))
 
 	// Wait for Serve goroutine to start, then cancel and wait for it to stop.
-	waitForServing(t, route)
+	waitForServing(ctx, t, route)
 	route.CancelFunc()
-	waitForNotServing(t, route)
+	waitForNotServing(ctx, t, route)
 
 	// Allow the deferred r.Close(ctx) in the newRoute goroutine to complete.
 	time.Sleep(200 * time.Millisecond)
@@ -128,9 +128,9 @@ func TestRoute_ResetNode_AlreadyClosed(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for Serve goroutine to start, then cancel and wait for it to stop.
-	waitForServing(t, route)
+	waitForServing(ctx, t, route)
 	route.CancelFunc()
-	waitForNotServing(t, route)
+	waitForNotServing(ctx, t, route)
 
 	// Allow the deferred r.Close(ctx) in the newRoute goroutine to complete.
 	time.Sleep(200 * time.Millisecond)

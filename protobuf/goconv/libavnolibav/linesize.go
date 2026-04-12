@@ -3,17 +3,19 @@
 // Package libavnolibav provides conversion functions between Protobuf and Go for libav types without libav dependency.
 package libavnolibav
 
+import "fmt"
+
 type Linesize [8]uint32
 
-func LinesizeFromProtobuf(input []uint32) Linesize {
+func LinesizeFromProtobuf(input []uint32) (Linesize, error) {
 	if len(input) != 8 {
-		panic("invalid linesize length")
+		return Linesize{}, fmt.Errorf("invalid linesize length: got %d, want 8", len(input))
 	}
 	var ls Linesize
-	for i := 0; i < 8 && i < len(input); i++ {
+	for i := range 8 {
 		ls[i] = input[i]
 	}
-	return ls
+	return ls, nil
 }
 
 func LinesizeFromGo(input [8]int) Linesize {

@@ -41,6 +41,9 @@ func (f *Filter) Match(
 		return true
 	}
 
+	// Detect framing format so we can preserve it after filtering.
+	format := extradatapacket.DetectNALFormat(data)
+
 	var keptNALUs []extradatapacket.NALU
 	removed := false
 	for nalu, err := range extradatapacket.Iter(cp.CodecID(), data) {
@@ -62,7 +65,7 @@ func (f *Filter) Match(
 		return false
 	}
 
-	newData := extradatapacket.JoinNALUs(keptNALUs)
+	newData := extradatapacket.JoinNALUsFormat(keptNALUs, format)
 	err := pkt.FromData(newData)
 	if err != nil {
 		return true

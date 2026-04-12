@@ -220,7 +220,7 @@ func TestStreamForwarderCopy_OutputAsNode_IsServing(t *testing.T) {
 	outputNode := fwd.outputAsNode()
 	// IsServing() delegates to the underlying node (dstRoute.Node),
 	// which IS serving. Just verify it doesn't panic.
-	_ = outputNode.IsServing()
+	_ = outputNode.IsServing(ctx)
 }
 
 func TestStreamForwarderCopy_OutputAsNode_GetProcessor(t *testing.T) {

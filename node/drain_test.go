@@ -395,7 +395,7 @@ func TestNode_Serve_AlreadyStarted(t *testing.T) {
 
 	// Wait for it to actually start
 	deadline := time.After(5 * time.Second)
-	for !n.IsServing() {
+	for !n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to start")
@@ -425,7 +425,7 @@ func TestNode_Serve_SetsIsServing(t *testing.T) {
 
 	n := newTestNode(ctx)
 
-	tassert.False(t, n.IsServing())
+	tassert.False(t, n.IsServing(ctx))
 
 	// Get change channel before Serve starts
 	startCh := n.GetChangeChanIsServing()
@@ -440,7 +440,7 @@ func TestNode_Serve_SetsIsServing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Serve to start")
 	}
-	tassert.True(t, n.IsServing())
+	tassert.True(t, n.IsServing(ctx))
 
 	// Get the next change channel before cancelling
 	stopCh := n.GetChangeChanIsServing()
@@ -454,7 +454,7 @@ func TestNode_Serve_SetsIsServing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Serve to stop")
 	}
-	tassert.False(t, n.IsServing())
+	tassert.False(t, n.IsServing(ctx))
 }
 
 func TestNode_Serve_ChangeChanIsServingFires(t *testing.T) {
@@ -476,7 +476,7 @@ func TestNode_Serve_ChangeChanIsServingFires(t *testing.T) {
 		t.Fatal("change channel should fire when Serve starts")
 	}
 
-	tassert.True(t, n.IsServing())
+	tassert.True(t, n.IsServing(ctx))
 
 	cancel()
 }

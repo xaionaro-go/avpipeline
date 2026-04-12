@@ -28,13 +28,13 @@ type CallbackPacketReceiver func(
 type Encoder interface {
 	fmt.Stringer
 	Closer
-	Codec() *astiav.Codec
-	CodecContext() *astiav.CodecContext
-	MediaType() astiav.MediaType
-	ToCodecParameters(cp *astiav.CodecParameters) error
-	HardwareDeviceContext() *astiav.HardwareDeviceContext
-	HardwarePixelFormat() astiav.PixelFormat
-	TimeBase() astiav.Rational
+	Codec(context.Context) *astiav.Codec
+	CodecContext(context.Context) *astiav.CodecContext
+	MediaType(context.Context) astiav.MediaType
+	ToCodecParameters(context.Context, *astiav.CodecParameters) error
+	HardwareDeviceContext(context.Context) *astiav.HardwareDeviceContext
+	HardwarePixelFormat(context.Context) astiav.PixelFormat
+	TimeBase(context.Context) astiav.Rational
 	SendFrame(context.Context, *astiav.Frame) error
 	ReceivePacket(context.Context, *astiav.Packet) error
 	GetQuality(ctx context.Context) Quality
@@ -77,7 +77,7 @@ func (pcmFmt PCMAudioFormat) Equal(other PCMAudioFormat) bool {
 		var err error
 		channelLayoutEqual, err = pcmFmt.ChannelLayout.Compare(other.ChannelLayout)
 		if err != nil {
-			logger.Errorf(context.TODO(), "unable to compare channel layouts: %v", err)
+			logger.Errorf(context.Background(), "unable to compare channel layouts: %v", err)
 			return false
 		}
 	}

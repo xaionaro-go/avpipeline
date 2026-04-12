@@ -106,7 +106,7 @@ func TestNoServe_IsServing_DelegatesToInner(t *testing.T) {
 	inner := newInnerNode(ctx)
 	ns := &NoServe[node.Abstract]{Node: inner}
 
-	assert.Equal(t, inner.IsServing(), ns.IsServing())
+	assert.Equal(t, inner.IsServing(ctx), ns.IsServing(ctx))
 }
 
 func TestNoServe_GetCountersPtr_DelegatesToInner(t *testing.T) {

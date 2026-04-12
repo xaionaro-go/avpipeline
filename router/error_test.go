@@ -77,7 +77,7 @@ func TestErrRouteClosed_ErrorsAs(t *testing.T) {
 
 func TestErrAlreadyHasPublisher_Error(t *testing.T) {
 	err := ErrAlreadyHasPublisher{}
-	assert.Equal(t, "is already has a publisher", err.Error())
+	assert.Equal(t, "already has a publisher", err.Error())
 }
 
 func TestErrAlreadyHasPublisher_ImplementsError(t *testing.T) {

@@ -66,7 +66,7 @@ func (c *StartWithKeyFrames) match(
 }
 
 func (c *StartWithKeyFrames) String() string {
-	ctx := context.TODO()
+	ctx := context.Background()
 	if !c.Locker.ManualTryRLock(ctx) {
 		return "StartWithKeyFrames"
 	}

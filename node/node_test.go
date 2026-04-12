@@ -18,7 +18,7 @@ func TestNew_InitialState(t *testing.T) {
 	n := newDummyNode()
 	require.NotNil(t, n)
 
-	tassert.False(t, n.IsServing(), "new node should not be serving")
+	tassert.False(t, n.IsServing(context.Background()), "new node should not be serving")
 	tassert.True(t, n.IsDrained(context.Background()), "new node should be drained (no data in flight)")
 	tassert.Empty(t, n.GetPushTos(context.Background()), "new node should have no push targets")
 	tassert.NotNil(t, n.Counters, "counters should be initialized")
@@ -37,7 +37,7 @@ func TestNew_ProcessorIsSet(t *testing.T) {
 
 func TestNilReceiver_IsServing(t *testing.T) {
 	var n *Dummy
-	tassert.False(t, n.IsServing(), "nil node should not be serving")
+	tassert.False(t, n.IsServing(context.Background()), "nil node should not be serving")
 }
 
 func TestNilReceiver_GetProcessor(t *testing.T) {
@@ -211,7 +211,7 @@ func TestNewWithCustomData_InitialState(t *testing.T) {
 	n := NewWithCustomData[string](proc)
 	require.NotNil(t, n)
 
-	tassert.False(t, n.IsServing())
+	tassert.False(t, n.IsServing(context.Background()))
 	tassert.True(t, n.IsDrained(context.Background()))
 	tassert.Empty(t, n.GetPushTos(context.Background()))
 	tassert.Equal(t, "", n.GetCustomData(), "custom data should be zero value")

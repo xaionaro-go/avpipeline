@@ -12,15 +12,15 @@ import (
 
 func TestLinesizeFromProtobuf(t *testing.T) {
 	input := []uint32{100, 200, 300, 400, 500, 600, 700, 800}
-	ls := LinesizeFromProtobuf(input)
+	ls, err := LinesizeFromProtobuf(input)
+	require.NoError(t, err)
 	assert.Equal(t, uint32(100), ls[0])
 	assert.Equal(t, uint32(800), ls[7])
 }
 
 func TestLinesizeFromProtobuf_InvalidLength(t *testing.T) {
-	assert.Panics(t, func() {
-		LinesizeFromProtobuf([]uint32{1, 2, 3})
-	})
+	_, err := LinesizeFromProtobuf([]uint32{1, 2, 3})
+	assert.Error(t, err)
 }
 
 func TestLinesizeFromGo(t *testing.T) {
@@ -47,7 +47,8 @@ func TestLinesize_Go(t *testing.T) {
 
 func TestLinesize_RoundTrip_ProtobufToGo(t *testing.T) {
 	input := []uint32{100, 200, 300, 400, 500, 600, 700, 800}
-	ls := LinesizeFromProtobuf(input)
+	ls, err := LinesizeFromProtobuf(input)
+	require.NoError(t, err)
 	output := ls.Protobuf()
 	assert.Equal(t, input, output)
 }

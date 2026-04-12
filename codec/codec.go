@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strconv"
+	"sync/atomic"
 	"strings"
 
 	"github.com/asticode/go-astiav"
@@ -63,7 +64,7 @@ type codecInternals struct {
 	hardwareContextType    hardwareContextType
 	closer                 *astikit.Closer
 	quirks                 Quirks
-	isDirty                bool
+	isDirty                atomic.Bool
 }
 
 type Codec struct {
@@ -71,50 +72,54 @@ type Codec struct {
 	locker xsync.RWMutex
 }
 
-func (c *Codec) Codec() *astiav.Codec {
-	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.Codec {
+func (c *Codec) Codec(ctx context.Context) *astiav.Codec {
+	return xsync.DoR1(ctx, &c.locker, func() *astiav.Codec {
 		return c.codec
 	})
 }
 
-func (c *Codec) CodecContext() *astiav.CodecContext {
-	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.CodecContext {
+func (c *Codec) CodecContext(ctx context.Context) *astiav.CodecContext {
+	return xsync.DoR1(ctx, &c.locker, func() *astiav.CodecContext {
 		return c.codecContext
 	})
 }
 
-func (c *Codec) MediaType() astiav.MediaType {
-	return xsync.DoR1(context.TODO(), &c.locker, c.mediaTypeLocked)
+func (c *Codec) MediaType(ctx context.Context) astiav.MediaType {
+	return xsync.DoR1(ctx, &c.locker, func() astiav.MediaType {
+		return c.mediaTypeLocked(ctx)
+	})
 }
 
-func (c *Codec) mediaTypeLocked() astiav.MediaType {
+func (c *Codec) mediaTypeLocked(ctx context.Context) astiav.MediaType {
 	if c.codecContext == nil {
-		logger.Errorf(context.TODO(), "codecContext == nil")
+		logger.Errorf(ctx, "codecContext == nil")
 		return astiav.MediaTypeUnknown
 	}
 	return c.codecContext.MediaType()
 }
 
-func (c *Codec) TimeBase() astiav.Rational {
-	return xsync.DoR1(context.TODO(), &c.locker, c.timeBaseLocked)
+func (c *Codec) TimeBase(ctx context.Context) astiav.Rational {
+	return xsync.DoR1(ctx, &c.locker, func() astiav.Rational {
+		return c.timeBaseLocked(ctx)
+	})
 }
 
-func (c *Codec) timeBaseLocked() astiav.Rational {
+func (c *Codec) timeBaseLocked(ctx context.Context) astiav.Rational {
 	if c.codecContext == nil {
-		logger.Errorf(context.TODO(), "codecContext == nil")
+		logger.Errorf(ctx, "codecContext == nil")
 		return astiav.Rational{}
 	}
 	return c.codecContext.TimeBase()
 }
 
-func (c *Codec) HardwareDeviceContext() *astiav.HardwareDeviceContext {
-	return xsync.DoR1(context.TODO(), &c.locker, func() *astiav.HardwareDeviceContext {
+func (c *Codec) HardwareDeviceContext(ctx context.Context) *astiav.HardwareDeviceContext {
+	return xsync.DoR1(ctx, &c.locker, func() *astiav.HardwareDeviceContext {
 		return c.hardwareDeviceContext
 	})
 }
 
-func (c *Codec) HardwarePixelFormat() astiav.PixelFormat {
-	return xsync.DoR1(context.TODO(), &c.locker, func() astiav.PixelFormat {
+func (c *Codec) HardwarePixelFormat(ctx context.Context) astiav.PixelFormat {
+	return xsync.DoR1(ctx, &c.locker, func() astiav.PixelFormat {
 		return c.hardwarePixelFormat
 	})
 }
@@ -135,7 +140,7 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	if c.closer == nil {
 		return nil
 	}
-	if c.isDirty {
+	if c.isDirty.Load() {
 		logger.Debugf(ctx, "resetting")
 		if err := c.reset(ctx); err != nil {
 			logger.Errorf(ctx, "unable to reset the codec: %v", err)
@@ -150,8 +155,8 @@ func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
 	return err
 }
 
-func (c *Codec) ToCodecParameters(cp *astiav.CodecParameters) error {
-	return xsync.DoA1R1(context.TODO(), &c.locker, c.toCodecParametersLocked, cp)
+func (c *Codec) ToCodecParameters(ctx context.Context, cp *astiav.CodecParameters) error {
+	return xsync.DoA1R1(ctx, &c.locker, c.toCodecParametersLocked, cp)
 }
 
 func (c *Codec) toCodecParametersLocked(cp *astiav.CodecParameters) (_err error) {
@@ -755,6 +760,14 @@ func newCodec(
 		if err != nil {
 			return nil, fmt.Errorf("unable to init hardware frames context: %w", err)
 		}
+	}
+
+	// Set GLOBAL_HEADER for video encoders so hardware encoders (e.g.
+	// h264_rkmpp) place SPS/PPS in AVCodecContext.extradata instead of
+	// inline in packets. Without this, the FLV muxer writes a header
+	// with nil extradata and RTMP receivers reject the stream.
+	if isEncoder && codecParameters.MediaType() == astiav.MediaTypeVideo {
+		c.codecContext.SetFlags(c.codecContext.Flags().Add(astiav.CodecContextFlagGlobalHeader))
 	}
 
 	logger.Debugf(ctx, "c.codecContext.Open(%#+v, %#+v)", c.codec, customOptions)

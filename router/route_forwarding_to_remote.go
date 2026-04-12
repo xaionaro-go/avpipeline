@@ -118,10 +118,10 @@ func (fwd *RouteForwardingToRemote[T]) init(
 func (fwd *RouteForwardingToRemote[T]) Close(
 	ctx context.Context,
 ) (_err error) {
+	logger.Debugf(ctx, "Close")
+	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	var errs []error
 	fwd.CloseOnce.Do(func() {
-		logger.Debugf(ctx, "Close")
-		defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 		if fwd.StreamForwarder != nil {
 			if err := fwd.StreamForwarder.Stop(ctx); err != nil {
 				errs = append(errs, fmt.Errorf("unable to stop forwarding the traffic: %w", err))

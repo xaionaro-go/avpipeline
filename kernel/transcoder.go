@@ -105,8 +105,10 @@ func (r *Transcoder[DF, EF]) Close(ctx context.Context) (_err error) {
 	if err := r.Encoder.Close(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("unable to close the encoder: %w", err))
 	}
-	if r.FilterKernel != nil {
-		if err := r.FilterKernel.Close(ctx); err != nil {
+	// Read FilterKernel under the lock to avoid racing with SetFilterKernel.
+	filterKernel := r.GetFilterKernel(ctx)
+	if filterKernel != nil {
+		if err := filterKernel.Close(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("unable to close the filter kernel: %w", err))
 		}
 	}
@@ -288,9 +290,14 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()
-		defer func() {
-			cancelFn()
-		}()
+		// Do NOT cancel the context here: when FilterKernel != nil, a
+		// second goroutine (below) reads from filterOutputCh and calls
+		// Encoder.SendInput. If we cancel the context before that
+		// goroutine finishes, the encoder's drain→send sees
+		// "context canceled" and the encoded packet is lost (the root
+		// cause of h264_rkmpp producing 0 output packets). The outer
+		// decoderToEncoder defer chain (wg.Wait then cancelFn) handles
+		// cleanup in the correct order.
 
 		var filterOutputCh chan packetorframe.OutputUnion
 		if r.FilterKernel != nil {

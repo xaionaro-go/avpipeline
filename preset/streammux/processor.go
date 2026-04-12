@@ -25,7 +25,10 @@ func (s *StreamMux[C]) OutputChan() <-chan packetorframe.OutputUnion {
 }
 
 func (s *StreamMux[C]) ErrorChan() <-chan error {
-	panic("not implemented")
+	// StreamMux does not have a single error channel; errors are propagated
+	// through individual output nodes. Returning nil blocks any receiver,
+	// which is the correct behavior for "no errors from this source".
+	return nil
 }
 
 func (s *StreamMux[C]) Flush(ctx context.Context) (_err error) {

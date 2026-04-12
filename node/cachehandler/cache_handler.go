@@ -82,7 +82,9 @@ func (h *CacheHandler) handlePacketSinceLastKeyFrame(
 	}
 
 	if pkt.Flags().Has(astiav.PacketFlagKey) {
-		panic("DO NOT USE ME; for some reason the stream gets corrupted; haven't understood why, yet")
+		// CachePolicySinceLastKeyFrame is known to corrupt the stream;
+		// return an error instead of panicking in production.
+		return fmt.Errorf("CachePolicySinceLastKeyFrame is disabled: stream corruption observed on key frames (not yet diagnosed)")
 	}
 
 	if len(h.packetCache) >= cap(h.packetCache) {

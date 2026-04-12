@@ -4,7 +4,6 @@ package codec
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/xaionaro-go/avpipeline/quality"
 	"github.com/xaionaro-go/xsync"
@@ -20,7 +19,9 @@ func (e *EncoderFullLocked) GetQuality(
 	ctx context.Context,
 ) Quality {
 	if e.codecContext == nil {
-		panic(fmt.Errorf("e.codecContext == nil"))
+		// Encoder not yet initialized; consistent with EncoderCopy.GetQuality
+		// which returns nil for the same situation.
+		return nil
 	}
 	bitRate := e.codecContext.BitRate()
 	if bitRate != 0 {

@@ -419,7 +419,7 @@ func TestStreamMux_ErrorChan_Panics(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = s.Close(ctx) }()
 
-	testifyassert.Panics(t, func() { s.ErrorChan() })
+	testifyassert.Nil(t, s.ErrorChan())
 }
 
 func TestStreamMux_GetEncoders(t *testing.T) {
@@ -622,7 +622,7 @@ func TestStreamMux_IsServing_False(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = s.Close(ctx) }()
 
-	testifyassert.False(t, s.IsServing())
+	testifyassert.False(t, s.IsServing(ctx))
 }
 
 func TestStreamMux_OriginalNode(t *testing.T) {

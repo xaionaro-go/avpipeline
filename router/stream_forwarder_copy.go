@@ -245,8 +245,8 @@ func (fwd *forwarderCopyOutputAsNode[CS, PS]) RemovePushTo(
 	return fwd.Output.RemovePushTo(ctx, dst)
 }
 
-func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsServing() bool {
-	return fwd.Output.IsServing()
+func (fwd *forwarderCopyOutputAsNode[CS, PS]) IsServing(ctx context.Context) bool {
+	return fwd.Output.IsServing(ctx)
 }
 
 func (fwd *forwarderCopyOutputAsNode[CS, PS]) GetProcessor() processor.Abstract {

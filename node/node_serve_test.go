@@ -64,7 +64,7 @@ func TestNode_Serve_SendsEOFOnClosedOutputChan(t *testing.T) {
 
 	// Wait for it to start serving
 	deadline := time.After(5 * time.Second)
-	for !n.IsServing() {
+	for !n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to start")
@@ -101,7 +101,7 @@ func TestNode_Serve_NilErrCh(t *testing.T) {
 	go n.Serve(ctx, ServeConfig{}, nil)
 
 	deadline := time.After(5 * time.Second)
-	for !n.IsServing() {
+	for !n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to start")
@@ -110,7 +110,7 @@ func TestNode_Serve_NilErrCh(t *testing.T) {
 		}
 	}
 
-	tassert.True(t, n.IsServing())
+	tassert.True(t, n.IsServing(ctx))
 	cancel()
 }
 
@@ -126,7 +126,7 @@ func TestNode_Serve_DebugDataPreserved(t *testing.T) {
 
 	// Wait for it to start
 	deadline := time.After(5 * time.Second)
-	for !n.IsServing() {
+	for !n.IsServing(ctx) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for Serve to start")

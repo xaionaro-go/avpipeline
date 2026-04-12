@@ -56,17 +56,33 @@ func (e ErrNotKeyFrame) Error() string {
 	return "not a key frame"
 }
 
+// isIntraOnlyCodec returns true for codecs where every frame is independently
+// decodable (no inter-frame prediction). These codecs don't need a keyframe
+// to start decoding — e.g. wrapped_avframe from lavfi sources doesn't set
+// PacketFlagKey on its packets, but every packet is effectively a keyframe.
+func isIntraOnlyCodec(codecID astiav.CodecID) bool {
+	switch codecID {
+	case astiav.CodecIDRawvideo, astiav.CodecIDWrappedAvframe:
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *DecoderLocked) SendPacket(
 	ctx context.Context,
 	p *astiav.Packet,
 ) error {
 	if !d.receivedKeyFrame {
-		if decoderDropNonKeyFramesBeforeKeyFrame && d.codecContext.MediaType() == astiav.MediaTypeVideo && !p.Flags().Has(astiav.PacketFlagKey) {
+		if decoderDropNonKeyFramesBeforeKeyFrame &&
+			d.codecContext.MediaType() == astiav.MediaTypeVideo &&
+			!p.Flags().Has(astiav.PacketFlagKey) &&
+			!isIntraOnlyCodec(d.codecContext.CodecID()) {
 			return ErrNotKeyFrame{}
 		}
 		d.receivedKeyFrame = true
 	}
-	d.isDirty = true
+	d.isDirty.Store(true)
 	return d.codecContext.SendPacket(p)
 }
 
@@ -131,9 +147,9 @@ func (d *DecoderLocked) Flush(
 
 	defer func() {
 		if _err == nil {
-			if d.isDirty {
+			if d.isDirty.Load() {
 				logger.Errorf(ctx, "%v is still dirty after flush; forcing isDirty:false", d)
-				d.isDirty = false
+				d.isDirty.Store(false)
 			}
 		}
 	}()
@@ -143,7 +159,7 @@ func (d *DecoderLocked) Flush(
 
 	if caps&astiav.CodecCapabilityDelay == 0 {
 		logger.Tracef(ctx, "the decoder has no delay, nothing to flush")
-		d.isDirty = false
+		d.isDirty.Store(false)
 		return nil
 	}
 
@@ -187,12 +203,12 @@ func (d *DecoderLocked) Drain(
 			// isEAgain means that there are no more frames to receive right now
 			logger.Tracef(ctx, "decoder.ReceiveFrame(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
-				d.isDirty = false
+				d.isDirty.Store(false)
 				return nil
 			}
 			if isEAgain {
 				if caps&astiav.CodecCapabilityDelay == 0 {
-					d.isDirty = false
+					d.isDirty.Store(false)
 				}
 				return nil
 			}
@@ -211,7 +227,7 @@ func (d *DecoderLocked) Drain(
 	}
 }
 
-func (d *DecoderLocked) ToCodecParameters(cp *astiav.CodecParameters) error {
+func (d *DecoderLocked) ToCodecParameters(_ context.Context, cp *astiav.CodecParameters) error {
 	return d.Codec.toCodecParametersLocked(cp)
 }
 

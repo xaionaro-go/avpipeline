@@ -161,7 +161,7 @@ const (
 func (m GetRouteMode) String() string {
 	switch m {
 	case GetRouteModeFailIfNotFound:
-		return "fail-if-no-found"
+		return "fail-if-not-found"
 	case GetRouteModeWaitUntilCreated:
 		return "wait-until-created"
 	case GetRouteModeWaitForPublisher:

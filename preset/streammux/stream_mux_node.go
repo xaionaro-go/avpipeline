@@ -144,8 +144,8 @@ func (s *StreamMux[C]) String() string {
 	return "StreamMux"
 }
 
-func (s *StreamMux[C]) IsServing() bool {
-	return s.InputAll.Node.IsServing()
+func (s *StreamMux[C]) IsServing(ctx context.Context) bool {
+	return s.InputAll.Node.IsServing(ctx)
 }
 
 func (n *StreamMux[C]) OriginalNodeAbstract() node.Abstract {

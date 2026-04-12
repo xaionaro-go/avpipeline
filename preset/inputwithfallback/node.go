@@ -120,7 +120,7 @@ func (i *InputWithFallback[K, DF, C]) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(i)
 }
 
-func (i *InputWithFallback[K, DF, C]) IsServing() bool {
+func (i *InputWithFallback[K, DF, C]) IsServing(ctx context.Context) bool {
 	return i.isServing.Load()
 }
 
