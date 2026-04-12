@@ -166,6 +166,20 @@ func (i *InputWithFallback[K, DF, C]) pauseChainLocked(
 	if chain == nil {
 		return fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
 	}
+	if chain.IsPaused(ctx) {
+		return nil
+	}
+
+	activeCount := 0
+	for _, c := range i.InputChains {
+		if !c.IsPaused(ctx) {
+			activeCount++
+		}
+	}
+	if activeCount <= 1 {
+		return ErrCannotPauseSoleActiveChain{ID: id}
+	}
+
 	return chain.Pause(ctx)
 }
 

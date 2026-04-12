@@ -1447,8 +1447,8 @@ func waitForKernelOpen(
 }
 
 // TestInputWithFallback_PauseChain_Succeeds covers the happy path:
-// PauseChain pauses the requested chain regardless of how many other
-// chains remain active.
+// PauseChain pauses the requested chain when at least one other
+// chain remains active.
 func TestInputWithFallback_PauseChain_Succeeds(t *testing.T) {
 	f1 := &mockInputFactory{name: "primary"}
 	f2 := &mockInputFactory{name: "fallback"}
@@ -1467,10 +1467,28 @@ func TestInputWithFallback_PauseChain_Succeeds(t *testing.T) {
 	testifyassert.True(t, iwf.InputChains[0].IsPaused(ctx))
 	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
 
-	// Pausing chain 1 is also permitted — callers may intend to
-	// suspend all chains.
-	require.NoError(t, iwf.PauseChain(ctx, 1))
-	testifyassert.True(t, iwf.InputChains[1].IsPaused(ctx))
+	// Pausing chain 1 (the sole active chain) must return
+	// ErrCannotPauseSoleActiveChain.
+	err := iwf.PauseChain(ctx, 1)
+	require.Error(t, err)
+	testifyassert.ErrorAs(t, err, &ErrCannotPauseSoleActiveChain{})
+	testifyassert.False(t, iwf.InputChains[1].IsPaused(ctx))
+}
+
+// TestInputWithFallback_PauseChain_SoleActiveChain verifies that
+// pausing the only active chain returns ErrCannotPauseSoleActiveChain
+// when there is exactly one chain total.
+func TestInputWithFallback_PauseChain_SoleActiveChain(t *testing.T) {
+	f1 := &mockInputFactory{name: "primary"}
+	iwf, ctx := newPauseTestIWF(t, f1)
+
+	require.NoError(t, iwf.InputChains[0].Unpause(ctx))
+	waitForKernelOpen(t, iwf.InputChains[0])
+
+	err := iwf.PauseChain(ctx, 0)
+	require.Error(t, err)
+	testifyassert.ErrorAs(t, err, &ErrCannotPauseSoleActiveChain{})
+	testifyassert.False(t, iwf.InputChains[0].IsPaused(ctx))
 }
 
 // TestInputWithFallback_PauseChain_AlreadyPaused_NoOp verifies that
