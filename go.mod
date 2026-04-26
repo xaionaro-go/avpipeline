@@ -2,7 +2,7 @@ module github.com/xaionaro-go/avpipeline
 
 go 1.25.5
 
-replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20260301205541-c20ea06c4df3
+replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20260320123320-4206a96c82a9
 
 require (
 	github.com/AndroidGoLab/ndk v0.0.3-0.20260316000240-e7dc81e12371
@@ -83,7 +83,7 @@ require (
 	github.com/lmpizarro/go_ehlers_indicators v0.0.0-20220405041400-fd6ced57cf1a
 	github.com/phuslu/goid v1.0.2 // indirect
 	github.com/samber/lo v1.52.0
-	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/sirupsen/logrus v1.9.4
 	github.com/xaionaro-go/androidetc v0.0.0-20250824193302-b7ecebb3b825
 	github.com/xaionaro-go/gorex v0.0.0-20241010205749-bcd59d639c4d // indirect
 	github.com/xaionaro-go/logrustash v0.0.0-20240804141650-d48034780a5f // indirect
