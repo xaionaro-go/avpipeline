@@ -153,11 +153,6 @@ func (r *Transcoder[DF, EF]) sendPacketNoLock(
 	outputCh chan<- packetorframe.OutputUnion,
 ) (_err error) {
 	mediaType := input.GetMediaType()
-	if mediaType == astiav.MediaTypeSubtitle || mediaType == astiav.MediaTypeData {
-		// TODO: implement passing through subtitle and data streams
-		logger.Warnf(ctx, "ignoring %s stream at index %d", mediaType, input.GetStreamIndex())
-		return nil
-	}
 	logger.Tracef(ctx, "sendPacket %s (started: %v)", mediaType, r.started)
 	defer func() { logger.Tracef(ctx, "/sendPacket: %v: %v (started: %v)", mediaType, _err, r.started) }()
 

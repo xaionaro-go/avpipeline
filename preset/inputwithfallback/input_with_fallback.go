@@ -423,7 +423,12 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 		if err != nil {
 			return fmt.Errorf("cannot create input chain for input %d: %w", inputID, err)
 		}
-		inputChain.GetInput().SetInputFilter(ctx, i.inputFilter())
+		// Attach the per-instance InputFilter to inputChain.Filter (a real
+		// destination node that receives pre-decode packets pushed from
+		// inputChain.Input). Setting the filter on inputChain.Input itself
+		// would be dead code: Input is a source node, so no node ever pushes
+		// to it and its GetInputFilter is never consulted.
+		node.AppendInputFilter(ctx, inputChain.Filter, i.inputFilter())
 		inputChain.GetOutput().AddPushTo(ctx, i.PreOutput)
 		i.InputChains = append(i.InputChains, inputChain)
 		select {

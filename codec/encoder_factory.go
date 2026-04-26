@@ -171,7 +171,10 @@ func (f *NaiveEncoderFactory) newEncoderLocked(
 			Options:         optsCombined,
 		}
 	default:
-		return nil, fmt.Errorf("only audio and video tracks are supported by NaiveEncoderFactory, yet; %s is not", codecParams.MediaType())
+		// Non-AV streams (subtitles, data, attachments) are passed through as-is.
+		// EncoderCopy is stateless; the transcoder's existing copy path will then
+		// call initOutputStreamCopy and emit the cloned packet on outputCh.
+		return EncoderCopy{}, nil
 	}
 
 	return NewEncoder(ctx, *encParams)

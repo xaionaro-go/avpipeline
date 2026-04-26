@@ -48,13 +48,41 @@ func (s *StreamMux[C]) Flush(ctx context.Context) (_err error) {
 	return errors.Join(errs...)
 }
 
+// addCountersSubSection accumulates src into dst by atomically adding loaded
+// values from src to dst. Used by CountersPtr to sum per-output counters.
+func addCountersSubSection(dst, src *globaltypes.CountersSubSection) {
+	dst.Video.Count.Add(src.Video.Count.Load())
+	dst.Video.Bytes.Add(src.Video.Bytes.Load())
+	dst.Audio.Count.Add(src.Audio.Count.Load())
+	dst.Audio.Bytes.Add(src.Audio.Bytes.Load())
+	dst.Other.Count.Add(src.Other.Count.Load())
+	dst.Other.Bytes.Add(src.Other.Bytes.Load())
+	dst.Unknown.Count.Add(src.Unknown.Count.Load())
+	dst.Unknown.Bytes.Add(src.Unknown.Bytes.Load())
+}
+
+// addCountersSection adds src into dst for both Packets and Frames.
+func addCountersSection(dst, src *globaltypes.CountersSection) {
+	addCountersSubSection(&dst.Packets, &src.Packets)
+	addCountersSubSection(&dst.Frames, &src.Frames)
+}
+
 func (s *StreamMux[C]) CountersPtr() *processortypes.Counters {
 	inputCounters := s.Input().GetProcessor().CountersPtr()
-	return &processortypes.Counters{
+	out := &processortypes.Counters{
 		Processed: globaltypes.CountersSection{
 			Packets: inputCounters.Processed.Packets,
 			Frames:  inputCounters.Processed.Frames,
 		},
-		// TODO: add a sum of all outputs as Generated
+		Generated: globaltypes.NewCountersSection(),
+		Omitted:   globaltypes.NewCountersSection(),
 	}
+	s.OutputsMap.Range(func(_ SenderKey, output *Output[C]) bool {
+		outProc := output.SendingNode.GetProcessor().CountersPtr()
+		// SendingNode is a sink: its Processed is what was received from upstream.
+		// From StreamMux's perspective that's what we "generated" for downstream consumption.
+		addCountersSection(&out.Generated, &outProc.Processed)
+		return true
+	})
+	return out
 }
