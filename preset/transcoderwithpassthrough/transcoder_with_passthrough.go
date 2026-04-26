@@ -264,6 +264,9 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 	if err != nil {
 		return fmt.Errorf("unable to initialize a transcoder: %w", err)
 	}
+	rm := s.asCodecResourceManager()
+	s.Transcoder.DecoderFactory.ResourceManager = rm
+	s.Transcoder.EncoderFactory.ResourceManager = rm
 	return nil
 }
 

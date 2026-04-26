@@ -118,6 +118,23 @@ func (c *Codec) HardwareDeviceContext(ctx context.Context) *astiav.HardwareDevic
 	})
 }
 
+// HardwareFramesContext returns the hw_frames_ctx attached to the underlying
+// codec context, if any. For decoders this is normally allocated lazily by the
+// driver (e.g. cuvid populates it after decoding the first frame) — so the
+// returned value may be nil before the first frame, even when hardware decoding
+// is configured. The caller must not free the returned context.
+func (c *Codec) HardwareFramesContext(ctx context.Context) *astiav.HardwareFramesContext {
+	return xsync.DoR1(ctx, &c.locker, func() *astiav.HardwareFramesContext {
+		if c.hardwareFramesContext != nil {
+			return c.hardwareFramesContext
+		}
+		if c.codecContext != nil {
+			return c.codecContext.HardwareFramesContext()
+		}
+		return nil
+	})
+}
+
 func (c *Codec) HardwarePixelFormat(ctx context.Context) astiav.PixelFormat {
 	return xsync.DoR1(ctx, &c.locker, func() astiav.PixelFormat {
 		return c.hardwarePixelFormat
@@ -578,6 +595,8 @@ func newCodec(
 			hardwareDeviceName,
 			customOptions,
 			hwDevFlags,
+			isEncoder,
+			codecParameters,
 			reusableResources,
 		)
 		switch {
@@ -756,7 +775,7 @@ func newCodec(
 	// codec context before avcodec_open2. HwDeviceCtx encoders skip this — they
 	// accept software frames and upload internally (see initHardwarePixelFormat).
 	if isEncoder && c.hardwareContextType == hardwareContextTypeFrames && c.hardwareDeviceContext != nil {
-		err := c.initHardwareFramesContext(ctx)
+		err := c.initHardwareFramesContext(ctx, reusableResources)
 		if err != nil {
 			return nil, fmt.Errorf("unable to init hardware frames context: %w", err)
 		}
@@ -832,13 +851,15 @@ func (c *Codec) initHardware(
 	hardwareDeviceName HardwareDeviceName,
 	options *astiav.Dictionary,
 	hwDevFlags int,
+	isEncoder bool,
+	codecParameters *astiav.CodecParameters,
 	reusableResources *Resources,
 ) (_err error) {
 	logger.Tracef(ctx, "initHardware(%s, '%s', %#+v, %X)", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags)
 	defer func() {
 		logger.Tracef(ctx, "/initHardware(%s, '%s', %#+v, %X): %v", hardwareDeviceType, hardwareDeviceName, options, hwDevFlags, _err)
 	}()
-	err := c.initHardwarePixelFormat(ctx, hardwareDeviceType)
+	err := c.initHardwarePixelFormat(ctx, hardwareDeviceType, isEncoder, codecParameters, reusableResources)
 	if err != nil {
 		return fmt.Errorf("unable to init hardware pixel format: %w", err)
 	}
@@ -993,9 +1014,12 @@ func (c *codecInternals) setupPixelFormat(
 func (c *Codec) initHardwarePixelFormat(
 	ctx context.Context,
 	hardwareDeviceType HardwareDeviceType,
+	isEncoder bool,
+	codecParameters *astiav.CodecParameters,
+	reusableResources *Resources,
 ) (_err error) {
 	logger.Tracef(ctx, "initHardwarePixelFormat")
-	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v", c.hardwarePixelFormat, _err) }()
+	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v %v", c.hardwareContextType, c.hardwarePixelFormat, _err) }()
 
 	// Prefer HwDeviceCtx over HwFramesCtx because HwDeviceCtx lets the encoder
 	// accept software frames (e.g. nv12) and handle GPU upload internally.
@@ -1028,6 +1052,40 @@ func (c *Codec) initHardwarePixelFormat(
 				c.hardwarePixelFormat = hwCfgs.PixelFormat()
 				break
 			}
+		}
+	}
+
+	// Override the HwDeviceCtx default for encoders when the upstream decoder
+	// has already produced an hw_frames_ctx whose dims and HW pixfmt match what
+	// this encoder needs. Reusing the upstream hfc lets nvenc consume cuvid
+	// output directly on the GPU — no SW download, no SW→HW upload, and the
+	// libswscale identity-NV12 zeroed-UV-plane bug (cycle 3 cause) cannot fire
+	// because the SW path is bypassed entirely. This is safe only when the
+	// HW config exposes the HwFramesCtx capability for the same device type.
+	if isEncoder &&
+		reusableResources != nil &&
+		reusableResources.HWFramesContext != nil &&
+		reusableResources.HWFramesContextWidth == codecParameters.Width() &&
+		reusableResources.HWFramesContextHeight == codecParameters.Height() &&
+		reusableResources.HWFramesContextHWPixFmt == c.hardwarePixelFormat {
+		for _, hwCfgs := range c.codec.HardwareConfigs() {
+			if hwCfgs.HardwareDeviceType() != astiav.HardwareDeviceType(hardwareDeviceType) {
+				continue
+			}
+			if !hwCfgs.MethodFlags().Has(astiav.CodecHardwareConfigMethodFlagHwFramesCtx) {
+				continue
+			}
+			if hwCfgs.PixelFormat() != reusableResources.HWFramesContextHWPixFmt {
+				continue
+			}
+			logger.Debugf(ctx, "encoder will reuse upstream hw_frames_ctx: %p %dx%d hw=%s",
+				reusableResources.HWFramesContext,
+				reusableResources.HWFramesContextWidth, reusableResources.HWFramesContextHeight,
+				reusableResources.HWFramesContextHWPixFmt,
+			)
+			c.hardwareContextType = hardwareContextTypeFrames
+			c.hardwarePixelFormat = hwCfgs.PixelFormat()
+			break
 		}
 	}
 
@@ -1097,6 +1155,7 @@ func (c *Codec) initHardwareDeviceContext(
 
 func (c *Codec) initHardwareFramesContext(
 	ctx context.Context,
+	reusableResources *Resources,
 ) (_err error) {
 	logger.Debugf(ctx, "initHardwareFramesContext(hw_pix_fmt=%s, %dx%d)",
 		c.hardwarePixelFormat,
@@ -1106,6 +1165,29 @@ func (c *Codec) initHardwareFramesContext(
 
 	if c.hardwareDeviceContext == nil {
 		return fmt.Errorf("hardware device context is nil")
+	}
+
+	// Reuse the upstream decoder's hw_frames_ctx when its dims and HW pixfmt
+	// match. The encoder borrows the buffer ref via SetHardwareFramesContext —
+	// av_buffer_ref bumps the refcount internally — so we do NOT register Free
+	// on the closer; the upstream decoder retains lifecycle ownership.
+	if reusableResources != nil &&
+		reusableResources.HWFramesContext != nil &&
+		reusableResources.HWFramesContextWidth == c.codecContext.Width() &&
+		reusableResources.HWFramesContextHeight == c.codecContext.Height() &&
+		reusableResources.HWFramesContextHWPixFmt == c.hardwarePixelFormat {
+		logger.Debugf(ctx, "reusing upstream hw_frames_ctx: %p %dx%d hw=%s",
+			reusableResources.HWFramesContext,
+			reusableResources.HWFramesContextWidth, reusableResources.HWFramesContextHeight,
+			reusableResources.HWFramesContextHWPixFmt,
+		)
+		c.hardwareFramesContext = reusableResources.HWFramesContext
+		c.codecContext.SetPixelFormat(c.hardwarePixelFormat)
+		c.codecContext.SetHardwareFramesContext(reusableResources.HWFramesContext)
+		c.closer.Add(func() {
+			logger.Tracef(ctx, "not freeing the reused upstream hw_frames_ctx: %p", reusableResources.HWFramesContext)
+		})
+		return nil
 	}
 
 	// Determine the correct software pixel format from hardware constraints,

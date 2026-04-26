@@ -198,9 +198,7 @@ func (f *NaiveDecoderFactory) getResources(
 			logger.Debugf(ctx, "got the decoder from frame source: %v", d)
 			for _, decoder := range f.VideoDecoders {
 				if decoder == d {
-					return &Resources{
-						HWDeviceContext: decoder.HardwareDeviceContext(ctx),
-					}
+					return resourcesFromDecoder(ctx, decoder)
 				}
 			}
 			return nil
@@ -218,12 +216,60 @@ func (f *NaiveDecoderFactory) getResources(
 			logger.Warnf(ctx, "multiple video decoders are present")
 			return nil
 		}
-		d := f.VideoDecoders[0]
-		return &Resources{
-			HWDeviceContext: d.HardwareDeviceContext(ctx),
-		}
+		return resourcesFromDecoder(ctx, f.VideoDecoders[0])
 	case astiav.MediaTypeAudio:
 		return nil
 	}
 	return nil
+}
+
+// resourcesFromDecoder snapshots the decoder's hardware-side state for an
+// encoder to optionally reuse. The hw_frames_ctx is populated lazily by the
+// driver (cuvid attaches it after the first decoded frame), so HWFramesContext
+// may be nil here even when hardware decoding is configured. The encoder side
+// re-validates dims/formats before reusing.
+//
+// Lifecycle safety for HWFramesContext (an *AVBufferRef wrapper): astiav has
+// no public Ref()/Clone() on HardwareFramesContext, so we cannot bump the
+// refcount here. Safety relies on call ordering enforced by the caller chain:
+//  1. resourcesFromDecoder is invoked under f.Locker while the decoder is
+//     still registered in f.VideoDecoders (i.e. has not been Closed/Free'd).
+//  2. The returned *Resources flows immediately into encoder construction
+//     (NewCodec → initHardwareFramesContext) which calls
+//     CodecContext.SetHardwareFramesContext(hfc) — that invokes
+//     C.av_buffer_ref under the hood (astiav codec_context.go:436-445), so
+//     the encoder owns its own AVBufferRef from that moment on.
+//  3. After the encoder is open, the decoder's lifetime is irrelevant: the
+//     underlying AVHWFramesContext stays alive as long as any ref exists.
+//
+// The bare hfc pointer must NOT be cached past the encoder-open call.
+func resourcesFromDecoder(
+	ctx context.Context,
+	d *Decoder,
+) *Resources {
+	res := &Resources{
+		HWDeviceContext: d.HardwareDeviceContext(ctx),
+	}
+	if hfc := d.HardwareFramesContext(ctx); hfc != nil {
+		// Pull dims from the decoder's CodecContext: HardwareFramesContext has
+		// no Width/Height getters in astiav, but the codec context tracks the
+		// stream's negotiated resolution which the hw_frames_ctx mirrors.
+		// The decoder's CodecContext.PixelFormat() returns the HW pixfmt
+		// (e.g. cuda) selected via the get_format callback — that matches the
+		// encoder's hardwarePixelFormat for nvenc, so it's the right field to
+		// compare against. The SW pixfmt is opaque (no getter on astiav's
+		// HardwareFramesContext), so the encoder side does not validate it.
+		cc := d.CodecContext(ctx)
+		if cc != nil {
+			res.HWFramesContext = hfc
+			res.HWFramesContextWidth = cc.Width()
+			res.HWFramesContextHeight = cc.Height()
+			res.HWFramesContextHWPixFmt = d.HardwarePixelFormat(ctx)
+			logger.Debugf(ctx, "captured upstream hw_frames_ctx: %p %dx%d hw=%s",
+				hfc, res.HWFramesContextWidth, res.HWFramesContextHeight,
+				res.HWFramesContextHWPixFmt,
+			)
+		}
+	}
+	return res
 }

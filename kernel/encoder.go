@@ -43,6 +43,10 @@ const (
 	encoderRescaleEnableCropping               = false
 	encoderRescaleSameResolution               = false
 	encoderRescaleEnableTightPacking           = false
+
+	canBypassScaler = !encoderRescaleSameResolution &&
+		!encoderRescaleEnableCropping &&
+		!encoderRescaleEnableTightPacking
 )
 
 type Encoder[EF codec.EncoderFactory] struct {
@@ -1045,13 +1049,31 @@ func (e *streamEncoderLocked) getScaledFrame(
 	// so we must convert to software first.
 	if frameSrc.HardwareFramesContext() != nil {
 		logger.Tracef(ctx, "transferring the frame data from hardware to software")
-		sw := frame.Pool.Get()
+		sw := astiav.AllocFrame()
+		setFinalizerFree(ctx, sw)
 		if err := frameSrc.TransferHardwareData(sw); err != nil {
-			frame.Pool.Put(sw)
 			return nil, fmt.Errorf("unable to transfer the frame data from hardware to software: %w", err)
 		}
 		frameSrc = sw
 		input.Frame = frameSrc
+	}
+
+	// The fitFrameForEncoding passthrough at the call site cannot match HW input
+	// (its PixelFormat() is `cuda`, not the encoder's sw pixfmt), so we re-check
+	// here after the HW->SW transfer. Without this short-circuit, identity
+	// NV12->NV12 same-resolution swscale runs and zeroes the UV plane on some
+	// libswscale builds (cuvid->nvenc green-frame bug). If encoderRescaleEnableCropping
+	// or encoderRescaleEnableTightPacking are ever enabled, revisit this gate.
+	if canBypassScaler {
+		if dstRes := e.GetResolution(ctx); dstRes != nil {
+			dstPixFmt := e.CodecContext(ctx).PixelFormat()
+			if frameSrc.Width() == int(dstRes.Width) &&
+				frameSrc.Height() == int(dstRes.Height) &&
+				frameSrc.PixelFormat() == dstPixFmt {
+				logger.Tracef(ctx, "sw frame %dx%d/%s matches encoder; skipping scaler", frameSrc.Width(), frameSrc.Height(), frameSrc.PixelFormat())
+				return frameSrc, nil
+			}
+		}
 	}
 
 	err := e.prepareScaler(ctx, input)
