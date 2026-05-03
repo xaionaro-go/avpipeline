@@ -12,6 +12,16 @@ import (
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 )
 
+// firstFrameUnixNanoer is implemented by processor types that record
+// the timestamp of their first emitted output packet/frame
+// (currently *processor.FromKernel via firstSeen.FirstOutputUnixNano).
+// We type-assert via this interface here to avoid an import cycle:
+// processor depends on protobuf for some converters, so this package
+// can't import processor directly.
+type firstFrameUnixNanoer interface {
+	FirstFrameUnixNano() int64
+}
+
 func NodeToGRPC(
 	ctx context.Context,
 	n node.Abstract,
@@ -19,12 +29,16 @@ func NodeToGRPC(
 	if n == nil {
 		return nil
 	}
+	proc := n.GetProcessor()
 	result := &avpipelinegrpc.Node{
 		Id:          uint64(n.GetObjectID()),
 		Type:        fmt.Sprintf("%T", n),
 		Description: n.String(),
 		IsServing:   n.IsServing(ctx),
-		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), n.GetProcessor().CountersPtr()),
+		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), proc.CountersPtr()),
+	}
+	if ffter, ok := proc.(firstFrameUnixNanoer); ok {
+		result.FirstFrameUnixNs = ffter.FirstFrameUnixNano()
 	}
 
 	for {

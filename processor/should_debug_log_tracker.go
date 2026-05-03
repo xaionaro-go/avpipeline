@@ -5,19 +5,58 @@ package processor
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/xsync"
 )
 
-// shouldDebugLogTracker tracks which (direction, type, streamIndex) combinations
-// have already been logged, so we log only the first packet/frame per stream.
+// shouldDebugLogTracker tracks "first observation" facts for the
+// processor it is embedded in:
+//   - per-stream first-packet/first-frame logging dedup (so debug
+//     logs emit one line per (direction, type, streamIndex) instead
+//     of spamming every packet);
+//   - first-ever output unix-nanosecond timestamp (write-once across
+//     ALL streams) for stats RPC consumers — used by
+//     ffstreamctl stats first-frame to walk the pipeline graph and
+//     identify the exact node where flow stalled (#350 debugging-gaps
+//     Item 1).
+//
+// Both responsibilities observe the same event (first packet/frame
+// out), so consolidating them here avoids parallel redundant calls
+// from the hot-path forwarder loop.
 type shouldDebugLogTracker struct {
 	inputPackets  xsync.Map[int, struct{}]
 	inputFrames   xsync.Map[int, struct{}]
 	outputPackets xsync.Map[int, struct{}]
 	outputFrames  xsync.Map[int, struct{}]
+
+	// firstOutputUnixNano is the unix-nanosecond timestamp at which
+	// the FIRST output packet OR frame was observed. Set once via
+	// CompareAndSwap from zero — subsequent first-observations on
+	// other streams do not re-write the field. Zero means "no
+	// output observed yet".
+	firstOutputUnixNano atomic.Int64
+}
+
+// recordFirstOutputTimestamp performs a one-shot CompareAndSwap from
+// zero to time.Now().UnixNano(). The Load short-circuits the common
+// steady-state path so we avoid the time.Now() syscall once the
+// timestamp has been set.
+func (t *shouldDebugLogTracker) recordFirstOutputTimestamp() {
+	if t.firstOutputUnixNano.Load() != 0 {
+		return
+	}
+	t.firstOutputUnixNano.CompareAndSwap(0, time.Now().UnixNano())
+}
+
+// FirstOutputUnixNano returns the unix-nanosecond timestamp at which
+// the first output packet/frame was observed, or 0 if no output has
+// been seen yet.
+func (t *shouldDebugLogTracker) FirstOutputUnixNano() int64 {
+	return t.firstOutputUnixNano.Load()
 }
 
 func (t *shouldDebugLogTracker) logFirstInput(
@@ -46,7 +85,15 @@ func (t *shouldDebugLogTracker) logFirstOutputPacket(
 	name fmt.Stringer,
 	pkt *packetorframe.OutputUnion,
 ) {
-	if pkt.Packet == nil || pkt.Packet.Packet == nil {
+	if pkt.Packet == nil {
+		return
+	}
+	// Record the first-output timestamp for stats RPC consumers.
+	// Cheap fast-path Load skips the CAS once already set; covers
+	// every output regardless of whether the inner astiav.Packet is
+	// nil (which is valid for some test/synthetic flows).
+	t.recordFirstOutputTimestamp()
+	if pkt.Packet.Packet == nil {
 		return
 	}
 	streamIdx := pkt.Packet.GetStreamIndex()
@@ -61,7 +108,11 @@ func (t *shouldDebugLogTracker) logFirstOutputFrame(
 	name fmt.Stringer,
 	frm *packetorframe.OutputUnion,
 ) {
-	if frm.Frame == nil || frm.Frame.Frame == nil {
+	if frm.Frame == nil {
+		return
+	}
+	t.recordFirstOutputTimestamp()
+	if frm.Frame.Frame == nil {
 		return
 	}
 	streamIdx := frm.Frame.GetStreamIndex()

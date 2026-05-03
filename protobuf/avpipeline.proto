@@ -11,6 +11,14 @@ message Node {
   NodeCounters  counters              = 5;
   repeated Node todo_publishing_nodes = 6; // is not currently reported
   repeated Node consuming_nodes       = 7;
+  // first_frame_unix_ns is the unix-nanosecond timestamp at which
+  // this node's processor emitted its first output packet/frame.
+  // 0 (default) means "no output observed yet". Used by
+  // ffstreamctl stats first-frame to walk the pipeline graph and
+  // identify the exact node where flow stalled (#350 debugging-gaps
+  // Item 1: per-layer first-frame timing pinpoints cascade-EOF
+  // wedges).
+  int64         first_frame_unix_ns   = 8;
 }
 
 message NodeCounters {

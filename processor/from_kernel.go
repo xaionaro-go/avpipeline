@@ -40,6 +40,10 @@ type FromKernel[T kernel.Abstract] struct {
 
 	CountersStorage *Counters
 
+	// firstSeen is shared "first observation" state: per-stream
+	// first-output debug-log dedup, AND first-ever output unix-ns
+	// timestamp for stats RPC consumers (#350 debugging-gaps Item 1).
+	// See shouldDebugLogTracker doc for the consolidation rationale.
 	firstSeen shouldDebugLogTracker
 }
 
@@ -305,6 +309,18 @@ func (p *FromKernel[T]) outChanError() chan<- error {
 
 func (p *FromKernel[T]) String() string {
 	return p.Kernel.String()
+}
+
+// FirstFrameUnixNano returns the unix-nanosecond timestamp at which
+// the first output packet/frame was forwarded to OutputCh, or 0 if
+// the processor has not yet emitted any output.
+//
+// Used by the pipeline-stats RPC path (NodeToGRPC) to surface
+// per-node first-frame timing for cascade-EOF root-cause
+// localization. Recording happens inside firstSeen.logFirst* — see
+// shouldDebugLogTracker.recordFirstOutputTimestamp.
+func (p *FromKernel[T]) FirstFrameUnixNano() int64 {
+	return p.firstSeen.FirstOutputUnixNano()
 }
 
 func (p *FromKernel[T]) GetPacketSource() packet.Source {
