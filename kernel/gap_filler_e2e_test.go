@@ -1,3 +1,5 @@
+//go:build test_e2e
+
 package kernel
 
 import (
@@ -8,6 +10,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/require"
+	avpaudio "github.com/xaionaro-go/avpipeline/audio"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
@@ -335,17 +338,17 @@ func TestGapFillerE2E_AudioStrategies(t *testing.T) {
 			require.GreaterOrEqual(t, len(receivedFrames), 2)
 
 			if tc.strategy == GapsStrategyAudioInterpolate {
-				// Verify interpolation isn't all zeros
-				hasNonZero := false
-				data, err := receivedFrames[0].Data().Bytes(0)
+				samples, err := avpaudio.ExtractSamples(receivedFrames[0], 0)
 				require.NoError(t, err)
-				for _, v := range data {
-					if v != 0 {
-						hasNonZero = true
-						break
+				require.NotEmpty(t, samples)
+				var maxAbs float64
+				for _, v := range samples {
+					if a := math.Abs(v); a > maxAbs {
+						maxAbs = a
 					}
 				}
-				require.True(t, hasNonZero, "Interpolated audio should not be silent")
+				require.Greater(t, maxAbs, 1e-3,
+					"interpolated audio frame must not be silent (max|sample|=%v)", maxAbs)
 			}
 		})
 	}

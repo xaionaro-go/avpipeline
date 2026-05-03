@@ -1586,3 +1586,301 @@ func TestInputWithFallback_Close_NoDeadlockWithActiveChain(t *testing.T) {
 		t.Fatal("Close deadlocked: did not return within 5 seconds")
 	}
 }
+
+// --- onInputChainError walks past empty (no-resource) chains ---
+//
+// mockInputFactoryWithAvailability satisfies both InputFactory and the
+// optional InputFactoryWithAvailability interface. Empty chains report
+// HasResources=false; the fallback walk in onInputChainError must skip
+// them and jump directly to the next chain that has resources.
+type mockInputFactoryWithAvailability struct {
+	mockInputFactory
+	hasResources bool
+}
+
+var _ InputFactoryWithAvailability = (*mockInputFactoryWithAvailability)(nil)
+
+func (m *mockInputFactoryWithAvailability) HasResources(ctx context.Context) bool {
+	return m.hasResources
+}
+
+// TestInputWithFallback_OnInputChainError_SkipsEmptyChains_SparsePriorities
+// pins the fix for the priority-0 + priority-10 race: when the active
+// chain (id 0) errors and chains 1..9 are empty (HasResources=false)
+// while chain 10 is occupied, the fallback walk must request a single
+// switch directly to chain 10 — not a stepwise 0->1->2->...->10 walk
+// where each empty step contends the switching latch (procN) and races
+// the next step's onInputChainError invocation.
+//
+// Pre-fix witness: nextID = id + 1 means SetValue(1) is called; the
+// staged NextValue would observe 1. Post-fix witness: nextID jumps over
+// chains 1..9 (all empty) and SetValue(10) is called directly.
+func TestInputWithFallback_OnInputChainError_SkipsEmptyChains_SparsePriorities(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Build 11 factories: index 0 occupied, 1..9 empty, 10 occupied.
+	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
+	for i := 0; i < 11; i++ {
+		f := &mockInputFactoryWithAvailability{
+			mockInputFactory: mockInputFactory{name: fmt.Sprintf("factory-%d", i)},
+			hasResources:     i == 0 || i == 10,
+		}
+		iFactories = append(iFactories, f)
+	}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](ctx, iFactories)
+	require.NoError(t, err)
+	defer func() {
+		cancel()
+		time.Sleep(25 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	}()
+
+	require.Len(t, iwf.InputChains, 11)
+
+	// Trigger the fallback path on the active chain (id 0). The fix
+	// must request a switch straight to chain 10. Pre-fix, the request
+	// would land on chain 1 (id+1); chain 1 would error asynchronously
+	// and trigger a second switch attempt that the procN latch rejects
+	// with "another switch is in progress".
+	result := iwf.onInputChainError(ctx, iwf.InputChains[0], fmt.Errorf("primary failed"))
+	testifyassert.NoError(t, result)
+
+	// onInputChainError clears the switch keep-unless before SetValue,
+	// so SetValue takes the setValueNow path that updates
+	// CurrentValue synchronously. NextValue stays at the
+	// math.MinInt32 sentinel (no staged next).
+	deadline := time.Now().Add(2 * time.Second)
+	var curVal int32
+	for time.Now().Before(deadline) {
+		curVal = iwf.InputSwitch.CurrentValue.Load()
+		if curVal == 10 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	testifyassert.Equal(t, int32(10), curVal,
+		"onInputChainError must skip empty chains 1..9 and switch directly to chain 10; "+
+			"got CurrentValue=%d (pre-fix would be 1)", curVal)
+}
+
+// TestInputWithFallback_OnInputChainError_AllEmptyFallbacks_NoSwitch
+// asserts the boundary: when all chains beyond the failing one are
+// empty, no switch is requested. Pre-fix would request a switch to id+1.
+func TestInputWithFallback_OnInputChainError_AllEmptyFallbacks_NoSwitch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
+	// Chain 0 occupied, chains 1..3 all empty.
+	for i := 0; i < 4; i++ {
+		f := &mockInputFactoryWithAvailability{
+			mockInputFactory: mockInputFactory{name: fmt.Sprintf("factory-%d", i)},
+			hasResources:     i == 0,
+		}
+		iFactories = append(iFactories, f)
+	}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](ctx, iFactories)
+	require.NoError(t, err)
+	defer func() {
+		cancel()
+		time.Sleep(25 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	}()
+
+	prevCur := iwf.InputSwitch.CurrentValue.Load()
+
+	result := iwf.onInputChainError(ctx, iwf.InputChains[0], fmt.Errorf("primary failed"))
+	testifyassert.NoError(t, result)
+
+	// No fallback target was requested: CurrentValue must remain
+	// unchanged (no SetValue call was issued).
+	time.Sleep(50 * time.Millisecond)
+	testifyassert.Equal(t, prevCur, iwf.InputSwitch.CurrentValue.Load(),
+		"with no occupied fallback, no switch must be requested")
+}
+
+// TestInputWithFallback_OnInputChainError_DenseFactories_LegacyBehavior
+// pins the fallback path for factories that DO NOT implement
+// InputFactoryWithAvailability: behavior remains the legacy
+// "advance by +1" — no skipping. This guards against accidentally
+// changing the behavior for callers that don't opt into the optional
+// interface.
+func TestInputWithFallback_OnInputChainError_DenseFactories_LegacyBehavior(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	f0 := &mockInputFactory{name: "primary"}
+	f1 := &mockInputFactory{name: "fallback"}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](
+		ctx,
+		[]InputFactory[*inputKernel, codec.DecoderFactory, struct{}]{f0, f1},
+	)
+	require.NoError(t, err)
+	defer func() {
+		cancel()
+		time.Sleep(25 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	}()
+
+	result := iwf.onInputChainError(ctx, iwf.InputChains[0], fmt.Errorf("primary failed"))
+	testifyassert.NoError(t, result)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var curVal int32
+	for time.Now().Before(deadline) {
+		curVal = iwf.InputSwitch.CurrentValue.Load()
+		if curVal == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	testifyassert.Equal(t, int32(1), curVal,
+		"factories without InputFactoryWithAvailability keep the legacy "+
+			"+1 advance: CurrentValue must be 1, got %d", curVal)
+}
+
+// TestInputWithFallback_OnSwitchRequest_UnpausesIntermediateChains:
+// chains 1..N-1 exist BEFORE the fallback walk runs, are paused on
+// creation (ID > 0). After OnSwitchRequest unpauses chain N, chains
+// [0, to] must all be unpaused so the consistency invariant
+// `paused = (ID > CurrentValue)` holds and hot adds at intermediate
+// priorities take effect.
+func TestInputWithFallback_OnSwitchRequest_UnpausesIntermediateChains(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 11 dense factories so OnSwitchRequest's getInputChainByID walk
+	// has real chains to unpause at every intermediate ID.
+	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
+	for i := 0; i < 11; i++ {
+		iFactories = append(iFactories,
+			&mockInputFactory{name: fmt.Sprintf("factory-%d", i)})
+	}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](ctx, iFactories)
+	require.NoError(t, err)
+	defer func() {
+		cancel()
+		time.Sleep(50 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	}()
+
+	errCh := make(chan node.Error, 64)
+	go func() { iwf.Serve(ctx, node.ServeConfig{}, errCh) }()
+	go func() {
+		for range errCh {
+		}
+	}()
+
+	// Wait for the boot state: chain 0 unpaused (auto-unpause path),
+	// chains 1..10 paused (no auto-unpause yet because CurrentValue=0).
+	require.Eventually(t, func() bool {
+		if iwf.InputChains[0].IsPaused(ctx) {
+			return false
+		}
+		for i := 1; i <= 10; i++ {
+			if !iwf.InputChains[i].IsPaused(ctx) {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 5*time.Millisecond,
+		"boot state precondition: chain 0 unpaused, chains 1..10 paused")
+
+	// Drive the fallback path: SetValue(10) routes through
+	// OnSwitchRequest, which (post-fix) unpauses every chain in
+	// [0, 10] — pre-fix, only chain 10 is unpaused, leaving chains
+	// 1..9 in violation of the consistency invariant.
+	require.NoError(t, iwf.InputSwitch.SetValue(ctx, 10))
+
+	require.Eventually(t, func() bool {
+		for id := 0; id <= 10; id++ {
+			if iwf.InputChains[id].IsPaused(ctx) {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 5*time.Millisecond,
+		"after SetValue(10), all chains [0,10] must be unpaused; "+
+			"pre-fix chains 1..9 stay paused — `inputs add N` for "+
+			"1<=N<=9 then silently fails because hot-reload kick "+
+			"is gated on !IsPaused")
+}
+
+// TestInputWithFallback_AddInput_AutoUnpauseAllChainsUpToCurrent:
+// when a chain at ID==0 is auto-unpaused at boot and the InputSwitch
+// later promotes a higher-numbered chain (e.g. fallback walk →
+// CurrentValue=10), all chains with ID <= CurrentValue MUST be
+// unpaused — otherwise the consistency-check loop in Serve flags
+// "input chain N paused=true but should be false" and a hot
+// `inputs add N` (1 <= N < CurrentValue) silently fails because
+// FFStream.AddInput's chainPreExisted Pause+Unpause kick is gated on
+// !IsPaused, so a paused chain never reloads InputsInfo[N].
+//
+// The receiver loop unpauses every newly-arrived chain whose
+// ID <= CurrentValue, mirroring the consistency-check invariant
+// (`expectedIsPaused := inputID > CurrentValue`).
+func TestInputWithFallback_AddInput_AutoUnpauseAllChainsUpToCurrent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Bootstrap with a single factory at ID=0 first; we will pump the
+	// switch to a higher current value, then add more factories and
+	// assert they get auto-unpaused on arrival.
+	f0 := &mockInputFactory{name: "factory-0"}
+	iwf, err := New[*inputKernel, codec.DecoderFactory, struct{}](
+		ctx,
+		[]InputFactory[*inputKernel, codec.DecoderFactory, struct{}]{f0},
+	)
+	require.NoError(t, err)
+	defer func() {
+		cancel()
+		time.Sleep(50 * time.Millisecond)
+		_ = iwf.Close(context.Background())
+	}()
+
+	// Start serving so the newInputChainChan receiver loop is running.
+	errCh := make(chan node.Error, 64)
+	go func() {
+		iwf.Serve(ctx, node.ServeConfig{}, errCh)
+	}()
+	// Drain errCh so receivers don't block.
+	go func() {
+		for range errCh {
+		}
+	}()
+
+	// Wait for chain 0 to be auto-unpaused (the legacy ID==0 path).
+	require.Eventually(t, func() bool {
+		return !iwf.InputChains[0].IsPaused(ctx)
+	}, 2*time.Second, 5*time.Millisecond,
+		"chain 0 must be auto-unpaused at boot")
+
+	// Simulate a fallback-style promotion: bump CurrentValue to 10.
+	// In production this happens via InputSwitch.SetValue from
+	// onInputChainError, but for this test we set the field directly so
+	// the receiver-loop's auto-unpause is the only logic under test.
+	iwf.InputSwitch.CurrentValue.Store(10)
+
+	// Add 10 more factories (IDs 1..10). Per the consistency
+	// invariant, all of them have ID <= CurrentValue(10), so all must
+	// be auto-unpaused after AddFactory delivers them through
+	// newInputChainChan to the receiver loop.
+	for i := 1; i <= 10; i++ {
+		f := &mockInputFactory{name: fmt.Sprintf("factory-%d", i)}
+		require.NoError(t, iwf.AddFactory(ctx, f))
+	}
+	require.Len(t, iwf.InputChains, 11)
+
+	// Assert: every chain with ID <= CurrentValue is unpaused.
+	require.Eventually(t, func() bool {
+		for id := 0; id <= 10; id++ {
+			if iwf.InputChains[id].IsPaused(ctx) {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 5*time.Millisecond,
+		"all chains with ID <= CurrentValue(10) must be auto-unpaused; "+
+			"pre-fix only ID==0 is unpaused — chains 1..10 stay paused")
+}

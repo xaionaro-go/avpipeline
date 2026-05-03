@@ -2,17 +2,47 @@ package streammux
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	testassert "github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/indicator"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
+	packetcondition "github.com/xaionaro-go/avpipeline/packet/condition"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	"github.com/xaionaro-go/avpipeline/processor"
+	"github.com/xaionaro-go/avpipeline/quality"
 )
+
+func TestIsBenignWithRawNetworkConnErr(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		benign bool
+	}{
+		{name: "nil", err: nil, benign: false},
+		{name: "io.EOF", err: io.EOF, benign: true},
+		{name: "wrapped EOF", err: fmt.Errorf("send buf: %w", io.EOF), benign: true},
+		{name: "ErrNoRawNetworkConn", err: kernel.ErrNoRawNetworkConn{}, benign: true},
+		{name: "ErrNotImplemented", err: kernel.ErrNotImplemented{}, benign: true},
+		{name: "wrapped ErrNotImplemented", err: fmt.Errorf("x: %w", kernel.ErrNotImplemented{Err: errors.New("y")}), benign: true},
+		{name: "generic error", err: errors.New("boom"), benign: false},
+		{name: "ECONNRESET-like", err: errors.New("connection reset by peer"), benign: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testassert.Equal(t, tc.benign, isBenignWithRawNetworkConnErr(tc.err))
+		})
+	}
+}
 
 func TestAutoBitrateHandlerSlowdownResolutionUpgrade(t *testing.T) {
 	resolutions := AutoBitRateResolutionAndBitRateConfigs{
@@ -562,4 +592,135 @@ type mockEncoder struct {
 
 func (m *mockEncoder) GetResolution(ctx context.Context) *codec.Resolution {
 	return &m.res
+}
+
+// recordingEncoder is a fake codec.Encoder that records every SetQuality
+// invocation along with the resolution reported when the handler reads
+// it back. It embeds EncoderCopy for default no-op semantics, but is
+// distinguishable from EncoderCopy via type assertion (so
+// codec.IsEncoderCopy returns false for the bypass-mode short-circuit
+// in getCurrentBitrate).
+type recordingEncoder struct {
+	codec.EncoderCopy
+	res codec.Resolution
+
+	mu          sync.Mutex
+	quality     quality.Quality
+	setQualityN atomic.Uint32
+	setQualityRecord []quality.Quality
+}
+
+func (e *recordingEncoder) GetResolution(ctx context.Context) *codec.Resolution {
+	return &e.res
+}
+
+func (e *recordingEncoder) GetQuality(ctx context.Context) codec.Quality {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.quality
+}
+
+func (e *recordingEncoder) SetQuality(
+	ctx context.Context,
+	q codec.Quality,
+	_ packetcondition.Condition,
+) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.quality = q
+	e.setQualityRecord = append(e.setQualityRecord, q)
+	e.setQualityN.Add(1)
+	return nil
+}
+
+func (e *recordingEncoder) callsSince(start int) []quality.Quality {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if start >= len(e.setQualityRecord) {
+		return nil
+	}
+	out := make([]quality.Quality, len(e.setQualityRecord)-start)
+	copy(out, e.setQualityRecord[start:])
+	return out
+}
+
+func (e *recordingEncoder) totalCalls() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.setQualityRecord)
+}
+
+// TestSetAutoBitRateVideoConfigClosesPreviousHandlerOnReplace covers
+// the regression behind commit 54954aa: when SetAutoBitRateVideoConfig
+// is called with a non-nil config while another non-nil config is
+// already active, the previous AutoBitRateHandler must be Close()d.
+// Otherwise both handler goroutines tick concurrently and race on the
+// encoder's SetQuality, so config-B's MaxBitRate cap is silently
+// overwritten by config-A's stale handler.
+//
+// Falsification: revert commit 54954aa (drop oldAutoBitRate.Close(ctx)
+// from the swap-and-close helper / SetAutoBitRateVideoConfig non-nil
+// branch) and the test fails because the previous handler's
+// closureSignaler stays open after replacement returns.
+func TestSetAutoBitRateVideoConfigClosesPreviousHandlerOnReplace(t *testing.T) {
+	// The handler goroutine, once started, tries to acquire an active
+	// video output via StreamMux.withActiveVideoOutput which only
+	// unblocks on ctx.Done or output-availability. The test never
+	// configures an output so we need a cancellable ctx to drain the
+	// goroutine when Close runs inside SetAutoBitRateVideoConfig.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s, err := New(ctx, types.MuxModeForbid, nil)
+	require.NoError(t, err)
+	defer func() { _ = s.Close(ctx) }()
+
+	cfgA := makeAutoBitRateVideoConfig(16_800_000)
+	require.NoError(t, s.SetAutoBitRateVideoConfig(ctx, &cfgA))
+	oldHandler := s.GetAutoBitRateHandler()
+	require.NotNil(t, oldHandler)
+	require.False(t, oldHandler.closureSignaler.IsClosed(),
+		"old handler must still be running before replacement")
+
+	// Cancel the ctx so the old handler's goroutine, which is blocked
+	// inside withActiveVideoOutput waiting for an output that the test
+	// never configures, can return and let Close()->wg.Wait() unblock
+	// inside swapAndCloseAutoBitRateHandler. The cancel is what makes
+	// this regression observable in a unit-test harness; in production
+	// the goroutine returns from withActiveVideoOutput naturally once
+	// an active output is bound.
+	cancel()
+
+	cfgB := makeAutoBitRateVideoConfig(500_000)
+	require.NoError(t, s.SetAutoBitRateVideoConfig(ctx, &cfgB))
+
+	newHandler := s.GetAutoBitRateHandler()
+	require.NotNil(t, newHandler)
+	require.NotSame(t, oldHandler, newHandler,
+		"replacement must produce a different handler instance")
+
+	// After SetAutoBitRateVideoConfig returns the previous handler must
+	// be Close()d: closureSignaler reports IsClosed and Close has
+	// awaited the goroutine via wg.Wait so no further ticks will run.
+	testassert.True(t, oldHandler.closureSignaler.IsClosed(),
+		"previous handler's closureSignaler must be closed after replacement")
+}
+
+// makeAutoBitRateVideoConfig builds a minimal but valid
+// AutoBitRateVideoConfig wrapped around an AutoBitrateCalculatorStatic
+// pinned at the supplied target bitrate.
+func makeAutoBitRateVideoConfig(targetBitRate types.Ubps) types.AutoBitRateVideoConfig {
+	return types.AutoBitRateVideoConfig{
+		ResolutionsAndBitRates: types.AutoBitRateResolutionAndBitRateConfigs{
+			{
+				Resolution:  codec.Resolution{Width: 1920, Height: 1080},
+				BitrateHigh: targetBitRate,
+				BitrateLow:  targetBitRate / 4,
+			},
+		},
+		Calculator:    types.AutoBitrateCalculatorStatic(targetBitRate),
+		CheckInterval: 50 * time.Millisecond,
+		MaxBitRate:    targetBitRate,
+		MinBitRate:    targetBitRate / 8,
+	}
 }

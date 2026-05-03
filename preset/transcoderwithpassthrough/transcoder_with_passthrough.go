@@ -243,6 +243,10 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 						logger.Warnf(ctx, "unable to enable the low latency mode on the decoder: %v", err)
 					}
 				},
+				// When the input config does not pin a decoder (VideoCodec=""),
+				// prefer the cuvid variant so AV1 publishers don't fall back to
+				// libdav1d's stricter OBU framing.
+				AutoSelectHardwareDecoder: true,
 			},
 		),
 		codec.NewNaiveEncoderFactory(ctx,
@@ -431,6 +435,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	ctx context.Context,
 	passthroughMode types.PassthroughMode,
 	serveCfg avpipeline.ServeConfig,
+	outputPushToConditions ...packetorframefiltercondition.Condition,
 ) (_err error) {
 	logger.Debugf(ctx, "Start(ctx, %s): %p", passthroughMode, s)
 	defer logger.Debugf(ctx, "/Start(ctx, %s): %p: %v", passthroughMode, s, _err)
@@ -447,6 +452,37 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 	outputAsPacketSink := asPacketSink(outputMain.GetProcessor())
 	if outputAsPacketSink == nil {
 		return fmt.Errorf("the output node processor is expected to be a packet sink, but is not")
+	}
+
+	// outputSinks holds the destinations whose inbound edges should
+	// receive outputPushToConditions. For passthrough modes that emit
+	// to a separate Outputs[1], we add it below.
+	outputSinks := map[node.Abstract]struct{}{
+		s.Outputs[0]: {},
+	}
+	if passthroughMode == types.PassthroughModeNextOutput && len(s.Outputs) > 1 {
+		outputSinks[s.Outputs[1]] = struct{}{}
+	}
+	// extendForOutput appends outputPushToConditions to the given
+	// existing condition slice if dst is one of the per-forwarding
+	// Output nodes (recognized via outputSinks). Returns the resulting
+	// slice. The destination node may be wrapped in nodewrapper.NoServe
+	// — unwrap before checking.
+	extendForOutput := func(dst node.Abstract, existing []packetorframefiltercondition.Condition) []packetorframefiltercondition.Condition {
+		if len(outputPushToConditions) == 0 {
+			return existing
+		}
+		inner := dst
+		if nw, ok := dst.(*nodewrapper.NoServe[node.Abstract]); ok && nw != nil {
+			inner = nw.Node
+		}
+		if _, ok := outputSinks[inner]; !ok {
+			return existing
+		}
+		out := make([]packetorframefiltercondition.Condition, 0, len(existing)+len(outputPushToConditions))
+		out = append(out, existing...)
+		out = append(out, outputPushToConditions...)
+		return out
 	}
 
 	// == configure ==
@@ -568,7 +604,7 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 				s.MapOutputStreamIndices,
 				processor.DefaultOptionsOutput()...,
 			)
-			nodeMapStreamIndices.AddPushTo(ctx, outputMain)
+			nodeMapStreamIndices.AddPushTo(ctx, outputMain, extendForOutput(outputMain, nil)...)
 			sinkMain, sinkPassthrough = nodeMapStreamIndices, s.NodeStreamFixerMain
 			if s.NodeStreamFixerMain == nil {
 				sinkPassthrough = nodeMapStreamIndices
@@ -592,21 +628,21 @@ func (s *TranscoderWithPassthrough[C, P]) Start(
 		}
 		if s.NodeStreamFixerMain != nil {
 			s.NodeTranscoder.AddPushTo(ctx, s.NodeStreamFixerMain, condTranscoder...)
-			s.NodeStreamFixerMain.AddPushTo(ctx, sinkMain)
+			s.NodeStreamFixerMain.AddPushTo(ctx, sinkMain, extendForOutput(sinkMain, nil)...)
 		} else {
-			s.NodeTranscoder.AddPushTo(ctx, sinkMain, condTranscoder...)
+			s.NodeTranscoder.AddPushTo(ctx, sinkMain, extendForOutput(sinkMain, condTranscoder)...)
 		}
 		if s.NodeStreamFixerPassthrough != nil {
-			s.NodeStreamFixerPassthrough.AddPushTo(ctx, sinkPassthrough, condPassthrough...)
+			s.NodeStreamFixerPassthrough.AddPushTo(ctx, sinkPassthrough, extendForOutput(sinkPassthrough, condPassthrough)...)
 		} else {
-			nodeFilterThrottle.AddPushTo(ctx, sinkPassthrough, condPassthrough...)
+			nodeFilterThrottle.AddPushTo(ctx, sinkPassthrough, extendForOutput(sinkPassthrough, condPassthrough)...)
 		}
 	} else {
 		if s.NodeStreamFixerMain != nil {
 			s.NodeTranscoder.AddPushTo(ctx, s.NodeStreamFixerMain)
-			s.NodeStreamFixerMain.AddPushTo(ctx, outputMain)
+			s.NodeStreamFixerMain.AddPushTo(ctx, outputMain, extendForOutput(outputMain, nil)...)
 		} else {
-			s.NodeTranscoder.AddPushTo(ctx, outputMain)
+			s.NodeTranscoder.AddPushTo(ctx, outputMain, extendForOutput(outputMain, nil)...)
 		}
 	}
 

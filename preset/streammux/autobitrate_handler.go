@@ -97,7 +97,19 @@ func GetDefaultAutoBitrateResolutionsConfig(codecID astiav.CodecID) (AutoBitRate
 		if err != nil {
 			return nil, err
 		}
-		return multiplyBitRates(h264Config, 0.7), nil
+		// For AV1 we always use the maximum resolution for all bitrates;
+		// collapse all entries into a single one with the max resolution and
+		// a bitrate range covering the union of all H264 ranges (scaled by 0.7).
+		av1Config := AutoBitRateResolutionAndBitRateConfigs(multiplyBitRates(h264Config, 0.7))
+		best := av1Config.Best()
+		worst := av1Config.Worst()
+		return AutoBitRateResolutionAndBitRateConfigs{
+			{
+				Resolution:  best.Resolution,
+				BitrateHigh: best.BitrateHigh,
+				BitrateLow:  worst.BitrateLow,
+			},
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported codec for DefaultAutoBitRateVideoConfig: %s", codecID)
 	}
@@ -183,11 +195,7 @@ func (s *StreamMux[C]) removeAutoBitRateHandler(
 		return nil
 	}
 
-	if !s.swapAutoBitRateHandler(nil, h) {
-		return fmt.Errorf("unable to clear auto bitrate handler, concurrent modification detected")
-	}
-
-	return h.Close(ctx)
+	return s.swapAndCloseAutoBitRateHandler(ctx, nil, h)
 }
 
 type resolutionChangeRequest struct {
@@ -234,6 +242,18 @@ func (h *AutoBitRateHandler[C]) start(ctx context.Context) (_err error) {
 
 func (h *AutoBitRateHandler[C]) String() string {
 	return "AutoBitRateHandler"
+}
+
+// logMissingEncoder emits the by-design "unable to get encoder" message
+// at the level dictated by StreamMux.QuietOnMissingEncoder: Debug when
+// the flag is set (steady-state pre-input, no encoder bound yet), Warn
+// otherwise (legacy default).
+func (h *AutoBitRateHandler[C]) logMissingEncoder(ctx context.Context) {
+	if h.StreamMux != nil && h.StreamMux.QuietOnMissingEncoder.Load() {
+		logger.Debugf(ctx, "unable to get encoder")
+		return
+	}
+	logger.Warnf(ctx, "unable to get encoder")
 }
 
 func (h *AutoBitRateHandler[C]) Close(ctx context.Context) (_err error) {
@@ -294,7 +314,7 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
-		logger.Warnf(ctx, "unable to get encoder")
+		h.logMissingEncoder(ctx)
 		return
 	}
 
@@ -367,6 +387,30 @@ func (h *AutoBitRateHandler[C]) getOutputsInfo(
 	return activeVideoOutput, getRawConners, getQueueSizers, err
 }
 
+// isBenignWithRawNetworkConnErr reports whether err from a
+// WithRawNetworkConn probe is a steady-state condition that does not
+// warrant an error-level log entry.
+//
+//   - kernel.ErrNoRawNetworkConn: the kernel never had a raw conn for
+//     this protocol (e.g. file output);
+//   - kernel.ErrNotImplemented:   the kernel does not implement raw
+//     network conn access at all;
+//   - io.EOF:                     kernel/net_conn.go returns this once
+//     the underlying netFile has been closed (e.g. the output's
+//     connection dropped). The autobitrate ticker keeps polling all
+//     configured outputs including closed ones, so this is benign once
+//     an output goes away.
+func isBenignWithRawNetworkConnErr(err error) bool {
+	switch {
+	case errors.As(err, &kernel.ErrNoRawNetworkConn{}),
+		errors.As(err, &kernel.ErrNotImplemented{}),
+		errors.Is(err, io.EOF):
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *AutoBitRateHandler[C]) logRawConnInfo(
 	ctx context.Context,
 	getRawConners []kernel.WithRawNetworkConner,
@@ -408,8 +452,7 @@ func (h *AutoBitRateHandler[C]) logRawConnInfo(
 				})
 			switch {
 			case err == nil:
-			case errors.As(err, &kernel.ErrNoRawNetworkConn{}),
-				errors.As(err, &kernel.ErrNotImplemented{}):
+			case isBenignWithRawNetworkConnErr(err):
 				logger.Debugf(ctx, "unable to get raw connection from %T: %v", proc, err)
 			default:
 				logger.Errorf(ctx, "unable to get raw connection from %T: %v", proc, err)
@@ -646,7 +689,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
-		logger.Warnf(ctx, "unable to get encoder")
+		h.logMissingEncoder(ctx)
 		return
 	}
 
@@ -727,7 +770,7 @@ func (h *AutoBitRateHandler[C]) changeResolutionIfNeeded(
 
 	encoderV, _ := h.StreamMux.GetEncoders(ctx)
 	if encoderV == nil {
-		logger.Warnf(ctx, "unable to get encoder")
+		h.logMissingEncoder(ctx)
 		return
 	}
 

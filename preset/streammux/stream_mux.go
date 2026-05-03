@@ -50,6 +50,31 @@ type StreamMux[C any] struct {
 	CurrentOutputProps types.SenderProps
 	Locker             xsync.Mutex
 
+	// QuietOnMissingEncoder demotes the by-design "unable to get
+	// encoder" log spam (emitted by AutoBitRateHandler when no input
+	// is flowing yet, so no encoder is bound) from Warn to Debug. It
+	// is set externally (e.g. by ffstream's -quiet_on_open_failure
+	// CLI flag, also available as the legacy alias
+	// -quiet_empty_priority). Default (false) preserves the legacy
+	// Warnf so existing diagnostics aren't lost.
+	QuietOnMissingEncoder atomic.Bool
+
+	// RawFrameSource records that the upstream pipeline supplies
+	// decoded frames directly (e.g. android_camera + android_microphone)
+	// rather than packets that need a downstream decoder. When set,
+	// every Output created via getOrCreateOutputLocked is initialised
+	// with OptionRawFrameSource(true), which routes MediaCodec
+	// encoders away from the get_format -> AV_PIX_FMT_MEDIACODEC
+	// surface-passthrough trap. Default (false) keeps the legacy
+	// behaviour for transcoding-from-decoder pipelines.
+	//
+	// OneWayBool pins the sticky-true contract at the type level: the
+	// flag can only ever transition false→true, never back. The first
+	// raw-frame upstream observed at any point in the StreamMux life-
+	// cycle latches it, and the latched encoder pix_fmt stays valid
+	// even if the raw-frame source is later removed.
+	RawFrameSource globaltypes.OneWayBool
+
 	// inputs:
 	InputAll       Input[C]
 	InputAudioOnly *Input[C]
@@ -81,6 +106,24 @@ type StreamMux[C any] struct {
 	lastKeyFrames       map[int]*ringbuffer.RingBuffer[packetorframe.InputUnion]
 	nextOutputID        atomic.Uint32
 	allowCorruptPackets atomic.Bool
+
+	// EvictionRecreatePolicy controls the no-sibling recreate retry
+	// schedule for evicted outputs: exponential backoff, MaxAttempts
+	// ceiling, MaxAge sliding-window reset. The zero value
+	// is valid (each field falls back to its default via
+	// applyDefaults). Set externally by callers (e.g. ffstream config)
+	// before Start; not safe to mutate while evictions are in flight.
+	EvictionRecreatePolicy EvictionRecreatePolicy
+
+	// evictionRecreateLocker guards lastEvictionRecreateState and the
+	// nowFunc / recreateEvictedOutputFunc seams used by the no-sibling
+	// eviction-recovery path. The attempt-state map and the per-call
+	// read-modify-write must not race against concurrent evictions of
+	// different outputs that happen to map to the same SenderKey.
+	evictionRecreateLocker    sync.Mutex
+	lastEvictionRecreateState map[SenderKey]evictionRecreateState
+	nowFunc                   func() time.Time
+	recreateEvictedOutputFunc func(ctx context.Context, input *Input[C], deadOutputKey SenderKey) error
 }
 
 func New(
@@ -113,7 +156,15 @@ func NewWithCustomData[C any](
 			astiav.MediaTypeData:     newTrackMeasurements(),
 			astiav.MediaTypeUnknown:  newTrackMeasurements(),
 		},
+		lastEvictionRecreateState: map[SenderKey]evictionRecreateState{},
+		nowFunc:                   time.Now,
 	}
+	// Wire the default eviction-recovery recreator. Exposed as a struct
+	// field (not a hard-coded call) so tests can intercept the call to
+	// assert backoff behaviour without having to spin up a real
+	// Transcoder/Encoder factory chain — the recreator is the only side-
+	// effect the no-sibling branch exposes.
+	s.recreateEvictedOutputFunc = s.recreateEvictedOutputDefault
 	s.InputAll = *newInput(ctx, s, InputTypeAll)
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
 		s.InputAudioOnly = newInput(ctx, s, InputTypeAudioOnly)
@@ -146,6 +197,35 @@ func (s *StreamMux[C]) swapAutoBitRateHandler(
 	return xatomic.CompareAndSwapPointer(&s.AutoBitRateHandler, old, new)
 }
 
+// swapAndCloseAutoBitRateHandler atomically swaps `new` into the
+// auto-bitrate slot replacing `old`, then Close()s `old` if non-nil.
+// On CAS failure it returns an error and does NOT close anything: the
+// caller owns the surplus `new` (which was constructed but never
+// installed) and must Close it itself, while `old` remains live under
+// the concurrent owner that won the race.
+//
+// The Close on the replaced handler must run BEFORE any subsequent
+// h.start(ctx) on `new`: otherwise both the old and new handler
+// goroutines tick concurrently for one CheckInterval and race on the
+// encoder bitrate (the bug commit 54954aa fixed). Between the CAS and
+// the start the auto-bitrate slot reads either `new` (post-swap) or
+// nil (post-clear), never two parallel writers.
+func (s *StreamMux[C]) swapAndCloseAutoBitRateHandler(
+	ctx context.Context,
+	new *AutoBitRateHandler[C],
+	old *AutoBitRateHandler[C],
+) error {
+	if !s.swapAutoBitRateHandler(new, old) {
+		return fmt.Errorf("unable to set auto bitrate handler, concurrent modification detected")
+	}
+	if old != nil {
+		if err := old.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close previous auto bitrate handler: %v", err)
+		}
+	}
+	return nil
+}
+
 func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
 	ctx context.Context,
 	autoBitRate *AutoBitRateVideoConfig,
@@ -173,14 +253,16 @@ func (s *StreamMux[C]) SetAutoBitRateVideoConfig(
 	if err != nil {
 		return fmt.Errorf("unable to initialize auto bitrate handler: %w", err)
 	}
-	if !s.swapAutoBitRateHandler(h, oldAutoBitRate) {
-		if err := h.Close(ctx); err != nil {
-			logger.Errorf(ctx, "unable to close superfluous auto bitrate handler: %v", err)
+	if err := s.swapAndCloseAutoBitRateHandler(ctx, h, oldAutoBitRate); err != nil {
+		// CAS lost the race: `h` was constructed but never installed,
+		// so we own it and must Close it. `oldAutoBitRate` was not
+		// closed by the helper and remains under the concurrent owner.
+		if closeErr := h.Close(ctx); closeErr != nil {
+			logger.Errorf(ctx, "unable to close superfluous auto bitrate handler: %v", closeErr)
 		}
-		return fmt.Errorf("unable to set auto bitrate handler, concurrent modification detected")
+		return err
 	}
-	err = h.start(ctx)
-	if err != nil {
+	if err := h.start(ctx); err != nil {
 		return fmt.Errorf("unable to start auto bitrate handler: %w", err)
 	}
 	return nil
@@ -249,6 +331,23 @@ func (s *StreamMux[C]) initSwitches(
 				packetorframecondition.Or{
 					packetorframecondition.IsKeyFrame(true),
 					packetorframecondition.AtomicBool(&s.allowCorruptPackets),
+					// Intra-only codecs (rawvideo, wrapped_avframe) carry no
+					// inter-frame prediction so every packet is effectively
+					// a keyframe even when libav demuxers (e.g. android_camera
+					// emitting rawvideo) do not set AV_PKT_FLAG_KEY. Without
+					// this the OutputSwitch keep-unless never matches a
+					// switch-anchor packet — the cam frames flow but the
+					// barrier never commits to the new output, so the
+					// per-Output TranscoderNode is never reached, the
+					// EncoderFactory.VideoEncoders slice stays empty, and
+					// AutoBitRateHandler's checkOnce loops forever logging
+					// "unable to get encoder". The codec list itself is the
+					// SSOT in codec/intra_only.go — mirrored here through
+					// packetorframecondition.IsIntraOnlyCodec rather than
+					// duplicated case-by-case so the streammux,
+					// inputwithfallback InputSwitch, and inputwithfallback
+					// Syncer keep-unless lists cannot silently diverge.
+					packetorframecondition.IsIntraOnlyCodec{},
 				},
 			}
 			logger.Debugf(ctx, "Switch[%s]: setting keep-unless conditions: %s", inputType, keepUnlessConds)
@@ -364,7 +463,11 @@ func (s *StreamMux[C]) removeOutputByIDLocked(
 		logger.Errorf(ctx, "removeOutputByIDLocked: output %v not found in Outputs map", outputID)
 		return fmt.Errorf("output %v not found", outputID)
 	}
-	return s.removeOutputLocked(ctx, output.GetKey())
+	// StorageKey() (not GetKey()) — see Output.StorageKey godoc.
+	// removeOutputLocked feeds OutputsMap.LoadAndDelete, which must use
+	// the key the entry was stored under, not the live
+	// EncoderFactory-derived compound key.
+	return s.removeOutputLocked(ctx, output.StorageKey())
 }
 
 var _ = (*StreamMux[struct{}])(nil).removeOutputByIDLocked
@@ -534,6 +637,80 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 	return nil
 }
 
+// recreateEvictedOutputDefault is the production implementation behind
+// recreateEvictedOutputFunc. It materialises a fresh Output[N] under
+// the dead output's SenderKey and switches the orphaned input to point
+// at it, so the transient eviction caused by the rtmp-era encoder
+// burning down on its first camera-direct mediacodec frame self-heals
+// into a working camera-direct chain instead of wedging at MinInt32 +
+// StateDrop.
+//
+// Caller (recommitDemotedInputToSibling no-sibling branch) MUST hold no
+// lock — this method takes s.Locker for the createAndConfigureOutputs +
+// setPreferredOutputForInput pair, mirroring the locking discipline in
+// switchToOutputByProps. Holding s.Locker across both calls keeps the
+// pair atomic against a concurrent SwitchToOutputByProps that could
+// otherwise observe the freshly-created Output mid-recreate and race
+// it onto the input.
+//
+// The new Output's encoder will inherit the StreamMux-level
+// RawFrameSource flag (set at the time the camera AddInput latched it),
+// so its open-time pix_fmt is nv12 from the start and the camera-direct
+// path no longer needs the in-flight rtmp-era mediacodec frame to
+// transfer to software (which is the failure that triggered the
+// eviction in the first place).
+func (s *StreamMux[C]) recreateEvictedOutputDefault(
+	ctx context.Context,
+	input *Input[C],
+	deadOutputKey SenderKey,
+) (_err error) {
+	logger.Tracef(ctx, "recreateEvictedOutputDefault(%s, %s)", input.GetType(), deadOutputKey)
+	defer func() {
+		logger.Tracef(ctx, "/recreateEvictedOutputDefault(%s, %s): %v", input.GetType(), deadOutputKey, _err)
+	}()
+
+	s.Locker.Do(ctx, func() {
+		transcoderConfig := s.CurrentOutputProps.TranscoderConfig
+		if err := s.createAndConfigureOutputs(ctx, deadOutputKey, transcoderConfig); err != nil {
+			_err = fmt.Errorf("createAndConfigureOutputs(%s): %w", deadOutputKey, err)
+			return
+		}
+
+		// Switch the orphaned input(s) to the freshly-created Output.
+		// Without this, the OutputSwitch / OutputSyncer remain at
+		// MinInt32 and the new Output never receives any traffic — the
+		// recreate would be a no-op from the input's perspective.
+		//
+		// setPreferredOutputs (not setPreferredOutputForInput): in
+		// SplitAV mode the dead output's StorageKey is a split key
+		// (video-only OR audio-only), and setPreferredOutputs
+		// already decomposes via getVideoInput()/getAudioInput() —
+		// matching the storage-key decomposition done by
+		// getInputsForSenderKey at the createAndConfigureOutputs
+		// callsite above. Passing the split key to
+		// setPreferredOutputForInput with a fixed `input` picks the
+		// wrong input in InputAll-vs-Video/AudioOnly modes; threading
+		// the input choice through the canonical setPreferredOutputs
+		// path is more robust against future storage-key semantics
+		// changes.
+		//
+		// ErrOutputAlreadyPreferred / ErrOutputsAlreadyPreferred can
+		// happen if a concurrent path switched the input first
+		// (rare); treat as success.
+		err := s.setPreferredOutputs(ctx, deadOutputKey)
+		switch {
+		case err == nil:
+		case errors.As(err, &ErrOutputAlreadyPreferred{}):
+			logger.Debugf(ctx, "input %s already preferred to %s", input.GetType(), deadOutputKey)
+		case errors.As(err, &ErrOutputsAlreadyPreferred{}):
+			logger.Debugf(ctx, "inputs already preferred to %s (orphaned was %s)", deadOutputKey, input.GetType())
+		default:
+			_err = fmt.Errorf("setPreferredOutputs(%s) for orphaned input %s: %w", deadOutputKey, input.GetType(), err)
+		}
+	})
+	return _err
+}
+
 func (s *StreamMux[C]) GetOrCreateOutput(
 	ctx context.Context,
 	outputKey types.SenderKey,
@@ -619,8 +796,16 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		return nil, false, fmt.Errorf("unknown mux mode: %s", s.MuxMode)
 	}
 
-	cfg := InitOutputOptions(opts).config()
-	_ = cfg // currently unused
+	// Inherit StreamMux-level RawFrameSource as a default. Caller-supplied
+	// opts apply on top, so an explicit OptionRawFrameSource(false) on a
+	// specific GetOrCreateOutput call still wins (last-writer in
+	// InitOutputOptions.apply).
+	allOpts := make([]InitOutputOption, 0, len(opts)+1)
+	if s.RawFrameSource.Load() {
+		allOpts = append(allOpts, OptionRawFrameSource(true))
+	}
+	allOpts = append(allOpts, opts...)
+	cfg := InitOutputOptions(allOpts).config()
 
 	output, err := newOutput(
 		ctx,
@@ -635,6 +820,7 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		s,
 		s.asCodecResourceManager(),
 		s,
+		cfg,
 	)
 	if err != nil {
 		return nil, true, fmt.Errorf("unable to create an output: %w", err)
@@ -1611,28 +1797,29 @@ func (s *StreamMux[C]) latencyMeasurerLoop(
 	t := time.NewTicker(time.Second / 4)
 	defer t.Stop()
 
-	prevTS := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
-			newTS := time.Now()
 			func() {
 				ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 				defer cancelFn()
-				err := s.updateSendingLatencyValues(ctx)
-				if err == nil {
-					return
+				// On error we previously fabricated a growing latency by adding
+				// the wall-clock tick interval to SendingLatency, on the
+				// assumption that "we cannot measure -> the queue must be
+				// stalled and growing". That assumption silently turns any
+				// transient measurement error (no active output, queuer not
+				// ready, ctx timeout, ...) into an unbounded synthetic value
+				// (observed: 226s, 535s) that misrepresents real latency to
+				// the gRPC client and corrupts the autobitrate handler that
+				// reads SendingLatency as queue duration. Leave the last
+				// measured value in place instead — the next successful tick
+				// will overwrite it with a fresh measurement.
+				if err := s.updateSendingLatencyValues(ctx); err != nil {
+					logger.Debugf(ctx, "unable to update sending latency values: %v; keeping the last measured value", err)
 				}
-				tsDiff := newTS.Sub(prevTS)
-				video := s.getTrackMeasurements(astiav.MediaTypeVideo)
-				oldValue := video.SendingLatency.Load()
-				computedNew := oldValue + uint64(tsDiff.Nanoseconds())
-				video.SendingLatency.Store(computedNew)
-				logger.Debugf(ctx, "unable to update latency values: %v; assuming the total latency must be increased by %s -> %s+%s=%s", err, tsDiff, nanosecondsToDuration(oldValue), tsDiff, nanosecondsToDuration(computedNew))
 			}()
-			prevTS = newTS
 		}
 	}
 }

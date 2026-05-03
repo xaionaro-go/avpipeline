@@ -103,10 +103,12 @@ func (n *NodeWithCustomData[C, T]) Serve(
 	for {
 		logger.Tracef(ctx, "Serve[%s]: an iteration started", nodeKey)
 		outputCh := n.Processor.OutputChan()
-		n.updateProcInfo(ctx)
+		// Drained-state refresh is covered by pushFurther's updateProcInfoLocked
+		// on every output, and by the ticker below for the idle path.
+		// Calling updateProcInfo per iteration here added a redundant locked
+		// allWentInAndOut traversal in the per-frame hot path.
 		select {
 		case <-t.C:
-			// TODO: delete me
 			n.updateProcInfo(ctx)
 		case <-procNodeEndCtx.Done():
 			logger.Debugf(ctx, "Serve[%s]: initiating closing", nodeKey)

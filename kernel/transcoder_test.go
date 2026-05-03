@@ -1,3 +1,5 @@
+//go:build test_long
+
 // transcoder_test.go contains tests for the transcoder kernel.
 
 package kernel_test

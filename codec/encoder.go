@@ -34,6 +34,7 @@ type Encoder interface {
 	ToCodecParameters(context.Context, *astiav.CodecParameters) error
 	HardwareDeviceContext(context.Context) *astiav.HardwareDeviceContext
 	HardwarePixelFormat(context.Context) astiav.PixelFormat
+	HardwareFramesContext(context.Context) *astiav.HardwareFramesContext
 	TimeBase(context.Context) astiav.Rational
 	SendFrame(context.Context, *astiav.Frame) error
 	ReceivePacket(context.Context, *astiav.Packet) error

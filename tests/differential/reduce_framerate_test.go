@@ -2,17 +2,37 @@ package differential
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-const difftestBin = "/home/claude/src/avpipeline/proofs/.lake/build/bin/difftest"
+// findDifftestBin locates the Lean difftest binary built by `cd proofs && lake build`.
+// The path is resolved from the package source location so it works on any checkout.
+func findDifftestBin(t *testing.T) string {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("unable to determine caller file path")
+	}
+	// thisFile = .../tests/differential/reduce_framerate_test.go
+	// repoRoot = .../ (parent of tests/)
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+	bin := filepath.Join(repoRoot, "proofs", ".lake", "build", "bin", "difftest")
+	if _, err := os.Stat(bin); err != nil {
+		t.Skipf("Lean difftest binary not found at %s; run 'cd proofs && lake build' first", bin)
+	}
+	return bin
+}
 
 func runDifftest(t *testing.T, component string, input string) string {
 	t.Helper()
-	cmd := exec.Command(difftestBin, component)
+	cmd := exec.Command(findDifftestBin(t), component)
 	cmd.Stdin = strings.NewReader(input)
 	out, err := cmd.Output()
 	if err != nil {

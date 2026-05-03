@@ -24,6 +24,13 @@ type InputConfig struct {
 	AsyncOpen      bool
 	AutoClose      bool
 
+	// QuietOnOpenFailure demotes by-design open-failure log noise to
+	// Debug. Set true for Inputs whose absence is a normal steady state
+	// (e.g. an upstream rtmp publisher not yet connected, an empty
+	// fallback priority slot). Default false preserves the legacy
+	// WARN/ERRO levels.
+	QuietOnOpenFailure bool
+
 	// ForceRealTime is an implementation of slowing down the input to match real-time playback,
 	// alternative to option "-re" in ffmpeg.
 	ForceRealTime *bool

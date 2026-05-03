@@ -1427,3 +1427,55 @@ func TestDecoder_SendInput_FramePassThrough(t *testing.T) {
 		t.Fatal("expected output but channel was empty")
 	}
 }
+
+// TestRetryable_Pause_NotStarvedByFactoryRetry is a regression test for the
+// AddInput-deadlock observed on the Android test phone: when the wrapped
+// factory keeps failing (e.g. fallback rtmp source returns "Connection
+// refused") and OnError sleeps RetryInterval to back off, Pause must still
+// be able to acquire KernelLocker promptly. Before the fix, OnError was
+// invoked while KernelLocker was held, so the sleep starved any concurrent
+// control op (Pause / Unpause / AddInput → chain.Pause+Unpause); the gRPC
+// call would hang indefinitely.
+//
+// This test arranges a factory that always fails and an OnError that
+// sleeps long enough that any naive lock-during-sleep would be observable.
+// It then calls Pause concurrently and asserts Pause returns within a
+// short bound.
+func TestRetryable_Pause_NotStarvedByFactoryRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	factoryErr := fmt.Errorf("factory always fails")
+	r := NewRetryable[Abstract](ctx,
+		func(ctx context.Context) (Abstract, error) {
+			return nil, factoryErr
+		},
+		func(ctx context.Context, k Abstract, err error) error {
+			// Mimic inputwithfallback.onInputChainError's
+			// `defer time.Sleep(RetryInterval)` behaviour. 1s
+			// matches the production -retry_input_timeout_on_failure.
+			time.Sleep(1 * time.Second)
+			return ErrRetry{Err: err}
+		},
+		RetryableOptionStartOnInit[Abstract](true),
+	)
+	defer r.Close(ctx)
+
+	// Let the factory fail at least once so OnError is in its sleep.
+	time.Sleep(50 * time.Millisecond)
+
+	// Pause must return promptly. With the bug, this blocks for the
+	// entire OnError sleep; with the fix, Pause grabs the lock during
+	// the sleep window. Pick a bound well below the sleep duration so
+	// a regression is unambiguous.
+	pauseDone := make(chan error, 1)
+	go func() {
+		pauseDone <- r.Pause(ctx)
+	}()
+	select {
+	case err := <-pauseDone:
+		require.NoError(t, err, "Pause should not error")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Pause blocked while OnError was sleeping — KernelLocker is held across the sleep (regression)")
+	}
+}

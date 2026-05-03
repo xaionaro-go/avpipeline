@@ -9,6 +9,7 @@ import (
 
 	"github.com/asticode/go-astiav"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -26,12 +27,23 @@ type MapStreamIndices struct {
 
 	formatContext *astiav.FormatContext
 	outputStreams map[int]*astiav.Stream
+
+	// upstreamSource captures the most recent upstream source observed by
+	// sendInput. Encoder construction downstream type-asserts the frame
+	// source to codec.GetDecoderer in order to bind the encoder to the
+	// upstream decoder's MediaCodec resources (surface passthrough,
+	// hardware-frame reuse). MapStreamIndices replaces the source on
+	// outgoing units with itself, hiding the upstream decoder; storing
+	// the upstream source here lets MapStreamIndices forward GetDecoder()
+	// so the encoder still sees the original decoder.
+	upstreamSource packetorframe.AbstractSource
 }
 
 var (
-	_ Abstract      = (*MapStreamIndices)(nil)
-	_ packet.Source = (*MapStreamIndices)(nil)
-	_ packet.Sink   = (*MapStreamIndices)(nil)
+	_ Abstract           = (*MapStreamIndices)(nil)
+	_ packet.Source      = (*MapStreamIndices)(nil)
+	_ packet.Sink        = (*MapStreamIndices)(nil)
+	_ codec.GetDecoderer = (*MapStreamIndices)(nil)
 )
 
 type StreamIndexAssigner interface {
@@ -148,6 +160,13 @@ func (m *MapStreamIndices) sendInput(
 	input packetorframe.InputUnion,
 	outputCh chan<- packetorframe.OutputUnion,
 ) error {
+	if src := input.GetSource(); src != nil {
+		// Capture the upstream source so GetDecoder can forward through
+		// to the upstream decoder; sendInput runs under m.Locker, so this
+		// store is safe against concurrent GetDecoder readers.
+		m.upstreamSource = src
+	}
+
 	outputStreamIndexes, err := m.getOutputStreamIndexes(ctx, input)
 	if err != nil {
 		return fmt.Errorf("unable to obtain the output stream indexes (on input: %#+v): %w", input, err)
@@ -174,8 +193,23 @@ func (m *MapStreamIndices) sendInput(
 				p.PipelineSideData,
 			)
 		} else if f != nil {
+			// Keep the upstream source on frames so downstream encoders can
+			// type-assert to codec.GetDecoderer and bind to the upstream
+			// decoder's resources (MediaCodec surface passthrough). Replacing
+			// the source with `m` would force every per-stream encoder init
+			// to consult MapStreamIndices.GetDecoder; that single-slot lookup
+			// races with concurrent inputs from sibling streams (audio
+			// frames overwrite the slot just-set by a video frame, etc.).
+			frameSource := input.GetSource()
+			if frameSource == nil {
+				// frame.Source is fmt.Stringer; AbstractSource is also
+				// fmt.Stringer — *MapStreamIndices satisfies both — fall
+				// back to `m` only when the upstream did not advertise a
+				// source at all (e.g. synthetic frames).
+				frameSource = m
+			}
 			f.StreamInfo = frame.BuildStreamInfo(
-				m,
+				frameSource,
 				f.GetCodecParameters(),
 				outputStream.Index(),
 				len(m.outputStreams),
@@ -269,6 +303,25 @@ func (m *MapStreamIndices) NotifyAboutPacketSource(
 
 func (m *MapStreamIndices) GetObjectID() globaltypes.ObjectID {
 	return globaltypes.GetObjectID(m)
+}
+
+// GetDecoder forwards to the upstream source's decoder when the upstream
+// source implements codec.GetDecoderer. This lets downstream encoder
+// construction (which type-asserts frame.Source to codec.GetDecoderer in
+// kernel/encoder.go:initEncoderFor) discover the upstream decoder even
+// when MapStreamIndices sits between the decoder and the encoder.
+func (m *MapStreamIndices) GetDecoder() *codec.Decoder {
+	ctx := context.TODO()
+	return xsync.DoR1(ctx, &m.Locker, func() *codec.Decoder {
+		if m.upstreamSource == nil {
+			return nil
+		}
+		getDecoderer, ok := m.upstreamSource.(codec.GetDecoderer)
+		if !ok {
+			return nil
+		}
+		return getDecoderer.GetDecoder()
+	})
 }
 
 func (m *MapStreamIndices) String() string {

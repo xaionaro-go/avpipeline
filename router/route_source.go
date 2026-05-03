@@ -140,7 +140,7 @@ func (fwd *RouteSource[T, C, P]) startLocked(ctx context.Context) (_err error) {
 		return fmt.Errorf("unable to add the RouteSource as a publisher to Route '%s': %w", dst.Path, err)
 	}
 
-	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.TranscoderConfig, fwd.FilterKernelFactory)
+	f, err := NewStreamForwarder(ctx, fwd.Input, dst.Node, fwd.TranscoderConfig, fwd.FilterKernelFactory, nil)
 	if err != nil {
 		return fmt.Errorf("unable to initialize a forwarder from %T to '%s' (%#+v): %w", fwd.Input, dst.Path, fwd.TranscoderConfig, err)
 	}

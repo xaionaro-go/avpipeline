@@ -118,6 +118,15 @@ func (n *netConn) closeLocked(context.Context) error {
 		}
 		n.netFile = nil
 	}
+	// Drop borrowed handles whose underlying resources are about to be
+	// freed by the surrounding Output.Close / Input.Close. Without this,
+	// post-close probes (e.g. autobitrate's WithRawNetworkConn ticker)
+	// observe a non-nil rawConn referencing a closed fd and the helpers
+	// fall through to the io.EOF defensive guard. Clearing here makes the
+	// post-close API uniform: ErrNoNetworkConn / ErrNoRawNetworkConn.
+	n.netConn = nil
+	n.rawConn = nil
+	n.avioCtx = nil
 	return errors.Join(result...)
 }
 

@@ -1,3 +1,5 @@
+//go:build test_e2e
+
 // stream_mux_e2e_test.go provides end-to-end tests for the stream muxer.
 package streammux_test
 

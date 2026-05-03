@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/facebookincubator/go-belt"
 	"github.com/go-ng/xatomic"
+	"github.com/xaionaro-go/avcommon"
 	"github.com/xaionaro-go/avpipeline/avconv"
 	"github.com/xaionaro-go/avpipeline/codec/consts"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
@@ -57,6 +59,21 @@ const (
 	outputWriteTrailer                  = true
 	outputDebug                         = false
 	revert0c55f85                       = false
+	// rtmpDefaultOutChunkSize is the chunk size we negotiate with the RTMP
+	// peer at connection time. FFmpeg's libavformat ships with a 128-byte
+	// default which causes one ~12-byte RTMP chunk header per 128 bytes of
+	// payload, fragmenting a single video frame across many tiny TCP
+	// segments and pinning av_interleaved_write_frame at high CPU. Modern
+	// servers (nginx-rtmp, MediaMTX, AVD's own ingest) accept much larger
+	// chunks, so we raise the chunk size to match the typical TCP send
+	// buffer / MSS-multiple regime. Override per-output via the
+	// "rtmp_out_chunk_size" custom option key.
+	rtmpDefaultOutChunkSize = 65536
+	// rtmpMaxChunkSize is the protocol-defined upper bound on the RTMP
+	// chunk size. Per RTMP Chunk Stream spec §5.4.1 the Set-Chunk-Size
+	// payload is a 32-bit big-endian integer whose high bit MUST be 0,
+	// so the maximum legal value is 0x7FFFFFFF.
+	rtmpMaxChunkSize = 0x7FFFFFFF
 )
 
 type OutputConfigWaitForOutputStreams struct {
@@ -66,7 +83,26 @@ type OutputConfigWaitForOutputStreams struct {
 	MinStreamsSubtitle uint
 	MinStreamsData     uint
 	VideoBeforeAudio   *bool
+	// Timeout bounds how long send() will defer WriteHeader while
+	// waiting for the configured Min* stream counts to be satisfied.
+	// The deadline is armed when the first packet is buffered as
+	// pending, and once it expires the kernel commits to writing the
+	// header with whatever streams have been registered so far. Any
+	// stream that arrives later is rejected via ErrLateStreamAddition.
+	//
+	// Zero means "use a sensible default for live forwarding"
+	// (see defaultWaitForOutputStreamsTimeout); a negative value
+	// disables the timeout (wait indefinitely until Min* are met).
+	Timeout time.Duration
 }
+
+// defaultWaitForOutputStreamsTimeout is the WriteHeader-deferral
+// window used when WaitForOutputStreams.Timeout is left at its zero
+// value. It is sized for live forwarding of high-bitrate inputs
+// (SRT / MPEGTS / RTSP / RTMP), where the demuxer may need a few
+// seconds to parse the audio/video stream descriptors before they
+// become visible in the source format context.
+const defaultWaitForOutputStreamsTimeout = 3 * time.Second
 
 type OutputConfig struct {
 	CustomOptions  globaltypes.DictionaryItems
@@ -156,14 +192,22 @@ type Output struct {
 	PreallocatedSubtitleStreams []*OutputStream
 	PreallocatedDataStreams     []*OutputStream
 
-	sendingAllowed        bool
+	sendingAllowed       bool
 	firstVideoPacketSeen bool
-	openFinished     chan struct{}
-	openError        error
-	pendingPackets   []pendingPacket
-	waitingKeyFrames map[int]struct{}
-	outputFormatName string
-	outTSs           *ringbuffer.RingBuffer[outTS]
+	openFinished         chan struct{}
+	openError            error
+	pendingPackets       []pendingPacket
+	// pendingPacketsDeadline is armed when the first packet is queued
+	// into pendingPackets while we are still waiting for the configured
+	// Min* stream counts (see Config.WaitForOutputStreams). Once
+	// time.Now() crosses this deadline, send() commits to writing the
+	// muxer header with whatever streams are currently registered, even
+	// if Min* are not yet satisfied. Zero value means "not armed" /
+	// "no buffered packets yet".
+	pendingPacketsDeadline time.Time
+	waitingKeyFrames       map[int]struct{}
+	outputFormatName       string
+	outTSs                 *ringbuffer.RingBuffer[outTS]
 
 	*closuresignaler.ClosureSignaler
 	*astiav.FormatContext
@@ -177,6 +221,67 @@ var (
 	_ WithNetworkConner     = (*Output)(nil)
 	_ WithRawNetworkConner  = (*Output)(nil)
 )
+
+// muxerAllowsLateStreamAddition reports whether the muxer with the
+// given libavformat name can safely accept a new stream after its
+// header has been written. The decision is per-muxer because the
+// container specification varies. Unknown muxers default to refuse
+// (safe). When libavformat grows real runtime stream-table mutation
+// for a muxer, only that muxer's arm of the switch needs to flip
+// to true.
+func muxerAllowsLateStreamAddition(muxerName string) bool {
+	switch muxerName {
+	case "flv":
+		// Spec quote: "There shall be no more than one audio and one
+		// video stream, synchronized together, in an FLV file. An FLV
+		// file shall not define multiple independent streams of a
+		// single type."
+		// Source: Adobe Flash Video File Format Specification v10.1,
+		// Annex E.1 (page 68).
+		// URL: https://veovera.org/docs/legacy/video-file-format-v10-1-spec.pdf
+		return false
+	case "mpegts":
+		// MPEG-TS spec [ISO/IEC 13818-1] allows late streams via PMT
+		// version_number increment, but libavformat's mpegtsenc does
+		// not implement dynamic PMT updates (write_header allocates
+		// per-stream state once at libavformat/mpegtsenc.c:1166;
+		// tables_version is written once; streams added after
+		// avformat_write_header() have NULL priv_data and crash
+		// mpegts_write_packet on first reference). Treat as refuse
+		// until upstream gains support.
+		return false
+	case "matroska", "webm":
+		// Spec structure: a Segment contains exactly one Tracks Master
+		// element, defined in the initialization region. Adding a new
+		// TrackEntry after the Tracks element is serialized would
+		// require rewriting the segment header.
+		// Source: Matroska element spec.
+		// URL: https://www.matroska.org/technical/elements.html
+		return false
+	case "mp4", "mov":
+		// ISO BMFF: track_IDs and per-track sample tables are defined
+		// in the initialization segment (moov/trak/trex). A media
+		// fragment must be decodable using only the init segment, so
+		// new tracks cannot appear after moov is written.
+		// Source: ISO/IEC 14496-12 / ISOBMFF byte-stream format.
+		// URL: https://www.w3.org/2013/12/byte-stream-format-registry/isobmff-byte-stream-format.html
+		return false
+	case "hls", "m3u8":
+		// Spec quote: "If the encoding parameters or codec values
+		// change… an EXT-X-DISCONTINUITY tag MUST be present in the
+		// Media Playlist before the first Media Segment with a
+		// different value."
+		// Source: RFC 8216 §3.5 (EXT-X-DISCONTINUITY semantics).
+		// URL: https://datatracker.ietf.org/doc/html/rfc8216
+		return false
+	default:
+		// Unknown muxer — refuse to be safe. Adding a stream that the
+		// muxer does not expect risks SIGFPE inside
+		// av_interleaved_write_frame on division by sample_rate=0 or
+		// time_base.den=0 for the unconfigured stream entry.
+		return false
+	}
+}
 
 func formatFromURL(url *url.URL) string {
 	switch url.Scheme {
@@ -330,6 +435,15 @@ func NewOutputFromURL(
 	if cfg.WaitForOutputStreams.VideoBeforeAudio == nil {
 		cfg.WaitForOutputStreams.VideoBeforeAudio = ptr(false)
 	}
+	if cfg.WaitForOutputStreams.Timeout == 0 {
+		// Default for live forwarding: SRT/MPEGTS/RTSP/RTMP demuxers
+		// often need a few seconds to parse codec parameters of all
+		// elementary streams from a high-bitrate feed before they
+		// surface in the source format context. Use the package
+		// default so the late-stream gate has a chance to release
+		// after both audio and video are visible.
+		cfg.WaitForOutputStreams.Timeout = defaultWaitForOutputStreamsTimeout
+	}
 	logger.Debugf(ctx, "output.WaitForOutputStreams: %s", spew.Sdump(cfg.WaitForOutputStreams))
 
 	logger.Debugf(ctx, "isAsync: %t", cfg.AsyncOpen)
@@ -463,6 +577,130 @@ func (o *Output) doOpen(
 		logger.Debugf(ctx, "set the send buffer size to %d", cfg.SendBufferSize)
 	}
 
+	if err := o.maybeRaiseRTMPOutChunkSize(ctx, url, cfg); err != nil {
+		return fmt.Errorf("unable to raise RTMP out_chunk_size: %w", err)
+	}
+
+	return nil
+}
+
+// maybeRaiseRTMPOutChunkSize sends an RTMP Set-Chunk-Size control message on
+// the underlying TCP socket and updates rt->out_chunk_size in the libavformat
+// RTMPContext, raising it from the FFmpeg default of 128 bytes to
+// rtmpDefaultOutChunkSize. This must run after initNetworkConn (which sets up
+// netConn.avioCtx and the RTMP URLContext) and before the muxer starts
+// writing FLV/RTMP packets — i.e. before WriteHeader. The RTMP Chunk Stream
+// protocol allows either side to change its outgoing chunk size at any time
+// (see librtmp / FFmpeg rtmpproto.c handle_chunk_size), so it is safe to do
+// this once at session start.
+//
+// Caller contract: this function MUST be invoked between initNetworkConn and
+// the first muxer write (WriteHeader). Within that window no other goroutine
+// is allowed to interact with the same RTMPContext: we both mutate
+// rt->out_chunk_size via cgo and write a Set-Chunk-Size frame directly to
+// the raw TCP fd, bypassing the FFmpeg AVIO buffer. Concurrent muxer writes
+// or reads on the same connection during this window would race the byte
+// stream and the RTMPContext field. Currently the sequential doOpen flow is
+// what enforces this (no other goroutine has a handle to o.netConn yet).
+//
+// Excludes the rtmps:// scheme on purpose: rtmps wraps the RTMP byte stream
+// in TLS, and the raw-fd write here would land plaintext below the TLS
+// layer (corrupting the session). The cgo TCPContext() lookup we use to
+// reach the RTMPContext also panics when the protocol name is "tls"
+// instead of "tcp", so an rtmps connection cannot be safely tuned this way.
+func (o *Output) maybeRaiseRTMPOutChunkSize(
+	ctx context.Context,
+	url *url.URL,
+	cfg OutputConfig,
+) error {
+	switch url.Scheme {
+	case "rtmp":
+	default:
+		return nil
+	}
+
+	desired := rtmpDefaultOutChunkSize
+	if v := cfg.CustomOptions.GetFirst("rtmp_out_chunk_size"); v != nil {
+		parsed, err := strconv.Atoi(*v)
+		if err != nil {
+			return fmt.Errorf("invalid rtmp_out_chunk_size value '%s': %w", *v, err)
+		}
+		if parsed <= 0 {
+			return fmt.Errorf("rtmp_out_chunk_size must be > 0, got %d", parsed)
+		}
+		if parsed > rtmpMaxChunkSize {
+			return fmt.Errorf("rtmp_out_chunk_size must be <= %d (RTMP spec §5.4.1), got %d", rtmpMaxChunkSize, parsed)
+		}
+		desired = parsed
+	}
+
+	var rtmpCtx *avcommon.RTMPContext
+	o.netConn.locker.ManualRLock(ctx)
+	rtmpCtx = o.netConn.unsafeGetRawRTMPContext(ctx)
+	o.netConn.locker.ManualRUnlock(ctx)
+	if rtmpCtx == nil {
+		logger.Debugf(ctx, "no RTMP context available; skipping out_chunk_size raise")
+		return nil
+	}
+	current := rtmpCtx.OutChunkSize()
+	if current >= desired {
+		logger.Debugf(ctx, "RTMP out_chunk_size is already %d (>= %d); not raising", current, desired)
+		return nil
+	}
+
+	// RTMP Chunk Stream Set-Chunk-Size message:
+	//   chunk basic header  : 0x02         (fmt=0, csid=2 — protocol control channel)
+	//   chunk message header: ts(BE24)=0, msg_len(BE24)=4, msg_type=0x01,
+	//                          msg_stream_id(LE32)=0
+	//   chunk payload       : new_chunk_size(BE32)
+	setChunkSizeMsg := [16]byte{
+		0x02,
+		0x00, 0x00, 0x00,
+		0x00, 0x00, 0x04,
+		0x01,
+		0x00, 0x00, 0x00, 0x00,
+		byte(desired >> 24),
+		byte(desired >> 16),
+		byte(desired >> 8),
+		byte(desired),
+	}
+
+	err := o.WithRawNetworkConn(
+		ctx,
+		func(_ context.Context, rc syscall.RawConn, _ string) error {
+			var werr error
+			cerr := rc.Write(func(fd uintptr) bool {
+				// Loop until the whole Set-Chunk-Size frame is written.
+				// syscall.Write may return short on a non-blocking
+				// socket or under back-pressure; sending a partial
+				// SCS frame would desync the RTMP chunk stream.
+				buf := setChunkSizeMsg[:]
+				for len(buf) > 0 {
+					n, err := syscall.Write(int(fd), buf)
+					if err != nil {
+						werr = err
+						return true
+					}
+					if n <= 0 {
+						werr = fmt.Errorf("syscall.Write returned %d for SCS frame", n)
+						return true
+					}
+					buf = buf[n:]
+				}
+				return true
+			})
+			if cerr != nil {
+				return cerr
+			}
+			return werr
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("unable to send Set-Chunk-Size control packet: %w", err)
+	}
+
+	rtmpCtx.SetOutChunkSize(desired)
+	logger.Debugf(ctx, "raised RTMP out_chunk_size: %d -> %d", current, desired)
 	return nil
 }
 
@@ -702,7 +940,27 @@ func (o *Output) configureOutputStream(
 		if w == 0 || h == 0 {
 			return fmt.Errorf("video stream has invalid dimensions: %dx%d", w, h)
 		}
+		// Reject video streams whose time_base is not yet populated.
+		// Without a non-zero denominator, RescaleTs and the muxer
+		// internals (e.g. mpegts PCR computation) divide by zero,
+		// producing SIGFPE inside av_interleaved_write_frame. This
+		// mirrors the audio sample_rate guard below.
+		if outputStream.TimeBase().Den() == 0 {
+			return fmt.Errorf("video stream has invalid time_base: %s", outputStream.TimeBase())
+		}
 		logger.Debugf(ctx, "video stream dimensions: %dx%d", w, h)
+	case astiav.MediaTypeAudio:
+		// Reject audio streams whose codec parameters are not yet populated.
+		// Without sample_rate, container muxers like mpegts log "sample rate
+		// not set", make WriteHeader return EINVAL, and then SIGFPE inside
+		// av_interleaved_write_frame on division by sample_rate=0. Returning
+		// an error here lets the caller retry once the demuxer has populated
+		// the parameters from later packets.
+		sr := outputStream.CodecParameters().SampleRate()
+		if sr == 0 {
+			return fmt.Errorf("audio stream has invalid sample_rate: %d", sr)
+		}
+		logger.Debugf(ctx, "audio stream sample_rate: %d", sr)
 	}
 
 	return nil
@@ -715,6 +973,14 @@ func (o *Output) preallocateOutputStream(
 	inputStreamIndex := inputStream.Index()
 	if _, ok := o.OutputStreams[inputStreamIndex]; ok {
 		logger.Tracef(ctx, "stream #%d already exists, not preallocating", inputStreamIndex)
+		return nil
+	}
+	// Output may be in the process of being torn down (Close set FormatContext
+	// to nil under formatContextLocker). The auto_bitrate handler can call into
+	// NotifyAboutPacketSource asynchronously, racing with Close — without this
+	// guard we'd dereference a nil FormatContext in NewStream below.
+	if o.FormatContext == nil {
+		logger.Debugf(ctx, "FormatContext is nil; skipping preallocation of output stream for input stream #%d", inputStreamIndex)
 		return nil
 	}
 
@@ -787,6 +1053,15 @@ func (o *Output) getOutputStream(
 		return outputStream, nil
 	}
 
+	if o.headerSent && !muxerAllowsLateStreamAddition(o.outputFormatName) {
+		// Once WriteHeader has run, the muxer's stream table is committed
+		// for muxers that do not support runtime stream-table mutation.
+		// Adding a stream now would crash av_interleaved_write_frame
+		// with SIGFPE on the first write to that index. Surface the
+		// typed error so the upstream forwarder can recreate the kernel.
+		logger.Warnf(ctx, "input stream #%d not registered before muxer header was written; refusing to add (muxer=%s)", inputStream.Index(), o.outputFormatName)
+		return nil, ErrLateStreamAddition{StreamIndex: inputStream.Index()}
+	}
 	logger.Debugf(ctx, "building new output stream for input stream #%d", inputStream.Index())
 	err := o.updateOutputFormat(ctx, inputSource, fmtCtx)
 	if err != nil {
@@ -892,13 +1167,23 @@ func (o *Output) sendPacket(
 			// stream metadata so that we do not silently discard the packet.
 			if inputStream := inputPkt.GetStream(); inputStream != nil && inputStream.CodecParameters() != nil &&
 				inputStream.CodecParameters().CodecID() != astiav.CodecIDNone {
-				logger.Debugf(ctx, "source format context unavailable; lazily initializing output stream from packet stream #%d", inputStream.Index())
-				var initErr error
-				outputStream, initErr = o.getOutputStreamFromPacket(ctx, inputPkt.GetSource(), inputStream)
-				if initErr != nil {
-					logger.Warnf(ctx, "lazy output stream init failed: %v", initErr)
+				if o.headerSent && !muxerAllowsLateStreamAddition(o.outputFormatName) {
+					// Creating a new stream after WriteHeader is unsafe for
+					// muxers that do not support runtime stream-table
+					// mutation (see ErrLateStreamAddition docs). Don't
+					// lazy-init; surface the error instead of producing a
+					// SIGFPE later.
+					logger.Warnf(ctx, "packet for stream #%d arrived after muxer header was written; refusing to lazy-init (muxer=%s)", inputStream.Index(), o.outputFormatName)
+					err = ErrLateStreamAddition{StreamIndex: inputStream.Index()}
 				} else {
-					err = nil
+					logger.Debugf(ctx, "source format context unavailable; lazily initializing output stream from packet stream #%d", inputStream.Index())
+					var initErr error
+					outputStream, initErr = o.getOutputStreamFromPacket(ctx, inputPkt.GetSource(), inputStream)
+					if initErr != nil {
+						logger.Warnf(ctx, "lazy output stream init failed: %v", initErr)
+					} else {
+						err = nil
+					}
 				}
 			}
 		}
@@ -1034,6 +1319,17 @@ func (o *Output) send(
 			logger.Errorf(ctx, "the limit of pending packets is exceeded, have to drop older packets")
 			o.pendingPackets = o.pendingPackets[1:]
 		}
+		// Arm the bounded WriteHeader-deferral deadline on the first
+		// buffered packet. Without this, a producer that delivers only
+		// one media type (e.g. video before the demuxer has parsed
+		// audio) would block WriteHeader forever waiting for the
+		// configured Min* counts.
+		if o.pendingPacketsDeadline.IsZero() && o.Config.WaitForOutputStreams != nil &&
+			o.Config.WaitForOutputStreams.Timeout > 0 {
+			o.pendingPacketsDeadline = time.Now().Add(o.Config.WaitForOutputStreams.Timeout)
+			logger.Debugf(ctx, "armed WaitForOutputStreams deadline: %s (timeout %s)",
+				o.pendingPacketsDeadline, o.Config.WaitForOutputStreams.Timeout)
+		}
 	}
 	var activeVideoStreamCount uint
 	var activeAudioStreamCount uint
@@ -1054,7 +1350,13 @@ func (o *Output) send(
 			activeDataStreamCount++
 		}
 	}
-	if o.Config.WaitForOutputStreams != nil {
+	// timeoutExpired tells us the bounded WriteHeader-deferral window
+	// has elapsed and we must commit with whatever streams are present.
+	// It is only meaningful while o.pendingPacketsDeadline is armed.
+	timeoutExpired := !o.pendingPacketsDeadline.IsZero() &&
+		time.Now().After(o.pendingPacketsDeadline)
+
+	if o.Config.WaitForOutputStreams != nil && !timeoutExpired {
 		if activeStreamCount < expectedStreamsCount {
 			logger.Tracef(ctx, "not starting sending the packets, yet: total streams: %d < %d; %s", activeStreamCount, expectedStreamsCount, mediaType)
 			return nil
@@ -1075,6 +1377,18 @@ func (o *Output) send(
 			logger.Tracef(ctx, "not starting sending the packets, yet: data streams: %d < %d; %s", activeDataStreamCount, expectedStreamsDataCount, mediaType)
 			return nil
 		}
+	}
+	if timeoutExpired {
+		logger.Warnf(
+			ctx,
+			"WaitForOutputStreams deadline expired (timeout %s); committing WriteHeader with current streams: *:%d/%d, v:%d/%d, a:%d/%d, s:%d/%d, d:%d/%d",
+			o.Config.WaitForOutputStreams.Timeout,
+			activeStreamCount, expectedStreamsCount,
+			activeVideoStreamCount, expectedStreamsVideoCount,
+			activeAudioStreamCount, expectedStreamsAudioCount,
+			activeSubtitleStreamCount, expectedStreamsSubtitleCount,
+			activeDataStreamCount, expectedStreamsDataCount,
+		)
 	}
 	if outputWaitForKeyFrames && len(o.waitingKeyFrames) != 0 {
 		logger.Tracef(ctx, "not starting sending the packets, yet: %d != 0; %s", len(o.waitingKeyFrames), mediaType)
@@ -1341,13 +1655,23 @@ func (o *Output) doWritePacket(
 			return
 		}
 		err = o.FormatContext.WriteInterleavedFrame(pkt)
+		if err != nil {
+			return
+		}
 		// Flush after every packet for real-time streaming. Without
 		// this, data stays in the AVIO 32KB buffer and slow producers
 		// (phone h264_mediacodec at 30fps) never fill it, causing
 		// the receiving side to starve.
-		if err == nil && o.ioContext != nil {
+		if o.ioContext != nil {
 			o.ioContext.Flush()
 		}
+		// Update high-water-marks under the same lock so concurrent
+		// readers (GetLatestSentDTS) observe a consistent snapshot.
+		// Previously these assignments lived outside the lock — a
+		// pre-existing race fixed here.
+		outputStream.LastDTS = dts
+		o.LatestSentPTS = ptsDuration
+		o.LatestSentDTS = dtsDuration
 	})
 	if err != nil {
 		err = fmt.Errorf(
@@ -1361,9 +1685,6 @@ func (o *Output) doWritePacket(
 		)
 		return err
 	}
-	outputStream.LastDTS = dts
-	o.LatestSentPTS = ptsDuration
-	o.LatestSentDTS = dtsDuration
 	if logger.FromCtx(ctx).Level() >= logger.LevelTrace {
 		logger.Tracef(ctx,
 			"wrote a packet (pos: %d; pts: %d; dts: %d): %s: %s; len:%d: %v",
@@ -1423,10 +1744,23 @@ func (o *Output) NotifyAboutPacketSource(
 	source.WithOutputFormatContext(ctx, func(fmtCtx *astiav.FormatContext) {
 		o.formatContextLocker.Do(ctx, func() {
 			for _, stream := range fmtCtx.Streams() {
-				logger.Debugf(ctx, "making sure stream #%d is initialized", stream.Index())
+				idx := stream.Index()
+				if o.headerSent && !muxerAllowsLateStreamAddition(o.outputFormatName) {
+					if _, ok := o.OutputStreams[idx]; !ok {
+						// The muxer has already written its header with a fixed
+						// stream table and does not support runtime stream-
+						// table mutation; adding a new stream now would crash
+						// av_interleaved_write_frame on SIGFPE. Surface a typed
+						// error so upstream can decide to recreate this kernel.
+						logger.Warnf(ctx, "stream #%d appeared after the muxer header was written; refusing to preallocate (muxer=%s)", idx, o.outputFormatName)
+						errs = append(errs, ErrLateStreamAddition{StreamIndex: idx})
+						continue
+					}
+				}
+				logger.Debugf(ctx, "making sure stream #%d is initialized", idx)
 				err := o.preallocateOutputStream(ctx, stream)
 				if err != nil {
-					errs = append(errs, fmt.Errorf("unable to preallocate an output stream for input stream %d from source %s: %w", stream.Index(), source, err))
+					errs = append(errs, fmt.Errorf("unable to preallocate an output stream for input stream %d from source %s: %w", idx, source, err))
 				}
 			}
 		})

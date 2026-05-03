@@ -12,6 +12,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	transcodertypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/observability"
 	"github.com/xaionaro-go/secret"
@@ -33,6 +34,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 	streamKey secret.String,
 	transcoderConfig *transcodertypes.TranscoderConfig,
 	filterKernelFactory FilterKernelFactory,
+	outputPushToConditions []packetorframefiltercondition.Condition,
 	outputConfig kernel.OutputConfig,
 ) (_ret *RouteForwardingToRemote[T], _err error) {
 	logger.Debugf(ctx, "AddRouteForwardingToRemote(ctx, '%s', '%s')", sourcePath, dstURL)
@@ -77,7 +79,7 @@ func (r *Router[T]) AddRouteForwardingToRemote(
 		return err
 	}, dstURL, streamKey, outputConfig)
 
-	fwd.StreamForwarder, err = NewStreamForwarder(ctx, fwd.Input.Node, fwd.Output, transcoderConfig, filterKernelFactory)
+	fwd.StreamForwarder, err = NewStreamForwarder(ctx, fwd.Input.Node, fwd.Output, transcoderConfig, filterKernelFactory, outputPushToConditions)
 	if err != nil {
 		return nil, fmt.Errorf("unable to build a stream forwarder from '%s' to '%s': %w", fwd.Input, fwd.Output, err)
 	}

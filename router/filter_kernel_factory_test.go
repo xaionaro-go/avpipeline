@@ -32,7 +32,7 @@ func TestNewStreamForwarderTranscoding_WithFilterKernelFactory(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, factory,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, factory, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)
@@ -53,7 +53,7 @@ func TestNewStreamForwarderTranscoding_NilFilterKernelFactory(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)
@@ -75,7 +75,7 @@ func TestNewStreamForwarder_TranscodingPassesFactory(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarder[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, factory,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, factory, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)
@@ -100,7 +100,7 @@ func TestNewStreamForwarder_CopyIgnoresFactory(t *testing.T) {
 
 	// nil transcoderConfig → copy mode, factory should be ignored
 	fwd, err := NewStreamForwarder[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, nil, factory,
+		ctx, srcRoute.Node, dstRoute.Node, nil, factory, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)

@@ -113,3 +113,30 @@ func (d *Decoder) IsDirty(
 ) bool {
 	return d.isDirty.Load()
 }
+
+// HardwareFramesContextLockless returns the decoder's hw_frames_ctx
+// without acquiring d.locker.
+//
+// The hw_frames_ctx pointer is set during newCodec() and never reassigned
+// during steady-state lifetime — only freed at Close(). Reading it without
+// a lock is race-free during normal operation; the encoder hot path that
+// invokes this already holds Ref()s on the decoder keeping it alive.
+//
+// The locking variant deadlocks the encoder hot path: encoder holds its own
+// locker while the decoder's locker is held by a CGO-blocked SendPacket
+// waiting for downstream drain — circular deadlock. Lockless read breaks
+// the cycle.
+//
+// nil is returned when the decoder has no hw_frames_ctx attached (SW path)
+// or when the codec context itself is nil (pre-init or post-Close); the
+// encoder's getScaledFrame falls through to its "no hw_frames_ctx" error
+// path which drops the frame.
+func (d *Decoder) HardwareFramesContextLockless() *astiav.HardwareFramesContext {
+	if d.hardwareFramesContext != nil {
+		return d.hardwareFramesContext
+	}
+	if d.codecContext != nil {
+		return d.codecContext.HardwareFramesContext()
+	}
+	return nil
+}

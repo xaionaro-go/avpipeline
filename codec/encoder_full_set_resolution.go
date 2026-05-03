@@ -68,7 +68,7 @@ func (e *EncoderFullLocked) setResolutionGeneric(
 		logger.Debugf(ctx, "the resolution is already %v", res)
 		return nil
 	}
-	logger.Infof(ctx, "SetResolution (generic): %v", res)
+	logger.Infof(ctx, "SetResolution (generic): %v ts_ms=%d", res, logger.NowMS())
 	e.InitParams.CodecParameters.SetWidth(int(res.Width))
 	e.InitParams.CodecParameters.SetHeight(int(res.Height))
 	if e.InitParams.CustomOptions == nil {

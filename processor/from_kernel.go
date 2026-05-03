@@ -24,6 +24,7 @@ import (
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
+	"github.com/xaionaro-go/xcontext"
 	"github.com/xaionaro-go/xsync"
 )
 
@@ -82,7 +83,24 @@ func NewFromKernel[T kernel.Abstract](
 		CountersStorage: processortypes.NewCounters(),
 		closer:          astikit.NewCloser(),
 	}
-	p.startProcessing(ctx)
+	// Detach ctx for the long-lived processor goroutines spawned in
+	// startProcessing. NewFromKernel is called during chain construction,
+	// often from a request-scoped caller (e.g. ffstream's gRPC AddInput
+	// chain factory at preset/inputwithfallback/input_chain.go's
+	// node.NewWithCustomDataFromKernel calls). When the AddInput RPC
+	// returns, the caller's ctx is cancelled by gRPC; without this
+	// detach, every FromKernel processor's Generate / readerLoop /
+	// preOutputCh-forwarder goroutine sees ctx.Done immediately, the
+	// forwarder closes p.OutputCh, and downstream
+	// NodeWithCustomData.Serve at node_serve.go:132 returns
+	// sendErr(io.EOF) — cascading EOF through the entire chain before
+	// any frame can flow. Lifecycle is owned by the processor's closer
+	// (Close path drains InputCh/preOutputCh/OutputCh), not by the
+	// caller's ctx. Mirrors the kernel/retryable.go xcontext.DetachDone
+	// fixes (#350 task #10 RCA: chain.Serve sub-Serves all "started" →
+	// "ended" same second; preOutputCh forwarder closes p.OutputCh on
+	// gRPC RPC ctx cancel).
+	p.startProcessing(xcontext.DetachDone(ctx))
 	return p
 }
 
@@ -164,11 +182,23 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 			defer swg.Done()
 			err := p.Kernel.Generate(ctx, p.preOutputCh)
 			logger.Tracef(ctx, "p.Kernel[%T].Generate: %v", p, err)
-			if err != nil {
-				p.ErrorCh <- fmt.Errorf(
-					"kernel %T unable to generate traffic: %w",
-					p.Kernel, err,
-				)
+			if err == nil {
+				return
+			}
+			wrapped := fmt.Errorf(
+				"kernel %T unable to generate traffic: %w",
+				p.Kernel, err,
+			)
+			// Send non-blockingly with ctx.Done escape: during shutdown the
+			// reader-side may have already filled ErrorCh (cap 1) with its
+			// own ctx.Err() before close(errCh). Without ctx.Done escape
+			// this goroutine deadlocks on a full ErrorCh, swg.Wait() blocks
+			// finalize, and Close() never returns. Dropping a redundant
+			// shutdown error is safe — the reader-side error already
+			// reflects ctx cancellation.
+			select {
+			case p.ErrorCh <- wrapped:
+			case <-ctx.Done():
 			}
 		})
 
@@ -183,7 +213,14 @@ func (p *FromKernel[T]) startProcessing(ctx context.Context) {
 		)
 		logger.Tracef(ctx, "/ReaderLoop[%s]: %v", p, err)
 		if err != nil {
-			errCh <- err
+			// Send non-blockingly with ctx.Done escape: the generator
+			// goroutine may have already filled ErrorCh (cap 1) with its
+			// own shutdown error before this send runs. See the matching
+			// comment on the generator-side send above.
+			select {
+			case errCh <- err:
+			case <-ctx.Done():
+			}
 		}
 	})
 
@@ -375,6 +412,62 @@ func (p *FromKernel[T]) HandleError(
 		return h.HandleError(ctx, err)
 	}
 	return err
+}
+
+var _ kerneltypes.Resetter = (*FromKernel[kernel.Abstract])(nil)
+
+// Reset drains pending items from the processor's own packet/frame
+// queues — InputCh, preOutputCh, OutputCh — and forwards Reset to the
+// wrapped kernel if it implements kerneltypes.Resetter.
+//
+// Why drain: when an upstream kernel.Retryable reopens its inner
+// kernel after EOF, the FromKernel that wraps a downstream Barrier
+// may already hold packets observed against the prior connection in
+// its buffered channels. Without draining, those stale packets
+// back-pressure the chain and the upstream pusher hits "queue is full
+// (size: 1)" once the new connection produces fresh packets.
+//
+// Drains are non-blocking: stale buffered items are discarded, but
+// no producer/consumer goroutines are paused. Callers must invoke
+// Reset only when the chain is in a quiescent state for the affected
+// streams (e.g. from the Retryable reopen callback before fresh
+// packets start flowing) — otherwise concurrently-produced fresh
+// packets may also be discarded.
+func (p *FromKernel[T]) Reset(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Reset[%s]", p)
+	defer func() { logger.Tracef(ctx, "/Reset[%s]: %v", p, _err) }()
+
+	drainCh(p.InputCh)
+	drainCh(p.preOutputCh)
+	drainCh(p.OutputCh)
+
+	if r, ok := any(p.Kernel).(kerneltypes.Resetter); ok {
+		return r.Reset(ctx)
+	}
+	return nil
+}
+
+// drainCh non-blockingly drains buffered items from ch. If ch has been
+// closed (e.g. Reset is racing FromKernel shutdown), the for-loop
+// would otherwise spin forever consuming zero values — the ok-flag
+// check exits immediately on a closed channel.
+//
+// Generic in T so the same helper covers InputUnion, OutputUnion, and
+// any future per-channel union type added to FromKernel without
+// re-implementing the closed-channel guard. Pre-SSOT this lived as two
+// hand-written variants (drainInputCh / drainOutputCh) that already
+// drifted once during refactors and were difficult to grep for.
+func drainCh[T any](ch chan T) {
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		default:
+			return
+		}
+	}
 }
 
 var _ processortypes.UnsafeGetOldestDTSInTheQueuer = (*FromKernel[kernel.Abstract])(nil)

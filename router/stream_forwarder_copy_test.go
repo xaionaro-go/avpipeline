@@ -518,7 +518,7 @@ func TestNewStreamForwarder_NilTranscoderConfig_CreatesCopy(t *testing.T) {
 	require.NoError(t, err)
 
 	fwd, err := NewStreamForwarder[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, nil, nil,
+		ctx, srcRoute.Node, dstRoute.Node, nil, nil, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)

@@ -135,6 +135,19 @@ func (k *Base[H]) Close(ctx context.Context) (_err error) {
 	return nil
 }
 
+// Reset implements kerneltypes.Resetter when the wrapped handler also
+// implements it; otherwise it is a no-op. This lets chain-restart paths
+// invoke Reset uniformly across kernels regardless of which wrap layer
+// (Base, BaseWithFormatContext) the underlying handler lives in.
+func (k *Base[H]) Reset(ctx context.Context) error {
+	logger.Tracef(ctx, "Reset()")
+	defer func() { logger.Tracef(ctx, "/Reset()") }()
+	if r, ok := any(k.Handler).(kerneltypes.Resetter); ok {
+		return r.Reset(ctx)
+	}
+	return nil
+}
+
 func (k *Base[H]) CloseChan() <-chan struct{} {
 	return k.ClosureSignaler.CloseChan()
 }

@@ -16,6 +16,14 @@ const (
 
 	// If set then the state of all inactive outputs will be "block".
 	SwitchFlagInactiveBlock
+
+	// If set, the Switch tracks per-chain last-emitted PTS per stream and, on
+	// chain change, rebases the new chain's PTS / DTS so the output stream
+	// remains a strictly-monotonic continuation of the old chain's last PTS.
+	// Bridges cross-clock-domain transitions (e.g. rtmp upstream-derived PTS
+	// vs builtin camera+mic monotonic-epoch PTS) that would otherwise produce
+	// large forward / backward jumps at chain switches and freeze players.
+	SwitchFlagBridgePTSAcrossChains
 )
 
 func (f SwitchFlags) HasAll(flag SwitchFlags) bool {

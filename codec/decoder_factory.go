@@ -49,6 +49,19 @@ type NaiveDecoderFactoryParams struct {
 	PostInitFunc          func(context.Context, *Decoder)
 	ResourceManager       ResourceManager
 	Options               []Option
+
+	// AutoSelectHardwareDecoder, when true and VideoCodec is empty,
+	// resolves the video decoder by trying <codec_id>_<hw_suffix>
+	// against astiav.FindDecoderByName (e.g. av1_cuvid for CUDA,
+	// av1_mediacodec for MediaCodec, h264_qsv for QSV). The hw_suffix
+	// is derived generically from HardwareDeviceType via Name.hwName,
+	// so any registered hwaccel variant is discoverable without a
+	// per-codec allowlist. HardwareDeviceTypeNone defaults to CUDA
+	// for backward-compat (avd cascade transcoder leaves
+	// hardware_device_type unset). Falls back to the libav default if
+	// the hardware decoder is not registered. An explicit VideoCodec
+	// always wins.
+	AutoSelectHardwareDecoder bool
 }
 
 func DefaultNaiveDecoderFactory() *NaiveDecoderFactoryParams {
@@ -127,8 +140,17 @@ func (f *NaiveDecoderFactory) newDecoder(
 			Options:               optsCombined,
 		}
 	case astiav.MediaTypeVideo:
+		videoCodec := f.VideoCodec
+		if videoCodec == "" && f.AutoSelectHardwareDecoder {
+			// Empty + opt-in → probe codec_id for a registered hwaccel
+			// decoder under f.HardwareDeviceType. preferredHWDecoderName
+			// returns "" if the variant is missing, so libav's default
+			// selection still applies as fallback. HardwareDeviceTypeNone
+			// is treated as CUDA inside the helper for backward-compat.
+			videoCodec = preferredHWDecoderName(ctx, codecParameters.CodecID(), f.HardwareDeviceType)
+		}
 		decInput = DecoderInput{
-			CodecName:             f.VideoCodec,
+			CodecName:             videoCodec,
 			CodecParameters:       codecParameters,
 			HardwareDeviceType:    f.HardwareDeviceType,
 			HardwareDeviceName:    f.HardwareDeviceName,
@@ -223,11 +245,35 @@ func (f *NaiveDecoderFactory) getResources(
 	return nil
 }
 
+// ResourcesFromDecoder is the exported variant of resourcesFromDecoder for
+// callers (e.g. streammux's outputAsResourceManager.GetReusable) that need
+// to harvest hardware-side state from a decoder owned by a *different*
+// factory than the local f.VideoDecoders set. The same lifetime caveats
+// apply as resourcesFromDecoder — see its docstring.
+func ResourcesFromDecoder(
+	ctx context.Context,
+	d *Decoder,
+) *Resources {
+	return resourcesFromDecoder(ctx, d)
+}
+
 // resourcesFromDecoder snapshots the decoder's hardware-side state for an
 // encoder to optionally reuse. The hw_frames_ctx is populated lazily by the
 // driver (cuvid attaches it after the first decoded frame), so HWFramesContext
 // may be nil here even when hardware decoding is configured. The encoder side
 // re-validates dims/formats before reusing.
+//
+// Dims (HWFramesContextWidth/Height) are recorded unconditionally from the
+// decoder's CodecContext whenever a HWDeviceContext is present. The
+// "hw_frames_ctx is real" semantic is checked explicitly via
+// HWFramesContext != nil at every reuse site. Mediacodec decoders in
+// Surface mode never attach a hw_frames_ctx (FFmpeg's mediacodec hwctx
+// omits frames_init/transfer_data) yet still expose a HWDeviceContext
+// whose embedded native_window IS the decoder→encoder Surface link.
+// Recording the decoder's dims lets selectMediaCodecEncoderDefaultPixFmt
+// keep the encoder on pix_fmt=MEDIACODEC for same-dim mediacodec→mediacodec
+// passthrough — the only path that produces packets without av_hwframe_*
+// scaffolding that mediacodec hwctx cannot satisfy.
 //
 // Lifecycle safety for HWFramesContext (an *AVBufferRef wrapper): astiav has
 // no public Ref()/Clone() on HardwareFramesContext, so we cannot bump the
@@ -250,20 +296,23 @@ func resourcesFromDecoder(
 	res := &Resources{
 		HWDeviceContext: d.HardwareDeviceContext(ctx),
 	}
+	cc := d.CodecContext(ctx)
+	if cc != nil && res.HWDeviceContext != nil {
+		// Record decoder dims unconditionally; cuvid path (initHardwarePixelFormat
+		// + initHardwareFramesContext) still gates hfc-reuse on HWFramesContext != nil
+		// AND dim-match, so populating dims without a real hfc cannot mis-route
+		// the cuvid encoder.
+		res.HWFramesContextWidth = cc.Width()
+		res.HWFramesContextHeight = cc.Height()
+	}
 	if hfc := d.HardwareFramesContext(ctx); hfc != nil {
-		// Pull dims from the decoder's CodecContext: HardwareFramesContext has
-		// no Width/Height getters in astiav, but the codec context tracks the
-		// stream's negotiated resolution which the hw_frames_ctx mirrors.
 		// The decoder's CodecContext.PixelFormat() returns the HW pixfmt
 		// (e.g. cuda) selected via the get_format callback — that matches the
 		// encoder's hardwarePixelFormat for nvenc, so it's the right field to
 		// compare against. The SW pixfmt is opaque (no getter on astiav's
 		// HardwareFramesContext), so the encoder side does not validate it.
-		cc := d.CodecContext(ctx)
 		if cc != nil {
 			res.HWFramesContext = hfc
-			res.HWFramesContextWidth = cc.Width()
-			res.HWFramesContextHeight = cc.Height()
 			res.HWFramesContextHWPixFmt = d.HardwarePixelFormat(ctx)
 			logger.Debugf(ctx, "captured upstream hw_frames_ctx: %p %dx%d hw=%s",
 				hfc, res.HWFramesContextWidth, res.HWFramesContextHeight,

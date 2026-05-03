@@ -463,6 +463,19 @@ func TestName_hwName_CUDA_Decoder(t *testing.T) {
 	assert.Equal(t, Name("h264_cuvid"), result)
 }
 
+// TestName_hwName_None_Panics pins the K-CritB-1 fail-fast contract:
+// hwName must NOT silently produce "<codec>_none" when called with
+// HardwareDeviceTypeNone (which would mask caller misuse via a quietly-
+// unregistered name that FindDecoderByName turns into nil).
+func TestName_hwName_None_Panics(t *testing.T) {
+	ctx := context.Background()
+	assert.PanicsWithValue(t,
+		"hwName called with HardwareDeviceTypeNone — callers must resolve None to a concrete device type before calling",
+		func() {
+			Name("av1").hwName(ctx, false, globaltypes.HardwareDeviceTypeNone)
+		})
+}
+
 // --- detectHardwareDeviceType ---
 
 func TestDetectHardwareDeviceType(t *testing.T) {
@@ -494,7 +507,7 @@ func TestNewNaiveDecoderFactory_NilParams(t *testing.T) {
 	ctx := context.Background()
 	f := NewNaiveDecoderFactory(ctx, nil)
 	require.NotNil(t, f)
-	assert.Equal(t, "NaiveDecoderFactory", f.String())
+	assert.Equal(t, "NaiveDecoderFactory(/)", f.String())
 }
 
 func TestNewNaiveDecoderFactory_WithParams(t *testing.T) {
@@ -841,13 +854,13 @@ func TestDecoder_SendPacket_IntraOnlyCodecAcceptsNonKeyFrame(t *testing.T) {
 		{"wrapped_avframe", astiav.CodecIDWrappedAvframe},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.True(t, isIntraOnlyCodec(tc.codecID))
+			assert.True(t, IsIntraOnlyCodec(tc.codecID))
 		})
 	}
 
 	// Verify inter-frame codecs are NOT intra-only.
-	assert.False(t, isIntraOnlyCodec(astiav.CodecIDH264))
-	assert.False(t, isIntraOnlyCodec(astiav.CodecIDH265))
+	assert.False(t, IsIntraOnlyCodec(astiav.CodecIDH264))
+	assert.False(t, IsIntraOnlyCodec(astiav.CodecIDH265))
 }
 
 // --- NaiveDecoderFactory lifecycle ---
@@ -1153,15 +1166,17 @@ func TestNaiveEncoderFactory_NewEncoder_Video(t *testing.T) {
 	assert.Empty(t, f.AudioEncoders)
 }
 
-func TestNaiveEncoderFactory_NewEncoder_UnsupportedMediaType(t *testing.T) {
+func TestNaiveEncoderFactory_NewEncoder_NonAVMediaTypePassthrough(t *testing.T) {
 	ctx := context.Background()
 	f := NewNaiveEncoderFactory(ctx, nil)
 	cp := astiav.AllocCodecParameters()
 	t.Cleanup(cp.Free)
 	cp.SetMediaType(astiav.MediaTypeSubtitle)
-	_, err := f.NewEncoder(ctx, cp, astiav.NewRational(1, 30))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "only audio and video")
+	enc, err := f.NewEncoder(ctx, cp, astiav.NewRational(1, 30))
+	require.NoError(t, err)
+	assert.IsType(t, EncoderCopy{}, enc)
+	assert.Empty(t, f.VideoEncoders)
+	assert.Empty(t, f.AudioEncoders)
 }
 
 // --- Decoder GetQuality ---

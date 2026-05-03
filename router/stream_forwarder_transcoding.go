@@ -12,8 +12,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/kernel"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	"github.com/xaionaro-go/avpipeline/nodewrapper"
 	"github.com/xaionaro-go/avpipeline/packet"
 	transcoder "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough"
@@ -29,15 +31,16 @@ type FilterKernelFactory func(ctx context.Context) (kernel.Abstract, error)
 
 // TODO: remove StreamForwarder from package `router`
 type StreamForwarderTranscoding[CS any, PS processor.Abstract] struct {
-	Input               *node.NodeWithCustomData[CS, PS]
-	InputAsPacketSource packet.Source
-	DestinationNode     node.Abstract
-	TranscoderConfig    transcodertypes.TranscoderConfig
-	FilterKernelFactory FilterKernelFactory
-	Chain               *transcoder.TranscoderWithPassthrough[CS, PS]
-	ChainInput          *nodewrapper.NoServe[*node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]]
-	CancelFunc          context.CancelFunc
-	Mutex               xsync.Mutex
+	Input                  *node.NodeWithCustomData[CS, PS]
+	InputAsPacketSource    packet.Source
+	DestinationNode        node.Abstract
+	TranscoderConfig       transcodertypes.TranscoderConfig
+	FilterKernelFactory    FilterKernelFactory
+	OutputPushToConditions []packetorframefiltercondition.Condition
+	Chain                  *transcoder.TranscoderWithPassthrough[CS, PS]
+	ChainInput             *nodewrapper.NoServe[*node.Node[*processor.FromKernel[*kernel.MapStreamIndices]]]
+	CancelFunc             context.CancelFunc
+	Mutex                  xsync.Mutex
 }
 
 var _ StreamForwarder[*Route[any], *ProcessorRouting] = (*StreamForwarderTranscoding[*Route[any], *ProcessorRouting])(nil)
@@ -49,6 +52,7 @@ func NewStreamForwarderTranscoding[CS any, PS processor.Abstract](
 	dst node.Abstract,
 	transcoderConfig *transcodertypes.TranscoderConfig,
 	filterKernelFactory FilterKernelFactory,
+	outputPushToConditions []packetorframefiltercondition.Condition,
 ) (_ret *StreamForwarderTranscoding[CS, PS], _err error) {
 	logger.Debugf(ctx, "NewStreamForwarderTranscoding(%s, %s)", src, dst)
 	defer func() { logger.Debugf(ctx, "/NewStreamForwarderTranscoding(%s, %s): %p, %v", src, dst, _ret, _err) }()
@@ -59,10 +63,11 @@ func NewStreamForwarderTranscoding[CS any, PS processor.Abstract](
 	}
 
 	fwd := &StreamForwarderTranscoding[CS, PS]{
-		Input:               src,
-		InputAsPacketSource: packetSource,
-		DestinationNode:     dst,
-		FilterKernelFactory: filterKernelFactory,
+		Input:                  src,
+		InputAsPacketSource:    packetSource,
+		DestinationNode:        dst,
+		FilterKernelFactory:    filterKernelFactory,
+		OutputPushToConditions: outputPushToConditions,
 	}
 
 	if transcoderConfig == nil {
@@ -154,7 +159,7 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) start(origCtx context.Context) (_
 
 	if err := chain.Start(ctx, transcodertypes.PassthroughModeNever, avpipeline.ServeConfig{
 		EachNode: node.ServeConfig{DebugData: fwd},
-	}); err != nil {
+	}, fwd.OutputPushToConditions...); err != nil {
 		return fmt.Errorf("unable to start the StreamForward: %w", err)
 	}
 
@@ -249,5 +254,20 @@ func (fwd *StreamForwarderTranscoding[CS, PS]) stop(
 		return fmt.Errorf("unable to remove pushing from %s to %s: %w", fwd.Input, fwd.ChainInput.Node, err)
 	}
 	fwd.Chain.Wait(ctx)
+	// The chain has drained: any per-stream observation state held by
+	// PushTo Conditions (e.g. kernel.AVSync max-PTS via avsynccondition)
+	// is now stale relative to the next chain that the forwarder may
+	// build. Reset Resetter-capable conditions so a freshly-started
+	// chain begins with a clean observation baseline. Operator-configured
+	// state (offsets, thresholds) is preserved by the Resetter contract.
+	for _, c := range fwd.OutputPushToConditions {
+		r, ok := c.(kerneltypes.Resetter)
+		if !ok {
+			continue
+		}
+		if err := r.Reset(ctx); err != nil {
+			logger.Errorf(ctx, "condition %s reset failed: %v", c, err)
+		}
+	}
 	return nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/frame"
 	"github.com/xaionaro-go/avpipeline/helpers/avfilter"
 	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
@@ -99,6 +100,14 @@ type StreamDecoder struct {
 	AutoRotate        bool
 	Rotation          float64
 	Rotator           *avfilter.FrameRotator
+	// SourceID identifies the upstream packet.Source that this codec
+	// context was opened against. When a new packet arrives from a
+	// different source (e.g. publisher reconnect / takeover on the same
+	// route path), the cached codec context is stale: hardware-accel
+	// state (cuvid/CUDA) was bound to the previous extradata/stream
+	// instance. Reusing it triggers SIGSEGV inside avcodec_send_packet.
+	// getStreamDecoder evicts and recreates on mismatch.
+	SourceID string
 }
 
 func (sd *StreamDecoder) Close(ctx context.Context) error {
@@ -125,8 +134,9 @@ type Decoder[DF codec.DecoderFactory] struct {
 }
 
 var (
-	_ Abstract    = (*Decoder[codec.DecoderFactory])(nil)
-	_ packet.Sink = (*Decoder[codec.DecoderFactory])(nil)
+	_ Abstract             = (*Decoder[codec.DecoderFactory])(nil)
+	_ packet.Sink          = (*Decoder[codec.DecoderFactory])(nil)
+	_ kerneltypes.Resetter = (*Decoder[codec.DecoderFactory])(nil)
 )
 
 func NewDecoder[DF codec.DecoderFactory](
@@ -150,8 +160,8 @@ func (d *Decoder[DF]) Close(ctx context.Context) error {
 }
 
 func (d *Decoder[DF]) closeLocked(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "closeLocked()")
-	defer func() { logger.Debugf(ctx, "/closeLocked(): %v", _err) }()
+	logger.Debugf(ctx, "closeLocked() ts_ms=%d", logger.NowMS())
+	defer func() { logger.Debugf(ctx, "/closeLocked() ts_ms=%d: %v", logger.NowMS(), _err) }()
 	d.ClosureSignaler.Close(ctx)
 
 	var errs []error
@@ -206,12 +216,26 @@ func (d *Decoder[DF]) getStreamDecoder(
 ) (*StreamDecoder, error) {
 	decoder := d.Decoders[stream.Index()]
 	logger.Tracef(ctx, "decoder == %v", decoder)
+	newSourceID := streamDecoderSourceID(source)
 	if decoder != nil {
 		if decoder.Decoder == nil {
 			// Sentinel: this stream type is unsupported, skip it.
 			return nil, nil
 		}
-		return decoder, nil
+		if decoder.SourceID == newSourceID {
+			return decoder, nil
+		}
+		// Source changed (publisher takeover / reconnect on same
+		// route). The codec context is bound to the previous source's
+		// hwaccel state and extradata; reusing it for the new source
+		// SIGSEGVs in avcodec_send_packet. Evict and recreate.
+		logger.Infof(ctx, "stream #%d source changed (%q -> %q); evicting cached decoder", stream.Index(), decoder.SourceID, newSourceID)
+		if err := decoder.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close stale decoder for stream #%d: %v", stream.Index(), err)
+		}
+		delete(d.Decoders, stream.Index())
+		delete(d.OutputCodecParameters, stream.Index())
+		d.StreamInfo.Delete(stream.Index())
 	}
 	rawDecoder, err := d.DecoderFactory.NewDecoder(ctx, source, stream, pipelineSideData)
 	if err != nil {
@@ -255,10 +279,23 @@ func (d *Decoder[DF]) getStreamDecoder(
 		Decoder:    rawDecoder,
 		AutoRotate: autoRotate,
 		Rotation:   rotation,
+		SourceID:   newSourceID,
 	}
-	logger.Tracef(ctx, "initialized a decoder: %s", decoder)
+	logger.Tracef(ctx, "initialized a decoder: %s (source=%q)", decoder, newSourceID)
 	d.Decoders[stream.Index()] = decoder
 	return decoder, nil
+}
+
+// streamDecoderSourceID returns a stable identity string for a
+// packet.Source. We use the source's String() (typically a path/addr
+// representation) plus its pointer address to disambiguate between
+// distinct source instances that happen to share the same String() —
+// e.g. two ConnectionProxied publishers on the same RTMP route path.
+func streamDecoderSourceID(source packet.Source) string {
+	if source == nil {
+		return ""
+	}
+	return fmt.Sprintf("%p:%s", source, source)
 }
 
 func (d *Decoder[DF]) sendBlankFrameForDroppedPacket(
@@ -714,8 +751,8 @@ func (d *Decoder[DF]) resetHard(
 	opts CodecResetOptions,
 ) (_err error) {
 	cfg := opts.config()
-	logger.Tracef(ctx, "resetHard: cfg=%+v", cfg)
-	defer func() { logger.Tracef(ctx, "/resetHard: cfg=%#+v: %v", cfg, _err) }()
+	logger.Tracef(ctx, "resetHard: cfg=%+v ts_ms=%d", cfg, logger.NowMS())
+	defer func() { logger.Tracef(ctx, "/resetHard: cfg=%#+v ts_ms=%d: %v", cfg, logger.NowMS(), _err) }()
 
 	var errs []error
 	for streamIndex, decoder := range d.Decoders {
@@ -738,6 +775,22 @@ func (d *Decoder[DF]) resetHard(
 	}
 
 	return errors.Join(errs...)
+}
+
+// Reset implements kerneltypes.Resetter. It tears down per-stream
+// codec contexts and the cached output codec parameters so that the
+// next packet (e.g. produced after an upstream Retryable reopen)
+// re-initializes a fresh decoder against the freshly-observed stream
+// parameters. Without this, a stale codec context from the previous
+// connection blocks decoding when the new stream's params differ
+// (resolution, extradata, codec ID), and downstream video flow stalls.
+//
+// Operator-configured factory state (codec name, hardware device,
+// options) lives on DecoderFactory and is preserved by
+// DecoderFactory.Reset (see NaiveDecoderFactory.reset, which only
+// nils its internal decoder lists).
+func (d *Decoder[DF]) Reset(ctx context.Context) error {
+	return d.ResetHard(ctx)
 }
 
 func (d *Decoder[DF]) IsDirty(

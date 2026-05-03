@@ -38,6 +38,7 @@ func TestInputConfig_Defaults(t *testing.T) {
 	assert.Equal(t, uint(0), cfg.RecvBufferSize)
 	assert.False(t, cfg.AsyncOpen)
 	assert.False(t, cfg.AutoClose)
+	assert.False(t, cfg.QuietOnOpenFailure)
 	assert.Nil(t, cfg.ForceRealTime)
 	assert.Nil(t, cfg.ForceStartPTS)
 	assert.Nil(t, cfg.ForceStartDTS)

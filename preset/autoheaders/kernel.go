@@ -24,8 +24,18 @@ type AutoHeaders struct {
 	Locker    xsync.Mutex
 	Sink      packet.Sink
 	Processor *processor.FromKernel[kerneltypes.Abstract]
-	IsSet     bool
-	CallCount atomic.Uint64
+	// SelectedKernel is the BSF (or Passthrough) kernel chosen by
+	// detectAppropriateFixerKernel after the first observed packet.
+	// All access is gated by Locker. Previously this was stored by
+	// swapping Processor.Kernel itself, but that field is read
+	// concurrently by the processor's reader-loop goroutine without
+	// taking any lock — the swap raced with that read. Keeping the
+	// selection internal to the handler removes the race; the per-
+	// packet cost is one extra interface dispatch through Base's
+	// SendInput, which is negligible.
+	SelectedKernel kerneltypes.Abstract
+	IsSet          bool
+	CallCount      atomic.Uint64
 }
 
 var _ kernelboilerplate.CustomHandlerWithContextFormat = (*AutoHeaders)(nil)
@@ -50,6 +60,33 @@ func (h *AutoHeaders) SetProcessor(p *processor.FromKernel[kerneltypes.Abstract]
 }
 
 var _ kerneltypes.SendInputer = (*AutoHeaders)(nil)
+var _ kerneltypes.Resetter = (*AutoHeaders)(nil)
+
+// Reset clears the per-stream detection state so that the next packet
+// re-runs detectAppropriateFixerKernel against the freshly-observed
+// input. Used by chain-restart paths (e.g. inputwithfallback retry on
+// EOF): the upstream connection may have produced packets in a
+// different bitstream-header convention than the new connection, so
+// the BSF kernel selected on the first connection's first packet must
+// not be sticky across reconnects. Operator-configured state (Sink,
+// Processor wiring) is preserved.
+func (h *AutoHeaders) Reset(ctx context.Context) (_err error) {
+	logger.Tracef(ctx, "Reset")
+	defer func() { logger.Tracef(ctx, "/Reset: %v", _err) }()
+	return xsync.DoA1R1(ctx, &h.Locker, h.resetLocked, ctx)
+}
+
+func (h *AutoHeaders) resetLocked(ctx context.Context) error {
+	h.IsSet = false
+	h.CallCount.Store(0)
+	// Clear the previously-detected kernel so that the next
+	// sendInputLocked call re-runs detectAppropriateFixerKernel
+	// against the freshly-observed input. SelectedKernel is gated by
+	// Locker (held here), so this write does not race with reader-
+	// loop dispatch through SendInput.
+	h.SelectedKernel = nil
+	return nil
+}
 
 func (h *AutoHeaders) SendInput(
 	ctx context.Context,
@@ -70,7 +107,7 @@ func (h *AutoHeaders) sendInputLocked(
 		return fmt.Errorf("processor is not set")
 	}
 	if h.IsSet {
-		return h.Processor.Kernel.SendInput(
+		return h.SelectedKernel.SendInput(
 			ctx,
 			input,
 			outputCh,
@@ -98,23 +135,28 @@ func (h *AutoHeaders) sendInputLocked(
 		newKernel = &kernel.Passthrough{} // no fixing is needed
 	}
 
-	// so that we detect the new kernel only once and after that use it directly:
-	h.Processor.Kernel = newKernel
+	// Record the chosen kernel under Locker (this routine holds it).
+	// All future SendInput calls dispatch through SelectedKernel
+	// while Processor.Kernel stays bound to the wrapping Base — the
+	// reader-loop's snapshot of Processor.Kernel never changes after
+	// startup, eliminating the race that the previous swap had with
+	// the unlocked read at processor.startProcessing.
+	h.SelectedKernel = newKernel
 	h.IsSet = true
 
 	// to get the input finally processed. If the chosen bitstream filter
 	// fails on the first packet (e.g. h264_mediacodec produces a format
 	// that the filter doesn't recognize), fall back to passthrough mode
 	// rather than killing the consumer.
-	err := h.Processor.Kernel.SendInput(
+	err := h.SelectedKernel.SendInput(
 		ctx,
 		input,
 		outputCh,
 	)
 	if err != nil && newKernel != (&kernel.Passthrough{}) {
 		logger.Warnf(ctx, "bitstream filter failed on first packet, falling back to passthrough: %v", err)
-		h.Processor.Kernel = &kernel.Passthrough{}
-		return h.Processor.Kernel.SendInput(ctx, input, outputCh)
+		h.SelectedKernel = &kernel.Passthrough{}
+		return h.SelectedKernel.SendInput(ctx, input, outputCh)
 	}
 	return err
 }

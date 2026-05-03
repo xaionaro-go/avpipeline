@@ -56,18 +56,8 @@ func (e ErrNotKeyFrame) Error() string {
 	return "not a key frame"
 }
 
-// isIntraOnlyCodec returns true for codecs where every frame is independently
-// decodable (no inter-frame prediction). These codecs don't need a keyframe
-// to start decoding — e.g. wrapped_avframe from lavfi sources doesn't set
-// PacketFlagKey on its packets, but every packet is effectively a keyframe.
-func isIntraOnlyCodec(codecID astiav.CodecID) bool {
-	switch codecID {
-	case astiav.CodecIDRawvideo, astiav.CodecIDWrappedAvframe:
-		return true
-	default:
-		return false
-	}
-}
+// IsIntraOnlyCodec lives in codec/intra_only.go (SSOT) — see that file
+// for the rationale and the canonical case list.
 
 func (d *DecoderLocked) SendPacket(
 	ctx context.Context,
@@ -77,7 +67,7 @@ func (d *DecoderLocked) SendPacket(
 		if decoderDropNonKeyFramesBeforeKeyFrame &&
 			d.codecContext.MediaType() == astiav.MediaTypeVideo &&
 			!p.Flags().Has(astiav.PacketFlagKey) &&
-			!isIntraOnlyCodec(d.codecContext.CodecID()) {
+			!IsIntraOnlyCodec(d.codecContext.CodecID()) {
 			return ErrNotKeyFrame{}
 		}
 		d.receivedKeyFrame = true
@@ -196,7 +186,15 @@ func (d *DecoderLocked) Drain(
 		f := frame.Pool.Get()
 		err := d.ReceiveFrame(ctx, f)
 		if err != nil {
-			frame.Pool.Pool.Put(f)
+			// Use wrapped Pool.Put (Frame.Unref via ResetFunc) instead of
+			// raw sync.Pool.Put. ReceiveFrame may have written partial state
+			// into f even on error; raw Put leaks the buffer reference into
+			// the pool, and the next Get-er sees buf[0]!=NULL — av_frame_get_buffer
+			// then returns EINVAL, the caller's recovery Pool.Put runs Unref
+			// on a dangling AVBufferRef, and SIGSEGVs in libavutil. See
+			// the prod crash trace in resampler.New -> prepareResampler at
+			// resampler.go:77 (xaionaro-go/avpipeline issue).
+			frame.Pool.Put(f)
 			isEOF := errors.Is(err, astiav.ErrEof)
 			isEAgain := errors.Is(err, astiav.ErrEagain)
 			// isEOF means that the decoder has been fully flushed
@@ -216,12 +214,12 @@ func (d *DecoderLocked) Drain(
 		}
 		logger.Tracef(ctx, "decoder.ReceiveFrame(): received a frame")
 		if callback == nil {
-			frame.Pool.Pool.Put(f)
+			frame.Pool.Put(f)
 			continue
 		}
 		err = callback(ctx, d, caps, f)
 		if err != nil {
-			frame.Pool.Pool.Put(f)
+			frame.Pool.Put(f)
 			return fmt.Errorf("unable to process the frame: %w", err)
 		}
 	}

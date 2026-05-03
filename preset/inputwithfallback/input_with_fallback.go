@@ -5,6 +5,7 @@ package inputwithfallback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -50,7 +51,28 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	isServing         atomic.Bool
 	serveWaitGroup    sync.WaitGroup
 	syncingSince      xatomic.Value[time.Time]
-	switchingProcN    xatomic.Int64
+	// switchingProcN counts in-flight switch-related work that gates
+	// concurrent SetValue calls in OnSwitchRequest. It tracks both the
+	// transient async goroutines (OnSwitchRequest unpause/pause workers,
+	// OnAfterSwitch pausers — each defer-decrements) and the
+	// OnBeforeSwitch → InputSyncer-KeepUnless cycle (one +1 per active
+	// cycle, released when KeepUnless first matches OR when a fresh
+	// switch supersedes a stuck cycle via syncingGen).
+	switchingProcN xatomic.Int64
+	// syncingGen tags the currently-pending OnBeforeSwitch →
+	// InputSyncer-KeepUnless cycle. Zero means no cycle pending. Each
+	// OnBeforeSwitch atomically Swaps in a fresh generation produced by
+	// nextSyncingGen.Add(1); if the prior gen was non-zero the prior
+	// cycle is superseded and the new cycle inherits its switchingProcN
+	// reservation (no extra +1). The KeepUnless decrement and other
+	// teardown sites (OnInterruptedSwitch, OnSwitchRequest's stuck-cycle
+	// release) attempt Swap(0) and only act on a non-zero return — so a
+	// stale cycle's defer becomes a no-op once the gen has been bumped.
+	// This recovers from a stuck syncer (predicate never matches) by
+	// letting a fresh switch request supersede it without a process
+	// restart.
+	syncingGen     xatomic.Uint64
+	nextSyncingGen xatomic.Uint64
 
 	// measurements
 	Measurements                    map[astiav.MediaType]*TrackMeasurements
@@ -204,6 +226,32 @@ func (i *InputWithFallback[K, DF, C]) unpauseChainLocked(
 	return chain.Unpause(ctx)
 }
 
+// releaseStaleSyncingCycle releases the OnBeforeSwitch → InputSyncer-
+// KeepUnless cycle's switchingProcN reservation, if any, atomically
+// clearing syncingGen. Returns true if a cycle was released.
+//
+// Used by:
+//   - OnSwitchRequest: a fresh SetValue arrives while a prior cycle is
+//     still pending — supersede it so the gate sees a clean state.
+//   - OnInterruptedSwitch: commitToNextValue's CAS lost the race or a
+//     setValueNow no-op switch — the OnBeforeSwitch we just paired with
+//     never reaches the syncer, so release immediately.
+//   - InputSyncer KeepUnless (via syncingGen.Swap(0) inline): the
+//     normal completion path — KeepUnless first matched, sync done.
+//
+// The accounting is one-shot per cycle: only the first Swap(0) returns
+// the active gen and decrements; concurrent late callers see 0 and
+// no-op. A stale cycle's defer (one whose gen has been superseded by
+// OnBeforeSwitch claiming a fresh gen) also no-ops via this path.
+func (i *InputWithFallback[K, DF, C]) releaseStaleSyncingCycle() bool {
+	if i.syncingGen.Swap(0) == 0 {
+		return false
+	}
+	i.syncingSince.Store(time.Time{})
+	i.switchingProcN.Add(-1)
+	return true
+}
+
 func (i *InputWithFallback[K, DF, C]) initSwitches(
 	ctx context.Context,
 ) (_err error) {
@@ -213,11 +261,17 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	i.InputSwitch.CurrentValue.Store(0)
 	i.InputSyncer.CurrentValue.Store(0)
 
+	// Intra-only allow-list mirrors streammux's OutputSwitch keep-unless via
+	// the SSOT helper (codec/intra_only.go → IsIntraOnlyCodec). Pre-SSOT this
+	// site listed only CodecIDRawvideo, so wrapped_avframe sources (lavfi /
+	// testsrc carrier with AV_PKT_FLAG_KEY unset) silently failed to commit a
+	// fallback switch while the streammux OutputSwitch accepted them — only
+	// rawvideo demuxers like android_camera triggered both anchors.
 	switchKeepUnlessConds := packetorframecondition.And{
 		packetorframecondition.MediaType(astiav.MediaTypeVideo),
 		packetorframecondition.Or{
 			packetorframecondition.IsKeyFrame(true),
-			packetorframecondition.CodecID(astiav.CodecIDRawvideo),
+			packetorframecondition.IsIntraOnlyCodec{},
 			packetorframecondition.AtomicBool(&i.AllowCorruptPackets),
 		},
 	}
@@ -232,9 +286,16 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	) (_err error) {
 		logger.Debugf(ctx, "Switch.SetOnSwitchRequest: -> %d", to)
 		defer func() { logger.Debugf(ctx, "/Switch.SetOnSwitchRequest: -> %d: %v", to, _err) }()
+		// Supersede any stuck OnBeforeSwitch → InputSyncer-KeepUnless
+		// cycle before gating: prevents the leak where a syncer that
+		// never matched its predicate held switchingProcN above zero
+		// indefinitely, rejecting all subsequent SetValue calls.
+		if i.releaseStaleSyncingCycle() {
+			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: superseded a stuck syncer cycle")
+		}
 		if v := i.switchingProcN.Add(1); v != 1 {
 			i.switchingProcN.Add(-1)
-			return fmt.Errorf("another switch is in progress (procN: %d), cannot switch to %d", v-1, to)
+			return ErrSwitchInProgress{ProcN: v - 1, To: to}
 		}
 		observability.Go(ctx, func(ctx context.Context) {
 			defer i.switchingProcN.Add(-1)
@@ -246,6 +307,25 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 			if err := inputNext.Unpause(ctx); err != nil {
 				logger.Errorf(ctx, "Switch: unable to unpause the next input %d: %v", to, err)
 			}
+			// Unpause every intermediate chain in [0, to) too, so the
+			// invariant `paused = (ID > CurrentValue)` holds for the
+			// whole [0, to] range. Walk under InputChainsLocker so
+			// concurrent AddFactory growth doesn't race the index
+			// dereference.
+			i.InputChainsLocker.Do(ctx, func() {
+				for id := InputID(0); int32(id) < to; id++ {
+					if int(id) >= len(i.InputChains) {
+						break
+					}
+					mid := i.InputChains[id]
+					if mid == nil || !mid.IsPaused(ctx) {
+						continue
+					}
+					if err := mid.Unpause(ctx); err != nil {
+						logger.Errorf(ctx, "Switch: unable to unpause intermediate input %d: %v", id, err)
+					}
+				}
+			})
 		})
 
 		prevNext := i.InputSwitch.NextValue.Load()
@@ -286,7 +366,15 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		from, to int32,
 	) {
 		logger.Debugf(ctx, "Switch.SetOnBeforeSwitch: %d -> %d", from, to)
-		i.switchingProcN.Add(1)
+		// Claim a fresh syncing generation. If a prior cycle's gen was
+		// still live, this Swap supersedes it: the prior cycle's
+		// teardown sites will Swap(0) and see a non-matching value
+		// (0 or our newGen), so they no-op — and we inherit the prior
+		// reservation rather than double-counting.
+		newGen := i.nextSyncingGen.Add(1)
+		if i.syncingGen.Swap(newGen) == 0 {
+			i.switchingProcN.Add(1)
+		}
 	})
 
 	i.InputSwitch.SetOnInterruptedSwitch(func(
@@ -295,7 +383,11 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		from, to int32,
 	) {
 		logger.Debugf(ctx, "Switch.SetOnInterruptedSwitch: %d -> %d", from, to)
-		i.switchingProcN.Add(-1)
+		// Release the reservation taken by the paired OnBeforeSwitch.
+		// Swap(0) is one-shot: a concurrent supersession by a fresh
+		// OnBeforeSwitch already changed syncingGen, so we no-op and
+		// the new cycle owns the live reservation.
+		i.releaseStaleSyncingCycle()
 	})
 
 	i.InputSwitch.SetOnAfterSwitch(func(
@@ -343,8 +435,11 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	) (_ret bool) {
 		defer func() {
 			if _ret {
-				i.syncingSince.Store(time.Time{})
-				i.switchingProcN.Add(-1)
+				// Tag-driven release: only the active cycle's
+				// completion decrements switchingProcN. A defer
+				// belonging to a superseded cycle would race here
+				// and Swap(0) returns 0 → no-op.
+				i.releaseStaleSyncingCycle()
 			}
 		}()
 		if in.GetPipelineSideData().Contains(kernel.SideFlagFlush{}) {
@@ -367,7 +462,12 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		if in.IsKey() {
 			return true
 		}
-		if in.GetCodecParameters() != nil && in.GetCodecParameters().CodecID() == astiav.CodecIDRawvideo {
+		// Intra-only release: SSOT in codec/intra_only.go covers both
+		// rawvideo (android_camera, v4l2) and wrapped_avframe (lavfi /
+		// test sources). Pre-SSOT this site listed only rawvideo, which
+		// matched the InputSwitch keep-unless's parallel divergence —
+		// see the SSOT comment on switchKeepUnlessConds above.
+		if cp := in.GetCodecParameters(); cp != nil && codec.IsIntraOnlyCodec(cp.CodecID()) {
 			return true
 		}
 		return false
@@ -417,6 +517,8 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 			inputID, inputFactory,
 			i.InputSwitch.Output(int32(inputID)),
 			i.InputSyncer.Output(int32(inputID)),
+			i.Config.QuietOnOpenFailure,
+			i.Config.ResetDownstreamKernelsTimeout,
 			i.onInputChainKernelOpen,
 			i.onInputChainError,
 		)
@@ -502,15 +604,36 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 			defer i.InputSyncer.SetKeepUnless(keepUnlessSyncer)
 		}
 
-		// choose next fallback (simple next index)
-		if id+1 >= InputID(len(i.InputChains)) {
-			logger.Debugf(ctx, "onInputChainError: no fallbacks available: %d+1 >= %d", int(id), len(i.InputChains))
+		// Choose the next fallback via the SSOT WalkAvailableAfter
+		// helper. Skips chains whose factory implements
+		// InputFactoryWithAvailability and reports no resources. This
+		// avoids the procN latch race on sparse chain layouts (the
+		// dense-walk pre-fix issued one switch per empty chain, and
+		// the next chain's onInputChainError raced against the
+		// in-progress latch with "another switch is in progress").
+		// The same helper backs ffstream.RemoveInput's removal-driven
+		// fallback walk, so a future factory adding custom
+		// availability semantics behaves consistently across both
+		// trigger paths.
+		nextID := InputID(WalkAvailableAfter(ctx, i.InputChains, int(id)))
+		if nextID < 0 {
+			logger.Debugf(ctx, "onInputChainError: no fallbacks available past %d (have %d chains)", int(id), len(i.InputChains))
 			return
 		}
-		nextID := id + 1
 		logger.Infof(ctx, "onInputChainError: switching from %d to %d due to error: %v", int(id), nextID, err)
-		if err := i.InputSwitch.SetValue(ctx, int32(nextID)); err != nil {
-			logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, err)
+		if switchErr := i.InputSwitch.SetValue(ctx, int32(nextID)); switchErr != nil {
+			// Demote the cascading "another switch is in progress"
+			// startup-walk noise to Debug when QuietOnOpenFailure is
+			// enabled. The fallback walk across consecutive empty
+			// slots races itself on the procN latch every retry tick;
+			// at startup (before any priority is provisioned) this is
+			// by-design. Other SetValue failures keep Errorf so real
+			// switch contention remains visible.
+			if i.Config.QuietOnOpenFailure && errors.Is(switchErr, ErrSwitchInProgress{}) {
+				logger.Debugf(ctx, "onInputChainError: switch to fallback %d superseded by in-flight switch: %v", nextID, switchErr)
+			} else {
+				logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, switchErr)
+			}
 		}
 	})
 	return nil

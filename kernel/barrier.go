@@ -9,11 +9,13 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/types"
 	"github.com/xaionaro-go/avpipeline/kernel/boilerplate"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
 var _ Abstract = (*Barrier)(nil)
+var _ kerneltypes.Resetter = (*Barrier)(nil)
 
 type Barrier = boilerplate.Base[*barrierHandler]
 
@@ -38,6 +40,20 @@ func newBarrierHandler(
 
 func (b *barrierHandler) String() string {
 	return fmt.Sprintf("Barrier(%s)", b.Condition)
+}
+
+// Reset clears any per-chain observation state held by the wrapped
+// Condition (StateGetter). Called by chain-restart paths so that
+// downstream Barriers re-establish PTS continuity / pending state
+// against the freshly-opened upstream — without this, a SwitchOutput's
+// ptsBridge keeps the prior connection's lastEmitted PTS for the same
+// chainID and applies a stale offset (or none at all) to packets from
+// the new connection, blocking video flow.
+func (b *barrierHandler) Reset(ctx context.Context) error {
+	if r, ok := b.Condition.(kerneltypes.Resetter); ok {
+		return r.Reset(ctx)
+	}
+	return nil
 }
 
 func (b *barrierHandler) VisitInput(

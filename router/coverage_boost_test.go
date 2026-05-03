@@ -363,7 +363,7 @@ func TestStreamForwarderTranscoding_StopTwice(t *testing.T) {
 	require.NoError(t, err)
 
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, nil, nil,
+		ctx, srcRoute.Node, dstRoute.Node, nil, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -1410,7 +1410,7 @@ func TestStreamForwarderTranscoding_Stop_WithCancelFunc(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -1444,7 +1444,7 @@ func TestStreamForwarderTranscoding_Stop_WithNilChainInput(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -1490,7 +1490,7 @@ func TestNewStreamForwarderTranscoding_WithSourceStreams(t *testing.T) {
 
 	// Create transcoding with nil config to trigger auto-config from streams.
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, nil, nil,
+		ctx, srcRoute.Node, dstRoute.Node, nil, nil, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, fwd)
@@ -1734,7 +1734,7 @@ func TestStreamForwarderTranscoding_Stop_RemovePushToNormalError(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -1775,7 +1775,7 @@ func TestStreamForwarderTranscoding_Stop_InputNilBranch(t *testing.T) {
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -2045,7 +2045,7 @@ func TestStreamForwarderTranscoding_Stop_RemovePushToError_AllFieldsNonNil(t *te
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -2084,7 +2084,7 @@ func TestStreamForwarderTranscoding_Stop_RemovePushToError_ChainInputNodeNonNil(
 
 	cfg := &transcodertypes.TranscoderConfig{}
 	fwd, err := NewStreamForwarderTranscoding[GoBug63285RouteInterface[any], *ProcessorRouting](
-		ctx, srcRoute.Node, dstRoute.Node, cfg, nil,
+		ctx, srcRoute.Node, dstRoute.Node, cfg, nil, nil,
 	)
 	require.NoError(t, err)
 
@@ -2122,7 +2122,7 @@ func TestAddRouteForwardingToRemote_GetRouteError(t *testing.T) {
 		"src/remotefail",
 		"rtmp://fake.example.com:1935/live",
 		secret.String{},
-		nil, nil,
+		nil, nil, nil,
 		kernel.OutputConfig{},
 	)
 	assert.Error(t, err)

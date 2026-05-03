@@ -46,6 +46,10 @@ func (EncoderRaw) HardwarePixelFormat(context.Context) astiav.PixelFormat {
 	return 0
 }
 
+func (EncoderRaw) HardwareFramesContext(context.Context) *astiav.HardwareFramesContext {
+	return nil
+}
+
 func (EncoderRaw) TimeBase(context.Context) astiav.Rational {
 	panic(fmt.Errorf("'raw' needs to be processed manually"))
 }

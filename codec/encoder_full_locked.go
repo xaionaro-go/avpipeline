@@ -287,8 +287,8 @@ func (e *EncoderFullLocked) ReceivePacket(
 }
 
 func (e *EncoderFullLocked) Close(ctx context.Context) (_err error) {
-	logger.Tracef(ctx, "Close")
-	defer func() { logger.Tracef(ctx, "/Close: %v", _err) }()
+	logger.Tracef(ctx, "Close ts_ms=%d", logger.NowMS())
+	defer func() { logger.Tracef(ctx, "/Close ts_ms=%d: %v", logger.NowMS(), _err) }()
 	var result []error
 	if err := e.EncoderFullBackend.closeLocked(ctx); err != nil {
 		result = append(result, fmt.Errorf("unable to close the encoder: %w", err))
@@ -301,8 +301,8 @@ func (e *EncoderFullLocked) Close(ctx context.Context) (_err error) {
 func (e *EncoderFullLocked) reinitEncoder(
 	ctx context.Context,
 ) (_err error) {
-	logger.Debugf(ctx, "reinitEncoder")
-	defer func() { logger.Debugf(ctx, "/reinitEncoder: %v", _err) }()
+	logger.Debugf(ctx, "reinitEncoder ts_ms=%d", logger.NowMS())
+	defer func() { logger.Debugf(ctx, "/reinitEncoder ts_ms=%d: %v", logger.NowMS(), _err) }()
 
 	if err := e.codecInternals.closeLocked(ctx); err != nil {
 		logger.Errorf(ctx, "unable to close the old encoder: %v", err)
@@ -436,7 +436,10 @@ func (e *EncoderFullLocked) Drain(
 			isEAgain := errors.Is(err, astiav.ErrEagain)
 			// isEOF means that the decoder has been fully flushed
 			// isEAgain means that there are no more frames to receive right now
-			packet.Pool.Pool.Put(pkt)
+			// Use wrapped Pool.Put (Packet.Unref via ResetFunc) — see
+			// decoder_locked.go for the rationale (avoid dirty pool entries
+			// causing av_frame_unref / av_packet_unref UAF in libavutil).
+			packet.Pool.Put(pkt)
 			logger.Tracef(ctx, "encoder.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
 			if isEOF {
 				e.isDirty.Store(false)
@@ -451,12 +454,12 @@ func (e *EncoderFullLocked) Drain(
 			return fmt.Errorf("unable receive the packet from the encoder: %w", err)
 		}
 		if callback == nil {
-			packet.Pool.Pool.Put(pkt)
+			packet.Pool.Put(pkt)
 			continue
 		}
 		err = callback(ctx, e, caps, pkt)
 		if err != nil {
-			packet.Pool.Pool.Put(pkt)
+			packet.Pool.Put(pkt)
 			return fmt.Errorf("unable to process the packet: %w", err)
 		}
 	}
@@ -491,4 +494,30 @@ func (e *EncoderFullLocked) Codec(context.Context) *astiav.Codec {
 
 func (e *EncoderFullLocked) CodecContext(context.Context) *astiav.CodecContext {
 	return e.codecContext
+}
+
+// HardwareFramesContext returns the encoder's hw_frames_ctx without
+// re-acquiring c.locker, which the caller already holds. Mirrors the
+// CodecContext pattern on the locked variant: the embedded
+// *Codec.HardwareFramesContext acquires c.locker via xsync.DoR1, and
+// kernel/encoder.go::fitFrameForEncoding / getScaledFrame / prepareScaler
+// (added by fb4afb2) call this method from inside EncoderFull.LockDo
+// (which holds c.locker write-lock). Without this override the embedded
+// method recurses into c.locker and deadlocks (sync.RWMutex is not
+// reentrant).
+//
+// The body matches *Codec.HardwareFramesContext minus the lock: prefer
+// the explicitly-stored hardwareFramesContext (set when the encoder
+// allocates its own hw_frames_ctx in initHardwareFramesContext, or
+// reuses an upstream decoder's), else fall through to whatever the
+// codecContext exposes (cuvid populates this lazily after the first
+// frame), else nil.
+func (e *EncoderFullLocked) HardwareFramesContext(ctx context.Context) *astiav.HardwareFramesContext {
+	if e.hardwareFramesContext != nil {
+		return e.hardwareFramesContext
+	}
+	if e.codecContext != nil {
+		return e.codecContext.HardwareFramesContext()
+	}
+	return nil
 }

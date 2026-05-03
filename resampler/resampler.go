@@ -15,6 +15,13 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// allocResampledFrameBuffer is the AllocBuffer call resampler.New
+// makes on its pooled output frame. It is a package var so tests can
+// override it to exercise the pool-leak guard on the failure path
+// without needing a libav config that defeats av_frame_get_buffer.
+// Production code never reassigns it.
+var allocResampledFrameBuffer = func(f *astiav.Frame) error { return f.AllocBuffer(0) }
+
 type Resampler struct {
 	AudioFifo               *astiav.AudioFifo
 	SoftwareResampleContext *astiav.SoftwareResampleContext
@@ -30,6 +37,15 @@ func New(
 ) (_ret *Resampler, _err error) {
 	logger.Tracef(ctx, "New: %+v", out)
 	defer func() { logger.Tracef(ctx, "/New: %#+v: %v %v", out, _ret, _err) }()
+
+	// Validate the output format up front so the caller gets a descriptive
+	// error naming the offending field instead of an opaque "Invalid argument"
+	// from libav (e.g. av_frame_get_buffer returns AVERROR(EINVAL) when
+	// nb_samples<=0, sample_fmt is NONE, or the channel layout has zero
+	// channels — see libavutil/frame.c:av_frame_get_buffer).
+	if err := validateOutputFormat(out); err != nil {
+		return nil, fmt.Errorf("invalid output PCM audio format %s: %w", out, err)
+	}
 
 	fifo := astiav.AllocAudioFifo(
 		out.SampleFormat,
@@ -52,7 +68,13 @@ func New(
 	resampledFrame.SetChannelLayout(out.ChannelLayout)
 	resampledFrame.SetSampleFormat(out.SampleFormat)
 	resampledFrame.SetSampleRate(out.SampleRate)
-	if err := resampledFrame.AllocBuffer(0); err != nil {
+	// Return the frame to the pool on AllocBuffer failure so its
+	// pool-finalizer (set by frame.Pool's New) does not later run
+	// av_frame_free on a partially-allocated AVFrame. Letting the
+	// frame leak to GC has been observed to crash inside libav with
+	// SIGSEGV at addr=0xbb80 once the finalizer fires.
+	if err := allocResampledFrameBuffer(resampledFrame); err != nil {
+		frame.Pool.Put(resampledFrame)
 		return nil, fmt.Errorf("cannot alloc buffer for resampled frame: %w", err)
 	}
 
@@ -68,7 +90,10 @@ func (r *Resampler) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 
-	// all of that will be automatically freed by finalizers
+	// Return the pooled output frame explicitly. Letting it drop to GC
+	// is the slab-aliasing UAF described in pool/no_raw_pool_put_test.go
+	// — the pool finalizer runs av_frame_free asynchronously, and a
+	// different Go *Frame wrapper may already alias the same slab.
 	if r.AudioFifo != nil {
 		r.AudioFifo = nil
 	}
@@ -76,6 +101,7 @@ func (r *Resampler) Close(ctx context.Context) (_err error) {
 		r.SoftwareResampleContext = nil
 	}
 	if r.ResampledFrame != nil {
+		frame.Pool.Put(r.ResampledFrame)
 		r.ResampledFrame = nil
 	}
 

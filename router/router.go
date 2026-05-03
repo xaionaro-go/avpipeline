@@ -23,6 +23,8 @@ type Router[T any] struct {
 	OnRouteRemoved          func(context.Context, *Route[T])
 	OnRoutePublisherAdded   func(context.Context, *Route[T], Publisher[T])
 	OnRoutePublisherRemoved func(context.Context, *Route[T], Publisher[T])
+	OnRouteConsumerAdded    func(context.Context, *Route[T], Consumer[T])
+	OnRouteConsumerRemoved  func(context.Context, *Route[T], Consumer[T])
 
 	WaitGroup sync.WaitGroup
 
@@ -115,9 +117,11 @@ func (r *Router[T]) onRouteClosed(
 	logger.Debugf(ctx, "onRouteClosed: %s", route)
 	defer func() { logger.Debugf(ctx, "/onRouteClosed: %s", route) }()
 	if err := r.RemoveRoute(ctx, route); err != nil {
-		logger.Errorf(ctx, "unable to remove route '%s': %v", route, err)
+		// "route not in router" is benign here: a path-based remove
+		// (RemoveRouteByPath) may have raced ahead and already
+		// decremented r.WaitGroup, so we don't double-decrement.
+		logger.Debugf(ctx, "unable to remove route '%s': %v", route, err)
 	}
-	// TODO: figure out: should I add r.WaitGroup.Done() here? (see also onRouteCreated)
 }
 
 func (r *Router[T]) onRoutePublisherAdded(
@@ -143,6 +147,32 @@ func (r *Router[T]) onRoutePublisherRemoved(
 
 	if r.OnRoutePublisherRemoved != nil {
 		r.OnRoutePublisherRemoved(ctx, route, publisher)
+	}
+}
+
+func (r *Router[T]) onRouteConsumerAdded(
+	ctx context.Context,
+	route *Route[T],
+	consumer Consumer[T],
+) {
+	logger.Debugf(ctx, "onRouteConsumerAdded: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRouteConsumerAdded: %s", route) }()
+
+	if r.OnRouteConsumerAdded != nil {
+		r.OnRouteConsumerAdded(ctx, route, consumer)
+	}
+}
+
+func (r *Router[T]) onRouteConsumerRemoved(
+	ctx context.Context,
+	route *Route[T],
+	consumer Consumer[T],
+) {
+	logger.Debugf(ctx, "onRouteConsumerRemoved: %s", route)
+	defer func() { logger.Debugf(ctx, "/onRouteConsumerRemoved: %s", route) }()
+
+	if r.OnRouteConsumerRemoved != nil {
+		r.OnRouteConsumerRemoved(ctx, route, consumer)
 	}
 }
 
@@ -296,6 +326,8 @@ func (r *Router[T]) createRoute(
 		r.onRouteClosed,
 		r.onRoutePublisherAdded,
 		r.onRoutePublisherRemoved,
+		r.onRouteConsumerAdded,
+		r.onRouteConsumerRemoved,
 	)
 	r.RoutesByPath[path] = route
 	var addCh chan<- struct{}
@@ -321,7 +353,23 @@ func (r *Router[T]) RemoveRouteByPath(
 	defer wg.Wait()
 	return xsync.DoR1(ctx, &r.Locker, func() *Route[T] {
 		route := r.RoutesByPath[path]
+		// route may legitimately be nil here: the path may have been
+		// removed already by another removal path (e.g. the Route's
+		// own Serve goroutine ending → onRouteClosed → RemoveRoute)
+		// before a callback-driven re-entry (e.g. an external
+		// EndpointResolver releasing a refcount in response to
+		// OnRoutePublisherRemoved) reaches this method. Treat the
+		// missing entry as a no-op rather than crashing on the nil
+		// receiver inside removeRouteLocked.
+		if route == nil {
+			return nil
+		}
 		r.removeRouteLocked(ctx, route, &wg)
+		// The +1 from onRouteCreated must be paired with a Done here,
+		// just like RemoveRoute. Without this, removing a route by
+		// path leaks the WaitGroup counter and Router.Close blocks
+		// forever waiting on Serve goroutines that already returned.
+		r.WaitGroup.Done()
 		return route
 	})
 }
@@ -330,6 +378,9 @@ func (r *Router[T]) RemoveRoute(
 	ctx context.Context,
 	route *Route[T],
 ) error {
+	if route == nil {
+		return fmt.Errorf("route is nil")
+	}
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	return xsync.DoR1(ctx, &r.Locker, func() error {
@@ -350,6 +401,13 @@ func (r *Router[T]) removeRouteLocked(
 ) {
 	logger.Debugf(ctx, "removeRouteLocked: %s", route)
 	defer func() { logger.Debugf(ctx, "/removeRouteLocked: %s", route) }()
+	// Defensive guard: every caller is supposed to filter out nil routes
+	// before reaching here, but a nil slipping through used to manifest
+	// as a SIGSEGV inside delete(r.RoutesByPath, route.Path). Make the
+	// invariant explicit so future callers can't reintroduce the bug.
+	if route == nil {
+		return
+	}
 	wg.Add(1)
 	observability.Go(ctx, func(ctx context.Context) {
 		defer wg.Done()

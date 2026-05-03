@@ -54,6 +54,10 @@ func (EncoderCopy) HardwarePixelFormat(context.Context) astiav.PixelFormat {
 	return 0
 }
 
+func (EncoderCopy) HardwareFramesContext(context.Context) *astiav.HardwareFramesContext {
+	return nil
+}
+
 func (EncoderCopy) TimeBase(context.Context) astiav.Rational {
 	panic(fmt.Errorf("'copy' needs to be processed manually"))
 }

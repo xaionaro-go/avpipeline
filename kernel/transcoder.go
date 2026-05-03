@@ -26,7 +26,24 @@ import (
 )
 
 const (
-	enableStreamCodecParametersUpdates = false
+	// enableStreamCodecParametersUpdates re-publishes
+	// outputStream.CodecParameters() from the current encoder whenever
+	// the encoder's InitTS advances (i.e. on a Reinit). Required for
+	// Bug 6.2: a resampler rebuild on input PCM format change forces an
+	// audio-encoder reinit (encoder.go:reinitEncoderForResamplerRebuild),
+	// regenerating the AAC ASC; without this re-publish branch firing,
+	// the AVStream visible to downstream consumers retains the stale
+	// extradata and the audio stream stays unreadable.
+	//
+	// The previous incarnation of the publish (commit 9f07679, reverted in
+	// e99df5e) ran from the encoder hot path and re-acquired the same
+	// non-reentrant codec lock that LockDo had just taken — deadlocking
+	// the encoder, filling downstream queues, and forcing a route
+	// consumer detach (audio dropped). The current publish runs from
+	// inside drain's callback (see republishCodecParamsIfStale in
+	// encoder.go), where the codec context is already locked and the
+	// writer (cc.ToCodecParameters) does not re-acquire any encoder lock.
+	enableStreamCodecParametersUpdates = true
 	transcoderWaitForStreamsStart      = true
 )
 
@@ -296,7 +313,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 
 		var filterOutputCh chan packetorframe.OutputUnion
 		if r.FilterKernel != nil {
-			filterOutputCh = make(chan packetorframe.OutputUnion, 100)
+			filterOutputCh = make(chan packetorframe.OutputUnion, 10)
 			wg.Add(1)
 			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
@@ -403,7 +420,7 @@ func (r *Transcoder[DF, EF]) sendFrame(
 		return r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &input}, outputCh)
 	}
 
-	filterOutputCh := make(chan packetorframe.OutputUnion, 100)
+	filterOutputCh := make(chan packetorframe.OutputUnion, 10)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	var encoderErr error

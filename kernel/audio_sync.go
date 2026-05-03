@@ -22,6 +22,23 @@ import (
 
 var _ kerneltypes.Abstract = (*AudioSync)(nil)
 
+// sendOrCtx sends out to outCh under context cancellation. The locker is
+// held by SendInput; honouring ctx.Done() lets the surrounding node.Serve
+// loop tear down cleanly on shutdown instead of wedging behind a stalled
+// consumer.
+func sendOrCtx(
+	ctx context.Context,
+	outCh chan<- packetorframe.OutputUnion,
+	out packetorframe.OutputUnion,
+) error {
+	select {
+	case outCh <- out:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 type AudioSyncStreamState struct {
 	streamIndex  int
 	sampleRate   int
@@ -170,8 +187,7 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 	}
 
 	if input.Frame.GetMediaType() != astiav.MediaTypeAudio {
-		outCh <- input.CloneAsReferencedOutput()
-		return nil
+		return sendOrCtx(ctx, outCh, input.CloneAsReferencedOutput())
 	}
 
 	state := s.getStreamStateNoLock(ctx, input.Frame)
@@ -189,8 +205,7 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 			}
 		}
 		if !isReference {
-			outCh <- input.CloneAsReferencedOutput()
-			return nil
+			return sendOrCtx(ctx, outCh, input.CloneAsReferencedOutput())
 		}
 	}
 
@@ -226,8 +241,7 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 	output := input.CloneAsReferencedOutput()
 
 	if state == nil {
-		outCh <- output
-		return nil
+		return sendOrCtx(ctx, outCh, output)
 	}
 
 	// 2. Apply the current offset to the frame PTS.
@@ -237,8 +251,7 @@ func (s *AudioSync) SendInput(ctx context.Context, input packetorframe.InputUnio
 		output.SetPTS(state.lastPts + state.offset)
 	}
 
-	outCh <- output
-	return nil
+	return sendOrCtx(ctx, outCh, output)
 }
 
 func (s *AudioSync) fillGaps(ctx context.Context, state *AudioSyncStreamState, currentPts int64, f *astiav.Frame) {

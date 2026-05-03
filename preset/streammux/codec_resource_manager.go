@@ -57,7 +57,24 @@ func (rm *outputAsResourceManager[C]) GetReusable(
 		return nil
 	}
 
-	return rm.asOutput().TranscoderNode.Processor.Kernel.DecoderFactory.GetResources(
+	decFactory := rm.asOutput().TranscoderNode.Processor.Kernel.DecoderFactory
+	// When the streammux's internal Transcoder decoder is bypassed (the
+	// upstream pipeline already produced decoded frames and pushed them via
+	// SendInput in kernel/transcoder.go), decFactory.VideoDecoders stays
+	// empty. In that case GetResources cannot match the upstream decoder
+	// against its own registry and returns nil, which prevents surface
+	// passthrough. Fall back to harvesting Resources directly from the
+	// upstream decoder advertised through EncoderFactoryOptionGetDecoderer.
+	if len(decFactory.VideoDecoders) == 0 {
+		if v, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionGetDecoderer](opts); ok &&
+			v.GetDecoderer != nil {
+			d := v.GetDecoderer.GetDecoder()
+			if d != nil {
+				return codec.ResourcesFromDecoder(ctx, d)
+			}
+		}
+	}
+	return decFactory.GetResources(
 		ctx,
 		isEncoder,
 		params,
@@ -95,11 +112,32 @@ func (rm *outputAsResourceManager[C]) canReuse(
 		return false
 	}
 
-	// we can reuse the resources only if pixel format is the same
+	// we can reuse the resources only if pixel format is the same.
+	//
+	// nil-guard the decoder and its CodecContext: GetDecoder() can return
+	// nil before the upstream decoder has been bound (raw-frame source
+	// pipelines like android_camera + StreamMux's bypass branch never
+	// register a decoder, and during cascade init the encoder's reuse
+	// query can fire before the upstream decoder is open). CodecContext
+	// can be nil for the same reason — the decoder exists but its codec
+	// context hasn't been opened yet (avcodec_open2 hasn't run).
+	//
+	// When we can't safely read the decoder's pixel format, we
+	// conservatively decline reuse — the caller falls through to creating
+	// a fresh resource pool.
 	decoder := getDecoderer.GetDecoderer.GetDecoder()
+	if decoder == nil {
+		logger.Debugf(ctx, "decoder is nil; cannot determine pixel format compatibility, skipping reuse")
+		return false
+	}
 	if params.PixelFormat() != astiav.PixelFormatNone {
-		if params.PixelFormat() != decoder.CodecContext(ctx).PixelFormat() {
-			logger.Tracef(ctx, "pixel format mismatch: params=%v vs decoder=%v", params.PixelFormat(), decoder.CodecContext(ctx).PixelFormat())
+		decCC := decoder.CodecContext(ctx)
+		if decCC == nil {
+			logger.Debugf(ctx, "decoder CodecContext is nil; cannot determine pixel format compatibility, skipping reuse")
+			return false
+		}
+		if params.PixelFormat() != decCC.PixelFormat() {
+			logger.Tracef(ctx, "pixel format mismatch: params=%v vs decoder=%v", params.PixelFormat(), decCC.PixelFormat())
 			return false
 		}
 	}

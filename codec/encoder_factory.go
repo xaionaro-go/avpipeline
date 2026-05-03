@@ -186,6 +186,78 @@ func (f *NaiveEncoderFactory) Reset(
 	return xsync.DoA1R1(ctx, &f.Locker, f.reset, ctx)
 }
 
+// SetVideoOption sets a video-encoder open-time option key=value on the
+// factory's live VideoOptions Dictionary. It allocates the Dictionary if
+// nil and acquires f.Locker; callers must NOT hold f.Locker. The option is
+// applied to encoders constructed from this point on; encoders that have
+// already been opened are unaffected (they captured a clone of the
+// Dictionary at NewEncoder time — see codec_params.go's deep-copy of
+// CustomOptions). To re-open an already-opened encoder against the new
+// option, call ResetHard on the bound kernel.Encoder so the next frame
+// triggers a fresh NewEncoder.
+//
+// SetVideoOption is the encapsulated entry point for cross-package
+// callers (e.g. preset/streammux's late pix_fmt injection); reaching
+// directly into f.VideoOptions skips the Locker and breaks the boundary
+// the factory owns.
+func (f *NaiveEncoderFactory) SetVideoOption(
+	ctx context.Context,
+	key, value string,
+) error {
+	return xsync.DoR1(ctx, &f.Locker, func() error {
+		if f.VideoOptions == nil {
+			f.VideoOptions = astiav.NewDictionary()
+		}
+		if err := f.VideoOptions.Set(key, value, 0); err != nil {
+			return fmt.Errorf("unable to set video encoder option %q=%q: %w", key, value, err)
+		}
+		return nil
+	})
+}
+
+// GetVideoOption reads the current value of a video-encoder open-time
+// option from the factory's live VideoOptions Dictionary, returning nil
+// if the key is unset. Acquires f.Locker; callers must NOT hold it.
+func (f *NaiveEncoderFactory) GetVideoOption(
+	ctx context.Context,
+	key string,
+) *string {
+	return xsync.DoR1(ctx, &f.Locker, func() *string {
+		if f.VideoOptions == nil {
+			return nil
+		}
+		entry := f.VideoOptions.Get(key, nil, 0)
+		if entry == nil {
+			return nil
+		}
+		v := entry.Value()
+		return &v
+	})
+}
+
+// SetVideoOptionIfAbsent atomically sets key=value only when key is not
+// already present in VideoOptions. Returns whether a write happened.
+// This is the atomic variant of "GetVideoOption then SetVideoOption" —
+// concurrent callers cannot race past the absence check. Allocates the
+// Dictionary if nil; acquires f.Locker.
+func (f *NaiveEncoderFactory) SetVideoOptionIfAbsent(
+	ctx context.Context,
+	key, value string,
+) (wrote bool, _ error) {
+	return xsync.DoR2(ctx, &f.Locker, func() (bool, error) {
+		if f.VideoOptions == nil {
+			f.VideoOptions = astiav.NewDictionary()
+		}
+		if entry := f.VideoOptions.Get(key, nil, 0); entry != nil {
+			return false, nil
+		}
+		if err := f.VideoOptions.Set(key, value, 0); err != nil {
+			return false, fmt.Errorf("unable to set video encoder option %q=%q: %w", key, value, err)
+		}
+		return true, nil
+	})
+}
+
 func (f *NaiveEncoderFactory) reset(
 	ctx context.Context,
 ) error {

@@ -100,12 +100,18 @@ func (i *InputWithFallback[K, DF, C]) Serve(
 					defer i.serveWaitGroup.Done()
 					inputChain.Serve(ctx, cfg, errCh)
 				})
-				if inputChain.ID == 0 {
-					logger.Debugf(ctx, "inputwithfallback.Serve: first input chain added, unpausing it")
+				// Auto-unpause every chain whose ID is at-or-above the
+				// active priority (numerically: ID <= CurrentValue) —
+				// this matches the consistency-check invariant
+				// `paused = (ID > CurrentValue)` enforced by the loop
+				// above.
+				current := i.InputSwitch.CurrentValue.Load()
+				if int32(inputChain.ID) <= current {
+					logger.Debugf(ctx, "inputwithfallback.Serve: input chain %d arrived at-or-above active priority (current=%d), unpausing", inputChain.ID, current)
 					if err := inputChain.Unpause(ctx); err != nil {
 						errCh <- node.Error{
 							Node: i,
-							Err:  fmt.Errorf("unable to unpause first input chain: %w", err),
+							Err:  fmt.Errorf("unable to unpause input chain %d on arrival: %w", inputChain.ID, err),
 						}
 					}
 				}

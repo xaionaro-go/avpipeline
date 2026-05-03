@@ -308,9 +308,13 @@ func TestGetDefaultAutoBitrateResolutionsConfig_AV1(t *testing.T) {
 	config, err := GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDAv1)
 	require.NoError(t, err)
 	require.NotEmpty(t, config)
-	// AV1 should be 70% of H264 bitrates
+	// AV1 always uses the maximum resolution for all bitrates: collapsed to a
+	// single entry covering the union of all H264 bitrate ranges, scaled by 0.7.
+	require.Len(t, config, 1)
 	h264Config, _ := GetDefaultAutoBitrateResolutionsConfig(astiav.CodecIDH264)
+	testifyassert.Equal(t, h264Config[0].Resolution, config[0].Resolution)
 	testifyassert.Less(t, float64(config[0].BitrateHigh), float64(h264Config[0].BitrateHigh))
+	testifyassert.Less(t, float64(config[0].BitrateLow), float64(h264Config[len(h264Config)-1].BitrateLow))
 }
 
 func TestGetDefaultAutoBitrateResolutionsConfig_Unsupported(t *testing.T) {
@@ -925,4 +929,43 @@ func TestStreamMux_WaitForStartChan(t *testing.T) {
 
 	ch := s.WaitForStartChan()
 	testifyassert.NotNil(t, ch)
+}
+
+// --- latencyMeasurerLoop ---
+
+// TestStreamMux_latencyMeasurerLoop_DoesNotFabricateOnMeasurementFailure
+// guards against a regression where a failed measurement in
+// updateSendingLatencyValues caused the loop to *fabricate* a steadily
+// growing SendingLatency by adding the wall-clock tick interval each
+// iteration. With no active output the measurement always errors, so a
+// fresh StreamMux that runs the loop for several ticks must keep
+// SendingLatency at its initial zero value for both audio and video.
+func TestStreamMux_latencyMeasurerLoop_DoesNotFabricateOnMeasurementFailure(t *testing.T) {
+	ctx := context.Background()
+	s, err := New(ctx, types.MuxModeForbid, nil)
+	require.NoError(t, err)
+	defer func() { _ = s.Close(ctx) }()
+
+	// Seed both tracks so the assertion verifies "left untouched", not
+	// merely "was zero". A correct implementation must preserve the
+	// last-known value when the measurement cannot be refreshed.
+	const seed = uint64(7_500_000) // 7.5ms
+	s.getTrackMeasurements(astiav.MediaTypeVideo).SendingLatency.Store(seed)
+	s.getTrackMeasurements(astiav.MediaTypeAudio).SendingLatency.Store(seed)
+
+	// Loop ticks at 250ms; run for ~700ms (≥2 ticks) and then cancel.
+	loopCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
+	defer cancel()
+	loopErr := s.latencyMeasurerLoop(loopCtx)
+	testifyassert.True(t, errors.Is(loopErr, context.DeadlineExceeded), "expected deadline-exceeded, got %v", loopErr)
+
+	gotVideo := s.getTrackMeasurements(astiav.MediaTypeVideo).SendingLatency.Load()
+	gotAudio := s.getTrackMeasurements(astiav.MediaTypeAudio).SendingLatency.Load()
+
+	// The buggy fallback grew video.SendingLatency by ~250ms per tick on
+	// measurement failure (and never touched audio). The fix removes that
+	// fabrication, so both values must stay at the seed. Anything above
+	// 1ms over the seed is the regression.
+	testifyassert.Equal(t, seed, gotVideo, "video SendingLatency must not grow when measurement fails; got %v", time.Duration(gotVideo))
+	testifyassert.Equal(t, seed, gotAudio, "audio SendingLatency must not grow when measurement fails; got %v", time.Duration(gotAudio))
 }

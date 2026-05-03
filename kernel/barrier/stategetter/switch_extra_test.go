@@ -281,3 +281,80 @@ func TestPtr(t *testing.T) {
 	require.NotNil(t, p)
 	assert.Equal(t, 42, *p)
 }
+
+// TestSwitchOutput_GetState_DemotedBothMinInt32_ReturnsDrop asserts:
+// when both currentValue and nextValue are the MinInt32 sentinel — the
+// post-evictDeadOutput steady state — and the switch carries
+// SwitchFlagInactiveBlock (as OutputSyncer always does in streammux),
+// GetState must return StateDrop instead of StateBlock.
+func TestSwitchOutput_GetState_DemotedBothMinInt32_ReturnsDrop(t *testing.T) {
+	sw := NewSwitch()
+	// Replicate the post-evictDeadOutput steady state.
+	sw.CurrentValue.Store(math.MinInt32)
+	sw.NextValue.Store(math.MinInt32)
+	// OutputSyncer.Flags carries InactiveBlock in stream_mux.go:390.
+	sw.Flags = types.SwitchFlagInactiveBlock
+
+	ctx := context.Background()
+
+	// GOOD-side: every valid (positive) OutputID must Drop, not Block,
+	// otherwise the per-output Barrier wedges forever.
+	for _, outputID := range []int32{0, 1, 5, 42} {
+		out := sw.Output(outputID)
+		state, ch := out.GetState(ctx, packetorframe.InputUnion{})
+		assert.Equal(
+			t,
+			types.StateDrop,
+			state,
+			"OutputID=%d: GetState must Drop when both currentValue and nextValue are MinInt32, regardless of InactiveBlock", outputID,
+		)
+		assert.NotNil(t, ch, "OutputID=%d: change channel must be returned even on Drop", outputID)
+	}
+
+	// BAD-side: removing InactiveBlock must not change the outcome — the
+	// MinInt32-MinInt32 path drops regardless of the flag, and an inactive
+	// switch with no flag also drops (the pre-existing default behavior at
+	// switch.go:307). This anchors the contract on both sides of the flag.
+	sw.Flags = 0
+	for _, outputID := range []int32{0, 1, 5, 42} {
+		out := sw.Output(outputID)
+		state, _ := out.GetState(ctx, packetorframe.InputUnion{})
+		assert.Equal(
+			t,
+			types.StateDrop,
+			state,
+			"OutputID=%d: GetState must Drop on MinInt32/MinInt32 with flags=0 too (pre-existing fall-through path)", outputID,
+		)
+	}
+}
+
+// TestSwitchOutput_GetState_DemotedThenNextValueSet_StillBlocks: a
+// switch that has been demoted (currentValue = MinInt32) but has a real
+// pending nextValue means a switch is in progress and InactiveBlock
+// must still hold packets back. The MinInt32-MinInt32 short-circuit
+// must NOT fire when only one of the two is MinInt32.
+func TestSwitchOutput_GetState_DemotedThenNextValueSet_StillBlocks(t *testing.T) {
+	sw := NewSwitch()
+	sw.CurrentValue.Store(math.MinInt32)
+	sw.NextValue.Store(7) // a real pending switch
+	sw.Flags = types.SwitchFlagInactiveBlock
+
+	ctx := context.Background()
+
+	// keep-unless absent → setValueNow path was taken, so reaching GetState
+	// with these atomic values requires keep-unless to be present (so the
+	// commit didn't fire on the SetValue call). Add a never-matching
+	// keep-unless so commitToNextValue inside GetState also doesn't fire.
+	sw.SetKeepUnless(packetorframecondition.Static(false))
+
+	// A non-current, non-next OutputID with InactiveBlock + a real
+	// pending switch must Block (the documented InactiveBlock semantics).
+	out := sw.Output(99)
+	state, _ := out.GetState(ctx, packetorframe.InputUnion{})
+	assert.Equal(
+		t,
+		types.StateBlock,
+		state,
+		"InactiveBlock with a real pending nextValue must still Block (only the both-MinInt32 case Drops)",
+	)
+}

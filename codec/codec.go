@@ -62,6 +62,18 @@ type codecInternals struct {
 	hardwareFramesContext  *astiav.HardwareFramesContext
 	hardwarePixelFormat    astiav.PixelFormat
 	hardwareContextType    hardwareContextType
+	// lazyHardwareFramesContext is the lock-free lazy-allocated companion to
+	// hardwareFramesContext. Populated by EnsureLazyHardwareFramesContext for
+	// HW decoders (notably mediacodec Surface mode) that never attach an
+	// hw_frames_ctx during decoder init — FFmpeg's mediacodec decoder leaves
+	// codecContext.hw_frames_ctx nil even when producing AV_PIX_FMT_MEDIACODEC
+	// frames, which breaks downstream encoder paths that need it for
+	// av_hwframe_transfer_data. atomic.Pointer + CAS keeps the alloc race-free
+	// without engaging c.locker — the encoder hot path that calls this is
+	// already inside its own LockDo and acquiring c.locker there chains into
+	// the encoder/decoder deadlock cycle. Freed by the closer registered in
+	// newCodec.
+	lazyHardwareFramesContext atomic.Pointer[astiav.HardwareFramesContext]
 	closer                 *astikit.Closer
 	quirks                 Quirks
 	isDirty                atomic.Bool
@@ -141,13 +153,132 @@ func (c *Codec) HardwarePixelFormat(ctx context.Context) astiav.PixelFormat {
 	})
 }
 
+// LazyHardwareFramesContext returns the lazy-allocated hw_frames_ctx
+// previously installed by EnsureLazyHardwareFramesContext, or nil if no
+// allocation has occurred. Lock-free.
+func (c *Codec) LazyHardwareFramesContext() *astiav.HardwareFramesContext {
+	return c.lazyHardwareFramesContext.Load()
+}
+
+// EnsureLazyHardwareFramesContext lazily allocates and installs an
+// AVHWFramesContext on this codec when one is required but absent. The
+// canonical case is FFmpeg's mediacodec decoder operating in Surface
+// mode: it produces AV_PIX_FMT_MEDIACODEC frames yet never attaches an
+// AVHWFramesContext to its codec context, so downstream consumers that
+// need it for av_hwframe_transfer_data (the encoder's getScaledFrame
+// HW->SW download path) cannot proceed. NVidia cuvid avoids this trap
+// because its get_format callback allocates the hw_frames_ctx; mediacodec
+// has no such hook.
+//
+// Behaviour:
+//   - If the codec has no hardwareDeviceContext, returns nil + error
+//     (cannot allocate without a device parent).
+//   - If a previously-installed hw_frames_ctx already exists (init-time
+//     in c.hardwareFramesContext, or an earlier lazy alloc), it is
+//     returned unchanged.
+//   - Otherwise allocates a fresh HFC sized (width, height) with HW
+//     pixfmt = c.hardwarePixelFormat and the supplied software pixfmt
+//     (NV12 for mediacodec; the caller's responsibility to choose), CAS-
+//     installs it, and returns it. On CAS loss (concurrent caller raced
+//     us), the loser frees its freshly allocated HFC and returns the
+//     winner's value.
+//
+// Concurrency: lock-free. The encoder hot path calling this is inside
+// its own LockDo; acquiring c.locker would replay the encoder/decoder deadlock.
+// The atomic.Pointer + CAS guarantees single-installation without a
+// lock.
+//
+// Lifetime: the installed HFC is freed by the closer registered in
+// newCodec, so the codec's Close drops the reference. Callers must NOT
+// Free the returned pointer.
+func (c *Codec) EnsureLazyHardwareFramesContext(
+	ctx context.Context,
+	width, height int,
+	swPixFmt astiav.PixelFormat,
+	initialPoolSize int,
+) (_ret *astiav.HardwareFramesContext, _err error) {
+	logger.Debugf(ctx, "EnsureLazyHardwareFramesContext(%dx%d, sw=%s, pool=%d)",
+		width, height, swPixFmt, initialPoolSize)
+	defer func() {
+		logger.Debugf(ctx, "/EnsureLazyHardwareFramesContext: %p %v", _ret, _err)
+	}()
+
+	if existing := c.lazyHardwareFramesContext.Load(); existing != nil {
+		return existing, nil
+	}
+	// Init-time hw_frames_ctx still wins if present — fall through to the
+	// existing accessor's path. Read codecContext.HardwareFramesContext()
+	// without c.locker: the field is set during newCodec() and never
+	// reassigned during steady state (same lockless guarantee
+	// HardwareFramesContextLockless relies on).
+	if c.hardwareFramesContext != nil {
+		return c.hardwareFramesContext, nil
+	}
+	if c.codecContext != nil {
+		if hfc := c.codecContext.HardwareFramesContext(); hfc != nil {
+			return hfc, nil
+		}
+	}
+
+	hwDev := c.hardwareDeviceContext
+	if hwDev == nil {
+		return nil, fmt.Errorf("cannot allocate hw_frames_ctx: codec has no hardware device context")
+	}
+
+	hwPixFmt := c.hardwarePixelFormat
+	if hwPixFmt == astiav.PixelFormatNone {
+		return nil, fmt.Errorf("cannot allocate hw_frames_ctx: codec has no hardware pixel format")
+	}
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("cannot allocate hw_frames_ctx: invalid dims %dx%d", width, height)
+	}
+	hfc := astiav.AllocHardwareFramesContext(hwDev)
+	if hfc == nil {
+		return nil, fmt.Errorf("av_hwframe_ctx_alloc returned nil")
+	}
+	hfc.SetWidth(width)
+	hfc.SetHeight(height)
+	hfc.SetHardwarePixelFormat(hwPixFmt)
+	hfc.SetSoftwarePixelFormat(swPixFmt)
+	// Pool prealloc must stay at zero for mediacodec: FFmpeg's mediacodec
+	// hwcontext (libavutil/hwcontext_mediacodec.c) does not implement
+	// frames_get_buffer, so av_hwframe_ctx_init's preallocation loop returns
+	// AVERROR(ENOSYS) for any positive pool size. The HFC is needed only as a
+	// metadata carrier (width/height/sw_format) for av_hwframe_transfer_data;
+	// the pool itself is irrelevant because mediacodec frames are owned by the
+	// decoder's MediaCodec output buffer, not by this pool. Honour the
+	// caller-supplied size only when nonzero — leaving the field at zero
+	// matches FFmpeg's "no preallocation" behaviour and lets ctx_init succeed
+	// for codecs whose hwcontext does support a pool but where the caller
+	// explicitly opted out.
+	if initialPoolSize > 0 {
+		hfc.SetInitialPoolSize(initialPoolSize)
+	}
+	if err := hfc.Initialize(); err != nil {
+		hfc.Free()
+		return nil, fmt.Errorf("av_hwframe_ctx_init failed (hw=%s, sw=%s, %dx%d): %w",
+			hwPixFmt, swPixFmt, width, height, err)
+	}
+
+	if c.lazyHardwareFramesContext.CompareAndSwap(nil, hfc) {
+		logger.Debugf(ctx, "installed lazy hw_frames_ctx %p (hw=%s, sw=%s, %dx%d)",
+			hfc, hwPixFmt, swPixFmt, width, height)
+		return hfc, nil
+	}
+	// Lost the CAS race: another caller installed a HFC concurrently.
+	// Free ours and return the winner's.
+	logger.Debugf(ctx, "CAS lost on lazy hw_frames_ctx; freeing our %p", hfc)
+	hfc.Free()
+	return c.lazyHardwareFramesContext.Load(), nil
+}
+
 func (c *Codec) Close(ctx context.Context) error {
 	return xsync.DoA1R1(ctx, &c.locker, c.closeLocked, ctx)
 }
 
 func (c *codecInternals) closeLocked(ctx context.Context) (_err error) {
-	logger.Debugf(ctx, "closeLocked")
-	defer func() { logger.Debugf(ctx, "/closeLocked: %v", _err) }()
+	logger.Debugf(ctx, "closeLocked ts_ms=%d", logger.NowMS())
+	defer func() { logger.Debugf(ctx, "/closeLocked ts_ms=%d: %v", logger.NowMS(), _err) }()
 	logger.Tracef(ctx, "closing the codec, due to: %s", debug.Stack())
 	defer func() {
 		c.codec = nil
@@ -379,9 +510,9 @@ func newCodec(
 	ctx = belt.WithField(ctx, "codec_name", codecName)
 	ctx = belt.WithField(ctx, "hw_dev_type", hardwareDeviceType)
 
-	logger.Debugf(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v)", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts)
+	logger.Debugf(ctx, "newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v) ts_ms=%d", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts, logger.NowMS())
 	defer func() {
-		logger.Debugf(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v): %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts, _ret, _err)
+		logger.Debugf(ctx, "/newCodec(ctx, '%s', %s, %#+v, %t, %s, '%s', %s, %#+v, %X, %v) ts_ms=%d: %p %v", codecName, codecParameters.CodecID(), codecParameters, isEncoder, hardwareDeviceType, hardwareDeviceName, timeBase, customOptions, hwDevFlags, opts, logger.NowMS(), _ret, _err)
 	}()
 	c := &Codec{
 		codecInternals: &codecInternals{
@@ -472,6 +603,17 @@ func newCodec(
 	c.closer.Add(func() {
 		logger.Tracef(ctx, "CodecContext.Free()")
 	})
+	// Lazy hw_frames_ctx (allocated post-init by EnsureLazyHardwareFramesContext
+	// for mediacodec Surface-mode) is freed at codec close. The Load is safe at
+	// close time because the encoder hot paths that read it are bounded by the
+	// codec's lifetime — the upstream Decoder Ref-keeps this codec alive while
+	// encoders read its hw_frames_ctx.
+	c.closer.Add(func() {
+		if hfc := c.lazyHardwareFramesContext.Load(); hfc != nil {
+			logger.Tracef(ctx, "freeing lazyHardwareFramesContext %p", hfc)
+			hfc.Free()
+		}
+	})
 
 	if doFullCopyOfParameters {
 		err := codecParameters.ToCodecContext(c.codecContext)
@@ -489,7 +631,7 @@ func newCodec(
 		if c.isMediaCodec() {
 			logger.Debugf(ctx, "MediaCodec: enforcing NDK codec")
 			customOptions.Set("ndk_codec", "1", 0) // NDK path
-			customOptions.Set("ndk_async", "0", 0) // disable async (avoid restart-after-flush issue)
+			customOptions.Set("ndk_async", "1", 0) // enable async callback path
 		}
 
 		if isEncoder {
@@ -535,10 +677,19 @@ func newCodec(
 				}
 			}
 			if c.isMediaCodec() {
-				{
+				switch c.codec.Name() {
+				case "h264_mediacodec", "hevc_mediacodec":
 					// TODO: delete this block, this is a temporary workaround
 					//       until it'll become clear how to bypass the quality floor
 					//       clamping of MediaCodec.
+					// The H264/HEVC MediaCodec encoders are buggy: they refuse to
+					// honor dynamic bitrate changes beyond a narrow band that is
+					// effectively bounded by the configured QP minimum. Setting
+					// a high QP min (low quality floor) widens that band so the
+					// encoder will actually drop the bitrate when asked. This
+					// quirk is specific to the H264/HEVC MediaCodec encoders;
+					// other MediaCodec encoders use unrelated rate-control state
+					// and the workaround is not applicable.
 
 					// to allow low bitrates:
 					h := codecParameters.Height()
@@ -927,9 +1078,27 @@ func (c *codecInternals) setupPixelFormat(
 	} else {
 		logger.Debugf(ctx, "%q option is not set", pixelFormatOptionName)
 		if c.isMediaCodec() {
-			defaultMediaCodecPixelFormat := astiav.PixelFormatNv12
-			if reusableResources != nil && reusableResources.HWDeviceContext != nil {
-				defaultMediaCodecPixelFormat = astiav.PixelFormatMediacodec
+			defaultMediaCodecPixelFormat := selectMediaCodecEncoderDefaultPixFmt(
+				reusableResources,
+				codecParameters.Width(), codecParameters.Height(),
+			)
+			// Diagnostic when we step off the HW-passthrough default: a
+			// reusable HW device context is present but recorded
+			// decoder dims either are missing (decoder pre-open) or
+			// differ from the encoder target, so scaling will be
+			// required and we must hand the encoder a SW pix_fmt
+			// (libswscale cannot consume HW pixfmts, see
+			// kernel/encoder_scaler_descriptors.go).
+			if defaultMediaCodecPixelFormat == astiav.PixelFormatNv12 &&
+				reusableResources != nil &&
+				reusableResources.HWDeviceContext != nil {
+				logger.Debugf(ctx,
+					"MediaCodec encoder: upstream decoder dims unrecorded or mismatch "+
+						"(hwfc_attached=%t src=%dx%d enc=%dx%d); forcing pix_fmt=nv12 for SW upload",
+					reusableResources.HWFramesContext != nil,
+					reusableResources.HWFramesContextWidth, reusableResources.HWFramesContextHeight,
+					codecParameters.Width(), codecParameters.Height(),
+				)
 			}
 			logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 			if err := customOptions.Set(pixelFormatOptionName, defaultMediaCodecPixelFormat.String(), 0); err != nil {

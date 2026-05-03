@@ -169,7 +169,10 @@ func (bsf *BitstreamFilter) sendPacketToFilterChain(
 				isEOF := errors.Is(err, astiav.ErrEof)
 				isEAgain := errors.Is(err, astiav.ErrEagain)
 				logger.Tracef(ctx, "bsf.ReceivePacket(): %v (isEOF:%t, isEAgain:%t)", err, isEOF, isEAgain)
-				packet.Pool.Pool.Put(pkt)
+				// Use wrapped Pool.Put (Packet.Unref via ResetFunc) so the
+				// pool entry is returned clean — raw Put leaks buffer refs
+				// across pool generations and corrupts subsequent users.
+				packet.Pool.Put(pkt)
 				if isEOF || isEAgain {
 					break
 				}

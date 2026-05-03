@@ -31,6 +31,7 @@ const (
 	SwitchFlagForbidTakeoverInKeepUnless            = types.SwitchFlagForbidTakeoverInKeepUnless
 	SwitchFlagNextOutputStateBlock                  = types.SwitchFlagNextOutputStateBlock
 	SwitchFlagInactiveBlock                         = types.SwitchFlagInactiveBlock
+	SwitchFlagBridgePTSAcrossChains                 = types.SwitchFlagBridgePTSAcrossChains
 )
 
 type State = types.State
@@ -55,11 +56,18 @@ type Switch struct {
 	Flags                         SwitchFlags
 	FirstPacketOrFrameAfterSwitch packetorframe.Abstract
 	CommitMutex                   xsync.Mutex
+
+	// ptsBridge carries cross-chain PTS continuity state when
+	// SwitchFlagBridgePTSAcrossChains is set. Always non-nil so the flag is
+	// safe to flip at any time; cost when the flag is unset is one nil-free
+	// pointer compare per GetState (see SwitchOutput.GetState).
+	ptsBridge *ptsBridge
 }
 
 func NewSwitch() *Switch {
 	sw := &Switch{
 		ChangeSignal: ptr(make(chan struct{})),
+		ptsBridge:    newPTSBridge(),
 	}
 	sw.NextValue.Store(math.MinInt32)
 	sw.PreviousValue.Store(math.MinInt32)
@@ -224,6 +232,21 @@ func (s *Switch) Output(OutputID int32) *SwitchOutput {
 	}
 }
 
+// Reset implements kerneltypes.Resetter. It clears the cross-chain
+// PTS bridge state for this SwitchOutput's OutputID so that the next
+// packet from a freshly-reopened upstream chain rebinds its offset
+// from scratch, and rotates the change-signal channel so any Barrier
+// blocked on the prior state immediately re-evaluates against the
+// reset state. Operator-configured switch state (CurrentValue, flags,
+// callbacks) is preserved.
+func (s *SwitchOutput) Reset(_ context.Context) error {
+	if s.ptsBridge != nil {
+		s.ptsBridge.resetForChain(s.OutputID)
+	}
+	s.rotateChangeChan()
+	return nil
+}
+
 func (s *Switch) GetChangeChan() <-chan struct{} {
 	return *xatomic.LoadPointer(&s.ChangeSignal)
 }
@@ -239,6 +262,17 @@ func (s *SwitchOutput) GetState(
 	logger.Tracef(ctx, "GetState[%p:%v](ctx, %v)", s.Switch, s.OutputID, pkt)
 	defer func() {
 		logger.Tracef(ctx, "/GetState[%p:%v](ctx, %v): %v, %p", s.Switch, s.OutputID, pkt, _ret0, _ret1)
+		// Apply cross-chain PTS continuity only when this output is the active
+		// emitter (StatePass on currentValue). Doing it after the state is
+		// resolved keeps the flag's cost zero on Drop / Block paths and avoids
+		// double-rebase when SwitchFlagFirstPacketAfterSwitchPassBothOutputs
+		// lets a previous chain emit one trailing packet — that packet keeps
+		// the old chain's offset rather than seeding the new chain.
+		if _ret0 == types.StatePass && s.Flags.HasAny(types.SwitchFlagBridgePTSAcrossChains) {
+			if pkt.Get() != nil && s.CurrentValue.Load() == s.OutputID {
+				s.ptsBridge.apply(s.OutputID, pkt)
+			}
+		}
 	}()
 
 	for {
@@ -266,6 +300,15 @@ func (s *SwitchOutput) GetState(
 				if s.Flags.HasAny(types.SwitchFlagNextOutputStateBlock) {
 					return types.StateBlock, s.GetChangeChan()
 				}
+			}
+			// When both currentValue and nextValue are the MinInt32
+			// sentinel, the switch has no commitment and no pending
+			// switch, so SwitchFlagInactiveBlock has nothing to
+			// hold-back-for. Drop instead so in-flight queued packets
+			// clear and the next operator action can stand up a new
+			// commitment from a clean state.
+			if currentValue == math.MinInt32 && nextValue == math.MinInt32 {
+				return types.StateDrop, s.GetChangeChan()
 			}
 			if s.Flags.HasAny(types.SwitchFlagInactiveBlock) {
 				return types.StateBlock, s.GetChangeChan()

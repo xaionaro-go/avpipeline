@@ -61,6 +61,18 @@ func (n Name) hwName(
 		logger.Tracef(ctx, "/hwName(ctx, %t, '%s', %v): %v", isEncoder, n, hwDeviceType, _ret)
 	}()
 	switch hwDeviceType {
+	case globaltypes.HardwareDeviceTypeNone:
+		// HardwareDeviceTypeNone is the zero-value sentinel for "no HW
+		// requested". Forming a candidate like "av1_none" would silently
+		// be unregistered and downstream FindDecoderByName would return
+		// nil, masking the misuse as a soft fallback. Fail fast instead:
+		// callers MUST resolve None upstream — preferredHWDecoderName
+		// remaps None→CUDA in decoder_auto.go for backward-compat, and
+		// codec.newCodec gates hwName invocations behind a None check
+		// before the call site. This panic is defense-in-depth against
+		// future callers that would otherwise produce silent
+		// "<codec>_none" fallbacks.
+		panic("hwName called with HardwareDeviceTypeNone — callers must resolve None to a concrete device type before calling")
 	case globaltypes.HardwareDeviceTypeCUDA:
 		if isEncoder {
 			return n + "_nvenc"

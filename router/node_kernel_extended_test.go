@@ -47,6 +47,119 @@ func TestErrSkip_Error(t *testing.T) {
 	assert.Equal(t, "skip", err.Error())
 }
 
+// TestNodeKernel_DetectAudio_PublisherArrivalSkew_DoesNotFlag verifies that
+// when the audio-vs-video DTS divergence is real (>2s) but the actual ratio
+// does NOT match the sample-rate ratio (i.e. audio is in genuine clock
+// units, not sample-count units), detectAudioTimestampMismatch must NOT
+// flag audioTimestampDetected. Setting it would let the caller compute
+// audioEpochOffset = audioDTS - LatestPTS, subtract it from every audio
+// packet thereafter, and have the consumer's Output kernel reject the
+// shifted packets via the LastDTS check (audio "leads" video by 4s in
+// ffstream split-AV mode where the audio publisher started 4s before
+// video — confirmed via repro this session).
+//
+// Falsification: if the fix is reverted (the line `k.audioTimestampDetected
+// = true` is restored at the no-correction branch in
+// detectAudioTimestampMismatch), this test FAILS because
+// audioTimestampDetected becomes true.
+func TestNodeKernel_DetectAudio_PublisherArrivalSkew_DoesNotFlag(t *testing.T) {
+	ctx := context.Background()
+	k, err := NewNodeKernel(ctx)
+	require.NoError(t, err)
+
+	// Pre-set LatestPTS to simulate video having arrived first; the value
+	// is small (1 second) which is what split-AV produces — both publishers'
+	// FLV streams are independently rebased to PTS=0 by ffmpeg.
+	k.LatestPTS = 1 * time.Second
+
+	// Audio publisher started 4s before video, so its DTS is at 5s while
+	// LatestPTS (video) is only at 1s. Divergence = 4s > 2s threshold.
+	const tbDen = int64(1000) // ms timebase, typical FLV/RTMP audio
+	tb := astiav.NewRational(1, int(tbDen))
+	pkt := astiav.AllocPacket()
+	defer pkt.Free()
+	pkt.SetDts(5000) // 5s in 1/1000
+	pkt.SetPts(5000)
+
+	// Construct an audio packet with codec params reflecting 48kHz audio
+	// in 1/1000 timebase — actualRatio = 5000/1000 = 5, expectedRatio =
+	// 48000/1000 = 48 — far outside [24, 96], so the no-correction branch
+	// fires.
+	stream := astiav.AllocFormatContext().NewStream(nil)
+	stream.CodecParameters().SetMediaType(astiav.MediaTypeAudio)
+	stream.CodecParameters().SetSampleRate(48000)
+	stream.SetTimeBase(tb)
+	stream.SetIndex(0)
+	pkt.SetStreamIndex(0)
+	src := newMockPacketSource("audio-late-vs-video")
+	info := &packet.StreamInfo{Stream: stream, Source: src, TimeBase: tb}
+	in := packet.BuildInput(pkt, info)
+
+	si := &SourceInfo{}
+	k.detectAudioTimestampMismatch(ctx, &in, si)
+
+	// Dual-sided: with the fix, the no-correction branch returns without
+	// setting the flag. The audio-epoch compute (now per-source on
+	// SourceInfo) gates on the divergence threshold (and the per-source
+	// AudioTimestampDetected); since neither fires here, the SourceInfo
+	// for this audio publisher must remain in its zero state — no flag,
+	// no offset to retroactively apply.
+	assert.False(t, si.AudioTimestampDetected,
+		"AudioTimestampDetected must remain false on publisher-arrival-time "+
+			"skew (ratio 5 vs expected 48); flagging it would let the "+
+			"per-source compute path apply an offset that retroactively "+
+			"pushes audio backward and gets Output.LastDTS to drop it")
+	assert.Zero(t, si.AudioSampleRate, "AudioSampleRate must remain 0")
+	assert.Zero(t, si.AudioTimeBaseDen, "AudioTimeBaseDen must remain 0")
+}
+
+// TestNodeKernel_DetectAudio_RealRateMismatch_StillFlags verifies the
+// rate-mismatch detection path still works for the original use case
+// (phone sending audio in sample-count units). Guards against over-
+// correction of the publisher-arrival-skew fix.
+func TestNodeKernel_DetectAudio_RealRateMismatch_StillFlags(t *testing.T) {
+	ctx := context.Background()
+	k, err := NewNodeKernel(ctx)
+	require.NoError(t, err)
+
+	k.LatestPTS = 1 * time.Second
+
+	// Phone sends audio DTS in sample-count units: 48000 samples per
+	// second of wall-clock. So at wall-clock 5s, audioDTS = 240000
+	// (in 1/1000 timebase, that's 240s — way ahead). Ratio = 240000/1000
+	// = 240 ≈ expectedRatio 48? No, ratio 240/48 = 5x, outside the
+	// tolerance. Use a divergence that lands inside [24, 96] = ratio
+	// 48 ± factor 2.
+	//
+	// Pick audioDTS such that audioDTS / LatestPTS ≈ 48: with LatestPTS=1s
+	// (1000 in 1/1000), audioDTS_int=48000 gives audioDTS in time.Duration
+	// = 48s. Ratio = 48000 / 1000 = 48. Match.
+	const tbDen = int64(1000)
+	tb := astiav.NewRational(1, int(tbDen))
+	pkt := astiav.AllocPacket()
+	defer pkt.Free()
+	pkt.SetDts(48000)
+	pkt.SetPts(48000)
+
+	stream := astiav.AllocFormatContext().NewStream(nil)
+	stream.CodecParameters().SetMediaType(astiav.MediaTypeAudio)
+	stream.CodecParameters().SetSampleRate(48000)
+	stream.SetTimeBase(tb)
+	stream.SetIndex(0)
+	pkt.SetStreamIndex(0)
+	src := newMockPacketSource("audio-rate-mismatch")
+	info := &packet.StreamInfo{Stream: stream, Source: src, TimeBase: tb}
+	in := packet.BuildInput(pkt, info)
+
+	si := &SourceInfo{}
+	k.detectAudioTimestampMismatch(ctx, &in, si)
+
+	assert.True(t, si.AudioTimestampDetected,
+		"genuine sample-rate-units mismatch must set AudioTimestampDetected on the per-source SourceInfo")
+	assert.Equal(t, int64(48000), si.AudioSampleRate)
+	assert.Equal(t, int64(1000), si.AudioTimeBaseDen)
+}
+
 func TestNodeKernel_SendInput_Packet(t *testing.T) {
 	ctx := context.Background()
 	k, err := NewNodeKernel(ctx, NodeKernelOptionShouldFixPTS(true))

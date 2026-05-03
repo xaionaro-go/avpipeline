@@ -85,6 +85,21 @@ func (fwd *RouteForwarding[T]) open(ctx context.Context) (_err error) {
 	return xsync.DoA1R1(ctx, &fwd.Locker, fwd.openLocked, ctx)
 }
 
+// openLocked derives the forwarder's lifetime ctx from the caller's
+// ctx and stores the cancel function. The forwarder's watcher
+// goroutine in startLocked selects on ctx.Done() and tears down on
+// cancellation, so the caller is responsible for passing a ctx whose
+// lifetime corresponds to the desired forwarder lifetime.
+//
+// In particular: a forwarder that needs to outlive any single
+// publisher/consumer request handler MUST be created with a ctx
+// detached from that handler's ctx — wrap the request-scoped ctx with
+// xcontext.DetachDone or context.WithoutCancel (Go 1.21+) so that
+// disconnect of the originating request does not cancel the
+// forwarder. Without the detach, the watcher takes the <-ctx.Done()
+// branch on disconnect, exits, and any sync.Once-guarded re-wire path
+// in the caller will short-circuit subsequent activations — leaving
+// the route node alive but the forwarder dead.
 func (fwd *RouteForwarding[T]) openLocked(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "openLocked")
 	defer func() { logger.Debugf(ctx, "/openLocked: %v", _err) }()
@@ -175,7 +190,7 @@ func (fwd *RouteForwarding[T]) startLocked(ctx context.Context) (_err error) {
 	}
 	fwd.Output = dstNode
 
-	f, err := NewStreamForwarder(ctx, src.Node, dstNode, fwd.TranscoderConfig, fwd.FilterKernelFactory)
+	f, err := NewStreamForwarder(ctx, src.Node, dstNode, fwd.TranscoderConfig, fwd.FilterKernelFactory, nil)
 	if err != nil {
 		return fmt.Errorf("unable to initialize a forwarder from '%s' to '%s' (%#+v): %w", src.Path, dstNode, fwd.TranscoderConfig, err)
 	}

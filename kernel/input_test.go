@@ -10,6 +10,8 @@ import (
 	"github.com/asticode/go-astiav"
 	assertT "github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xaionaro-go/avpipeline/helpers/closuresignaler"
+	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	"github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/secret"
@@ -242,6 +244,83 @@ func TestInput_ForceStartDTSNoNegativeOutput(t *testing.T) {
 	assertT.Equal(t, forceStart, minPTS, "the minimum PTS across output packets must match ForceStartPTS")
 }
 
+// TestInput_ForceStartPTSEpochAlignsFirstPacketToWallClock verifies
+// the PTSEpoch sentinel: when ForceStartPTS=PTSEpoch, the first
+// emitted packet's PTS equals (now - sharedEpoch) converted into the
+// stream's own timebase, bounded above by the wall-clock time elapsed
+// since the epoch was captured. This is the per-stream replacement
+// for the previous hard-coded ForceStartPTS=0 used by android_camera
+// / pulse, and it is what aligns camera + microphone first frames
+// onto a shared origin instead of each starting at PTS=0.
+func TestInput_ForceStartPTSEpochAlignsFirstPacketToWallClock(t *testing.T) {
+	// Inject a deterministic monotonic clock so the assertion is exact:
+	// the fake's reading at the moment applyPerStreamShift fires equals
+	// the epoch + a known offset, and the first packet's PTS must match
+	// that offset converted into the stream's timebase.
+	const epochAtStart = int64(50_000_000_000) // 50s since fake boot
+	const offsetNanos = int64(80_000_000)      // 80ms
+	fake := newFakeMonotonicClock(epochAtStart)
+	prev := SetMonotonicClock(fake)
+	defer SetMonotonicClock(prev)
+	resetPTSEpochForTest()
+	defer resetPTSEpochForTest()
+
+	// Force epoch to seed at exactly epochAtStart.
+	require.Equal(t, epochAtStart, PTSEpochNanos())
+
+	// Advance the fake clock so the upcoming resolvePTSShiftTarget call
+	// (inside Input.Generate's first packet handling) sees a known
+	// delta. The exact PTS for the first emitted packet then equals
+	// offsetNanos converted into the stream's timebase.
+	fake.SetNanos(epochAtStart + offsetNanos)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startPTS := types.PTSEpoch
+	input, err := NewInputFromURL(ctx, "testsrc=duration=0.2:rate=25", secret.New(""), InputConfig{
+		CustomOptions: types.DictionaryItems{
+			{Key: "f", Value: "lavfi"},
+		},
+		ForceStartPTS: &startPTS,
+	})
+	require.NoError(t, err)
+	defer input.Close(ctx)
+
+	outputCh := make(chan packetorframe.OutputUnion, 100)
+	err = input.Generate(ctx, outputCh)
+	if !errors.Is(err, io.EOF) {
+		require.NoError(t, err)
+	}
+	close(outputCh)
+
+	var firstPTS = int64(astiav.NoPtsValue)
+	var firstStreamTimeBase astiav.Rational
+	for out := range outputCh {
+		pkt := out.Packet
+		if pkt == nil {
+			continue
+		}
+		pts := pkt.GetPTS()
+		if pts != astiav.NoPtsValue {
+			firstPTS = pts
+			firstStreamTimeBase = pkt.GetStream().TimeBase()
+			break
+		}
+	}
+	require.NotEqual(t, int64(astiav.NoPtsValue), firstPTS,
+		"expected at least one packet with a PTS")
+
+	// Expected PTS: offsetNanos converted to the stream's timebase.
+	// resolvePTSShiftTarget is called once per stream on the first
+	// packet, so the fake clock reading at that instant determines the
+	// shift target exactly.
+	expectedTarget := ptsSinceEpochInTimeBase(epochAtStart+offsetNanos, epochAtStart, firstStreamTimeBase)
+	assertT.Equal(t, expectedTarget, firstPTS,
+		"first emitted PTS must equal monotonic-delta-since-epoch in stream timebase")
+	t.Logf("firstPTS=%d timeBase=%v expected=%d", firstPTS, firstStreamTimeBase, expectedTarget)
+}
+
 // TestInput_ForceStartPerStreamShiftSingleStream verifies the
 // per-stream shift on a well-behaved single-stream input: the stored
 // shift for that stream equals ForceStartDTS minus the raw DTS of the
@@ -280,4 +359,87 @@ func TestInput_ForceStartPerStreamShiftSingleStream(t *testing.T) {
 	ptsShift, ok := input.PTSShifts.Load(0)
 	require.True(t, ok, "per-stream PTS shift must be set after packets were drained")
 	assertT.Equal(t, forceStart, ptsShift)
+}
+
+// newSlowdownTestInput constructs a minimal Input usable by
+// slowdownIfNeeded — no demuxer, no goroutines, no I/O. ForceRealTime is
+// enabled so the function actually runs its body, and SyncStreamIndex is
+// initialized to math.MinInt64 so autoDetectSyncStreamIndexIfNeeded picks
+// up the first packet's stream as the sync stream.
+func newSlowdownTestInput() *Input {
+	cs := closuresignaler.New()
+	in := &Input{
+		ClosureSignaler: cs,
+		ForceRealTime:   true,
+	}
+	in.SyncStreamIndex.Store(math.MinInt64)
+	return in
+}
+
+// newSlowdownTestPacket builds a *packet.Output with the given PTS, a 1/1000
+// timebase (1 ms tick), and a video media type so autoDetectSyncStreamIndex
+// accepts it as the sync stream. The astiav.Packet is registered for
+// cleanup via t.Cleanup.
+func newSlowdownTestPacket(t *testing.T, pts int64) *packet.Output {
+	t.Helper()
+	pkt := astiav.AllocPacket()
+	t.Cleanup(pkt.Free)
+	pkt.SetPts(pts)
+	pkt.SetStreamIndex(0)
+
+	cp := astiav.AllocCodecParameters()
+	t.Cleanup(cp.Free)
+	cp.SetMediaType(astiav.MediaTypeVideo)
+
+	si := &packet.StreamInfo{
+		CodecParameters: cp,
+		StreamIndex:     0,
+		TimeBase:        astiav.NewRational(1, 1000),
+	}
+	out := packet.BuildOutput(pkt, si)
+	return &out
+}
+
+// TestInput_slowdownIfNeeded_NegativePTSDoesNotPanic verifies that
+// slowdownIfNeeded handles legitimate negative PTS values (e.g. h264 mp4
+// with B-frames, live RTMP, certain camera captures emit negative PTS at
+// stream start) without panicking. The previously-asserted `pts >= 0`
+// invariant did not hold in practice — this test guards the regression.
+func TestInput_slowdownIfNeeded_NegativePTSDoesNotPanic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := newSlowdownTestInput()
+	defer in.ClosureSignaler.Close(ctx)
+
+	pkt := newSlowdownTestPacket(t, -100)
+	// Must not panic. The first call also primes ClockCalculator.StartTS
+	// with the (negative) first PTS, so the second call's slowdown math
+	// produces a non-positive sleepDuration and returns immediately.
+	assertT.NotPanics(t, func() {
+		in.slowdownIfNeeded(ctx, pkt)
+	})
+
+	pkt2 := newSlowdownTestPacket(t, -50)
+	assertT.NotPanics(t, func() {
+		in.slowdownIfNeeded(ctx, pkt2)
+	})
+}
+
+// TestInput_slowdownIfNeeded_GarbagePTSPanics verifies that the
+// years-scale sanity assert still catches truly garbage PTS values
+// (uninitialized memory, near-misses of the NoPtsValue sentinel, demuxer
+// corruption). With a 1/1000 timebase, math.MinInt64/2 is roughly 146
+// million years before zero — well past the 1-year sanity bound.
+func TestInput_slowdownIfNeeded_GarbagePTSPanics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := newSlowdownTestInput()
+	defer in.ClosureSignaler.Close(ctx)
+
+	pkt := newSlowdownTestPacket(t, math.MinInt64/2)
+	assertT.Panics(t, func() {
+		in.slowdownIfNeeded(ctx, pkt)
+	}, "garbage PTS far before zero must trip the sanity assert")
 }

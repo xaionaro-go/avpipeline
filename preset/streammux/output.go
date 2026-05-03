@@ -41,7 +41,18 @@ import (
 )
 
 const (
-	outputReuseDecoderResources = false
+	// outputReuseDecoderResources gates the decoder→encoder hardware-context
+	// share path that turns transcoding into surface passthrough. With this
+	// enabled the streammux Output's internal Transcoder decoder produces
+	// pix_fmt=mediacodec frames (via PreInitFunc-injected
+	// "pixel_format=mediacodec, create_window=1") and the encoder reuses the
+	// same HWDeviceContext (carrying the persistent input ANativeWindow), so
+	// the codec context opens with avctx->pix_fmt=AV_PIX_FMT_MEDIACODEC and
+	// the surface passthrough path activates inside mediacodecenc.c (line
+	// 468). Without it the decoder downloads to nv12 and the encoder
+	// re-uploads on the CPU side ('forcing nv12 pixel format' warning,
+	// ~150% CPU baseline on a Pixel 8a).
+	outputReuseDecoderResources = true
 )
 
 type (
@@ -99,9 +110,49 @@ type Output[C any] struct {
 	ParentResourceManager ResourceManager
 
 	Measurements OutputMeasurements
+
+	// RawFrameSource records whether the upstream pipeline supplies decoded
+	// frames directly (e.g. android_camera + android_microphone) instead of
+	// packets that need a downstream decoder. When the encoder is a
+	// MediaCodec encoder, no upstream decoder means there is no shared
+	// ANativeWindow Surface and the get_format -> AV_PIX_FMT_MEDIACODEC
+	// branch in mediacodecenc.c silently consumes frames (it expects
+	// Surface buffers attached as frame->data[3]). reconfigureEncoder
+	// reads this flag to inject pix_fmt=nv12 into the encoder's open-time
+	// options, which forces the SW-upload encode path.
+	//
+	// OneWayBool pins the sticky-true contract at the type level: once
+	// the upstream supplies raw frames, the encoder's pix_fmt selection
+	// is locked in for the rest of the Output's life — see StreamMux.
+	RawFrameSource globaltypes.OneWayBool
+
+	// storageKey is the SenderKey under which this Output was indexed in
+	// StreamMux.OutputsMap by getOrCreateOutputLocked. It is the
+	// authoritative key for OutputsMap CompareAndDelete / LoadAndDelete
+	// callers: GetKey() derives the key live from the EncoderFactory
+	// state, but reconfigureEncoder writes BOTH EncoderFactory.VideoCodec
+	// and EncoderFactory.AudioCodec onto the same factory — so a
+	// video-only Output that was stored under
+	// SenderKey{VideoCodec: av1, ...} starts returning a compound
+	// SenderKey{VideoCodec: av1, AudioCodec: aac, ...} from GetKey() once
+	// reconfigured. Map lookups keyed on GetKey() then silently miss the
+	// stored entry. Using storageKey for the OutputsMap detach side keeps
+	// GetKey()'s autobitrate semantics intact while eliminating the
+	// silent miss in evictDeadOutput / removeOutputByIDLocked.
+	storageKey SenderKey
 }
 
-type initOutputConfig struct{}
+// StorageKey returns the SenderKey under which this Output was indexed
+// in StreamMux.OutputsMap. Use this (not GetKey()) for OutputsMap detach
+// callsites that must round-trip through the same key the entry was
+// stored with.
+func (o *Output[C]) StorageKey() SenderKey {
+	return o.storageKey
+}
+
+type initOutputConfig struct {
+	RawFrameSource bool
+}
 
 type InitOutputOption interface {
 	apply(*initOutputConfig)
@@ -119,6 +170,19 @@ func (opts InitOutputOptions) config() initOutputConfig {
 	cfg := initOutputConfig{}
 	opts.apply(&cfg)
 	return cfg
+}
+
+// OptionRawFrameSource declares that the upstream pipeline supplies decoded
+// frames directly (no upstream decoder). Set true for camera/microphone
+// inputs to force MediaCodec encoders onto the SW-upload path and avoid the
+// silent-consume trap caused by the absent ANativeWindow Surface. See
+// Output.RawFrameSource for details.
+type OptionRawFrameSource bool
+
+var _ InitOutputOption = OptionRawFrameSource(false)
+
+func (o OptionRawFrameSource) apply(cfg *initOutputConfig) {
+	cfg.RawFrameSource = bool(o)
 }
 
 type ResourceManager interface {
@@ -172,6 +236,7 @@ func newOutput[C any](
 	streamsIniter OutputStreamsIniter,
 	resourceManager ResourceManager,
 	fpsFractionGetter FPSFractionGetter,
+	cfg initOutputConfig,
 ) (_ret *Output[C], _err error) {
 	ctx = belt.WithField(ctx, "output_id", outputID)
 	ctx = xcontext.DetachDone(ctx)
@@ -227,8 +292,9 @@ func newOutput[C any](
 	}
 
 	o := &Output[C]{
-		ID:        outputID,
-		InputFrom: inputNode,
+		ID:         outputID,
+		storageKey: senderKey,
+		InputFrom:  inputNode,
 		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),
 			outputSwitch,
@@ -260,11 +326,34 @@ func newOutput[C any](
 		CancelFn:              cancelFn,
 		ParentResourceManager: resourceManager,
 	}
+	if cfg.RawFrameSource {
+		o.RawFrameSource.Set()
+	}
 	customData := OutputCustomData[C]{Output: o}
 	o.InputFilter.CustomData = customData
 	o.InputFixer.SetCustomData(customData)
 	o.TranscoderNode.CustomData = customData
-	o.TranscoderNode.SetInputFilter(ctx, packetorframefiltercondition.Panic("the transcoder is not configured, yet!"))
+	// The original filter was packetorframefiltercondition.Panic which
+	// fired and crashed the whole daemon if any packet arrived at this
+	// output before the transcoder finished configuring. This is reachable
+	// during cascade init — a brief window where shared-takeover route
+	// publishers route a packet through MapStreamIndices to an output
+	// whose InputFilter has not yet been replaced by configurePackets.
+	//
+	// The architectural fix is to defer InputFilter installation until
+	// after the transcoder is fully wired (or to gate route forwarding on
+	// the configurePackets ack). Pending that, we soft-drop with a warning
+	// so the pre-configuration race doesn't take the whole daemon down.
+	// The drop is safe: pre-configuration packets cannot meaningfully be
+	// processed by the not-yet-configured transcoder anyway, and
+	// configurePackets replaces the filter once the transcoder is ready,
+	// so subsequent packets pass through normally.
+	o.TranscoderNode.SetInputFilter(ctx, packetorframefiltercondition.Function(
+		func(ctx context.Context, _ packetorframefiltercondition.Input) bool {
+			logger.Warnf(ctx, "the transcoder is not configured, yet! dropping packet on output %p (pre-configuration race; see streammux/output.go:336)", o)
+			return false
+		},
+	))
 	codecOpts := []codec.Option{CodecOptionOutputID{OutputID: o.ID}}
 	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.ResourceManager = o.asCodecResourceManager()
 	o.TranscoderNode.Processor.Kernel.Decoder.DecoderFactory.Options = codecOpts
@@ -305,6 +394,21 @@ func newOutput[C any](
 			})
 			return true
 		}),
+	}
+
+	// Audio-copy guard: when AudioCodec == NameCopy the audio path is a strict
+	// packet pass-through (the AutoHeaders BSF and EncoderCopy both reject
+	// frames). If an upstream stage (e.g. ffstream's AudioSync kernel)
+	// pre-decodes audio packets into frames before pushing them at StreamMux,
+	// those frames cannot be re-packetised without transcoding (which would
+	// violate "copy" semantics) — let them through and the pipeline aborts
+	// with a fatal codec.ErrCopyEncoder / "BitstreamFilter could be used only
+	// for Packet-s" error that takes the unrelated video output down with it.
+	// Drop audio frames at the InputFilter→inputFixer edge so the audio-copy
+	// path stays packet-only and the rest of the pipeline survives.
+	if senderKey.AudioCodec == codectypes.Name(codec.NameCopy) {
+		audioCopyAcceptsPacketsOnly := o.audioCopyAcceptsPacketsOnly()
+		pushToFixerConds = append(pushToFixerConds, audioCopyAcceptsPacketsOnly)
 	}
 	o.InputFilter.AddPushTo(ctx, inputFixer, packetorframefiltercondition.PacketOrFrame{pushToFixerConds})
 	pushToTranscoderConds := packetorframecondition.Function(o.onTranscoderInput)
@@ -857,6 +961,12 @@ func (o *Output[C]) reconfigureEncoder(
 		{Key: "intra-refresh", Value: "0"}, // to avoid corruptions on switching the outputs
 	}...)
 	videoOptions = append(videoOptions, convertCustomOptions(videoCfg.CustomOptions)...)
+	videoOptions = forceRawFrameSourceMediaCodecPixFmt(
+		ctx,
+		videoOptions,
+		o.RawFrameSource.Load(),
+		types.HardwareDeviceType(videoCfg.HardwareDeviceType),
+	)
 
 	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
 		if len(encoderFactory.VideoEncoders) == 0 {

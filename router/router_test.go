@@ -290,9 +290,10 @@ func TestRouter_RemoveRoute_WrongInstance(t *testing.T) {
 }
 
 func TestRouter_RemoveRouteByPath(t *testing.T) {
-	// NOTE: RemoveRouteByPath does not call WaitGroup.Done(), unlike RemoveRoute.
-	// So we manage the router lifecycle manually here without relying on
-	// the standard cleanup which calls r.Close() (which waits on WaitGroup).
+	// RemoveRouteByPath decrements the per-route WaitGroup counter
+	// (added by onRouteCreated) symmetrically with RemoveRoute, so a
+	// path-driven removal lets Router.Close return cleanly without
+	// any manual WaitGroup fixup.
 	ctx := context.Background()
 	r := New[any](ctx)
 
@@ -307,21 +308,56 @@ func TestRouter_RemoveRouteByPath(t *testing.T) {
 	_, err = r.GetRoute(ctx, "test/stream", GetRouteModeFailIfNotFound)
 	assert.Error(t, err)
 
-	// Manually fix the WaitGroup so we can close the router.
-	r.WaitGroup.Done()
 	r.Close(ctx)
 }
 
-func TestRouter_RemoveRouteByPath_NonExistent_Panics(t *testing.T) {
-	// RemoveRouteByPath does not check for nil route before passing it
-	// to removeRouteLocked, which calls route.Close(ctx). This causes a
-	// nil pointer dereference panic. This is a known edge case in the
-	// source code -- callers should verify the path exists before calling.
+func TestRouter_RemoveRouteByPath_NonExistent_NoPanic(t *testing.T) {
+	// RemoveRouteByPath must be a no-op (returning nil) when the path is
+	// not in the map, instead of nil-deref'ing on the absent route.
+	// This guards against the re-entrant remove pattern where one path
+	// (e.g. Route's own Serve goroutine ending) removes the route, and
+	// then a callback-driven path (e.g. publisher-disconnect cascading
+	// through an external EndpointResolver back into RemoveRouteByPath)
+	// arrives second and finds the map already empty.
 	r := newTestRouter(t)
 	ctx := context.Background()
 
-	assert.Panics(t, func() {
-		r.RemoveRouteByPath(ctx, "nonexistent")
+	assert.NotPanics(t, func() {
+		removed := r.RemoveRouteByPath(ctx, "nonexistent")
+		assert.Nil(t, removed)
+	})
+}
+
+func TestRouter_RemoveRouteByPath_FromOnRoutePublisherRemoved_NoPanic(t *testing.T) {
+	// Reproduces the avd EndpointResolver.Release recursion pattern:
+	// publisher disconnect → Router.OnRoutePublisherRemoved callback →
+	// (resolver decides to release) → RemoveRouteByPath(ctx, path).
+	// The route may already be gone by the time the callback runs (e.g.
+	// the Route's Serve goroutine already ran onRouteClosed→RemoveRoute),
+	// so RemoveRouteByPath must not crash when its lookup yields nil.
+	r := newTestRouter(t)
+	ctx := context.Background()
+
+	r.OnRoutePublisherRemoved = func(ctx context.Context, route *Route[any], pub Publisher[any]) {
+		// Mirror the avd flow: cascade back into the router by path.
+		// The first invocation removes the route; any later call (if the
+		// route had been removed by another path concurrently) must be a
+		// safe no-op.
+		r.RemoveRouteByPath(ctx, route.Path)
+		// And again — exercising the "already gone" branch explicitly.
+		r.RemoveRouteByPath(ctx, route.Path)
+	}
+
+	route, err := r.GetRoute(ctx, "publisher/disconnect", GetRouteModeCreateTemporary)
+	require.NoError(t, err)
+
+	pub := newMockPublisher("pub1", PublishModeExclusiveTakeover)
+	_, err = route.AddPublisher(ctx, pub)
+	require.NoError(t, err)
+
+	assert.NotPanics(t, func() {
+		_, err = route.RemovePublisher(ctx, pub)
+		assert.NoError(t, err)
 	})
 }
 

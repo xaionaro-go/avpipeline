@@ -63,7 +63,7 @@ func TestQuality_Aggregate_VideoOnly(t *testing.T) {
 	agg := q.Aggregate()
 	require.NotNil(t, agg)
 	require.InDelta(t, 0.9, agg.Video.Continuity, 0.001)
-	require.Equal(t, 0.0, agg.Video.Overlap) // overlap sum is not accumulated in Aggregate
+	require.InDelta(t, 0.1, agg.Video.Overlap, 0.001)
 	require.InDelta(t, 30.0, agg.Video.FrameRate, 0.001)
 	require.Equal(t, 0.0, agg.Audio.Continuity)
 }
@@ -82,7 +82,7 @@ func TestQuality_Aggregate_AudioOnly(t *testing.T) {
 	agg := q.Aggregate()
 	require.NotNil(t, agg)
 	require.InDelta(t, 0.95, agg.Audio.Continuity, 0.001)
-	require.Equal(t, 0.0, agg.Audio.Overlap) // overlap sum is not accumulated in Aggregate
+	require.InDelta(t, 0.05, agg.Audio.Overlap, 0.001)
 	require.Equal(t, 0.0, agg.Video.Continuity)
 }
 

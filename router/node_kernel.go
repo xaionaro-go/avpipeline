@@ -22,24 +22,52 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// audioEpochAlignmentThreshold is the divergence beyond which the
+// kernel concludes a new audio source's PTS base differs from the
+// shared video epoch (publisher-arrival skew or independently-rebased
+// cascade publisher) and must be aligned. Below this threshold the
+// audio is treated as already well-aligned and passes through with
+// zero offset — preventing the regression where a fresh single
+// publisher with sub-second arrival jitter was being shifted to land
+// on the first video PTS, breaking cases where audio legitimately
+// led video by 30-200ms.
+const audioEpochAlignmentThreshold = time.Second
+
+// SourceInfo carries per-packet-source bookkeeping. TimeShift bridges
+// video PTS forward across publisher reconnects (so consumers see a
+// monotonically advancing video timeline). AudioEpochOffset and
+// AudioEpochComputed do the same job for audio, but per-source: each
+// audio packet.Source attaches with its own publisher-side PTS base
+// (split-AV cascade publishers rebase independently) and must compute
+// its own offset against the video epoch — sharing a global offset
+// across audio sources lets a stale prior-source offset smuggle into
+// a freshly-attached publisher's first packets.
+//
+// AudioTimestampDetected / AudioSampleRate / AudioTimeBaseDen are the
+// rate-correction state used when a publisher sends audio DTS in
+// sample-count units rather than the declared timebase (typical phone
+// RTMP feed). They live per-source for the same reason the epoch state
+// does: two simultaneously-attached publishers — one in genuine
+// millisecond units, one in sample-count units — would otherwise corrupt
+// each other's timestamps if a single kernel-global flag rescaled both.
 type SourceInfo struct {
-	TimeShift time.Duration
+	TimeShift              time.Duration
+	AudioEpochOffset       time.Duration
+	AudioEpochComputed     bool
+	AudioTimestampDetected bool
+	AudioSampleRate        int64 // non-zero when rate correction is needed
+	AudioTimeBaseDen       int64
 }
 
 type NodeKernel struct {
 	*closuresignaler.ClosureSignaler
-	Locker            xsync.Mutex
-	Config            nodeKernelConfig
-	PreviousSource    map[int]packet.Source // map[streamID]Source
-	SourceInfo        map[packet.Source]*SourceInfo
-	FormatContext     *astiav.FormatContext
-	OutputStreams     map[int]*astiav.Stream
-	LatestPTS         time.Duration
-	audioTimestampDetected bool
-	audioSampleRate        int64 // non-zero when rate correction is needed
-	audioTimeBaseDen       int64
-	audioEpochOffset       time.Duration
-	audioEpochComputed     bool
+	Locker         xsync.Mutex
+	Config         nodeKernelConfig
+	PreviousSource map[int]packet.Source // map[streamID]Source
+	SourceInfo     map[packet.Source]*SourceInfo
+	FormatContext  *astiav.FormatContext
+	OutputStreams  map[int]*astiav.Stream
+	LatestPTS      time.Duration
 }
 
 var _ kernel.Abstract = (*NodeKernel)(nil)
@@ -159,29 +187,81 @@ func (k *NodeKernel) makeTimeMoveOnlyForward(
 
 	switch input.GetMediaType() {
 	case astiav.MediaTypeAudio:
-		k.detectAudioTimestampMismatch(ctx, input)
+		// For frame audio (packetSource=nil — sendFrame passes nil) we
+		// have no source-keyed slot, so per-source tracking does not
+		// apply; the frame passes through as-is. Detection and rate
+		// correction both depend on per-source state, so they are
+		// skipped here too — the muxed-frame path runs without per-
+		// source bookkeeping by design.
+		if packetSource == nil {
+			return nil
+		}
+		sourceInfo := k.SourceInfo[packetSource]
+		if sourceInfo == nil {
+			sourceInfo = &SourceInfo{}
+			k.SourceInfo[packetSource] = sourceInfo
+		}
+
+		k.detectAudioTimestampMismatch(ctx, input, sourceInfo)
 
 		// Step 1: Rate correction. Phone may send audio timestamps in
 		// sample-count units (e.g. 44100 Hz) instead of the declared
 		// timebase (1/1000). Rescale: corrected = raw * tbDen / sampleRate.
-		if k.audioSampleRate > 0 {
-			input.SetDTS(input.GetDTS() * k.audioTimeBaseDen / k.audioSampleRate)
-			input.SetPTS(input.GetPTS() * k.audioTimeBaseDen / k.audioSampleRate)
+		// Per-source so a publisher-A in sample-count units cannot
+		// corrupt publisher-B's already-correct millisecond timestamps.
+		if sourceInfo.AudioSampleRate > 0 {
+			input.SetDTS(input.GetDTS() * sourceInfo.AudioTimeBaseDen / sourceInfo.AudioSampleRate)
+			input.SetPTS(input.GetPTS() * sourceInfo.AudioTimeBaseDen / sourceInfo.AudioSampleRate)
 		}
 
-		// Step 2: Epoch alignment. After rate correction, audio may still
-		// be offset from video (phone starts audio capture before video).
-		// Compute the offset once and subtract from all audio timestamps.
+		// Step 2: Epoch alignment. Per-source: each audio packet.Source
+		// carries its own publisher-side PTS base, so its alignment
+		// against the shared video epoch (k.LatestPTS) must be tracked
+		// independently of any other audio source's. The global
+		// alternative (one offset shared across audio sources) leaks a
+		// stale prior session's offset into a freshly-attached
+		// publisher's first packets, which is the multi-cascade-
+		// consumer-EOF symptom.
 		timeBase := input.GetTimeBase()
-		if !k.audioEpochComputed && k.audioTimestampDetected && k.LatestPTS > 0 {
+		// Re-attempt the compute on every audio packet from this source
+		// until a definitive decision is recorded. The audio publisher
+		// may attach BEFORE the video publisher (split-AV arrival
+		// order); in that window LatestPTS is still 0 and we cannot
+		// compute a meaningful offset, so we keep deferring. Once
+		// LatestPTS becomes non-zero (video has been observed) the next
+		// audio packet locks in the decision:
+		//
+		//   - large divergence (or sample-rate-units case): compute
+		//     the offset that maps audioDTS onto LatestPTS so audio
+		//     and video share an epoch.
+		//
+		//   - small divergence (typical fresh single-publisher arrival
+		//     jitter, well under audioEpochAlignmentThreshold): record
+		//     a zero offset and lock. Shifting in this case retro-
+		//     actively pushes audio onto the video PTS and breaks
+		//     legitimate small audio-leads-video offsets.
+		//
+		// Either path sets AudioEpochComputed=true so the decision is
+		// stable for subsequent packets from this source.
+		if !sourceInfo.AudioEpochComputed && k.LatestPTS > 0 {
 			correctedDTS := avconv.Duration(input.GetDTS(), timeBase)
-			k.audioEpochOffset = correctedDTS - k.LatestPTS
-			k.audioEpochComputed = true
-			logger.Debugf(ctx, "Audio epoch offset: %v (correctedDTS=%v, videoPTS=%v)",
-				k.audioEpochOffset, correctedDTS, k.LatestPTS)
+			rawDivergence := correctedDTS - k.LatestPTS
+			absDivergence := rawDivergence
+			if absDivergence < 0 {
+				absDivergence = -absDivergence
+			}
+			switch {
+			case absDivergence > audioEpochAlignmentThreshold || sourceInfo.AudioTimestampDetected:
+				sourceInfo.AudioEpochOffset = rawDivergence
+			default:
+				sourceInfo.AudioEpochOffset = 0
+			}
+			sourceInfo.AudioEpochComputed = true
+			logger.Debugf(ctx, "Audio epoch offset for source %s: %v (correctedDTS=%v, videoPTS=%v, divergence=%v, sampleRateMismatch=%v, newSource=%v)",
+				packetSource, sourceInfo.AudioEpochOffset, correctedDTS, k.LatestPTS, rawDivergence, sourceInfo.AudioTimestampDetected, setNewTimeShift)
 		}
-		if k.audioEpochOffset != 0 {
-			offset := avconv.FromDuration(k.audioEpochOffset, timeBase)
+		if sourceInfo.AudioEpochOffset != 0 {
+			offset := avconv.FromDuration(sourceInfo.AudioEpochOffset, timeBase)
 			input.SetDTS(input.GetDTS() - offset)
 			input.SetPTS(input.GetPTS() - offset)
 		}
@@ -264,14 +344,22 @@ func (k *NodeKernel) Close(ctx context.Context) (_err error) {
 // detectAudioTimestampMismatch checks whether audio timestamps are in
 // sample-count units rather than the declared timebase (e.g. phone sends
 // 44100 Hz sample counts as RTMP millisecond timestamps, making audio DTS
-// grow ~44x faster than video). Once confirmed, audioSampleRate and
-// audioTimeBaseDen are stored so the caller can rescale precisely:
-// corrected = raw * timeBaseDen / sampleRate.
+// grow ~44x faster than video). Once confirmed, AudioSampleRate and
+// AudioTimeBaseDen are stored on the per-source SourceInfo so the caller
+// can rescale precisely: corrected = raw * timeBaseDen / sampleRate.
+//
+// The decision is per-source: a publisher feeding sample-count-unit audio
+// must not flip a kernel-global flag that then rescales a different
+// publisher's already-correct millisecond timestamps. Two simultaneously-
+// attached publishers with different audio-timestamp conventions therefore
+// each get their own detection state; the rescale at the call site reads
+// from the same SourceInfo, so the conventions cannot smuggle.
 func (k *NodeKernel) detectAudioTimestampMismatch(
 	ctx context.Context,
 	input packetorframe.Abstract,
+	sourceInfo *SourceInfo,
 ) {
-	if k.audioTimestampDetected {
+	if sourceInfo.AudioTimestampDetected {
 		return
 	}
 
@@ -306,15 +394,24 @@ func (k *NodeKernel) detectAudioTimestampMismatch(
 	// Verify the actual divergence matches the expected sample-rate ratio.
 	actualRatio := int64(audioDTS) / int64(k.LatestPTS)
 	if actualRatio < expectedRatio/2 || actualRatio > expectedRatio*2 {
-		logger.Debugf(ctx, "Audio DTS divergence (actual ratio %d) does not match sample-rate ratio %d; not correcting",
+		// Divergence is real (>2s) but does NOT come from sample-rate-units
+		// timestamps. Most likely cause: ffstream split-AV mode where the
+		// audio publisher started before video, so audio's clock is simply
+		// further along than video's. Do NOT set AudioTimestampDetected:
+		// flipping it would make the caller compute audioEpochOffset =
+		// audioDTS - LatestPTS and subtract that from every subsequent
+		// audio packet, which retroactively pushes audio packets backward
+		// past Output.LastDTS and gets them dropped. The reordering here
+		// is a publisher-arrival-time difference, not a clock-units bug,
+		// so the right action is no action — leave audio PTS untouched.
+		logger.Debugf(ctx, "Audio DTS divergence (actual ratio %d) does not match sample-rate ratio %d; not correcting and not flagging detection (publisher-arrival-time skew, not clock-units mismatch)",
 			actualRatio, expectedRatio)
-		k.audioTimestampDetected = true
 		return
 	}
 
-	k.audioTimestampDetected = true
-	k.audioSampleRate = sampleRate
-	k.audioTimeBaseDen = tbDen
+	sourceInfo.AudioTimestampDetected = true
+	sourceInfo.AudioSampleRate = sampleRate
+	sourceInfo.AudioTimeBaseDen = tbDen
 	logger.Debugf(ctx, "Detected audio sample-rate timestamps: rescaling by %d/%d (audioDTS=%v, videoPTS=%v)",
 		tbDen, sampleRate, audioDTS, k.LatestPTS)
 }

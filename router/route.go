@@ -59,6 +59,8 @@ func newRoute[T any](
 	onClose func(context.Context, *Route[T]),
 	onPublisherAdded func(context.Context, *Route[T], Publisher[T]),
 	onPublisherRemoved func(context.Context, *Route[T], Publisher[T]),
+	onConsumerAdded func(context.Context, *Route[T], Consumer[T]),
+	onConsumerRemoved func(context.Context, *Route[T], Consumer[T]),
 ) (_ret *Route[T]) {
 	ctx = belt.WithField(ctx, "path", path)
 	logger.Tracef(ctx, "newRoute")
@@ -70,13 +72,15 @@ func newRoute[T any](
 		OnClose:              onClose,
 		OnPublisherAdded:     onPublisherAdded,
 		OnPublisherRemoved:   onPublisherRemoved,
+		OnConsumerAdded:      onConsumerAdded,
+		OnConsumerRemoved:    onConsumerRemoved,
 		PublishersChangeChan: make(chan struct{}),
 		CancelFunc:           cancelFn,
 	}
 	close(r.PublishersChangeChan) // this line is just for local consistency: initially the route is closed until openNodeLocked is called
 	processor := processor.NewFromKernel(
 		ctx,
-		must(NewNodeKernel(ctx)),
+		must(NewNodeKernel(ctx, NodeKernelOptionShouldFixPTS(true))),
 		processor.DefaultOptionsTranscoder()...,
 	)
 	var opts node.Options
@@ -115,7 +119,7 @@ func (r *Route[T]) openNodeLocked(
 	if routeCloseProcessor {
 		r.Node.Processor = processor.NewFromKernel(
 			ctx,
-			must(NewNodeKernel(ctx)),
+			must(NewNodeKernel(ctx, NodeKernelOptionShouldFixPTS(true))),
 			processor.DefaultOptionsTranscoder()...,
 		)
 	}

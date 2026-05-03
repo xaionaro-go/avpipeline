@@ -7,6 +7,7 @@ import (
 
 	"github.com/xaionaro-go/avpipeline/logger"
 	"github.com/xaionaro-go/avpipeline/node"
+	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	transcodertypes "github.com/xaionaro-go/avpipeline/preset/transcoderwithpassthrough/types"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
@@ -26,6 +27,7 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	dst node.Abstract,
 	transcoderConfig *transcodertypes.TranscoderConfig,
 	filterKernelFactory FilterKernelFactory,
+	outputPushToConditions []packetorframefiltercondition.Condition,
 ) (_ret StreamForwarder[CS, PS], _err error) {
 	logger.Tracef(ctx, "NewStreamForwarder(ctx, %s, %s, %#+v)", src, dst, transcoderConfig)
 	defer func() {
@@ -34,9 +36,13 @@ func NewStreamForwarder[CS any, PS processor.Abstract](
 	var fwd StreamForwarder[CS, PS]
 	var err error
 	if transcoderConfig == nil {
+		// outputPushToConditions are not applied on the copy path: the
+		// copy forwarder has no transcoder chain to thread them through.
+		// Callers that need PushTo conditions must use the transcoding
+		// path (transcoderConfig != nil).
 		fwd, err = NewStreamForwarderCopy(ctx, src, dst)
 	} else {
-		fwd, err = NewStreamForwarderTranscoding(ctx, src, dst, transcoderConfig, filterKernelFactory)
+		fwd, err = NewStreamForwarderTranscoding(ctx, src, dst, transcoderConfig, filterKernelFactory, outputPushToConditions)
 	}
 	if err != nil {
 		return nil, err

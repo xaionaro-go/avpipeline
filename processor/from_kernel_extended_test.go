@@ -446,7 +446,7 @@ func TestDefaultOptionsOutput(t *testing.T) {
 	opts := DefaultOptionsOutput()
 	require.NotEmpty(t, opts)
 	cfg := Options(opts).config()
-	assert.Equal(t, uint(600), cfg.InputQueue)
+	assert.Equal(t, uint(60), cfg.InputQueue)
 	assert.Equal(t, uint(0), cfg.OutputQueue)
 	assert.Equal(t, uint(2), cfg.ErrorQueue)
 }
@@ -455,7 +455,7 @@ func TestDefaultOptionsTranscoder(t *testing.T) {
 	opts := DefaultOptionsTranscoder()
 	require.NotEmpty(t, opts)
 	cfg := Options(opts).config()
-	assert.Equal(t, uint(600), cfg.InputQueue)
+	assert.Equal(t, uint(60), cfg.InputQueue)
 	assert.Equal(t, uint(10), cfg.OutputQueue)
 	assert.Equal(t, uint(2), cfg.ErrorQueue)
 }
