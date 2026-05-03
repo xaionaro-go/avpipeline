@@ -130,7 +130,14 @@ func (n *NodeWithCustomData[C, T]) Serve(
 			}
 		case output, ok := <-outputCh:
 			if !ok {
-				sendErr(io.EOF)
+				// Annotate with processor identity so cascade-EOF causes
+				// are distinguishable in logs. Without this, every
+				// FromKernel[...] in a chain emits a bare io.EOF when its
+				// upstream tears down, making it impossible to tell
+				// camera vs mic vs barrier vs decoder cascades apart.
+				// The downstream errors.Is(err, io.EOF) classification
+				// continues to work because we wrap with %w.
+				sendErr(fmt.Errorf("%s: output channel closed: %w", n.Processor, io.EOF))
 				return
 			}
 			if output.Packet != nil {

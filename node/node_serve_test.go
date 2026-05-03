@@ -91,6 +91,58 @@ func TestNode_Serve_SendsEOFOnClosedOutputChan(t *testing.T) {
 	cancel()
 }
 
+// TestNode_Serve_EOFErrorContainsProcessorIdentity verifies the cascade-EOF
+// fix from item 2A — when a processor's output channel closes (the textbook
+// cause of cascade-EOF wedges), the error reported on errCh must be
+// annotated with n.Processor.String() so log readers can see which
+// processor in the chain triggered the cascade. Without identity, multiple
+// FromKernel[...] processors all reported a bare io.EOF, making it
+// impossible to distinguish camera vs mic vs barrier vs decoder cascades
+// in production logs.
+//
+// Falsifier: revert node_serve.go's sendErr(io.EOF) wrap back to bare
+// io.EOF — this test must fail (Contains check on processor name).
+func TestNode_Serve_EOFErrorContainsProcessorIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const procName = "test-cascade-source-kernel"
+	n := NewFromKernel[*testKernel](ctx, &testKernel{stringValue: procName})
+
+	errCh := make(chan Error, 10)
+	go n.Serve(ctx, ServeConfig{}, errCh)
+
+	deadline := time.After(5 * time.Second)
+	for !n.IsServing(ctx) {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for Serve to start")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	require.NoError(t, n.Processor.Close(ctx))
+
+	select {
+	case nodeErr := <-errCh:
+		// Both the EOF cascade path and the ctx-cancelled path should
+		// surface the processor identity for diagnostic clarity. The
+		// EOF wrap is the primary subject of this test.
+		if errors.Is(nodeErr.Err, io.EOF) {
+			tassert.Contains(t, nodeErr.Err.Error(), procName,
+				"EOF error must include processor identity; got: %v", nodeErr.Err)
+			tassert.Contains(t, nodeErr.Err.Error(), "output channel closed",
+				"EOF error must explain cause; got: %v", nodeErr.Err)
+		}
+		// ctx.Canceled path is acceptable but not the falsification target.
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected error after processor close")
+	}
+
+	cancel()
+}
+
 func TestNode_Serve_NilErrCh(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
