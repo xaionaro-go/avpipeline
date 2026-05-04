@@ -1,4 +1,6 @@
-// should_debug_log_tracker.go tracks per-stream debug log deduplication for packets and frames.
+// first_observation_tracker.go records "first observation" facts for
+// a processor: per-stream first-input/output debug-log dedup AND a
+// single first-ever output unix-nanosecond timestamp.
 
 package processor
 
@@ -13,7 +15,7 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
-// shouldDebugLogTracker tracks "first observation" facts for the
+// firstObservationTracker records "first observation" facts for the
 // processor it is embedded in:
 //   - per-stream first-packet/first-frame logging dedup (so debug
 //     logs emit one line per (direction, type, streamIndex) instead
@@ -21,13 +23,12 @@ import (
 //   - first-ever output unix-nanosecond timestamp (write-once across
 //     ALL streams) for stats RPC consumers — used by
 //     ffstreamctl stats first-frame to walk the pipeline graph and
-//     identify the exact node where flow stalled (#350 debugging-gaps
-//     Item 1).
+//     identify the exact node where flow stalled.
 //
 // Both responsibilities observe the same event (first packet/frame
 // out), so consolidating them here avoids parallel redundant calls
 // from the hot-path forwarder loop.
-type shouldDebugLogTracker struct {
+type firstObservationTracker struct {
 	inputPackets  xsync.Map[int, struct{}]
 	inputFrames   xsync.Map[int, struct{}]
 	outputPackets xsync.Map[int, struct{}]
@@ -45,7 +46,7 @@ type shouldDebugLogTracker struct {
 // zero to time.Now().UnixNano(). The Load short-circuits the common
 // steady-state path so we avoid the time.Now() syscall once the
 // timestamp has been set.
-func (t *shouldDebugLogTracker) recordFirstOutputTimestamp() {
+func (t *firstObservationTracker) recordFirstOutputTimestamp() {
 	if t.firstOutputUnixNano.Load() != 0 {
 		return
 	}
@@ -55,11 +56,11 @@ func (t *shouldDebugLogTracker) recordFirstOutputTimestamp() {
 // FirstOutputUnixNano returns the unix-nanosecond timestamp at which
 // the first output packet/frame was observed, or 0 if no output has
 // been seen yet.
-func (t *shouldDebugLogTracker) FirstOutputUnixNano() int64 {
+func (t *firstObservationTracker) FirstOutputUnixNano() int64 {
 	return t.firstOutputUnixNano.Load()
 }
 
-func (t *shouldDebugLogTracker) logFirstInput(
+func (t *firstObservationTracker) logFirstInput(
 	ctx context.Context,
 	name fmt.Stringer,
 	input packetorframe.InputUnion,
@@ -80,7 +81,7 @@ func (t *shouldDebugLogTracker) logFirstInput(
 	}
 }
 
-func (t *shouldDebugLogTracker) logFirstOutputPacket(
+func (t *firstObservationTracker) logFirstOutputPacket(
 	ctx context.Context,
 	name fmt.Stringer,
 	pkt *packetorframe.OutputUnion,
@@ -103,7 +104,7 @@ func (t *shouldDebugLogTracker) logFirstOutputPacket(
 	}
 }
 
-func (t *shouldDebugLogTracker) logFirstOutputFrame(
+func (t *firstObservationTracker) logFirstOutputFrame(
 	ctx context.Context,
 	name fmt.Stringer,
 	frm *packetorframe.OutputUnion,

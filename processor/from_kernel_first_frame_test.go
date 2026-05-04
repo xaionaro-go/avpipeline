@@ -1,19 +1,15 @@
 // from_kernel_first_frame_test.go pins down the per-node first-frame
-// timestamp contract added for #350 debugging-gaps Item 1.
+// timestamp contract on FromKernel.
 //
-// Why this matters: during the #350 cascade-EOF investigation, six
-// distinct architectural root causes (retryable getKernel ctx-leak,
-// retryable retry() ErrKernelNotSet fatal, retryable Unpause
-// ctx-leak, retryable NewRetryable StartOnInit ctx-leak, ffstream
-// chainPreExisted kick race, FromKernel startProcessing ctx-leak)
-// each presented identically: Input.Video=0, ffprobe EOF on the
-// merged output. Per-layer first-frame timing surfaced via the
-// pipeline-stats RPC would have walked the chain to the exact node
-// where flow stalled in seconds. The atomic-int64 firstFrameUnixNano
-// field on FromKernel is the data point.
+// Why this matters: a class of cascade-EOF wedges presents identically
+// at the input layer (counters at zero, ffprobe EOF on the merged
+// output). Per-layer first-frame timing surfaced via the pipeline-
+// stats RPC walks the chain to the exact node where flow stalled —
+// the atomic-int64 firstOutputUnixNano on FromKernel is the data
+// point.
 //
 // Falsifier intent: removing the recordFirstOutputTimestamp() call
-// from shouldDebugLogTracker.logFirstOutputPacket /
+// from firstObservationTracker.logFirstOutputPacket /
 // logFirstOutputFrame must make
 // TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket fail
 // (FirstFrameUnixNano stays at 0 even after a packet flowed).
@@ -51,7 +47,7 @@ func TestFromKernel_FirstFrameUnixNano_ZeroBeforeAnyOutput(t *testing.T) {
 // non-zero timestamp within a sanity window of time.Now().
 //
 // Falsifier: remove the `t.recordFirstOutputTimestamp()` call from
-// shouldDebugLogTracker.logFirstOutputPacket — this assertion must
+// firstObservationTracker.logFirstOutputPacket — this assertion must
 // fail (FirstFrameUnixNano stays at 0 even after the packet was
 // forwarded).
 func TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket(t *testing.T) {
@@ -83,7 +79,7 @@ func TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket(t *testing.T) {
 	t.Cleanup(func() { _ = p.Close(context.Background()) })
 
 	// Drain the output to free up the preOutputCh forwarder so
-	// recordFirstFrameTimestamp gets called.
+	// recordFirstOutputTimestamp gets called.
 	select {
 	case <-p.OutputChan():
 	case <-time.After(2 * time.Second):
@@ -93,7 +89,7 @@ func TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket(t *testing.T) {
 
 	got := p.FirstFrameUnixNano()
 	require.NotEqual(t, int64(0), got,
-		"FirstFrameUnixNano must be non-zero after first packet — recordFirstFrameTimestamp() is missing or broken")
+		"FirstFrameUnixNano must be non-zero after first packet — recordFirstOutputTimestamp() is missing or broken")
 	tassert.GreaterOrEqual(t, got, beforeTs,
 		"FirstFrameUnixNano must be >= timestamp captured before NewFromKernel; got=%d before=%d", got, beforeTs)
 	tassert.LessOrEqual(t, got, afterTs,

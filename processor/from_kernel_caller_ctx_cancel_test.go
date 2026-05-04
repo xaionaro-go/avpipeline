@@ -1,12 +1,12 @@
-// from_kernel_caller_ctx_cancel_test.go reproduces the wedge that #350
-// task #11 final-blocker fix repaired: NewFromKernel was passing the
-// caller's ctx to startProcessing, which spawns three long-lived
+// from_kernel_caller_ctx_cancel_test.go pins down the goroutine-
+// survival contract for NewFromKernel: passing the caller's ctx to
+// startProcessing leaks ctx-cancellation into the three long-lived
 // processor goroutines (preOutputCh forwarder, readerLoop, Generate).
 // When the caller is a request-scoped handler — most concretely
 // ffstream's gRPC AddInput RPC, which constructs FromKernel chains via
 // preset/inputwithfallback's input_chain factory — gRPC cancels the
 // per-call ctx the moment the RPC returns. Without the
-// xcontext.DetachDone fix at from_kernel.go's NewFromKernel, the
+// xcontext.DetachDone wrap at from_kernel.go's NewFromKernel, the
 // preOutputCh forwarder goroutine sees ctx.Done immediately, runs its
 // `defer close(p.OutputCh)`, and downstream
 // NodeWithCustomData.Serve returns sendErr(io.EOF) — cascading EOF

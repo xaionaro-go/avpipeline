@@ -92,13 +92,19 @@ func TestNode_Serve_SendsEOFOnClosedOutputChan(t *testing.T) {
 }
 
 // TestNode_Serve_EOFErrorContainsProcessorIdentity verifies the cascade-EOF
-// fix from item 2A — when a processor's output channel closes (the textbook
+// identity wrap — when a processor's output channel closes (the textbook
 // cause of cascade-EOF wedges), the error reported on errCh must be
 // annotated with n.Processor.String() so log readers can see which
 // processor in the chain triggered the cascade. Without identity, multiple
 // FromKernel[...] processors all reported a bare io.EOF, making it
 // impossible to distinguish camera vs mic vs barrier vs decoder cascades
 // in production logs.
+//
+// Determinism: the parent test ctx stays alive for the entire wait
+// — Processor.Close is the ONLY trigger. The Serve loop's
+// procNodeEndCtx.Done() branch can therefore not fire before the
+// outputCh-closed branch, so the EOF wrap path is the deterministic
+// outcome.
 //
 // Falsifier: revert node_serve.go's sendErr(io.EOF) wrap back to bare
 // io.EOF — this test must fail (Contains check on processor name).
@@ -122,25 +128,27 @@ func TestNode_Serve_EOFErrorContainsProcessorIdentity(t *testing.T) {
 		}
 	}
 
+	// Close the processor WITHOUT cancelling the outer ctx. This makes
+	// the OutputCh-closed branch the deterministic trigger; the Serve
+	// loop's procNodeEndCtx.Done() branch stays blocked because the
+	// parent ctx stays alive.
 	require.NoError(t, n.Processor.Close(ctx))
 
 	select {
 	case nodeErr := <-errCh:
-		// Both the EOF cascade path and the ctx-cancelled path should
-		// surface the processor identity for diagnostic clarity. The
-		// EOF wrap is the primary subject of this test.
-		if errors.Is(nodeErr.Err, io.EOF) {
-			tassert.Contains(t, nodeErr.Err.Error(), procName,
-				"EOF error must include processor identity; got: %v", nodeErr.Err)
-			tassert.Contains(t, nodeErr.Err.Error(), "output channel closed",
-				"EOF error must explain cause; got: %v", nodeErr.Err)
+		// EOF path is the only deterministic outcome here. If we ever
+		// observe a different error, the falsifier guarantee is gone
+		// and the test must fail loudly rather than silently pass.
+		if !errors.Is(nodeErr.Err, io.EOF) {
+			t.Fatalf("EOF path didn't fire — falsifier not exercised; got: %v", nodeErr.Err)
 		}
-		// ctx.Canceled path is acceptable but not the falsification target.
+		tassert.Contains(t, nodeErr.Err.Error(), procName,
+			"EOF error must include processor identity; got: %v", nodeErr.Err)
+		tassert.Contains(t, nodeErr.Err.Error(), "output channel closed",
+			"EOF error must explain cause; got: %v", nodeErr.Err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("expected error after processor close")
 	}
-
-	cancel()
 }
 
 func TestNode_Serve_NilErrCh(t *testing.T) {

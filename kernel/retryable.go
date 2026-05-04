@@ -368,9 +368,9 @@ func (r *Retryable[K]) retry(
 			// "kernel is not set" the moment getKernel races the
 			// Unpause spawn, exits with that error, and the entire
 			// InputChain.Serve unwinds before any frame can flow.
-			// (#350 task #10 root cause: pipelines counters all
-			// zero, no goroutine in CGO/syscall, chain.Serve
-			// "input node serving started"→"ended" same second.)
+			// Symptom of the unwind: pipelines counters all zero, no
+			// goroutine in CGO/syscall, chain.Serve "input node
+			// serving started" → "ended" within the same second.
 			if errors.As(err, &ErrKernelNotSet{}) {
 				// Wait for either the barrier to be opened
 				// (kernel ready) or for shutdown signals, then

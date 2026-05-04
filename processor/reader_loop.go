@@ -26,7 +26,7 @@ func readerLoop(
 	kernel Kernel,
 	outputCh chan<- packetorframe.OutputUnion,
 	countersPtr *Counters,
-	firstSeen *shouldDebugLogTracker,
+	firstSeen *firstObservationTracker,
 ) (_err error) {
 	logger.Debugf(ctx, "ReaderLoop[%s]: chan %p", kernel, inputChan)
 	defer func() { logger.Debugf(ctx, "/ReaderLoop[%s]: chan %p: %v", kernel, inputChan, _err) }()

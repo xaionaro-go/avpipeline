@@ -18,6 +18,13 @@ import (
 // We type-assert via this interface here to avoid an import cycle:
 // processor depends on protobuf for some converters, so this package
 // can't import processor directly.
+//
+// Processors that do not implement this interface (Dummy, StreamMux,
+// NoServe wrappers, etc.) leave Node.FirstFrameUnixNs absent in the
+// proto message — distinguished from "implements but no output yet"
+// (which is presence-with-value-0). Operator tooling can therefore
+// tell "type does not track this fact" from "tracked, still
+// stalled".
 type firstFrameUnixNanoer interface {
 	FirstFrameUnixNano() int64
 }
@@ -38,7 +45,8 @@ func NodeToGRPC(
 		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), proc.CountersPtr()),
 	}
 	if ffter, ok := proc.(firstFrameUnixNanoer); ok {
-		result.FirstFrameUnixNs = ffter.FirstFrameUnixNano()
+		ts := ffter.FirstFrameUnixNano()
+		result.FirstFrameUnixNs = &ts
 	}
 
 	for {

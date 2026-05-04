@@ -42,9 +42,9 @@ type FromKernel[T kernel.Abstract] struct {
 
 	// firstSeen is shared "first observation" state: per-stream
 	// first-output debug-log dedup, AND first-ever output unix-ns
-	// timestamp for stats RPC consumers (#350 debugging-gaps Item 1).
-	// See shouldDebugLogTracker doc for the consolidation rationale.
-	firstSeen shouldDebugLogTracker
+	// timestamp for stats RPC consumers. See firstObservationTracker
+	// doc for the consolidation rationale.
+	firstSeen firstObservationTracker
 }
 
 var _ globaltypes.ErrorHandler = (*FromKernel[kernel.Abstract])(nil)
@@ -101,9 +101,10 @@ func NewFromKernel[T kernel.Abstract](
 	// any frame can flow. Lifecycle is owned by the processor's closer
 	// (Close path drains InputCh/preOutputCh/OutputCh), not by the
 	// caller's ctx. Mirrors the kernel/retryable.go xcontext.DetachDone
-	// fixes (#350 task #10 RCA: chain.Serve sub-Serves all "started" →
-	// "ended" same second; preOutputCh forwarder closes p.OutputCh on
-	// gRPC RPC ctx cancel).
+	// wraps: without the detach, chain.Serve sub-Serves all transition
+	// "started" → "ended" within the same second of the AddInput RPC
+	// returning, because the preOutputCh forwarder closes p.OutputCh
+	// on gRPC RPC ctx cancel.
 	p.startProcessing(xcontext.DetachDone(ctx))
 	return p
 }
@@ -312,13 +313,16 @@ func (p *FromKernel[T]) String() string {
 }
 
 // FirstFrameUnixNano returns the unix-nanosecond timestamp at which
-// the first output packet/frame was forwarded to OutputCh, or 0 if
-// the processor has not yet emitted any output.
+// the first output packet/frame was observed by the forwarder, or 0
+// if the processor has not yet emitted any output. The timestamp is
+// recorded BEFORE the send to OutputCh — if the forwarder takes the
+// Omitted branch on shutdown the value is still set, reflecting
+// "produced by the kernel" rather than "delivered downstream".
 //
 // Used by the pipeline-stats RPC path (NodeToGRPC) to surface
 // per-node first-frame timing for cascade-EOF root-cause
 // localization. Recording happens inside firstSeen.logFirst* — see
-// shouldDebugLogTracker.recordFirstOutputTimestamp.
+// firstObservationTracker.recordFirstOutputTimestamp.
 func (p *FromKernel[T]) FirstFrameUnixNano() int64 {
 	return p.firstSeen.FirstOutputUnixNano()
 }
