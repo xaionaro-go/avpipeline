@@ -429,6 +429,11 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		}
 		defer work.Release()
 
+		if i.getInputChainByID(ctx, InputID(to)) == nil {
+			logger.Errorf(ctx, "Switch: target input %d not found", to)
+			return nil
+		}
+
 		prevNext := i.InputSwitch.NextValue.Load()
 		cur := i.InputSwitch.CurrentValue.Load()
 		plan, err := i.planSwitchLifecycle(ctx, InputID(to), cur, prevNext)
@@ -436,9 +441,6 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 			return err
 		}
 
-		if len(plan.UnpauseBeforeSwitch) == 0 && i.getInputChainByID(ctx, InputID(to)) == nil {
-			logger.Errorf(ctx, "Switch: target input %d not found", to)
-		}
 		if len(plan.UnpauseBeforeSwitch) > 0 {
 			release := work.ReserveAsyncWork()
 			observability.Go(ctx, func(ctx context.Context) {

@@ -69,19 +69,41 @@ func TestInputWithFallback_StuckSwitchRecovers(t *testing.T) {
 	// the new attempt succeeds.
 	onSwitchReq := iwf.InputSwitch.GetOnSwitchRequest()
 	require.NotNil(t, onSwitchReq)
-	// Use to=999: the spawned async goroutine returns immediately when
-	// getInputChainByID misses, so its deferred decrement runs without
-	// touching real Pause/Unpause paths. This keeps the convergence
-	// assertion below independent of retry-kernel async work.
+	// Use to=999: the missing target path returns without touching real
+	// Pause/Unpause paths. This keeps the convergence assertion below
+	// independent of retry-kernel async work.
 	require.NoError(t, onSwitchReq(ctx, packetorframe.InputUnion{}, 999))
 
 	// Phase 4: the gate must converge to 0. Recovery released the
-	// stuck reservation synchronously; the brief async work spawned by
-	// OnSwitchRequest self-decrements via defer. Eventually polls a
-	// deterministic condition; if the leak regresses, the poll reaches
-	// the deadline and the test fails.
+	// stuck reservation synchronously; the missing-target request
+	// self-decrements via defer. Eventually polls a deterministic
+	// condition; if the leak regresses, the poll reaches the deadline and
+	// the test fails.
 	require.Eventually(t, func() bool {
 		return iwf.switchGate.InFlight() == 0
 	}, 2*time.Second, time.Millisecond,
 		"switch gate failed to converge to 0; leak regressed")
+}
+
+func TestInputWithFallback_OnSwitchRequestMissingTargetPreservesPausedChains(t *testing.T) {
+	ctx := context.Background()
+	f0 := &mockInputFactory{name: "primary"}
+	f1 := &mockInputFactory{name: "fallback1"}
+	f2 := &mockInputFactory{name: "fallback2"}
+	iwf := newTestIWF(t, f0, f1, f2)
+	iwf.InputSwitch.CurrentValue.Store(0)
+
+	require.True(t, iwf.InputChains[1].IsPaused(ctx))
+	require.True(t, iwf.InputChains[2].IsPaused(ctx))
+
+	onSwitchReq := iwf.InputSwitch.GetOnSwitchRequest()
+	require.NotNil(t, onSwitchReq)
+	require.NoError(t, onSwitchReq(ctx, packetorframe.InputUnion{}, 999))
+
+	require.Eventually(t, func() bool {
+		return iwf.switchGate.InFlight() == 0
+	}, 2*time.Second, time.Millisecond,
+		"switch gate failed to converge to 0 after missing target")
+	require.True(t, iwf.InputChains[1].IsPaused(ctx))
+	require.True(t, iwf.InputChains[2].IsPaused(ctx))
 }
