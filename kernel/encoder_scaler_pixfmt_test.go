@@ -303,6 +303,55 @@ func TestShouldBypassScaler_PixelFormatMismatch_RunsScaler(t *testing.T) {
 		"YUV444P != NV12 upload format and != MEDIACODEC -> scaler must run")
 }
 
+// TestShouldBypassScaler_HWInputHWEncoder_DimMismatch_BypassesScaler
+// pins the prod DJI scenario: decoder post-crop dims (1920x1072)
+// differ from the encoder's launcher-configured target (1920x1080),
+// but BOTH sides are MEDIACODEC. The Android Surface composer absorbs
+// producer/consumer dim mismatch via the shared
+// dev_ctx->native_window, so HW->HW passthrough is safe.
+//
+// Required behaviour: bypass MUST be taken — running libswscale on a
+// hwaccel source pixfmt fails outright, and falling through to
+// av_hwframe_transfer_data against the mediacodec hwctx returns
+// ENOSYS (FFmpeg's hwcontext_mediacodec.c does not implement
+// frames_get_buffer). Either path wedges the encoder.
+//
+// The HW->HW arm must fire BEFORE the dim-equality early-return —
+// otherwise the dim mismatch falls through to "run scaler" and the
+// pipeline stalls.
+func TestShouldBypassScaler_HWInputHWEncoder_DimMismatch_BypassesScaler(t *testing.T) {
+	t.Parallel()
+
+	got := shouldBypassScaler(
+		astiav.PixelFormatMediacodec, 1920, 1072,
+		astiav.PixelFormatMediacodec, 1920, 1080,
+		nil,
+	)
+	testifyassert.True(t, got,
+		"HW->HW passthrough must bypass scaler even with dim mismatch "+
+			"(input=MEDIACODEC/1920x1072, encoder=MEDIACODEC/1920x1080); "+
+			"Surface composer absorbs the mismatch — bypass=false leads to "+
+			"libswscale ENOSYS or transfer_data ENOSYS")
+}
+
+// TestShouldBypassScaler_SWInputHWEncoder_DimMismatch_RunsScaler is the
+// regression check paired with TestShouldBypassScaler_HWInputHWEncoder_DimMismatch_BypassesScaler:
+// when the input pixfmt is a SW format (NV12), the dim-mismatch arm
+// MUST still fall through to "run scaler" — only HW->HW input gets the
+// Surface-composer dim absorption.
+func TestShouldBypassScaler_SWInputHWEncoder_DimMismatch_RunsScaler(t *testing.T) {
+	t.Parallel()
+
+	got := shouldBypassScaler(
+		astiav.PixelFormatNv12, 1920, 1072,
+		astiav.PixelFormatMediacodec, 1920, 1080,
+		nil,
+	)
+	testifyassert.False(t, got,
+		"SW NV12 input with dim mismatch must run scaler "+
+			"(no Surface-composer absorption for SW->HW upload path)")
+}
+
 // TestScaledFrame_AllocBufferFailsForHWPixelFormat is the empirical
 // reproduction of the EINVAL: it asserts the libavutil contract that
 // av_frame_get_buffer cannot allocate for hwaccel pixfmts. This is

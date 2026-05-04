@@ -4,6 +4,7 @@ package resource
 
 import (
 	"github.com/asticode/go-astiav"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 // Resources captures hardware-side state that an encoder may borrow from the
@@ -15,8 +16,15 @@ import (
 // hw_frames_ctx after the first decoded frame; if the encoder is created
 // before that first frame, HWFramesContext stays nil and the encoder falls
 // back to HWDeviceContext-only mode (existing behaviour).
+//
+// HardwareDeviceType is recorded alongside HWDeviceContext because astiav
+// exposes no Type() accessor on HardwareDeviceContext; the field lets
+// downstream selectors (e.g. selectMediaCodecEncoderDefaultPixFmt's
+// cross-vendor guard) reject non-mediacodec devices without dereferencing
+// the AVBufferRef.
 type Resources struct {
 	HWDeviceContext         *astiav.HardwareDeviceContext
+	HardwareDeviceType      globaltypes.HardwareDeviceType
 	HWFramesContext         *astiav.HardwareFramesContext
 	HWFramesContextWidth    int
 	HWFramesContextHeight   int

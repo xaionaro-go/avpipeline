@@ -294,7 +294,8 @@ func resourcesFromDecoder(
 	d *Decoder,
 ) *Resources {
 	res := &Resources{
-		HWDeviceContext: d.HardwareDeviceContext(ctx),
+		HWDeviceContext:    d.HardwareDeviceContext(ctx),
+		HardwareDeviceType: d.InitParams.HardwareDeviceType,
 	}
 	cc := d.CodecContext(ctx)
 	if cc != nil && res.HWDeviceContext != nil {

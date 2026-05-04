@@ -1080,26 +1080,37 @@ func (c *codecInternals) setupPixelFormat(
 		if c.isMediaCodec() {
 			defaultMediaCodecPixelFormat := selectMediaCodecEncoderDefaultPixFmt(
 				reusableResources,
+				codecParameters.CodecID(),
 				codecParameters.Width(), codecParameters.Height(),
 			)
-			// Diagnostic when we step off the HW-passthrough default: a
-			// reusable HW device context is present but recorded
-			// decoder dims either are missing (decoder pre-open) or
-			// differ from the encoder target, so scaling will be
-			// required and we must hand the encoder a SW pix_fmt
-			// (libswscale cannot consume HW pixfmts, see
-			// kernel/encoder_scaler_descriptors.go).
-			if defaultMediaCodecPixelFormat == astiav.PixelFormatNv12 &&
-				reusableResources != nil &&
-				reusableResources.HWDeviceContext != nil {
-				logger.Debugf(ctx,
-					"MediaCodec encoder: upstream decoder dims unrecorded or mismatch "+
-						"(hwfc_attached=%t src=%dx%d enc=%dx%d); forcing pix_fmt=nv12 for SW upload",
-					reusableResources.HWFramesContext != nil,
-					reusableResources.HWFramesContextWidth, reusableResources.HWFramesContextHeight,
-					codecParameters.Width(), codecParameters.Height(),
-				)
+			// Unconditional decision-time diagnostic: every call site
+			// records codec_id, recorded decoder dims, encoder target,
+			// chosen pixfmt, and reusable-state shape so prod logs let
+			// us reconstruct the F7 gate vote without a debugger.
+			var (
+				resHWDevSet   bool
+				resHWDevType  globaltypes.HardwareDeviceType
+				resHWFCSet    bool
+				resRecordedW  int
+				resRecordedH  int
+			)
+			if reusableResources != nil {
+				resHWDevSet = reusableResources.HWDeviceContext != nil
+				resHWDevType = reusableResources.HardwareDeviceType
+				resHWFCSet = reusableResources.HWFramesContext != nil
+				resRecordedW = reusableResources.HWFramesContextWidth
+				resRecordedH = reusableResources.HWFramesContextHeight
 			}
+			logger.Debugf(ctx,
+				"MediaCodec encoder pixfmt decision: codec_id=%s "+
+					"hwdev_set=%t hwdev_type=%s hwfc_set=%t "+
+					"src_recorded=%dx%d enc_target=%dx%d -> pixfmt=%s",
+				codecParameters.CodecID(),
+				resHWDevSet, resHWDevType, resHWFCSet,
+				resRecordedW, resRecordedH,
+				codecParameters.Width(), codecParameters.Height(),
+				defaultMediaCodecPixelFormat,
+			)
 			logger.Warnf(ctx, "is MediaCodec, but pixel format is not set; forcing %s pixel format", defaultMediaCodecPixelFormat)
 			if err := customOptions.Set(pixelFormatOptionName, defaultMediaCodecPixelFormat.String(), 0); err != nil {
 				return fmt.Errorf("unable to set %q option: %w", pixelFormatOptionName, err)

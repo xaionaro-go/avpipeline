@@ -1327,7 +1327,18 @@ func (e *streamEncoderLocked) getScaledFrame(
 						// and is reused for every subsequent frame; freed
 						// at decoder close. Lockless via atomic.Pointer
 						// CAS — see EnsureLazyHardwareFramesContext doc.
-						const lazyMediaCodecPoolSize = 8
+						//
+						// Pool size MUST be 0 here: FFmpeg's
+						// hwcontext_mediacodec.c does not implement
+						// frames_get_buffer, so av_hwframe_ctx_init's
+						// pool-prealloc loop returns ENOSYS for any positive
+						// size. The HFC is needed only as a metadata carrier
+						// (width/height/sw_format) for
+						// av_hwframe_transfer_data — see the invariant
+						// pinned in codec/codec.go (the SetInitialPoolSize
+						// gate honours zero by skipping the call, matching
+						// FFmpeg's "no preallocation" behaviour).
+						const lazyMediaCodecPoolSize = 0
 						lazyHFC, err := dec.EnsureLazyHardwareFramesContext(
 							ctx,
 							frameSrc.Width(), frameSrc.Height(),

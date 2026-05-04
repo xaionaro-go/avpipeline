@@ -13,6 +13,7 @@ import (
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/assert"
 	"github.com/xaionaro-go/avpipeline/codec/resource"
+	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
 func TestSelectMediaCodecEncoderDefaultPixFmt(t *testing.T) {
@@ -22,12 +23,12 @@ func TestSelectMediaCodecEncoderDefaultPixFmt(t *testing.T) {
 	hwFrames := &astiav.HardwareFramesContext{}
 
 	t.Run("nil reusable resources -> NV12", func(t *testing.T) {
-		got := selectMediaCodecEncoderDefaultPixFmt(nil, 1920, 1920)
+		got := selectMediaCodecEncoderDefaultPixFmt(nil, astiav.CodecIDH264, 1920, 1920)
 		assert.Equal(t, astiav.PixelFormatNv12, got)
 	})
 
 	t.Run("HWDeviceContext nil -> NV12", func(t *testing.T) {
-		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{}, 1920, 1920)
+		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{}, astiav.CodecIDH264, 1920, 1920)
 		assert.Equal(t, astiav.PixelFormatNv12, got)
 	})
 
@@ -36,8 +37,9 @@ func TestSelectMediaCodecEncoderDefaultPixFmt(t *testing.T) {
 		// the decoder's CodecContext yet. Fall back to NV12 to avoid
 		// gambling that decoder dims match encoder target.
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
-			HWDeviceContext: hwDev,
-		}, 1920, 1920)
+			HWDeviceContext:    hwDev,
+			HardwareDeviceType: globaltypes.HardwareDeviceTypeMediaCodec,
+		}, astiav.CodecIDH264, 1920, 1920)
 		assert.Equal(t, astiav.PixelFormatNv12, got)
 	})
 
@@ -53,44 +55,91 @@ func TestSelectMediaCodecEncoderDefaultPixFmt(t *testing.T) {
 		// av_hwframe_transfer_data (mediacodec hwctx returns ENOSYS).
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
 			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
 			HWFramesContextWidth:  1920,
 			HWFramesContextHeight: 1920,
-		}, 1920, 1920)
+		}, astiav.CodecIDH264, 1920, 1920)
 		assert.Equal(t, astiav.PixelFormatMediacodec, got)
 	})
 
-	t.Run("HWFramesContext set, dims mismatch -> NV12 cross-resolution scaler", func(t *testing.T) {
-		// Dim-mismatch (e.g. 1920x1080 source decoded by cuvid feeding a
-		// 1920x1920 mediacodec encoder — synthetic but covers the
-		// scaler invariant). MEDIACODEC would force libswscale to read
-		// a hwaccel pixfmt and fail.
+	t.Run("HWFramesContext set, dim MISmatch + H264 -> MEDIACODEC (Surface composer absorbs)", func(t *testing.T) {
+		// The prod DJI scenario: decoder post-crop dims 1920x1072,
+		// encoder launcher-configured 1920x1080. SurfaceFlinger absorbs
+		// producer/consumer dim mismatch on the shared
+		// dev_ctx->native_window, so HW->HW passthrough is safe.
+		// The strict dim-equality gate forced NV12 fallback, which then
+		// triggered av_hwframe_transfer_data against the mediacodec
+		// hwctx -> ENOSYS, wedging the encoder.
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
 			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
 			HWFramesContext:       hwFrames,
 			HWFramesContextWidth:  1920,
-			HWFramesContextHeight: 1080,
-		}, 1920, 1920)
-		assert.Equal(t, astiav.PixelFormatNv12, got)
+			HWFramesContextHeight: 1072,
+		}, astiav.CodecIDH264, 1920, 1080)
+		assert.Equal(t, astiav.PixelFormatMediacodec, got)
 	})
 
-	t.Run("HWFramesContext set, width mismatch -> NV12", func(t *testing.T) {
+	t.Run("HWFramesContext set, width mismatch + H264 -> MEDIACODEC (Surface composer absorbs)", func(t *testing.T) {
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
 			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
 			HWFramesContext:       hwFrames,
 			HWFramesContextWidth:  1280,
 			HWFramesContextHeight: 1920,
-		}, 1920, 1920)
-		assert.Equal(t, astiav.PixelFormatNv12, got)
+		}, astiav.CodecIDH264, 1920, 1920)
+		assert.Equal(t, astiav.PixelFormatMediacodec, got)
 	})
 
-	t.Run("HWFramesContext set, dims match -> MEDIACODEC (HW->HW passthrough cuvid->nvenc analog)", func(t *testing.T) {
+	t.Run("HWFramesContext set, dims match + H264 -> MEDIACODEC (HW->HW passthrough)", func(t *testing.T) {
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
 			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
 			HWFramesContext:       hwFrames,
 			HWFramesContextWidth:  1920,
 			HWFramesContextHeight: 1920,
-		}, 1920, 1920)
+		}, astiav.CodecIDH264, 1920, 1920)
 		assert.Equal(t, astiav.PixelFormatMediacodec, got)
+	})
+
+	t.Run("HWDeviceContext + matching dims + HEVC -> MEDIACODEC", func(t *testing.T) {
+		// HEVC has the same in-tree SPS/VPS rewriter support as H.264,
+		// so the Surface-passthrough path is safe.
+		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
+			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
+			HWFramesContextWidth:  1920,
+			HWFramesContextHeight: 1080,
+		}, astiav.CodecIDHevc, 1920, 1080)
+		assert.Equal(t, astiav.PixelFormatMediacodec, got)
+	})
+
+	t.Run("HWDeviceContext + matching dims + AV1 -> NV12 (no in-tree SPS rewriter)", func(t *testing.T) {
+		// AV1 lacks an in-tree BSF for SPS-rewriting, so HW->HW
+		// passthrough via the Surface composer is unsafe today. Stay on
+		// NV12 + SW upload until each new codec gains a rewriter.
+		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
+			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeMediaCodec,
+			HWFramesContextWidth:  1920,
+			HWFramesContextHeight: 1080,
+		}, astiav.CodecIDAv1, 1920, 1080)
+		assert.Equal(t, astiav.PixelFormatNv12, got)
+	})
+
+	t.Run("non-mediacodec HWDeviceContext + matching dims + H264 -> NV12 (cross-vendor guard)", func(t *testing.T) {
+		// cuvid->mediacodec route: the upstream HWDeviceContext is CUDA,
+		// not mediacodec. mediacodec_init() rejects non-mediacodec
+		// hw_device_ctx with EINVAL, so we must NOT route the encoder
+		// onto pix_fmt=MEDIACODEC. NV12 + SW upload is the only safe
+		// option.
+		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
+			HWDeviceContext:       hwDev,
+			HardwareDeviceType:    globaltypes.HardwareDeviceTypeCUDA,
+			HWFramesContextWidth:  1920,
+			HWFramesContextHeight: 1080,
+		}, astiav.CodecIDH264, 1920, 1080)
+		assert.Equal(t, astiav.PixelFormatNv12, got)
 	})
 
 	t.Run("zero target dims with zero recorded dims -> NV12 (degenerate but safe)", func(t *testing.T) {
@@ -99,9 +148,10 @@ func TestSelectMediaCodecEncoderDefaultPixFmt(t *testing.T) {
 		// NV12. Real call sites always pass non-zero target dims
 		// (codecParameters.Width()/Height() set by amendVideoCodecParams).
 		got := selectMediaCodecEncoderDefaultPixFmt(&resource.Resources{
-			HWDeviceContext: hwDev,
-			HWFramesContext: hwFrames,
-		}, 0, 0)
+			HWDeviceContext:    hwDev,
+			HardwareDeviceType: globaltypes.HardwareDeviceTypeMediaCodec,
+			HWFramesContext:    hwFrames,
+		}, astiav.CodecIDH264, 0, 0)
 		assert.Equal(t, astiav.PixelFormatNv12, got)
 	})
 }
