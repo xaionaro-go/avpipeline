@@ -35,7 +35,8 @@ func (dummyOutputFactory) NewSender(
 
 func TestOutputNodes(t *testing.T) {
 	ctx := context.Background()
-	input := newInput[struct{}](ctx, nil, InputTypeAll)
+	input, err := newInput[struct{}](ctx, nil, InputTypeAll)
+	require.NoError(t, err)
 	output, err := newOutput[struct{}](
 		ctx,
 		1,
