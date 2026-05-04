@@ -63,6 +63,12 @@ func (p *ModeCreationPlanner[K]) planForbid(
 	requested K,
 	existing []ExistingMember[K],
 ) CreationDecision[K] {
+	for _, existingMember := range existing {
+		if existingMember.StorageKey == requested {
+			return p.reuseDecision(requested, existingMember)
+		}
+	}
+
 	if len(existing) == 0 {
 		return p.createDecision(requested)
 	}

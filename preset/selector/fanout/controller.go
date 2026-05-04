@@ -56,11 +56,23 @@ func (c *Controller[K, M]) SetPreferred(
 	ctx context.Context,
 	requested K,
 ) error {
+	snapshots, err := c.snapshotPreferredSwitch(ctx, requested)
+	if err != nil {
+		return err
+	}
+
+	return c.preferenceSwitcher.switchValidatedSnapshots(ctx, snapshots)
+}
+
+func (c *Controller[K, M]) snapshotPreferredSwitch(
+	ctx context.Context,
+	requested K,
+) ([]preferredRouteSnapshot[K], error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	if !c.differentOutputPolicy.AllowsDifferentOutputs(ctx) {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"storage key %s: %w",
 			safekey.Format(ctx, c.safeKeyFormatter, requested),
 			ErrDifferentOutputsNotAllowed,
@@ -69,12 +81,12 @@ func (c *Controller[K, M]) SetPreferred(
 
 	plans, err := c.preferredRoutePlanner.PlanPreferred(ctx, requested)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"plan preferred storage key %s: %w",
 			safekey.Format(ctx, c.safeKeyFormatter, requested),
 			err,
 		)
 	}
 
-	return c.preferenceSwitcher.SwitchPreferred(ctx, plans, c.routes, c.members, c.attachments)
+	return c.preferenceSwitcher.validatePlans(ctx, plans, c.routes, c.members, c.attachments)
 }

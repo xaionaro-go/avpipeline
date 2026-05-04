@@ -30,7 +30,7 @@ func TestModePoliciesRepresentAllTopologyModes(t *testing.T) {
 			name:                   "forbid",
 			mode:                   fanout.ModeForbid,
 			createWithExisting:     fanout.CreationActionReject,
-			sameKeyWithExisting:    fanout.CreationActionReject,
+			sameKeyWithExisting:    fanout.CreationActionReuse,
 			allowsDifferentOutputs: false,
 		},
 		{

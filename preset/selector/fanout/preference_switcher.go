@@ -26,6 +26,11 @@ type preferredRouteSnapshot[K comparable] struct {
 	syncer     id.MemberID
 }
 
+type routeStateSnapshotter interface {
+	Current(ctx context.Context) id.MemberID
+	SyncerCurrent(ctx context.Context) id.MemberID
+}
+
 func NewPreferenceSwitcher[K comparable, M any](
 	safeKeyFormatter safekey.Formatter[K],
 ) *PreferenceSwitcher[K, M] {
@@ -58,6 +63,13 @@ func (s *PreferenceSwitcher[K, M]) SwitchPreferred(
 		return err
 	}
 
+	return s.switchValidatedSnapshots(ctx, snapshots)
+}
+
+func (s *PreferenceSwitcher[K, M]) switchValidatedSnapshots(
+	ctx context.Context,
+	snapshots []preferredRouteSnapshot[K],
+) error {
 	var alreadyPreferred []id.RouteID
 	for _, snapshot := range snapshots {
 		if snapshot.current != snapshot.syncer {
@@ -128,17 +140,28 @@ func (s *PreferenceSwitcher[K, M]) validatePlans(
 			)
 		}
 
+		current, syncer := currentAndSyncer(ctx, state.Pair)
 		snapshots = append(snapshots, preferredRouteSnapshot[K]{
 			routeID:    plan.RouteID,
 			storageKey: plan.StorageKey,
 			memberID:   entry.ID,
 			pair:       state.Pair,
-			current:    state.Pair.Current(ctx),
-			syncer:     state.Pair.SyncerCurrent(ctx),
+			current:    current,
+			syncer:     syncer,
 		})
 	}
 
 	return snapshots, nil
+}
+
+func currentAndSyncer(
+	ctx context.Context,
+	snapshotter routeStateSnapshotter,
+) (id.MemberID, id.MemberID) {
+	syncer := snapshotter.SyncerCurrent(ctx)
+	current := snapshotter.Current(ctx)
+
+	return current, syncer
 }
 
 func isMemberAttachedToRoute(
