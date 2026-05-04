@@ -25,6 +25,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
+	selectorfanin "github.com/xaionaro-go/avpipeline/preset/selector/fanin"
+	selectorid "github.com/xaionaro-go/avpipeline/preset/selector/id"
+	selectormember "github.com/xaionaro-go/avpipeline/preset/selector/member"
+	"github.com/xaionaro-go/avpipeline/preset/selector/switchprogress"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -51,28 +55,11 @@ type InputWithFallback[K InputKernel, DF codec.DecoderFactory, C any] struct {
 	isServing         atomic.Bool
 	serveWaitGroup    sync.WaitGroup
 	syncingSince      xatomic.Value[time.Time]
-	// switchingProcN counts in-flight switch-related work that gates
-	// concurrent SetValue calls in OnSwitchRequest. It tracks both the
-	// transient async goroutines (OnSwitchRequest unpause/pause workers,
-	// OnAfterSwitch pausers — each defer-decrements) and the
-	// OnBeforeSwitch → InputSyncer-KeepUnless cycle (one +1 per active
-	// cycle, released when KeepUnless first matches OR when a fresh
-	// switch supersedes a stuck cycle via syncingGen).
-	switchingProcN xatomic.Int64
-	// syncingGen tags the currently-pending OnBeforeSwitch →
-	// InputSyncer-KeepUnless cycle. Zero means no cycle pending. Each
-	// OnBeforeSwitch atomically Swaps in a fresh generation produced by
-	// nextSyncingGen.Add(1); if the prior gen was non-zero the prior
-	// cycle is superseded and the new cycle inherits its switchingProcN
-	// reservation (no extra +1). The KeepUnless decrement and other
-	// teardown sites (OnInterruptedSwitch, OnSwitchRequest's stuck-cycle
-	// release) attempt Swap(0) and only act on a non-zero return — so a
-	// stale cycle's defer becomes a no-op once the gen has been bumped.
-	// This recovers from a stuck syncer (predicate never matches) by
-	// letting a fresh switch request supersede it without a process
-	// restart.
-	syncingGen     xatomic.Uint64
-	nextSyncingGen xatomic.Uint64
+	// switchGate owns the selector-compatible in-flight switch
+	// accounting. It tracks OnSwitchRequest work and the
+	// OnBeforeSwitch -> InputSyncer-KeepUnless cycle so a fresh switch
+	// can supersede a stuck syncer cycle without process restart.
+	switchGate switchprogress.Gate
 
 	// measurements
 	Measurements                    map[astiav.MediaType]*TrackMeasurements
@@ -168,6 +155,19 @@ func (i *InputWithFallback[K, DF, C]) GetInputChainsCount(
 	})
 }
 
+type chainLifecycleOperation uint8
+
+const (
+	chainLifecyclePause chainLifecycleOperation = iota + 1
+	chainLifecycleUnpause
+)
+
+type switchLifecyclePlan[K InputKernel, DF codec.DecoderFactory, C any] struct {
+	UnpauseBeforeSwitch  []*InputChain[K, DF, C]
+	PauseAfterSwitch     []*InputChain[K, DF, C]
+	PausePreviousPending []*InputChain[K, DF, C]
+}
+
 // PauseChain pauses the input chain at the given ID. Pausing all chains
 // will suspend packet production until at least one chain is unpaused.
 // Pausing an already-paused chain is a no-op.
@@ -177,32 +177,38 @@ func (i *InputWithFallback[K, DF, C]) PauseChain(
 ) (_err error) {
 	logger.Debugf(ctx, "PauseChain: %d", id)
 	defer func() { logger.Debugf(ctx, "/PauseChain: %d: %v", id, _err) }()
-	return xsync.DoA2R1(ctx, &i.InputChainsLocker, i.pauseChainLocked, ctx, id)
+	chains, err := xsync.DoA2R2(ctx, &i.InputChainsLocker, i.planPauseChainLocked, ctx, id)
+	if err != nil {
+		return err
+	}
+	return runChainLifecycle(ctx, chains, chainLifecyclePause)
 }
 
-func (i *InputWithFallback[K, DF, C]) pauseChainLocked(
+func (i *InputWithFallback[K, DF, C]) planPauseChainLocked(
 	ctx context.Context,
 	id InputID,
-) error {
+) ([]*InputChain[K, DF, C], error) {
 	chain := i.getInputChainByIDLocked(ctx, id)
 	if chain == nil {
-		return fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
-	}
-	if chain.IsPaused(ctx) {
-		return nil
+		return nil, fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
 	}
 
-	activeCount := 0
-	for _, c := range i.InputChains {
-		if !c.IsPaused(ctx) {
-			activeCount++
-		}
+	state, chainsByID := i.pauseStateLocked(
+		ctx,
+		selectorid.MemberID(i.InputSwitch.CurrentValue.Load()),
+		selectorid.MemberID(i.InputSwitch.NextValue.Load()),
+		selectorid.MemberID(id),
+	)
+	planner := selectorfanin.PausePlanner[InputID, *InputChain[K, DF, C]]{}
+	plan, err := planner.PlanPause(ctx, state, selectorid.MemberID(id))
+	if errors.Is(err, selectorfanin.ErrCannotPauseSoleActiveMember) {
+		return nil, ErrCannotPauseSoleActiveChain{ID: id}
 	}
-	if activeCount <= 1 {
-		return ErrCannotPauseSoleActiveChain{ID: id}
+	if err != nil {
+		return nil, err
 	}
 
-	return chain.Pause(ctx)
+	return chainsByMemberIDs(chainsByID, plan.PauseAfterSwitch), nil
 }
 
 // UnpauseChain unpauses the input chain at the given ID.
@@ -212,23 +218,146 @@ func (i *InputWithFallback[K, DF, C]) UnpauseChain(
 ) (_err error) {
 	logger.Debugf(ctx, "UnpauseChain: %d", id)
 	defer func() { logger.Debugf(ctx, "/UnpauseChain: %d: %v", id, _err) }()
-	return xsync.DoA2R1(ctx, &i.InputChainsLocker, i.unpauseChainLocked, ctx, id)
+	chains, err := xsync.DoA2R2(ctx, &i.InputChainsLocker, i.planUnpauseChainLocked, ctx, id)
+	if err != nil {
+		return err
+	}
+	return runChainLifecycle(ctx, chains, chainLifecycleUnpause)
 }
 
-func (i *InputWithFallback[K, DF, C]) unpauseChainLocked(
+func (i *InputWithFallback[K, DF, C]) planUnpauseChainLocked(
 	ctx context.Context,
 	id InputID,
-) error {
+) ([]*InputChain[K, DF, C], error) {
 	chain := i.getInputChainByIDLocked(ctx, id)
 	if chain == nil {
-		return fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
+		return nil, fmt.Errorf("input chain %d not found (have %d chains)", id, len(i.InputChains))
 	}
-	return chain.Unpause(ctx)
+
+	state, chainsByID := i.pauseStateLocked(
+		ctx,
+		selectorid.MemberID(i.InputSwitch.CurrentValue.Load()),
+		selectorid.MemberID(i.InputSwitch.NextValue.Load()),
+		selectorid.MemberID(id),
+	)
+	planner := selectorfanin.PausePlanner[InputID, *InputChain[K, DF, C]]{}
+	plan, err := planner.PlanUnpause(ctx, state, selectorid.MemberID(id))
+	if err != nil {
+		return nil, err
+	}
+
+	return chainsByMemberIDs(chainsByID, plan.UnpauseBeforeSwitch), nil
 }
 
-// releaseStaleSyncingCycle releases the OnBeforeSwitch → InputSyncer-
-// KeepUnless cycle's switchingProcN reservation, if any, atomically
-// clearing syncingGen. Returns true if a cycle was released.
+func (i *InputWithFallback[K, DF, C]) pauseStateLocked(
+	ctx context.Context,
+	current selectorid.MemberID,
+	previousPending selectorid.MemberID,
+	target selectorid.MemberID,
+) (selectorfanin.PauseState, map[selectorid.MemberID]*InputChain[K, DF, C]) {
+	state := selectorfanin.PauseState{
+		Current:         current,
+		PreviousPending: previousPending,
+		Target:          target,
+		Paused:          map[selectorid.MemberID]bool{},
+	}
+	chainsByID := map[selectorid.MemberID]*InputChain[K, DF, C]{}
+	for _, chain := range i.InputChains {
+		if chain == nil {
+			continue
+		}
+		memberID := selectorid.MemberID(chain.ID)
+		paused := chain.IsPaused(ctx)
+		state.Priorities = append(state.Priorities, memberID)
+		state.Paused[memberID] = paused
+		chainsByID[memberID] = chain
+		if !paused {
+			state.UnpausedCount++
+		}
+	}
+	return state, chainsByID
+}
+
+func chainsByMemberIDs[K InputKernel, DF codec.DecoderFactory, C any](
+	chainsByID map[selectorid.MemberID]*InputChain[K, DF, C],
+	memberIDs []selectorid.MemberID,
+) []*InputChain[K, DF, C] {
+	chains := make([]*InputChain[K, DF, C], 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		chain, ok := chainsByID[memberID]
+		if !ok {
+			continue
+		}
+		chains = append(chains, chain)
+	}
+	return chains
+}
+
+func runChainLifecycle[K InputKernel, DF codec.DecoderFactory, C any](
+	ctx context.Context,
+	chains []*InputChain[K, DF, C],
+	operation chainLifecycleOperation,
+) error {
+	var errs []error
+	for _, chain := range chains {
+		if chain == nil {
+			continue
+		}
+		var err error
+		switch operation {
+		case chainLifecyclePause:
+			err = chain.Pause(ctx)
+		case chainLifecycleUnpause:
+			err = chain.Unpause(ctx)
+		default:
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("input chain %d lifecycle operation %d failed: %w", chain.ID, operation, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (i *InputWithFallback[K, DF, C]) planSwitchLifecycle(
+	ctx context.Context,
+	target InputID,
+	current int32,
+	previousPending int32,
+) (switchLifecyclePlan[K, DF, C], error) {
+	i.InputChainsLocker.ManualLock(ctx)
+	defer i.InputChainsLocker.ManualUnlock(ctx)
+	return i.planSwitchLifecycleLocked(
+		ctx,
+		target,
+		selectorid.MemberID(current),
+		selectorid.MemberID(previousPending),
+	)
+}
+
+func (i *InputWithFallback[K, DF, C]) planSwitchLifecycleLocked(
+	ctx context.Context,
+	target InputID,
+	current selectorid.MemberID,
+	previousPending selectorid.MemberID,
+) (switchLifecyclePlan[K, DF, C], error) {
+	state, chainsByID := i.pauseStateLocked(ctx, current, previousPending, selectorid.MemberID(target))
+	planner := selectorfanin.PausePlanner[InputID, *InputChain[K, DF, C]]{}
+	plan, err := planner.PlanSwitch(ctx, state)
+	if err != nil {
+		return switchLifecyclePlan[K, DF, C]{}, err
+	}
+
+	return switchLifecyclePlan[K, DF, C]{
+		UnpauseBeforeSwitch:  chainsByMemberIDs(chainsByID, plan.UnpauseBeforeSwitch),
+		PauseAfterSwitch:     chainsByMemberIDs(chainsByID, plan.PauseAfterSwitch),
+		PausePreviousPending: chainsByMemberIDs(chainsByID, plan.PausePreviousPending),
+	}, nil
+}
+
+// releaseStaleSyncingCycle releases the OnBeforeSwitch -> InputSyncer-
+// KeepUnless cycle's selector gate reservation, if any. Returns true
+// if a cycle was released.
 //
 // Used by:
 //   - OnSwitchRequest: a fresh SetValue arrives while a prior cycle is
@@ -236,19 +365,16 @@ func (i *InputWithFallback[K, DF, C]) unpauseChainLocked(
 //   - OnInterruptedSwitch: commitToNextValue's CAS lost the race or a
 //     setValueNow no-op switch — the OnBeforeSwitch we just paired with
 //     never reaches the syncer, so release immediately.
-//   - InputSyncer KeepUnless (via syncingGen.Swap(0) inline): the
-//     normal completion path — KeepUnless first matched, sync done.
+//   - InputSyncer KeepUnless: the normal completion path — KeepUnless
+//     first matched, sync done.
 //
-// The accounting is one-shot per cycle: only the first Swap(0) returns
-// the active gen and decrements; concurrent late callers see 0 and
-// no-op. A stale cycle's defer (one whose gen has been superseded by
-// OnBeforeSwitch claiming a fresh gen) also no-ops via this path.
+// The accounting is one-shot per cycle inside switchprogress.Gate.
+// Concurrent late callers see no active cycle and no-op.
 func (i *InputWithFallback[K, DF, C]) releaseStaleSyncingCycle() bool {
-	if i.syncingGen.Swap(0) == 0 {
+	if !i.switchGate.SupersedeStuckCycle() {
 		return false
 	}
 	i.syncingSince.Store(time.Time{})
-	i.switchingProcN.Add(-1)
 	return true
 }
 
@@ -288,53 +414,46 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		defer func() { logger.Debugf(ctx, "/Switch.SetOnSwitchRequest: -> %d: %v", to, _err) }()
 		// Supersede any stuck OnBeforeSwitch → InputSyncer-KeepUnless
 		// cycle before gating: prevents the leak where a syncer that
-		// never matched its predicate held switchingProcN above zero
+		// never matched its predicate held the switch gate above zero
 		// indefinitely, rejecting all subsequent SetValue calls.
 		if i.releaseStaleSyncingCycle() {
 			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: superseded a stuck syncer cycle")
 		}
-		if v := i.switchingProcN.Add(1); v != 1 {
-			i.switchingProcN.Add(-1)
-			return ErrSwitchInProgress{ProcN: v - 1, To: to}
+		work, err := i.switchGate.StartRequest(selectorid.MemberID(to))
+		if err != nil {
+			var inProgress switchprogress.ErrSwitchInProgress
+			if errors.As(err, &inProgress) {
+				return ErrSwitchInProgress{ProcN: inProgress.ProcN, To: to}
+			}
+			return err
 		}
-		observability.Go(ctx, func(ctx context.Context) {
-			defer i.switchingProcN.Add(-1)
-			inputNext := i.getInputChainByID(ctx, InputID(to))
-			if inputNext == nil {
-				logger.Errorf(ctx, "Switch: target input %d not found", to)
-				return
-			}
-			if err := inputNext.Unpause(ctx); err != nil {
-				logger.Errorf(ctx, "Switch: unable to unpause the next input %d: %v", to, err)
-			}
-			// Unpause every intermediate chain in [0, to) too, so the
-			// invariant `paused = (ID > CurrentValue)` holds for the
-			// whole [0, to] range. Walk under InputChainsLocker so
-			// concurrent AddFactory growth doesn't race the index
-			// dereference.
-			i.InputChainsLocker.Do(ctx, func() {
-				for id := InputID(0); int32(id) < to; id++ {
-					if int(id) >= len(i.InputChains) {
-						break
-					}
-					mid := i.InputChains[id]
-					if mid == nil || !mid.IsPaused(ctx) {
-						continue
-					}
-					if err := mid.Unpause(ctx); err != nil {
-						logger.Errorf(ctx, "Switch: unable to unpause intermediate input %d: %v", id, err)
-					}
-				}
-			})
-		})
+		defer work.Release()
 
 		prevNext := i.InputSwitch.NextValue.Load()
+		cur := i.InputSwitch.CurrentValue.Load()
+		plan, err := i.planSwitchLifecycle(ctx, InputID(to), cur, prevNext)
+		if err != nil {
+			return err
+		}
+
+		if len(plan.UnpauseBeforeSwitch) == 0 && i.getInputChainByID(ctx, InputID(to)) == nil {
+			logger.Errorf(ctx, "Switch: target input %d not found", to)
+		}
+		if len(plan.UnpauseBeforeSwitch) > 0 {
+			release := work.ReserveAsyncWork()
+			observability.Go(ctx, func(ctx context.Context) {
+				defer release()
+				if err := runChainLifecycle(ctx, plan.UnpauseBeforeSwitch, chainLifecycleUnpause); err != nil {
+					logger.Errorf(ctx, "Switch: unable to unpause input chain(s) before switching to %d: %v", to, err)
+				}
+			})
+		}
+
 		if prevNext == math.MinInt32 {
 			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: no previous requested input")
 			return nil
 		}
 
-		cur := i.InputSwitch.CurrentValue.Load()
 		if prevNext <= cur {
 			logger.Debugf(ctx, "Switch.SetOnSwitchRequest: not pausing a higher priority input (than the currently active) %d <= %d", prevNext, cur)
 			return nil
@@ -345,18 +464,19 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		}
 
 		logger.Debugf(ctx, "Switch.SetOnSwitchRequest: pausing previous requested input %d", prevNext)
-		i.switchingProcN.Add(1)
-		observability.Go(ctx, func(ctx context.Context) {
-			defer i.switchingProcN.Add(-1)
-			inputPrev := i.getInputChainByID(ctx, InputID(prevNext))
-			if inputPrev == nil {
-				logger.Errorf(ctx, "Switch: previous requested input %d not found", prevNext)
-				return
-			}
-			if err := inputPrev.Pause(ctx); err != nil {
-				logger.Errorf(ctx, "Switch: unable to pause the previous requested input %d: %v", prevNext, err)
-			}
-		})
+		if len(plan.PausePreviousPending) == 0 && i.getInputChainByID(ctx, InputID(prevNext)) == nil {
+			logger.Errorf(ctx, "Switch: previous requested input %d not found", prevNext)
+			return nil
+		}
+		if len(plan.PausePreviousPending) > 0 {
+			release := work.ReserveAsyncWork()
+			observability.Go(ctx, func(ctx context.Context) {
+				defer release()
+				if err := runChainLifecycle(ctx, plan.PausePreviousPending, chainLifecyclePause); err != nil {
+					logger.Errorf(ctx, "Switch: unable to pause the previous requested input %d: %v", prevNext, err)
+				}
+			})
+		}
 		return nil
 	})
 
@@ -366,15 +486,7 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		from, to int32,
 	) {
 		logger.Debugf(ctx, "Switch.SetOnBeforeSwitch: %d -> %d", from, to)
-		// Claim a fresh syncing generation. If a prior cycle's gen was
-		// still live, this Swap supersedes it: the prior cycle's
-		// teardown sites will Swap(0) and see a non-matching value
-		// (0 or our newGen), so they no-op — and we inherit the prior
-		// reservation rather than double-counting.
-		newGen := i.nextSyncingGen.Add(1)
-		if i.syncingGen.Swap(newGen) == 0 {
-			i.switchingProcN.Add(1)
-		}
+		i.switchGate.BeginSyncerCycle()
 	})
 
 	i.InputSwitch.SetOnInterruptedSwitch(func(
@@ -385,8 +497,8 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 		logger.Debugf(ctx, "Switch.SetOnInterruptedSwitch: %d -> %d", from, to)
 		// Release the reservation taken by the paired OnBeforeSwitch.
 		// Swap(0) is one-shot: a concurrent supersession by a fresh
-		// OnBeforeSwitch already changed syncingGen, so we no-op and
-		// the new cycle owns the live reservation.
+		// OnBeforeSwitch already superseded the active cycle, so we
+		// no-op and the new cycle owns the live reservation.
 		i.releaseStaleSyncingCycle()
 	})
 
@@ -409,25 +521,17 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 			in.AddPipelineSideData(kernel.SideFlagFlush{})
 		}
 
-		for inputID := from; inputID > to; inputID-- {
-			inputID := inputID
-			i.switchingProcN.Add(1)
-			observability.Go(ctx, func(ctx context.Context) {
-				defer i.switchingProcN.Add(-1)
-				inputPrev := i.getInputChainByID(ctx, InputID(inputID))
-				if inputPrev == nil {
-					logger.Errorf(ctx, "Switch: previous input %d not found", inputID)
-					return
-				}
-				if err := inputPrev.Pause(ctx); err != nil {
-					logger.Errorf(ctx, "Switch: unable to pause the previous input %d: %v", inputID, err)
-				}
-			})
+		plan, err := i.planSwitchLifecycle(ctx, InputID(to), from, i.InputSwitch.NextValue.Load())
+		if err != nil {
+			logger.Errorf(ctx, "Switch: unable to plan post-switch pauses for %d -> %d: %v", from, to, err)
+		}
+		if err := runChainLifecycle(ctx, plan.PauseAfterSwitch, chainLifecyclePause); err != nil {
+			logger.Errorf(ctx, "Switch: unable to pause previous input chain(s) after switching to %d: %v", to, err)
 		}
 
 		logger.Debugf(ctx, "Syncer.SetValue(ctx, %d): from %d", to, from)
-		err := i.InputSyncer.SetValue(ctx, to)
-		logger.Debugf(ctx, "/Syncer.SetValue(ctx, %d): from %d: %v", to, from, err)
+		syncerErr := i.InputSyncer.SetValue(ctx, to)
+		logger.Debugf(ctx, "/Syncer.SetValue(ctx, %d): from %d: %v", to, from, syncerErr)
 	})
 	i.InputSyncer.SetKeepUnless(packetorframecondition.Function(func(
 		ctx context.Context,
@@ -435,10 +539,6 @@ func (i *InputWithFallback[K, DF, C]) initSwitches(
 	) (_ret bool) {
 		defer func() {
 			if _ret {
-				// Tag-driven release: only the active cycle's
-				// completion decrements switchingProcN. A defer
-				// belonging to a superseded cycle would race here
-				// and Swap(0) returns 0 → no-op.
 				i.releaseStaleSyncingCycle()
 			}
 		}()
@@ -504,12 +604,18 @@ func (i *InputWithFallback[K, DF, C]) AddFactory(
 ) (_err error) {
 	logger.Debugf(ctx, "AddFactory")
 	defer func() { logger.Debugf(ctx, "/AddFactory: %v", _err) }()
-	return xsync.DoA2R1(ctx, &i.InputChainsLocker, i.addFactory, ctx, inputFactories)
+	var closeAfterUnlock []*InputChain[K, DF, C]
+	i.InputChainsLocker.ManualLock(ctx)
+	err := i.addFactory(ctx, inputFactories, &closeAfterUnlock)
+	i.InputChainsLocker.ManualUnlock(ctx)
+	closeErr := closeInputChains(ctx, closeAfterUnlock)
+	return errors.Join(err, closeErr)
 }
 
 func (i *InputWithFallback[K, DF, C]) addFactory(
 	ctx context.Context,
 	inputFactories []InputFactory[K, DF, C],
+	closeAfterUnlock *[]*InputChain[K, DF, C],
 ) error {
 	for _, inputFactory := range inputFactories {
 		inputID := InputID(len(i.InputChains))
@@ -535,16 +641,34 @@ func (i *InputWithFallback[K, DF, C]) addFactory(
 		i.InputChains = append(i.InputChains, inputChain)
 		select {
 		case <-ctx.Done():
+			i.InputChains = i.InputChains[:len(i.InputChains)-1]
+			*closeAfterUnlock = append(*closeAfterUnlock, inputChain)
 			return ctx.Err()
 		case i.newInputChainChan <- inputChain:
 		default:
-			if err := inputChain.Close(ctx); err != nil {
-				logger.Errorf(ctx, "unable to close input chain: %v", err)
-			}
+			i.InputChains = i.InputChains[:len(i.InputChains)-1]
+			*closeAfterUnlock = append(*closeAfterUnlock, inputChain)
 			return fmt.Errorf("cannot send new input chain to the init queue: it is already full")
 		}
 	}
 	return nil
+}
+
+func closeInputChains[K InputKernel, DF codec.DecoderFactory, C any](
+	ctx context.Context,
+	chains []*InputChain[K, DF, C],
+) error {
+	var errs []error
+	for _, inputChain := range chains {
+		if inputChain == nil {
+			continue
+		}
+		if err := inputChain.Close(ctx); err != nil {
+			logger.Errorf(ctx, "unable to close input chain: %v", err)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (i *InputWithFallback[K, DF, C]) onInputChainKernelOpen(
@@ -592,51 +716,92 @@ func (i *InputWithFallback[K, DF, C]) onInputChainError(
 		return nil
 	}
 
-	i.InputChainsLocker.Do(ctx, func() {
-		keepUnlessSwitch := i.InputSwitch.GetKeepUnless()
-		if keepUnlessSwitch != nil {
-			i.InputSwitch.SetKeepUnless(nil)
-			defer i.InputSwitch.SetKeepUnless(keepUnlessSwitch)
-		}
-		keepUnlessSyncer := i.InputSyncer.GetKeepUnless()
-		if keepUnlessSyncer != nil {
-			i.InputSyncer.SetKeepUnless(nil)
-			defer i.InputSyncer.SetKeepUnless(keepUnlessSyncer)
-		}
+	nextID, ok, planErr := i.planFallbackAfterFailure(ctx, inputChain, InputID(current), err)
+	if planErr != nil {
+		return planErr
+	}
+	if !ok {
+		logger.Debugf(ctx, "onInputChainError: no fallbacks available past %d (have %d chains)", int(id), i.GetInputChainsCount(ctx))
+		return nil
+	}
 
-		// Choose the next fallback via the SSOT WalkAvailableAfter
-		// helper. Skips chains whose factory implements
-		// InputFactoryWithAvailability and reports no resources. This
-		// avoids the procN latch race on sparse chain layouts (the
-		// dense-walk pre-fix issued one switch per empty chain, and
-		// the next chain's onInputChainError raced against the
-		// in-progress latch with "another switch is in progress").
-		// The same helper backs ffstream.RemoveInput's removal-driven
-		// fallback walk, so a future factory adding custom
-		// availability semantics behaves consistently across both
-		// trigger paths.
-		nextID := InputID(WalkAvailableAfter(ctx, i.InputChains, int(id)))
-		if nextID < 0 {
-			logger.Debugf(ctx, "onInputChainError: no fallbacks available past %d (have %d chains)", int(id), len(i.InputChains))
-			return
+	keepUnlessSwitch := i.InputSwitch.GetKeepUnless()
+	if keepUnlessSwitch != nil {
+		i.InputSwitch.SetKeepUnless(nil)
+		defer i.InputSwitch.SetKeepUnless(keepUnlessSwitch)
+	}
+	keepUnlessSyncer := i.InputSyncer.GetKeepUnless()
+	if keepUnlessSyncer != nil {
+		i.InputSyncer.SetKeepUnless(nil)
+		defer i.InputSyncer.SetKeepUnless(keepUnlessSyncer)
+	}
+
+	logger.Infof(ctx, "onInputChainError: switching from %d to %d due to error: %v", int(id), nextID, err)
+	if switchErr := i.InputSwitch.SetValue(ctx, int32(nextID)); switchErr != nil {
+		// Demote the cascading "another switch is in progress"
+		// startup-walk noise to Debug when QuietOnOpenFailure is
+		// enabled. The fallback walk across consecutive empty slots
+		// races itself on the selector switch-progress gate every
+		// retry tick; at startup (before any priority is provisioned)
+		// this is by-design. Other SetValue failures keep Errorf so
+		// real switch contention remains visible.
+		if i.Config.QuietOnOpenFailure && errors.Is(switchErr, ErrSwitchInProgress{}) {
+			logger.Debugf(ctx, "onInputChainError: switch to fallback %d superseded by in-flight switch: %v", nextID, switchErr)
+		} else {
+			logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, switchErr)
 		}
-		logger.Infof(ctx, "onInputChainError: switching from %d to %d due to error: %v", int(id), nextID, err)
-		if switchErr := i.InputSwitch.SetValue(ctx, int32(nextID)); switchErr != nil {
-			// Demote the cascading "another switch is in progress"
-			// startup-walk noise to Debug when QuietOnOpenFailure is
-			// enabled. The fallback walk across consecutive empty
-			// slots races itself on the procN latch every retry tick;
-			// at startup (before any priority is provisioned) this is
-			// by-design. Other SetValue failures keep Errorf so real
-			// switch contention remains visible.
-			if i.Config.QuietOnOpenFailure && errors.Is(switchErr, ErrSwitchInProgress{}) {
-				logger.Debugf(ctx, "onInputChainError: switch to fallback %d superseded by in-flight switch: %v", nextID, switchErr)
-			} else {
-				logger.Errorf(ctx, "onInputChainError: unable to switch to fallback %d: %v", nextID, switchErr)
-			}
-		}
-	})
+	}
 	return nil
+}
+
+func (i *InputWithFallback[K, DF, C]) planFallbackAfterFailure(
+	ctx context.Context,
+	inputChain *InputChain[K, DF, C],
+	current InputID,
+	cause error,
+) (InputID, bool, error) {
+	i.InputChainsLocker.ManualLock(ctx)
+	defer i.InputChainsLocker.ManualUnlock(ctx)
+
+	handler := selectorfanin.FallbackHandler[InputID, *InputChain[K, DF, C]]{}
+	decision, err := handler.HandleFailure(
+		ctx,
+		selectorfanin.Failure[InputID]{
+			MemberID:   selectorid.MemberID(inputChain.ID),
+			StorageKey: inputChain.ID,
+			Current:    selectorid.MemberID(current),
+			Next:       selectorid.MemberID(current),
+			Cause:      cause,
+		},
+		i.fallbackCandidatesLocked(),
+	)
+	if err != nil {
+		return 0, false, err
+	}
+	if decision.IgnoreFailure || decision.UseRecreate {
+		return 0, false, nil
+	}
+	return InputID(decision.SwitchTo), true, nil
+}
+
+func (i *InputWithFallback[K, DF, C]) fallbackCandidatesLocked() []selectorfanin.PriorityCandidate[InputID, *InputChain[K, DF, C]] {
+	candidates := make([]selectorfanin.PriorityCandidate[InputID, *InputChain[K, DF, C]], 0, len(i.InputChains))
+	for _, chain := range i.InputChains {
+		if chain == nil {
+			continue
+		}
+		memberID := selectorid.MemberID(chain.ID)
+		candidates = append(candidates, selectorfanin.PriorityCandidate[InputID, *InputChain[K, DF, C]]{
+			Priority: memberID,
+			Entry: selectormember.Entry[InputID, *InputChain[K, DF, C]]{
+				ID:         memberID,
+				StorageKey: chain.ID,
+				Value:      chain,
+			},
+			Availability: availabilityCandidate(chain),
+		})
+	}
+	return candidates
 }
 
 type asInputFilter[K InputKernel, DF codec.DecoderFactory, C any] InputWithFallback[K, DF, C]

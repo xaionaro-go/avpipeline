@@ -1155,6 +1155,8 @@ func TestInputWithFallback_AddFactory_ChannelFull(t *testing.T) {
 	err = iwf.AddFactory(ctx, f)
 	testifyassert.Error(t, err)
 	testifyassert.Contains(t, err.Error(), "already full")
+	testifyassert.Equal(t, 100, iwf.GetInputChainsCount(ctx),
+		"failed AddFactory must not retain the chain it closes after releasing InputChainsLocker")
 }
 
 // --- onInputChainKernelOpen tests ---
@@ -1253,6 +1255,8 @@ func TestInputWithFallback_AddFactory_ContextCancelled(t *testing.T) {
 	f := &mockInputFactory{name: "after-cancel"}
 	err = iwf.AddFactory(ctx, f)
 	testifyassert.Error(t, err)
+	testifyassert.Equal(t, 100, iwf.GetInputChainsCount(context.Background()),
+		"cancelled AddFactory must not retain the chain it closes after releasing InputChainsLocker")
 }
 
 // --- InputChain.Close with non-nil decoder/autoheaders ---

@@ -1,15 +1,16 @@
 // input_with_fallback_stuck_switch_test.go regresses the
-// switchingProcN-leak bug: when the InputSyncer's KeepUnless predicate
-// never returns true post-switch (stale priority chain), the gated
-// decrement was skipped and switchingProcN stuck above zero, so every
-// subsequent SetValue was rejected by the OnSwitchRequest gate with
-// "another switch is in progress (procN: N)" until process restart.
+// selector switch-progress leak bug: when the InputSyncer's KeepUnless
+// predicate never returns true post-switch (stale priority chain), the
+// gated decrement was skipped and the switch-progress gate stuck above
+// zero, so every subsequent SetValue was rejected by the
+// OnSwitchRequest gate with "another switch is in progress (procN: N)"
+// until process restart.
 //
 // The fix introduces a generation counter on the OnBeforeSwitch →
 // InputSyncer-KeepUnless cycle: each new switch claims a fresh
 // generation, superseding any prior in-flight cycle whose KeepUnless
 // never matched. This test drives KeepUnless to return false 100×, then
-// invokes a fresh OnSwitchRequest and asserts switchingProcN converges
+// invokes a fresh OnSwitchRequest and asserts the selector gate converges
 // to zero — both the synchronous error-path and the asynchronous
 // counter convergence are deterministic (no time.Sleep racing).
 
@@ -48,7 +49,7 @@ func TestInputWithFallback_StuckSwitchRecovers(t *testing.T) {
 
 	// Phase 2: drive InputSyncer's KeepUnless to return false 100× —
 	// stale-priority-chain semantics where no packet ever satisfies the
-	// predicate. Each false return leaves switchingProcN held above zero.
+	// predicate. Each false return leaves the selector gate held above zero.
 	keepUnless := iwf.InputSyncer.GetKeepUnless()
 	require.NotNil(t, keepUnless)
 	in := packetorframe.InputUnion{
@@ -57,15 +58,15 @@ func TestInputWithFallback_StuckSwitchRecovers(t *testing.T) {
 	for n := 0; n < 100; n++ {
 		require.False(t, keepUnless.Match(ctx, in), "iteration %d", n)
 	}
-	require.NotZero(t, iwf.switchingProcN.Load(),
+	require.NotZero(t, iwf.switchGate.InFlight(),
 		"leak invariant: OnBeforeSwitch's reservation must be live before recovery")
 
 	// Phase 3: a fresh switch request must recover synchronously.
 	// Pre-fix: OnSwitchRequest's "another switch is in progress" gate
-	// rejects because the stuck reservation is still on switchingProcN.
+	// rejects because the stuck reservation is still on the gate.
 	// Post-fix: OnSwitchRequest releases the stale syncer cycle first
-	// (via syncingGen.Swap(0) and switchingProcN.Add(-1)), so the gate
-	// sees a clean state and the new attempt succeeds.
+	// through switchprogress.Gate, so the gate sees a clean state and
+	// the new attempt succeeds.
 	onSwitchReq := iwf.InputSwitch.GetOnSwitchRequest()
 	require.NotNil(t, onSwitchReq)
 	// Use to=999: the spawned async goroutine returns immediately when
@@ -74,13 +75,13 @@ func TestInputWithFallback_StuckSwitchRecovers(t *testing.T) {
 	// assertion below independent of retry-kernel async work.
 	require.NoError(t, onSwitchReq(ctx, packetorframe.InputUnion{}, 999))
 
-	// Phase 4: switchingProcN must converge to 0. Recovery released the
+	// Phase 4: the gate must converge to 0. Recovery released the
 	// stuck reservation synchronously; the brief async work spawned by
 	// OnSwitchRequest self-decrements via defer. Eventually polls a
 	// deterministic condition; if the leak regresses, the poll reaches
 	// the deadline and the test fails.
 	require.Eventually(t, func() bool {
-		return iwf.switchingProcN.Load() == 0
+		return iwf.switchGate.InFlight() == 0
 	}, 2*time.Second, time.Millisecond,
-		"switchingProcN failed to converge to 0; leak regressed")
+		"switch gate failed to converge to 0; leak regressed")
 }
