@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
@@ -15,6 +14,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	packetorframefiltercondition "github.com/xaionaro-go/avpipeline/node/filter/packetorframefilter/condition"
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
+	"github.com/xaionaro-go/avpipeline/preset/selector/attachment"
+	"github.com/xaionaro-go/avpipeline/preset/selector/id"
 	"github.com/xaionaro-go/avpipeline/processor"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 	"github.com/xaionaro-go/observability"
@@ -329,13 +330,14 @@ func (s *StreamMux[C]) evictDeadOutput(
 		willDemoteSwitch := input.OutputSwitch.CurrentValue.Load() == int32(output.ID)
 		willDemoteSyncer := input.OutputSyncer.CurrentValue.Load() == int32(output.ID)
 		if willDemoteSwitch || willDemoteSyncer {
-			s.lastEvictedKey.Store(input, output.StorageKey())
+			s.recordEvictedKey(ctx, input, output.StorageKey())
 		}
-		demotedSwitch := input.OutputSwitch.CurrentValue.CompareAndSwap(int32(output.ID), math.MinInt32)
+		demotion := input.outputPair.DemoteIfCurrent(ctx, id.MemberID(output.ID))
+		demotedSwitch := demotion.SwitchDemoted
 		if demotedSwitch {
 			logger.Debugf(ctx, "demoted OutputSwitch.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
 		}
-		demotedSyncer := input.OutputSyncer.CurrentValue.CompareAndSwap(int32(output.ID), math.MinInt32)
+		demotedSyncer := demotion.SyncerDemoted
 		if demotedSyncer {
 			logger.Debugf(ctx, "demoted OutputSyncer.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
 		}
@@ -378,7 +380,7 @@ func (s *StreamMux[C]) recommitDemotedInputToSibling(
 	// through OutputsMap, and the eviction-recreate state map keys on
 	// the same SenderKey across an eviction era.
 	deadOutputKey := deadOutput.StorageKey()
-	siblingKey, ok := s.findSiblingOutputKeyForInput(input, deadOutput)
+	siblingKey, ok := s.findSiblingOutputKeyForInput(ctx, input, deadOutput)
 	if !ok {
 		s.handleNoSiblingEviction(ctx, input, deadOutput, deadOutputKey)
 		return
@@ -445,24 +447,43 @@ func (s *StreamMux[C]) handleNoSiblingEviction(
 // round-trip back through OutputsMap.Load — see Output.StorageKey godoc
 // for the GetKey()-vs-StorageKey divergence rationale.
 func (s *StreamMux[C]) findSiblingOutputKeyForInput(
+	ctx context.Context,
 	input *Input[C],
 	deadOutput *Output[C],
 ) (SenderKey, bool) {
-	var foundKey SenderKey
-	found := false
+	routeID, err := s.routeIDForInput(input)
+	if err != nil {
+		return SenderKey{}, false
+	}
+	attachments := attachment.NewIndex(func(_ context.Context, candidate id.RouteID) bool {
+		return candidate == routeID
+	})
+	storageKeys := map[id.MemberID]SenderKey{}
 	s.Outputs.Range(func(_ OutputID, candidate *Output[C]) bool {
 		if candidate == deadOutput {
 			return true
 		}
-		if candidate.InputFrom != input.Node {
+		candidateRouteID, ok := s.routeIDForOutput(candidate)
+		if !ok || candidateRouteID != routeID {
 			return true
 		}
 		if candidate.IsClosed() {
 			return true
 		}
-		foundKey = candidate.StorageKey()
-		found = true
-		return false
+		memberID := id.MemberID(candidate.ID)
+		storageKeys[memberID] = candidate.StorageKey()
+		if err := attachments.Attach(ctx, routeID, memberID); err != nil {
+			logger.Debugf(ctx, "unable to attach output %d to sibling route %q: %v", candidate.ID, routeID, err)
+		}
+		return true
 	})
-	return foundKey, found
+	siblingID, ok := attachments.FirstSibling(ctx, routeID, id.MemberID(deadOutput.ID), func(candidate id.MemberID) bool {
+		_, ok := storageKeys[candidate]
+		return ok
+	})
+	if !ok {
+		return SenderKey{}, false
+	}
+	foundKey, ok := storageKeys[siblingID]
+	return foundKey, ok
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/xaionaro-go/avpipeline/logger"
+	"github.com/xaionaro-go/avpipeline/preset/selector/id"
 	"github.com/xaionaro-go/observability"
 )
 
@@ -75,31 +76,80 @@ func (s *StreamMux[C]) evictionRecreateRetryTick(
 		return
 	}
 
-	if foreachErr := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+	if err := s.syncRetryTrackerFromEvictedKeys(ctx); err != nil {
+		logger.Debugf(ctx, "evictionRecreateRetryTick: sync retry tracker: %v", err)
+	}
+	if s.retryTracker == nil {
+		return
+	}
+	if err := s.retryTracker.Tick(ctx, s.currentRouteMember); err != nil {
+		logger.Debugf(ctx, "evictionRecreateRetryTick: retry tracker: %v", err)
+	}
+}
+
+func (s *StreamMux[C]) syncRetryTrackerFromEvictedKeys(
+	ctx context.Context,
+) error {
+	if s.retryTracker == nil {
+		return nil
+	}
+	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+		routeID, err := s.routeIDForInput(input)
+		if err != nil {
+			return err
+		}
 		if input.OutputSwitch.CurrentValue.Load() != math.MinInt32 {
-			// Input has recovered (sibling recommit, prior recreate,
-			// or external action) — nothing to do this tick. If a
-			// lastEvictedKey was Stored at eviction time (sibling-
-			// failover success path leaves a stale entry; same for
-			// retry-tick recreate-success), Delete it now so map size
-			// correlates with currently-orphaned set, not lifetime-
-			// orphaned set.
 			s.lastEvictedKey.Delete(input)
+			s.retryTracker.MarkRecovered(ctx, routeID)
 			return nil
 		}
 		deadOutputKey, ok := s.lastEvictedKeyFor(input)
 		if !ok {
-			// Input is at MinInt32 but no eviction key was recorded —
-			// this is the initial-state OutputSwitch (set in
-			// initSwitches before any AddInput RPC), not an orphaned
-			// post-eviction state. Skip.
 			return nil
 		}
-		s.fireRetryRecreate(ctx, input, deadOutputKey)
+		s.retryTracker.RecordDemotion(ctx, routeID, deadOutputKey)
 		return nil
-	}); foreachErr != nil {
-		logger.Debugf(ctx, "evictionRecreateRetryTick: ForEachInput: %v", foreachErr)
+	})
+}
+
+func (s *StreamMux[C]) currentRouteMember(
+	_ context.Context,
+	routeID id.RouteID,
+) (id.MemberID, bool) {
+	input, ok := s.inputForRouteID(routeID)
+	if !ok {
+		return 0, false
 	}
+	return id.MemberID(input.OutputSwitch.CurrentValue.Load()), true
+}
+
+func (s *StreamMux[C]) recreateEvictedOutputForRoute(
+	ctx context.Context,
+	routeID id.RouteID,
+	deadOutputKey SenderKey,
+) error {
+	input, ok := s.inputForRouteID(routeID)
+	if !ok {
+		return nil
+	}
+	return s.fireRetryRecreate(ctx, input, deadOutputKey)
+}
+
+func (s *StreamMux[C]) recordEvictedKey(
+	ctx context.Context,
+	input *Input[C],
+	deadOutputKey SenderKey,
+) {
+	s.lastEvictedKey.Store(input, deadOutputKey)
+	if s.retryTracker == nil {
+		return
+	}
+	routeID, err := s.routeIDForInput(input)
+	if err != nil {
+		logger.Debugf(ctx, "unable to record retry route for input %s: %v", input.GetType(), err)
+		return
+	}
+	s.retryTracker.RecordDemotion(ctx, routeID, deadOutputKey)
 }
 
 // fireRetryRecreate invokes recreateEvictedOutputFunc once for an
@@ -111,7 +161,7 @@ func (s *StreamMux[C]) fireRetryRecreate(
 	ctx context.Context,
 	input *Input[C],
 	deadOutputKey SenderKey,
-) {
+) error {
 	logger.Debugf(ctx,
 		"input %s is still orphaned (1 Hz retry tick); recreating fresh Output under SenderKey %s",
 		input.GetType(), deadOutputKey)
@@ -119,11 +169,12 @@ func (s *StreamMux[C]) fireRetryRecreate(
 		logger.Debugf(ctx,
 			"unable to recreate output for orphaned input %s on retry tick (key %s): %v; will retry on the next 1 Hz tick",
 			input.GetType(), deadOutputKey, err)
-		return
+		return err
 	}
 	logger.Debugf(ctx,
 		"retry-tick recreated and re-attached output %s for orphaned input %s",
 		deadOutputKey, input.GetType())
+	return nil
 }
 
 // startEvictionRecreateRetryLoop spawns the retry-loop goroutine on

@@ -14,6 +14,8 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
 	"github.com/xaionaro-go/avpipeline/packetorframe/filter/monotonicpts"
+	"github.com/xaionaro-go/avpipeline/preset/selector/id"
+	"github.com/xaionaro-go/avpipeline/preset/selector/switchpair"
 	"github.com/xaionaro-go/avpipeline/processor"
 )
 
@@ -60,25 +62,33 @@ type Input[C any] struct {
 	MonotonicPTSFilter packetorframecondition.Condition
 	OutputSwitch       *barrierstategetter.Switch
 	OutputSyncer       *barrierstategetter.Switch
+	outputPair         *switchpair.Pair
 }
 
 func newInput[C any](
 	ctx context.Context,
 	s *StreamMux[C],
 	inputType InputType,
-) *Input[C] {
+) (*Input[C], error) {
 	h := &InputHandler[C]{
 		StreamMux: s,
 		Type:      inputType,
 	}
 	k := kernelboilerplate.NewKernelWithFormatContext(ctx, h)
 	h.Kernel = k
+	outputPair, err := switchpair.New(ctx, switchpair.Config{
+		InitialValue: id.NoMemberID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize output switch pair: %w", err)
+	}
 	return &Input[C]{
 		Node:               node.NewWithCustomDataFromKernel[C](ctx, k),
 		MonotonicPTSFilter: monotonicpts.New(false),
-		OutputSwitch:       barrierstategetter.NewSwitch(),
-		OutputSyncer:       barrierstategetter.NewSwitch(),
-	}
+		OutputSwitch:       outputPair.Switch(),
+		OutputSyncer:       outputPair.Syncer(),
+		outputPair:         outputPair,
+	}, nil
 }
 
 func (i *Input[C]) GetType() InputType {
