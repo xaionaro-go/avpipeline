@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"time"
 
 	"github.com/go-ng/xatomic"
 	"github.com/xaionaro-go/avpipeline"
@@ -48,13 +47,13 @@ func (s *StreamMux[C]) Serve(
 	observability.Go(ctx, func(ctx context.Context) {
 		s.latencyMeasurerLoop(ctx)
 	})
-	// Periodic retry tick for the no-sibling eviction-recovery state.
+	// 1 Hz retry tick for the no-sibling eviction-recovery state.
 	// Without this, an eviction whose first recreate fails leaves the
 	// input demoted to MinInt32 with no further trigger to re-attempt
-	// — only attempt 1/MaxAttempts ever fires. The loop scans
-	// lastEvictionRecreateState every InitialBackoff/2 (floored at
-	// minRetryTickInterval) and re-fires the recreate hook for any
-	// SenderKey past its backoff with a still-demoted input.
+	// — the SwitchOutput.GetState defense-in-depth path drops in-flight
+	// frames silently, producing no node-level error. The 1 Hz tick is
+	// the ONLY path that can heal the orphaned input once the
+	// destination becomes reachable again. See RETRY_SEMANTICS.md.
 	s.startEvictionRecreateRetryLoop(ctx)
 	rawErrCh := make(chan node.Error, 100)
 	defer close(rawErrCh)
@@ -343,13 +342,10 @@ func (s *StreamMux[C]) evictDeadOutput(
 // encoder is gone for good and the camera path delivers 0 video
 // packets.
 //
-// The recreate is gated by EvictionRecreatePolicy: exponential backoff
-// stops a recreated Output that immediately fails again from entering
-// a tight recreate-and-die loop, MaxAttempts retires a SenderKey after
-// a bounded number of consecutive failures, and MaxAge resets the
-// state once the SenderKey has been quiescent long enough. Keyed by
-// SenderKey so simultaneous evictions of audio + video outputs
-// (SplitAV) do not interfere with each other.
+// The recreate runs synchronously here for the on-eviction era. If it
+// fails (or the input is still demoted afterwards) the 1 Hz retry tick
+// (eviction_recreate_retry.go) takes over and keeps trying
+// indefinitely — no backoff, no give-up. See RETRY_SEMANTICS.md.
 func (s *StreamMux[C]) recommitDemotedInputToSibling(
 	ctx context.Context,
 	input *Input[C],
@@ -383,37 +379,14 @@ func (s *StreamMux[C]) recommitDemotedInputToSibling(
 }
 
 // handleNoSiblingEviction is the no-sibling branch of
-// recommitDemotedInputToSibling. It implements the recreate path with
-// exponential-backoff + ceiling + sliding-window-reset retry policy:
+// recommitDemotedInputToSibling. It records the dead output's
+// SenderKey under the orphaned input (so the 1 Hz retry tick can
+// recover it later) and fires the recreate hook synchronously once.
 //
-//   - Promote the orphan-detection log from Debug to Warn so production
-//     diagnostics surface the moment the camera-direct chain starts
-//     self-healing.
-//   - Sliding-window reset: a SenderKey whose lastFailureTime is older
-//     than EvictionRecreatePolicy.MaxAge gets a fresh state on the next
-//     eviction (counter and permanentlyFailed flag both reset). Without
-//     this rearm, a once-failed-permanently SenderKey would stay dead
-//     forever even after the underlying root cause clears.
-//   - Skip the recreate when the time since lastFailureTime is below the
-//     exponential backoff for the current consecutiveFailures count;
-//     otherwise a recreated Output that fails for the same root cause
-//     would burn CPU in a tight recreate-and-die loop (5s, 10s, 20s,
-//     40s, 60s under defaults).
-//   - Mark the SenderKey permanentlyFailed once consecutiveFailures
-//     reaches EvictionRecreatePolicy.MaxAttempts: a persistent encoder
-//     fault is not going to clear on the next try, and unbounded
-//     retries over hours flood logs and mask other issues. The terminal
-//     Warn fires once per fault era.
-//   - Otherwise call recreateEvictedOutputFunc which materialises a new
-//     Output and switches the input onto it. The recreate failure is
-//     logged at Warn — the GetState defense-in-depth path will Drop on
-//     the still-demoted state until the next eviction tick rearms.
-//
-// State updates and the recreate hook all run under
-// evictionRecreateLocker only for the read-modify-write of
-// lastEvictionRecreateState; the recreate hook itself is invoked
-// without the lock held so a long-running encoder open does not block
-// concurrent evictions of other SenderKeys.
+// If the recreate fails, the input stays at OutputSwitch.CurrentValue
+// == math.MinInt32 and the 1 Hz retry tick keeps trying indefinitely
+// (eviction_recreate_retry.go). There is no backoff, no give-up
+// point — see RETRY_SEMANTICS.md "What we deliberately do NOT do".
 func (s *StreamMux[C]) handleNoSiblingEviction(
 	ctx context.Context,
 	input *Input[C],
@@ -421,157 +394,29 @@ func (s *StreamMux[C]) handleNoSiblingEviction(
 	deadOutputKey SenderKey,
 ) {
 	if !s.IsAllowedDifferentOutputs() {
-		logger.Warnf(ctx, "input %s is orphaned post-eviction of output %d (%s); MuxMode %s does not allow per-input switching, video output is 0 until a manual reconfigure",
+		logger.Warnf(ctx,
+			"input %s is orphaned post-eviction of output %d (%s); MuxMode %s does not allow per-input switching, video output is 0 until a manual reconfigure",
 			input.GetType(), deadOutput.ID, deadOutputKey, s.MuxMode)
 		return
 	}
 
-	policy := s.EvictionRecreatePolicy.applyDefaults()
-	now := s.nowFunc()
-
-	decision, state := s.evaluateEvictionRecreateLocked(deadOutputKey, policy, now)
-
-	switch decision.kind {
-	case evictionRecreateDecisionAlreadyPermanent:
-		logger.Debugf(ctx,
-			"input %s is orphaned post-eviction of output %d (%s); recreate already retired (MaxAttempts=%d hit); video output stays 0 until quiescent for MaxAge=%s",
-			input.GetType(), deadOutput.ID, deadOutputKey, policy.MaxAttempts, policy.MaxAge)
-		return
-	case evictionRecreateDecisionSkipBackoff:
-		logger.Warnf(ctx,
-			"input %s is orphaned post-eviction of output %d (%s); skipping recreate (last attempt %s ago < backoff %s for %d consecutive failures); video output is 0 until backoff elapses",
-			input.GetType(), deadOutput.ID, deadOutputKey, decision.timeSinceLast, decision.backoff, state.consecutiveFailures)
-		return
-	case evictionRecreateDecisionFire, evictionRecreateDecisionFireFinal:
-		// fall through
-	}
+	// Record BEFORE the recreate so the 1 Hz tick can pick up where
+	// this synchronous attempt leaves off if the input remains
+	// orphaned.
+	s.lastEvictedKey.Store(input, deadOutputKey)
 
 	logger.Warnf(ctx,
-		"input %s is orphaned post-eviction of output %d (%s); recreating fresh Output under same SenderKey (attempt %d/%d)",
-		input.GetType(), deadOutput.ID, deadOutputKey, state.consecutiveFailures, policy.MaxAttempts)
+		"input %s is orphaned post-eviction of output %d (%s); recreating fresh Output under same SenderKey",
+		input.GetType(), deadOutput.ID, deadOutputKey)
 	if err := s.recreateEvictedOutputFunc(ctx, input, deadOutputKey); err != nil {
 		logger.Warnf(ctx,
-			"unable to recreate output for orphaned input %s after evicting %d (%s): %v; video output is 0 until backoff elapses",
+			"unable to recreate output for orphaned input %s after evicting %d (%s): %v; the 1 Hz retry tick will keep trying",
 			input.GetType(), deadOutput.ID, deadOutputKey, err)
-	} else {
-		logger.Debugf(ctx, "recreated and re-attached output %s for orphaned input %s after evicting %d", deadOutputKey, input.GetType(), deadOutput.ID)
+		return
 	}
-
-	// FireFinal: this attempt was the final one allowed by the
-	// MaxAttempts ceiling. Whether it succeeded or failed, the next
-	// eviction tick within MaxAge will hit the AlreadyPermanent path —
-	// emit the terminal Warn here so it fires exactly once per fault
-	// era, regardless of whether the recreate itself crashed.
-	if decision.kind == evictionRecreateDecisionFireFinal {
-		logger.Warnf(ctx,
-			"input %s reached EvictionRecreatePolicy.MaxAttempts=%d for output %d (%s); SenderKey marked permanently failed, recreate disabled until quiescent for MaxAge=%s",
-			input.GetType(), policy.MaxAttempts, deadOutput.ID, deadOutputKey, policy.MaxAge)
-	}
-}
-
-// evictionRecreateDecisionKind enumerates the four outcomes of the
-// per-eviction policy evaluation.
-type evictionRecreateDecisionKind int
-
-const (
-	// evictionRecreateDecisionFire: state has been bumped, caller
-	// should invoke the recreate hook. consecutiveFailures is below
-	// MaxAttempts.
-	evictionRecreateDecisionFire evictionRecreateDecisionKind = iota
-	// evictionRecreateDecisionFireFinal: this attempt is the
-	// MaxAttempts-th — caller should invoke the hook AND emit the
-	// terminal Warn afterwards. permanentlyFailed has been latched so
-	// any subsequent tick within MaxAge falls through to
-	// AlreadyPermanent.
-	evictionRecreateDecisionFireFinal
-	// evictionRecreateDecisionSkipBackoff: backoff window has not yet
-	// elapsed since the last attempt; suppress this tick.
-	evictionRecreateDecisionSkipBackoff
-	// evictionRecreateDecisionAlreadyPermanent: a previous tick
-	// already latched permanentlyFailed; emit the once-per-tick Debug
-	// instead of re-firing the terminal Warn.
-	evictionRecreateDecisionAlreadyPermanent
-)
-
-// evictionRecreateDecision carries the outcome of evaluating the
-// policy at a single eviction tick. backoff and timeSinceLast are
-// only populated for the SkipBackoff branch (the log message embeds
-// them).
-type evictionRecreateDecision struct {
-	kind          evictionRecreateDecisionKind
-	backoff       time.Duration
-	timeSinceLast time.Duration
-}
-
-// evaluateEvictionRecreateLocked applies the EvictionRecreatePolicy to
-// the per-SenderKey state under evictionRecreateLocker. Returns the
-// decision the caller should act on plus the post-update state (so the
-// caller can log the new consecutiveFailures count without taking the
-// lock again).
-//
-// Order of checks: sliding-window reset → already-permanent → backoff
-// skip → fire (with fire-final distinguished when this attempt hits the
-// cap). The reset runs first so a SenderKey whose MaxAge has elapsed
-// gets a fresh budget regardless of any previous permanentlyFailed
-// latch.
-func (s *StreamMux[C]) evaluateEvictionRecreateLocked(
-	deadOutputKey SenderKey,
-	policy EvictionRecreatePolicy,
-	now time.Time,
-) (evictionRecreateDecision, evictionRecreateState) {
-	s.evictionRecreateLocker.Lock()
-	defer s.evictionRecreateLocker.Unlock()
-
-	state, hasState := s.lastEvictionRecreateState[deadOutputKey]
-	// Sliding-window reset: a SenderKey whose lastFailureTime is older
-	// than MaxAge gets a fresh start. Without this rearm, a SenderKey
-	// that hit permanentlyFailed in the morning would stay dead all
-	// day even if the underlying fault cleared in minutes.
-	if hasState && !state.lastFailureTime.IsZero() && now.Sub(state.lastFailureTime) > policy.MaxAge {
-		state = evictionRecreateState{}
-		hasState = false
-	}
-
-	if state.permanentlyFailed {
-		return evictionRecreateDecision{kind: evictionRecreateDecisionAlreadyPermanent}, state
-	}
-
-	// Backoff gate: the wait is computed from the CURRENT
-	// consecutiveFailures count. consecutiveFailures==0 (fresh state
-	// or post-reset) maps to InitialBackoff — but we only honor the
-	// gate when there was a prior attempt to gate against, otherwise
-	// the very first eviction would be artificially delayed.
-	if hasState && !state.lastFailureTime.IsZero() {
-		backoff := policy.backoffFor(state.consecutiveFailures)
-		elapsed := now.Sub(state.lastFailureTime)
-		if elapsed < backoff {
-			return evictionRecreateDecision{
-				kind:          evictionRecreateDecisionSkipBackoff,
-				backoff:       backoff,
-				timeSinceLast: elapsed,
-			}, state
-		}
-	}
-
-	// Bump the counter + timestamp BEFORE the hook runs so a
-	// concurrent eviction of a sibling that happens to map to the
-	// same SenderKey sees the updated gate. The recreate hook is
-	// called by the caller without the lock held.
-	state.consecutiveFailures++
-	state.lastFailureTime = now
-
-	// Cap check: if this attempt is the MaxAttempts-th, latch
-	// permanentlyFailed AFTER firing — the budget is "fire MaxAttempts
-	// times, then retire". A budget of 5 means 5 attempts get to run,
-	// not 4 attempts and a suppressed 5th.
-	if state.consecutiveFailures >= policy.MaxAttempts {
-		state.permanentlyFailed = true
-		s.lastEvictionRecreateState[deadOutputKey] = state
-		return evictionRecreateDecision{kind: evictionRecreateDecisionFireFinal}, state
-	}
-
-	s.lastEvictionRecreateState[deadOutputKey] = state
-	return evictionRecreateDecision{kind: evictionRecreateDecisionFire}, state
+	logger.Debugf(ctx,
+		"recreated and re-attached output %s for orphaned input %s after evicting %d",
+		deadOutputKey, input.GetType(), deadOutput.ID)
 }
 
 // findSiblingOutputKeyForInput scans s.Outputs for a non-closed output

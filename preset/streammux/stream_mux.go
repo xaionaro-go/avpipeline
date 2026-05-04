@@ -107,22 +107,17 @@ type StreamMux[C any] struct {
 	nextOutputID        atomic.Uint32
 	allowCorruptPackets atomic.Bool
 
-	// EvictionRecreatePolicy controls the no-sibling recreate retry
-	// schedule for evicted outputs: exponential backoff, MaxAttempts
-	// ceiling, MaxAge sliding-window reset. The zero value
-	// is valid (each field falls back to its default via
-	// applyDefaults). Set externally by callers (e.g. ffstream config)
-	// before Start; not safe to mutate while evictions are in flight.
-	EvictionRecreatePolicy EvictionRecreatePolicy
+	// lastEvictedKey records the SenderKey of the most-recently-
+	// evicted output for each Input. The 1 Hz retry tick reads this
+	// to know which key to recreate when an Input is still orphaned
+	// (OutputSwitch.CurrentValue == math.MinInt32). See
+	// RETRY_SEMANTICS.md for the design rationale.
+	lastEvictedKey xsync.Map[*Input[C], SenderKey]
 
-	// evictionRecreateLocker guards lastEvictionRecreateState and the
-	// nowFunc / recreateEvictedOutputFunc seams used by the no-sibling
-	// eviction-recovery path. The attempt-state map and the per-call
-	// read-modify-write must not race against concurrent evictions of
-	// different outputs that happen to map to the same SenderKey.
-	evictionRecreateLocker    sync.Mutex
-	lastEvictionRecreateState map[SenderKey]evictionRecreateState
-	nowFunc                   func() time.Time
+	// recreateEvictedOutputFunc is the test seam for the no-sibling
+	// recreate path. Production wires it to recreateEvictedOutputDefault
+	// in NewWithCustomData; tests inject a stub to assert call timing
+	// without spinning up a real Transcoder/Encoder factory chain.
 	recreateEvictedOutputFunc func(ctx context.Context, input *Input[C], deadOutputKey SenderKey) error
 }
 
@@ -156,8 +151,6 @@ func NewWithCustomData[C any](
 			astiav.MediaTypeData:     newTrackMeasurements(),
 			astiav.MediaTypeUnknown:  newTrackMeasurements(),
 		},
-		lastEvictionRecreateState: map[SenderKey]evictionRecreateState{},
-		nowFunc:                   time.Now,
 	}
 	// Wire the default eviction-recovery recreator. Exposed as a struct
 	// field (not a hard-coded call) so tests can intercept the call to
@@ -709,6 +702,13 @@ func (s *StreamMux[C]) recreateEvictedOutputDefault(
 		}
 	})
 	return _err
+}
+
+// lastEvictedKeyFor returns the SenderKey of the most-recently-evicted
+// output for an orphaned input. Used by the 1 Hz retry tick to recover
+// the routing state when no on-eviction event is left to drive it.
+func (s *StreamMux[C]) lastEvictedKeyFor(input *Input[C]) (SenderKey, bool) {
+	return s.lastEvictedKey.Load(input)
 }
 
 func (s *StreamMux[C]) GetOrCreateOutput(

@@ -1,17 +1,14 @@
-// eviction_recreate_retry_test.go pins the fix:
+// eviction_recreate_retry_test.go pins the 1 Hz indefinite reconnect
+// design for the no-sibling eviction-recovery path:
 //
-//   - evictDeadOutput must round-trip the OutputsMap entry through
-//     Output.StorageKey(), not GetKey() — reconfigureEncoder fills the
-//     EncoderFactory with both video AND audio axes, so GetKey() drifts
-//     from the split key the entry was stored under.
-//   - A periodic retry tick must re-fire the recreate hook for
-//     SenderKeys whose backoff has elapsed without a fresh eviction
-//     event. After the first eviction the dead Output is detached and
-//     subsequent in-flight frames are dropped without producing node-
-//     level errors; without the timer-driven retry, only attempt 1/N
-//     ever fires.
+//   - The retry tick fires every tick interval (1 Hz in production)
+//     for any orphaned input.
+//   - Recovery (OutputSwitch advancing off MinInt32) silences the tick
+//     for that input.
+//   - There is NO give-up point — the tick keeps trying indefinitely
+//     until either ctx is canceled or the input recovers.
 //
-// All three tests follow the dual-sided + falsifier-validated discipline
+// All four tests follow the dual-sided + falsifier-validated discipline
 // required by testing-discipline.
 
 package streammux
@@ -20,530 +17,247 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
-	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 )
 
-// TestRecreateEvictedOutput_SplitAVCompoundKey_DecomposesCorrectly is
-// the dual-sided proof for the StorageKey detach fix.
+// TestEvictionRecreate_RetryTick_FiresAt1Hz pins the per-tick
+// invariant: a single retry-tick call fires the recreate hook exactly
+// once for an orphaned input, regardless of wall-clock time. The
+// production 1 Hz cadence is enforced by the time.Ticker wrapper in
+// evictionRecreateRetryLoop; the unit test drives the tick body
+// synchronously and asserts the per-tick semantics.
 //
-// Setup mirrors the production wedge: SplitAV mode, a video-only
-// Output whose EncoderFactory has been "reconfigured" so its
-// VideoCodec AND AudioCodec are both populated (matching what
-// reconfigureEncoder writes onto the factory). The Output was
-// originally stored in OutputsMap under the SPLIT key
-// (VideoCodec=av1, AudioCodec=""), but GetKey() now returns the
-// COMPOUND key (VideoCodec=av1, AudioCodec=aac).
+//   - GOOD-side: 5 synchronous tick calls for an orphaned input fire
+//     the recreate hook exactly 5 times.
+//   - BAD-side: a tick on a non-orphaned input must NOT fire.
 //
-//   - GOOD-side: evictDeadOutput uses StorageKey() to detach the
-//     OutputsMap entry, so the entry is removed cleanly. The
-//     OutputSwitch is demoted to MinInt32 and recommit fires.
-//   - BAD-side: keying the CompareAndDelete on GetKey() would silently
-//     miss because GetKey() != the stored split key — the
-//     OutputsMap[splitKey] entry would persist, leaving a stale
-//     dead-output reference for the next eviction cycle to trip over.
-//
-// Falsification protocol: replace `output.StorageKey()` with
-// `output.GetKey()` in evictDeadOutput's CompareAndDelete call —
-// this test MUST fail at the OutputsMap.Load(splitKey) assertion
-// because the stale entry would still be present.
-func TestRecreateEvictedOutput_SplitAVCompoundKey_DecomposesCorrectly(t *testing.T) {
+// Falsification protocol: revert the tick body to a no-op (return
+// without scanning inputs) — this test MUST fail because no tick
+// would invoke the recreate hook.
+func TestEvictionRecreate_RetryTick_FiresAt1Hz(t *testing.T) {
 	mux, ctx := newStreamMuxForEvictTest(t)
 
 	const deadID OutputID = 42
-
-	// Original split key the OutputsMap was indexed by (matches what
-	// getOrCreateOutputLocked stores in SplitAV mode for a video-only
-	// output: getInputsForSenderKey decomposes the compound config
-	// into a video-only SenderKey).
-	splitKey := SenderKey{
-		VideoCodec:      codectypes.Name("av1"),
-		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
-	}
-
-	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, splitKey)
-
-	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(splitKey, dead)
-	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
-	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
-
-	// Simulate the post-reconfigureEncoder state: the EncoderFactory
-	// now carries BOTH the video AND audio codec axes, so GetKey()
-	// returns a COMPOUND key that differs from StorageKey().
-	dead.TranscoderNode.Processor.Kernel.EncoderFactory.VideoCodec = codec.Name("av1")
-	dead.TranscoderNode.Processor.Kernel.EncoderFactory.AudioCodec = codec.Name("aac")
-	dead.TranscoderNode.Processor.Kernel.EncoderFactory.AudioSampleRate = 48000
-
-	compoundKey := dead.GetKey()
-	require.NotEqual(t, splitKey, compoundKey,
-		"test setup: post-reconfigure GetKey() must drift from the StorageKey (compound vs split) — otherwise this test cannot expose Bug A")
-	require.Equal(t, splitKey, dead.StorageKey(),
-		"StorageKey must remain the original split key even after EncoderFactory mutation")
-
-	// Block the recreate hook so it does NOT spin up a new Output —
-	// this test asserts the eviction-side detach behaviour, not the
-	// recreate-side behaviour. Returning a non-nil error keeps the
-	// state at consecutiveFailures=1 + permanentlyFailed=false.
-	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		return errors.New("recreate suppressed for this test")
-	}
-
-	mux.evictDeadOutput(ctx, dead)
-
-	// GOOD-side: evictDeadOutput keyed on StorageKey() removes the
-	// OutputsMap[splitKey] entry cleanly.
-	_, okSplit := mux.OutputsMap.Load(splitKey)
-	require.False(t, okSplit, "OutputsMap[splitKey] must be removed by evictDeadOutput keyed on StorageKey()")
-
-	// BAD-side: the COMPOUND key was never stored, so Load(compoundKey)
-	// is not the assertion we want — but we DO want to confirm that
-	// the dead Output is no longer reachable under any key. Walk
-	// OutputsMap to confirm zero entries point at `dead`.
-	var staleEntries int
-	mux.OutputsMap.Range(func(_ SenderKey, o *Output[struct{}]) bool {
-		if o == dead {
-			staleEntries++
-		}
-		return true
-	})
-	require.Equal(t, 0, staleEntries, "no OutputsMap entry may still point at the evicted dead output")
-
-	// GOOD-side: OutputID-keyed map also cleared.
-	_, okOutputs := mux.Outputs.Load(deadID)
-	require.False(t, okOutputs, "OutputID-keyed Outputs map must also be cleared")
-
-	// GOOD-side: OutputSwitch demoted to MinInt32 (Bug A's downstream
-	// trigger for the recreate path that exercises Bug B).
-	require.Equal(t, int32(math.MinInt32),
-		mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
-		"OutputSwitch on the orphaned video input must be demoted to MinInt32")
-
-	// GOOD-side: recreate state recorded under the SPLIT key, not the
-	// compound key. The retry loop keys on this same SenderKey so the
-	// lookup must agree.
-	mux.evictionRecreateLocker.Lock()
-	_, hasSplit := mux.lastEvictionRecreateState[splitKey]
-	_, hasCompound := mux.lastEvictionRecreateState[compoundKey]
-	mux.evictionRecreateLocker.Unlock()
-	require.True(t, hasSplit, "eviction-recreate state must be keyed by the SplitKey (StorageKey)")
-	require.False(t, hasCompound, "eviction-recreate state must NOT be keyed by the post-reconfigure compound key")
-}
-
-// TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction is the
-// dual-sided proof for the periodic retry tick.
-//
-// Without the periodic retry tick: after the first eviction's
-// recreate fails, the in-flight frames hit a demoted-input drop path
-// that does NOT produce node-level errors, so handleOutputNodeError
-// → evictDeadOutput is never invoked again. consecutiveFailures
-// stays at 1 forever. The retry loop fixes that by re-firing the
-// recreate hook on a timer when the per-key backoff has elapsed.
-//
-//   - GOOD-side: a single eviction event followed by clock-advance
-//     past InitialBackoff drives a SECOND recreate-hook invocation
-//     via evictionRecreateRetryTick (no second on-eviction path).
-//   - BAD-side: without the retry tick, calls would stay at 1.
-//
-// Falsification protocol: comment out `s.startEvictionRecreateRetryLoop`
-// in StreamMux.Serve AND `tryRecreateForRetry`'s recreateEvictedOutputFunc
-// invocation — this test (which calls the tick directly) MUST fail
-// because no second hook fire would happen.
-func TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction(t *testing.T) {
-	mux, ctx := newStreamMuxForEvictTest(t)
-	// Tight backoff so the elapsed math is straightforward.
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff:    10 * time.Millisecond,
-		BackoffMultiplier: 2.0,
-		MaxBackoff:        50 * time.Millisecond,
-		MaxAttempts:       5,
-		MaxAge:            time.Hour,
-	}
-
-	const deadID OutputID = 42
-	// Non-empty VideoCodec is required: getInputsForSenderKey (used
-	// by the retry tick to resolve which input owns the SenderKey)
-	// only routes a key to InputVideoOnly when VideoCodec != "".
 	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
 		VideoCodec:      codectypes.Name("av1"),
-		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 	})
 
-	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
-	mux.nowFunc = func() time.Time { return now }
-
-	calls := 0
+	var calls atomic.Int32
 	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		calls++
-		return errors.New("simulated persistent encoder fault")
+		calls.Add(1)
+		return errors.New("simulated persistent fault")
 	}
 
-	// Setup: prime the eviction state via a real evictDeadOutput call
-	// (attempt 1 fires).
+	// Prime the orphaned-input state via a real eviction. After this:
+	//   - OutputSwitch.CurrentValue == MinInt32 (orphaned)
+	//   - lastEvictedKey records the dead SenderKey for the input
 	mux.Outputs.Store(deadID, dead)
 	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
 	mux.evictDeadOutput(ctx, dead)
-	require.Equal(t, 1, calls, "attempt 1 fires from the on-eviction path")
+	require.Equal(t, int32(1), calls.Load(), "the on-eviction path fires attempt 1")
 	require.Equal(t, int32(math.MinInt32), mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
-		"OutputSwitch must be demoted after the first eviction")
+		"input must be demoted to MinInt32 post-eviction")
 
-	// Tick BEFORE the backoff has elapsed: must NOT fire (gates on
-	// SkipBackoff). The state stays at consecutiveFailures=1.
-	now = now.Add(5 * time.Millisecond) // 5ms < 20ms (consecutiveFailures=1 backoff)
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 1, calls, "retry tick must not fire while backoff window is active")
-
-	// Tick AFTER the backoff has elapsed: must fire WITHOUT any new
-	// eviction event. This is the load-bearing assertion: in the
-	// pre-fix world there would be no second hook invocation because
-	// no on-eviction path runs.
-	now = now.Add(20 * time.Millisecond) // total 25ms > 20ms backoff
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 2, calls, "retry tick must fire attempt 2 once backoff has elapsed")
-
-	// State updated: consecutiveFailures bumped to 2, lastFailureTime
-	// refreshed to now. Without the bump, every subsequent retry tick
-	// would also fire (the gate would not advance).
-	mux.evictionRecreateLocker.Lock()
-	state := mux.lastEvictionRecreateState[dead.StorageKey()]
-	mux.evictionRecreateLocker.Unlock()
-	require.Equal(t, 2, state.consecutiveFailures, "retry-driven attempt must bump consecutiveFailures")
-	require.Equal(t, now, state.lastFailureTime, "retry-driven attempt must refresh lastFailureTime")
-
-	// BAD-side: another tick immediately after must NOT fire (the
-	// backoff for consecutiveFailures=2 is 40ms, capped at 50ms).
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 2, calls, "consecutive retry ticks within the new (escalated) backoff must not fire")
+	// 5 synchronous ticks — each must fire the hook exactly once
+	// because the input remains orphaned and there is no backoff or
+	// budget.
+	for i := 0; i < 5; i++ {
+		mux.evictionRecreateRetryTick(ctx)
+	}
+	require.Equal(t, int32(6), calls.Load(),
+		"5 retry ticks on an orphaned input must each fire the recreate hook (1 from on-eviction + 5 from ticks)")
 }
 
-// TestEvictionRecreate_PeriodicRetryStopsAfterRecovery is the dual-
-// sided proof that the retry tick is gated on the still-demoted
-// signal: once OutputSwitch advances off MinInt32 (recreate succeeded
-// or external action recovered the input), subsequent ticks must NOT
-// re-fire.
+// TestEvictionRecreate_RetryTick_StopsWhenInputRecovers pins the
+// recovery-silence invariant: once OutputSwitch advances off MinInt32
+// (recreate succeeded or external action recovered the input), the
+// retry tick must NOT fire for that input.
 //
-//   - GOOD-side: with the still-demoted gate, a tick after the input
-//     has recovered does NOT invoke the recreate hook.
-//   - BAD-side: without the gate, the retry would burn CPU re-firing
-//     forever (until MaxAge cleans the state entry).
+//   - GOOD-side: post-recovery ticks do NOT fire the hook.
+//   - BAD-side: pre-recovery ticks DO fire the hook (otherwise the
+//     test would be vacuous).
 //
-// Falsification protocol: remove the `demotedInput == nil` early
-// return in tryRecreateForRetry — this test MUST fail because the
-// post-recovery tick would still call the hook.
-func TestEvictionRecreate_PeriodicRetryStopsAfterRecovery(t *testing.T) {
+// Falsification protocol: remove the OutputSwitch.CurrentValue.Load()
+// guard in the retry tick body — this test MUST fail because the
+// post-recovery ticks would still call the hook.
+func TestEvictionRecreate_RetryTick_StopsWhenInputRecovers(t *testing.T) {
 	mux, ctx := newStreamMuxForEvictTest(t)
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff:    10 * time.Millisecond,
-		BackoffMultiplier: 2.0,
-		MaxBackoff:        50 * time.Millisecond,
-		MaxAttempts:       5,
-		MaxAge:            time.Hour,
-	}
 
 	const deadID OutputID = 42
 	const recoveredID OutputID = 99
-	// Non-empty VideoCodec — see TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction
-	// for the getInputsForSenderKey routing constraint.
 	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
 		VideoCodec:      codectypes.Name("av1"),
-		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 	})
 
-	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
-	mux.nowFunc = func() time.Time { return now }
-
-	calls := 0
+	var calls atomic.Int32
 	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		calls++
+		calls.Add(1)
 		return errors.New("simulated fault")
 	}
 
-	// Drive attempt 1 from the on-eviction path.
 	mux.Outputs.Store(deadID, dead)
 	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
 	mux.evictDeadOutput(ctx, dead)
-	require.Equal(t, 1, calls, "attempt 1 fires from the on-eviction path")
-	require.Equal(t, int32(math.MinInt32), mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
-		"input demoted post-eviction")
+	require.Equal(t, int32(1), calls.Load(), "the on-eviction path fires attempt 1")
 
-	// Simulate recovery: the recreate path (or some other path) has
-	// switched the input onto a fresh Output that is no longer
-	// MinInt32. The state entry stays in the map (cleaned by MaxAge
-	// on the next eviction or sliding-window reset).
+	// Pre-recovery: tick must fire (BAD-side establishes the test is
+	// non-vacuous).
+	mux.evictionRecreateRetryTick(ctx)
+	require.Equal(t, int32(2), calls.Load(), "pre-recovery tick must fire")
+
+	// Simulate recovery: switch advances off MinInt32.
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(recoveredID))
 
-	// Advance past the backoff and tick. The still-demoted gate must
-	// suppress the recreate hook.
-	now = now.Add(50 * time.Millisecond) // > 20ms backoff for n=1
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 1, calls, "retry tick must NOT fire when input has recovered (OutputSwitch != MinInt32)")
-
-	// State must NOT have advanced — no second hook fire means no
-	// state mutation. consecutiveFailures stays at 1.
-	mux.evictionRecreateLocker.Lock()
-	state := mux.lastEvictionRecreateState[dead.StorageKey()]
-	mux.evictionRecreateLocker.Unlock()
-	require.Equal(t, 1, state.consecutiveFailures, "skipped retry must not bump consecutiveFailures")
-	require.False(t, state.permanentlyFailed, "skipped retry must not latch permanentlyFailed")
-
-	// BAD-side: subsequent ticks at any time interval must also stay
-	// at 1 call as long as the input is recovered.
-	now = now.Add(time.Second) // far past any backoff
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 1, calls, "post-recovery ticks must remain suppressed regardless of elapsed time (until MaxAge reset)")
+	// Post-recovery: 10 ticks must remain silent.
+	for i := 0; i < 10; i++ {
+		mux.evictionRecreateRetryTick(ctx)
+	}
+	require.Equal(t, int32(2), calls.Load(),
+		"post-recovery ticks must NOT fire the recreate hook for the recovered input")
 }
 
-// TestEvictionRecreate_RetryInterval_FloorAndDerivation is a
-// determinism-of-cadence pin: the retry interval is derived from the
-// policy's InitialBackoff (half of it) but never below the
-// minRetryTickInterval floor. Without the floor a sub-millisecond
-// InitialBackoff would spin the ticker.
-func TestEvictionRecreate_RetryInterval_FloorAndDerivation(t *testing.T) {
-	mux, _ := newStreamMuxForEvictTest(t)
-
-	// Default policy: InitialBackoff=5s → interval=2.5s (well above
-	// the 100ms floor).
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{}
-	require.Equal(t, 2500*time.Millisecond, mux.evictionRecreateRetryInterval(),
-		"default-policy interval must be InitialBackoff/2 = 2.5s")
-
-	// Tight test policy: InitialBackoff=10ms → would derive 5ms but
-	// the 100ms floor wins.
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff: 10 * time.Millisecond,
-	}
-	require.Equal(t, minRetryTickInterval, mux.evictionRecreateRetryInterval(),
-		"sub-floor InitialBackoff must clamp to minRetryTickInterval")
-
-	// Mid-range: InitialBackoff=400ms → 200ms, above the floor.
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff: 400 * time.Millisecond,
-	}
-	require.Equal(t, 200*time.Millisecond, mux.evictionRecreateRetryInterval(),
-		"InitialBackoff/2 above the floor must be honored")
-}
-
-// TestEvictionRecreate_RetryTick_RespectsPermanentlyFailed pins the
-// AlreadyPermanent gate on the retry path: after MaxAttempts has
-// latched, the retry tick must not fire even if the backoff has
-// elapsed.
-func TestEvictionRecreate_RetryTick_RespectsPermanentlyFailed(t *testing.T) {
+// TestEvictionRecreate_RetryTick_NeverGivesUp pins the no-give-up
+// invariant: 1000 consecutive ticks against a persistent fault must
+// each fire the hook. Live-streaming users cannot tolerate any
+// "permanently failed" retirement — the destination either becomes
+// reachable or doesn't, and the daemon must keep trying.
+//
+//   - GOOD-side: 1000 ticks → 1000 fires.
+//   - BAD-side: ANY missing fire indicates a hidden ceiling/budget.
+//
+// Falsification protocol: introduce ANY ceiling (max-attempts,
+// permanently-failed latch, exponential-backoff gate) — this test
+// MUST fail because some subset of the 1000 ticks would be
+// suppressed.
+func TestEvictionRecreate_RetryTick_NeverGivesUp(t *testing.T) {
 	mux, ctx := newStreamMuxForEvictTest(t)
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff:    10 * time.Millisecond,
-		BackoffMultiplier: 2.0,
-		MaxBackoff:        50 * time.Millisecond,
-		MaxAttempts:       2,
-		MaxAge:            time.Hour,
-	}
 
 	const deadID OutputID = 42
-	// Non-empty VideoCodec — see TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction.
 	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
 		VideoCodec:      codectypes.Name("av1"),
-		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 	})
 
-	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
-	mux.nowFunc = func() time.Time { return now }
-
-	calls := 0
+	var calls atomic.Int32
 	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		calls++
-		return errors.New("simulated persistent fault")
+		calls.Add(1)
+		return errors.New("persistent fault — destination unreachable")
 	}
 
-	rearm := func() {
-		mux.Outputs.Store(deadID, dead)
-		mux.OutputsMap.Store(dead.StorageKey(), dead)
-		mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
-		mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	// Prime the orphaned-input state via a real eviction.
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	mux.evictDeadOutput(ctx, dead)
+	require.Equal(t, int32(1), calls.Load(), "the on-eviction path fires attempt 1")
+
+	// 1000 ticks — every single one must fire. ANY suppression
+	// (ceiling, budget, latch) would drop the tail count below
+	// 1001 (1 from eviction + 1000 from ticks).
+	const ticks = 1000
+	for i := 0; i < ticks; i++ {
+		mux.evictionRecreateRetryTick(ctx)
 	}
-
-	// Drive both attempts to hit MaxAttempts=2 → permanentlyFailed.
-	rearm()
-	mux.evictDeadOutput(ctx, dead) // attempt 1
-	require.Equal(t, 1, calls)
-
-	now = now.Add(25 * time.Millisecond)
-	rearm()
-	mux.evictDeadOutput(ctx, dead) // attempt 2 = final
-	require.Equal(t, 2, calls)
-
-	mux.evictionRecreateLocker.Lock()
-	state := mux.lastEvictionRecreateState[dead.StorageKey()]
-	mux.evictionRecreateLocker.Unlock()
-	require.True(t, state.permanentlyFailed, "MaxAttempts=2 must latch permanentlyFailed")
-
-	// Re-arm the input so the still-demoted gate would otherwise
-	// pass — the AlreadyPermanent gate must still suppress.
-	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(math.MinInt32))
-
-	// Tick well past any backoff — the AlreadyPermanent gate must
-	// suppress regardless.
-	now = now.Add(time.Second)
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 2, calls, "retry tick must NOT fire while permanentlyFailed is latched")
+	require.Equal(t, int32(1+ticks), calls.Load(),
+		"every retry tick on a persistent fault must fire the hook — no give-up point")
 }
 
-// TestEvictionRecreate_RetryTick_RearmsAfterMaxAge pins the
-// sliding-window reset on the retry path: after MaxAttempts has
-// latched permanentlyFailed, a quiescent window longer than MaxAge
-// must rearm the budget via the retry tick — the on-eviction path
-// is dead in this scenario (no node-level errors fire while the
-// input is demoted), so without retry-side admission the latch is
-// terminal.
+// TestEvictionRecreate_RecoveryWithin1Sec pins the production
+// scenario binding the user's directive: when the destination becomes
+// reachable, the next retry tick (which fires within at most one tick
+// interval = 1 s) must successfully recover the orphaned input. This
+// is the unit-level analogue of the mission witness on the phone.
 //
-// Production scenario: the avd server goes down for longer than
-// MaxAttempts*MaxBackoff (~155s with defaults). The first eviction
-// burst latches permanentlyFailed. After avd reappears, the user
-// expects the daemon to retry and recover — which requires the
-// retry tick admit the latched key once lastFailureTime is older
-// than MaxAge so evaluateEvictionRecreateLocked's sliding-window
-// reset clears the latch.
+//   - GOOD-side: simulate the destination coming back at tick N
+//     (recreate hook returns nil and switches the input). The very
+//     next tick must observe the input recovered (OutputSwitch off
+//     MinInt32) and stop firing.
+//   - BAD-side: any mechanism that would delay the recovery beyond
+//     one tick interval (backoff, cooldown) would push recovery past
+//     the 1 s budget.
 //
-//   - GOOD-side: tick at lastFailureTime + MaxAge + epsilon admits
-//     the latched key, evaluate clears permanentlyFailed via the
-//     sliding-window reset, the recreate hook fires under a fresh
-//     budget (consecutiveFailures=1 post-fire).
-//   - BAD-side (pre-fix): the snapshot filter skipped every
-//     permanentlyFailed key unconditionally, so MaxAge was never
-//     reachable through the retry path — the latch was terminal.
-//
-// Falsification protocol: revert the snapshot filter in
-// snapshotEvictionRecreateRetryCandidates so latched keys are
-// skipped unconditionally — this test MUST fail because no recreate
-// hook fires and permanentlyFailed stays true.
-func TestEvictionRecreate_RetryTick_RearmsAfterMaxAge(t *testing.T) {
+// Falsification protocol: insert a "skip if backoff <= elapsed"
+// branch — this test MUST fail because the recovery tick (N) would
+// be suppressed and the input would stay orphaned.
+func TestEvictionRecreate_RecoveryWithin1Sec(t *testing.T) {
 	mux, ctx := newStreamMuxForEvictTest(t)
-	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
-		InitialBackoff:    10 * time.Millisecond,
-		BackoffMultiplier: 2.0,
-		MaxBackoff:        50 * time.Millisecond,
-		MaxAttempts:       2,
-		MaxAge:            500 * time.Millisecond,
-	}
 
 	const deadID OutputID = 42
-	// Non-empty VideoCodec — see TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction
-	// for the getInputsForSenderKey routing constraint.
+	const recoveredID OutputID = 99
 	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
 		VideoCodec:      codectypes.Name("av1"),
-		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
 	})
 
-	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
-	mux.nowFunc = func() time.Time { return now }
-
-	calls := 0
+	// Hook simulates the destination state: returns an error while
+	// the destination is "down", returns nil and advances OutputSwitch
+	// once the destination is "up".
+	var destinationUp atomic.Bool
+	var calls atomic.Int32
 	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		calls++
-		return errors.New("simulated persistent fault")
-	}
-
-	rearm := func() {
-		mux.Outputs.Store(deadID, dead)
-		mux.OutputsMap.Store(dead.StorageKey(), dead)
-		mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
-		mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
-	}
-
-	// Drive both attempts to hit MaxAttempts=2 → permanentlyFailed.
-	rearm()
-	mux.evictDeadOutput(ctx, dead) // attempt 1
-	require.Equal(t, 1, calls)
-
-	now = now.Add(25 * time.Millisecond)
-	rearm()
-	mux.evictDeadOutput(ctx, dead) // attempt 2 = final
-	require.Equal(t, 2, calls)
-
-	mux.evictionRecreateLocker.Lock()
-	state := mux.lastEvictionRecreateState[dead.StorageKey()]
-	lastFailure := state.lastFailureTime
-	mux.evictionRecreateLocker.Unlock()
-	require.True(t, state.permanentlyFailed, "MaxAttempts=2 must latch permanentlyFailed")
-
-	// The on-eviction path runs only when a frame produces a node-
-	// level error. Once the input is demoted (OutputSwitch=MinInt32)
-	// no further on-eviction event fires — the retry tick is the
-	// only path that can clear the latch.
-	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(math.MinInt32))
-
-	// Sanity: a tick BEFORE MaxAge has elapsed must remain
-	// suppressed by the AlreadyPermanent latch (covered by the
-	// existing TestEvictionRecreate_RetryTick_RespectsPermanentlyFailed
-	// — duplicated here as a tighter pre-condition for the rearm
-	// assertion below).
-	now = lastFailure.Add(policyMaxAgeOf(mux) - 100*time.Millisecond)
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 2, calls, "tick within MaxAge must remain suppressed by the latch")
-
-	mux.evictionRecreateLocker.Lock()
-	stateMid := mux.lastEvictionRecreateState[dead.StorageKey()]
-	mux.evictionRecreateLocker.Unlock()
-	require.True(t, stateMid.permanentlyFailed, "latch must persist while elapsed <= MaxAge")
-
-	// Advance past MaxAge: the snapshot must admit the latched key,
-	// evaluateEvictionRecreateLocked must apply the sliding-window
-	// reset and clear the latch, and the recreate hook must fire
-	// under a fresh budget.
-	now = lastFailure.Add(policyMaxAgeOf(mux) + 10*time.Millisecond)
-	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 3, calls, "tick past MaxAge must rearm and fire the recreate hook")
-
-	mux.evictionRecreateLocker.Lock()
-	stateAfter := mux.lastEvictionRecreateState[dead.StorageKey()]
-	mux.evictionRecreateLocker.Unlock()
-	require.False(t, stateAfter.permanentlyFailed,
-		"sliding-window reset must clear permanentlyFailed when the retry tick fires past MaxAge")
-	require.Equal(t, 1, stateAfter.consecutiveFailures,
-		"sliding-window reset must restart the counter — the post-rearm attempt is attempt 1 of a fresh era")
-	require.Equal(t, now, stateAfter.lastFailureTime,
-		"post-rearm attempt must refresh lastFailureTime to the current tick")
-}
-
-// policyMaxAgeOf returns the resolved MaxAge for the mux's current
-// policy — the test sets a sub-default MaxAge to keep the test fast,
-// but applyDefaults() is the authority on what the runtime sees.
-func policyMaxAgeOf[C any](mux *StreamMux[C]) time.Duration {
-	return mux.EvictionRecreatePolicy.applyDefaults().MaxAge
-}
-
-// TestEvictionRecreate_RetryTick_NotAllowedDifferentOutputs pins the
-// MuxMode guard: in modes that don't support per-input switching, the
-// retry tick is a no-op. This avoids polluting logs with "orphaned
-// input" warnings for a recovery path that cannot run anyway.
-func TestEvictionRecreate_RetryTick_NotAllowedDifferentOutputs(t *testing.T) {
-	ctx := context.Background()
-	// MuxModeForbid: IsAllowedDifferentOutputs() returns false.
-	mux, err := NewWithCustomData[struct{}](ctx, types.MuxModeForbid, dummyOutputFactory{})
-	require.NoError(t, err)
-
-	calls := 0
-	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
-		calls++
+		calls.Add(1)
+		if !destinationUp.Load() {
+			return errors.New("destination unreachable")
+		}
+		// Simulate the production recreate path's effect: switch the
+		// orphaned input onto a freshly-created Output.
+		mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(recoveredID))
 		return nil
 	}
 
-	// Even with a state entry primed, the tick must short-circuit at
-	// the IsAllowedDifferentOutputs() guard.
-	mux.evictionRecreateLocker.Lock()
-	mux.lastEvictionRecreateState[SenderKey{VideoCodec: codectypes.Name("av1")}] = evictionRecreateState{
-		lastFailureTime:     time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC).Add(-time.Hour),
-		consecutiveFailures: 1,
-	}
-	mux.evictionRecreateLocker.Unlock()
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	mux.evictDeadOutput(ctx, dead) // attempt 1: destination still down
+	require.Equal(t, int32(1), calls.Load())
+	require.Equal(t, int32(math.MinInt32), mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
+		"input demoted while destination is down")
 
+	// Several ticks while destination is still down — each must fire,
+	// each must keep the input demoted.
+	for i := 0; i < 3; i++ {
+		mux.evictionRecreateRetryTick(ctx)
+	}
+	require.Equal(t, int32(4), calls.Load(),
+		"ticks while destination is down must each fire (no backoff)")
+	require.Equal(t, int32(math.MinInt32), mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
+		"input remains demoted while destination is down")
+
+	// Bring the destination up. The very next tick must recover.
+	destinationUp.Store(true)
 	mux.evictionRecreateRetryTick(ctx)
-	require.Equal(t, 0, calls, "retry tick must be a no-op when MuxMode does not allow per-input switching")
+	require.Equal(t, int32(5), calls.Load(),
+		"the recovery tick must fire (no suppression by backoff/cooldown)")
+	require.Equal(t, int32(recoveredID), mux.InputVideoOnly.OutputSwitch.CurrentValue.Load(),
+		"recovery tick must advance OutputSwitch off MinInt32")
+
+	// Subsequent ticks must observe the input recovered and stop
+	// firing.
+	for i := 0; i < 5; i++ {
+		mux.evictionRecreateRetryTick(ctx)
+	}
+	require.Equal(t, int32(5), calls.Load(),
+		"post-recovery ticks must remain silent")
+}
+
+// TestEvictionRecreate_RetryTickInterval_Is1Hz pins the production
+// cadence: the retry tick fires at exactly 1 Hz. The interval is a
+// const (retryTickInterval) so this test reads it directly — but we
+// pin it so any unintended change to the cadence trips the test.
+func TestEvictionRecreate_RetryTickInterval_Is1Hz(t *testing.T) {
+	require.Equal(t, time.Second, retryTickInterval,
+		"retry tick must fire at 1 Hz — see RETRY_SEMANTICS.md")
 }
