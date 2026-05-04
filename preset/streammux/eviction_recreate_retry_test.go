@@ -395,6 +395,130 @@ func TestEvictionRecreate_RetryTick_RespectsPermanentlyFailed(t *testing.T) {
 	require.Equal(t, 2, calls, "retry tick must NOT fire while permanentlyFailed is latched")
 }
 
+// TestEvictionRecreate_RetryTick_RearmsAfterMaxAge pins the
+// sliding-window reset on the retry path: after MaxAttempts has
+// latched permanentlyFailed, a quiescent window longer than MaxAge
+// must rearm the budget via the retry tick — the on-eviction path
+// is dead in this scenario (no node-level errors fire while the
+// input is demoted), so without retry-side admission the latch is
+// terminal.
+//
+// Production scenario: the avd server goes down for longer than
+// MaxAttempts*MaxBackoff (~155s with defaults). The first eviction
+// burst latches permanentlyFailed. After avd reappears, the user
+// expects the daemon to retry and recover — which requires the
+// retry tick admit the latched key once lastFailureTime is older
+// than MaxAge so evaluateEvictionRecreateLocked's sliding-window
+// reset clears the latch.
+//
+//   - GOOD-side: tick at lastFailureTime + MaxAge + epsilon admits
+//     the latched key, evaluate clears permanentlyFailed via the
+//     sliding-window reset, the recreate hook fires under a fresh
+//     budget (consecutiveFailures=1 post-fire).
+//   - BAD-side (pre-fix): the snapshot filter skipped every
+//     permanentlyFailed key unconditionally, so MaxAge was never
+//     reachable through the retry path — the latch was terminal.
+//
+// Falsification protocol: revert the snapshot filter in
+// snapshotEvictionRecreateRetryCandidates so latched keys are
+// skipped unconditionally — this test MUST fail because no recreate
+// hook fires and permanentlyFailed stays true.
+func TestEvictionRecreate_RetryTick_RearmsAfterMaxAge(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+	mux.EvictionRecreatePolicy = EvictionRecreatePolicy{
+		InitialBackoff:    10 * time.Millisecond,
+		BackoffMultiplier: 2.0,
+		MaxBackoff:        50 * time.Millisecond,
+		MaxAttempts:       2,
+		MaxAge:            500 * time.Millisecond,
+	}
+
+	const deadID OutputID = 42
+	// Non-empty VideoCodec — see TestEvictionRecreate_PeriodicRetryFiresWithoutNewEviction
+	// for the getInputsForSenderKey routing constraint.
+	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
+		VideoCodec:      codectypes.Name("av1"),
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+	})
+
+	now := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+	mux.nowFunc = func() time.Time { return now }
+
+	calls := 0
+	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
+		calls++
+		return errors.New("simulated persistent fault")
+	}
+
+	rearm := func() {
+		mux.Outputs.Store(deadID, dead)
+		mux.OutputsMap.Store(dead.StorageKey(), dead)
+		mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+		mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	}
+
+	// Drive both attempts to hit MaxAttempts=2 → permanentlyFailed.
+	rearm()
+	mux.evictDeadOutput(ctx, dead) // attempt 1
+	require.Equal(t, 1, calls)
+
+	now = now.Add(25 * time.Millisecond)
+	rearm()
+	mux.evictDeadOutput(ctx, dead) // attempt 2 = final
+	require.Equal(t, 2, calls)
+
+	mux.evictionRecreateLocker.Lock()
+	state := mux.lastEvictionRecreateState[dead.StorageKey()]
+	lastFailure := state.lastFailureTime
+	mux.evictionRecreateLocker.Unlock()
+	require.True(t, state.permanentlyFailed, "MaxAttempts=2 must latch permanentlyFailed")
+
+	// The on-eviction path runs only when a frame produces a node-
+	// level error. Once the input is demoted (OutputSwitch=MinInt32)
+	// no further on-eviction event fires — the retry tick is the
+	// only path that can clear the latch.
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(math.MinInt32))
+
+	// Sanity: a tick BEFORE MaxAge has elapsed must remain
+	// suppressed by the AlreadyPermanent latch (covered by the
+	// existing TestEvictionRecreate_RetryTick_RespectsPermanentlyFailed
+	// — duplicated here as a tighter pre-condition for the rearm
+	// assertion below).
+	now = lastFailure.Add(policyMaxAgeOf(mux) - 100*time.Millisecond)
+	mux.evictionRecreateRetryTick(ctx)
+	require.Equal(t, 2, calls, "tick within MaxAge must remain suppressed by the latch")
+
+	mux.evictionRecreateLocker.Lock()
+	stateMid := mux.lastEvictionRecreateState[dead.StorageKey()]
+	mux.evictionRecreateLocker.Unlock()
+	require.True(t, stateMid.permanentlyFailed, "latch must persist while elapsed <= MaxAge")
+
+	// Advance past MaxAge: the snapshot must admit the latched key,
+	// evaluateEvictionRecreateLocked must apply the sliding-window
+	// reset and clear the latch, and the recreate hook must fire
+	// under a fresh budget.
+	now = lastFailure.Add(policyMaxAgeOf(mux) + 10*time.Millisecond)
+	mux.evictionRecreateRetryTick(ctx)
+	require.Equal(t, 3, calls, "tick past MaxAge must rearm and fire the recreate hook")
+
+	mux.evictionRecreateLocker.Lock()
+	stateAfter := mux.lastEvictionRecreateState[dead.StorageKey()]
+	mux.evictionRecreateLocker.Unlock()
+	require.False(t, stateAfter.permanentlyFailed,
+		"sliding-window reset must clear permanentlyFailed when the retry tick fires past MaxAge")
+	require.Equal(t, 1, stateAfter.consecutiveFailures,
+		"sliding-window reset must restart the counter — the post-rearm attempt is attempt 1 of a fresh era")
+	require.Equal(t, now, stateAfter.lastFailureTime,
+		"post-rearm attempt must refresh lastFailureTime to the current tick")
+}
+
+// policyMaxAgeOf returns the resolved MaxAge for the mux's current
+// policy — the test sets a sub-default MaxAge to keep the test fast,
+// but applyDefaults() is the authority on what the runtime sees.
+func policyMaxAgeOf[C any](mux *StreamMux[C]) time.Duration {
+	return mux.EvictionRecreatePolicy.applyDefaults().MaxAge
+}
+
 // TestEvictionRecreate_RetryTick_NotAllowedDifferentOutputs pins the
 // MuxMode guard: in modes that don't support per-input switching, the
 // retry tick is a no-op. This avoids polluting logs with "orphaned

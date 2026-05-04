@@ -117,10 +117,16 @@ func (s *StreamMux[C]) evictionRecreateRetryTick(
 
 // snapshotEvictionRecreateRetryCandidates returns the subset of keys
 // in lastEvictionRecreateState that are eligible for a retry pass at
-// `now`: not permanently failed, last-failure-time set, and elapsed
-// time at-or-past the per-key backoff. Runs under
-// evictionRecreateLocker so the snapshot is consistent against
-// concurrent on-eviction state mutations.
+// `now`: last-failure-time set, and either (a) not permanently failed
+// and elapsed time at-or-past the per-key backoff, or (b) permanently
+// failed but quiescent for longer than policy.MaxAge — the latch must
+// be admitted so evaluateEvictionRecreateLocked can apply the sliding-
+// window reset and rearm the recreate budget. Without this admission
+// the latch is terminal: no on-eviction event refreshes lastFailureTime
+// once the orphan is detached, so MaxAge would never be reached via
+// the eviction-driven path. Runs under evictionRecreateLocker so the
+// snapshot is consistent against concurrent on-eviction state
+// mutations.
 func (s *StreamMux[C]) snapshotEvictionRecreateRetryCandidates(
 	now time.Time,
 	policy EvictionRecreatePolicy,
@@ -130,10 +136,18 @@ func (s *StreamMux[C]) snapshotEvictionRecreateRetryCandidates(
 
 	var keys []SenderKey
 	for key, state := range s.lastEvictionRecreateState {
-		if state.permanentlyFailed {
+		if state.lastFailureTime.IsZero() {
 			continue
 		}
-		if state.lastFailureTime.IsZero() {
+		if state.permanentlyFailed {
+			// Latched keys re-enter the retry path only once MaxAge has
+			// elapsed since the last attempt; evaluateEvictionRecreateLocked
+			// then clears the latch via the sliding-window reset and the
+			// next attempt fires under a fresh budget.
+			if now.Sub(state.lastFailureTime) <= policy.MaxAge {
+				continue
+			}
+			keys = append(keys, key)
 			continue
 		}
 		backoff := policy.backoffFor(state.consecutiveFailures)
