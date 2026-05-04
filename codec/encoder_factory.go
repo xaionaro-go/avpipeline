@@ -15,14 +15,36 @@ import (
 	"github.com/xaionaro-go/xsync"
 )
 
+// EncoderFactory creates stream-specific encoders for kernel.Encoder and
+// kernel.Transcoder.
+//
+// AVPipeline calls NewEncoder after it knows the input stream metadata. The
+// params argument is the input stream's astiav.CodecParameters, and timeBase is
+// the stream time base that will be used for encoded packets. Custom factories
+// should inspect params.MediaType(), params.CodecID(), params.Width(),
+// params.Height(), params.FrameRate(), params.BitRate(), params.SampleRate(),
+// params.ChannelLayout(), and related astiav.CodecParameters fields to choose
+// codecs, bitrate, resolution, sample rate, channel count, and open-time
+// encoder options.
+//
+// NewEncoder may be called more than once for the same factory: once per stream,
+// and again after a hard reset/recreate. It must therefore be safe to call
+// repeatedly. Return EncoderCopy for passthrough streams, return an error for
+// unsupported media types, and propagate errors from delegated factories or
+// codec initialization.
 type EncoderFactory interface {
 	fmt.Stringer
+	// NewEncoder builds an encoder for one stream. The opts slice may contain
+	// EncoderFactoryOptionGetDecoderer when the frame source exposes the decoder;
+	// use EncoderFactoryOptionLatest to read the latest instance.
 	NewEncoder(
 		ctx context.Context,
 		params *astiav.CodecParameters,
 		timeBase astiav.Rational,
 		opts ...Option,
 	) (Encoder, error)
+	// Reset releases factory-owned encoder state. It is called during encoder
+	// shutdown and hard reset before streams are opened again.
 	Reset(ctx context.Context) error
 }
 
@@ -37,6 +59,15 @@ type NaiveEncoderFactory struct {
 	ResourceManager ResourceManager
 }
 
+// NaiveEncoderFactoryParams configures NaiveEncoderFactory.
+//
+// Zero values generally mean "inherit from the input stream metadata" for
+// fields carried by astiav.CodecParameters. Non-zero quality, resolution, frame
+// rate, sample rate, and channel fields override the input metadata before the
+// underlying codec is opened. VideoOptions and AudioOptions are FFmpeg
+// open-time options; already-open encoders keep the cloned options they were
+// created with, so apply option changes before NewEncoder or hard-reset the
+// bound kernel.Encoder before expecting them to affect an existing stream.
 type NaiveEncoderFactoryParams struct {
 	VideoCodec         Name
 	VideoCodecs        []Name

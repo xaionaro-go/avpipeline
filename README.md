@@ -133,3 +133,7 @@ graph LR
 
 * [`avd`](https://github.com/xaionaro-go/avd) users `avpipeline` to implement a streaming server (as an alternative to [`mediamtx`](https://github.com/bluenviron/mediamtx)).
 * [`ffstream`](https://github.com/xaionaro-go/ffstream) uses `avpipeline` to implement a CLI that could be used as a kick-in replacement to `ffmpeg` in some livestreaming use cases. It allows for dynamic change of bitrate and for enabling a passthrough mode (to disable transcoding).
+
+# Guides
+
+* [Encoder factory guide](doc/encoder_factory.md): implement custom `codec.EncoderFactory` types, inspect stream metadata in `NewEncoder`, choose dynamic codec parameters, and handle open-time versus runtime encoder changes.
