@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
+	"github.com/xaionaro-go/avpipeline/preset/selector/id"
 )
 
 // --- recordingHook captures every Entry pushed to the logger so a
@@ -267,7 +268,8 @@ func hasMessageAtLevel(entries []loggertypes.Entry, sub string, lvl logger.Level
 // --- Site C: ErrSwitchInProgress sentinel + onInputChainError demote ---
 
 // TestErrSwitchInProgress_IsSentinel asserts that the error returned
-// from the OnSwitchRequest gate at switchingProcN > 0 is the
+// from the OnSwitchRequest gate while selector switch-progress work is
+// in flight is the
 // ErrSwitchInProgress type, so callers can distinguish it via
 // errors.Is.
 func TestErrSwitchInProgress_IsSentinel(t *testing.T) {
@@ -298,8 +300,9 @@ func TestInputWithFallback_OnInputChainError_QuietDemotesSwitchInProgress(t *tes
 	// Two empty fallback chains past the active one. The active chain
 	// (id 0) must report HasResources=true so the walk reaches the
 	// SetValue call (an active chain is needed for the
-	// "current == int(id)" guard to pass). Pre-occupy switchingProcN
-	// so SetValue's OnSwitchRequest gate returns ErrSwitchInProgress.
+	// "current == int(id)" guard to pass). Pre-occupy the selector
+	// switch-progress gate so SetValue's OnSwitchRequest gate returns
+	// ErrSwitchInProgress.
 	var iFactories []InputFactory[*inputKernel, codec.DecoderFactory, struct{}]
 	for i := 0; i < 3; i++ {
 		f := &mockInputFactoryWithAvailability{
@@ -318,11 +321,13 @@ func TestInputWithFallback_OnInputChainError_QuietDemotesSwitchInProgress(t *tes
 		_ = iwf.Close(context.Background())
 	}()
 
-	// Park switchingProcN above zero so OnSwitchRequest's gate trips
-	// and SetValue returns ErrSwitchInProgress, exercising the demote
-	// path at input_with_fallback.go's onInputChainError site.
-	iwf.switchingProcN.Add(1)
-	defer iwf.switchingProcN.Add(-1)
+	// Park the selector switch-progress gate above zero so
+	// OnSwitchRequest trips and SetValue returns ErrSwitchInProgress,
+	// exercising the demote path at input_with_fallback.go's
+	// onInputChainError site.
+	work, err := iwf.switchGate.StartRequest(id.MemberID(99))
+	require.NoError(t, err)
+	defer work.Release()
 
 	res := iwf.onInputChainError(ctx, iwf.InputChains[0], errors.New("primary failed"))
 	require.NoError(t, res)
@@ -365,8 +370,9 @@ func TestInputWithFallback_OnInputChainError_DefaultLogsSwitchInProgressAtError(
 		_ = iwf.Close(context.Background())
 	}()
 
-	iwf.switchingProcN.Add(1)
-	defer iwf.switchingProcN.Add(-1)
+	work, err := iwf.switchGate.StartRequest(id.MemberID(99))
+	require.NoError(t, err)
+	defer work.Release()
 
 	res := iwf.onInputChainError(ctx, iwf.InputChains[0], errors.New("primary failed"))
 	require.NoError(t, res)

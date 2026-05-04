@@ -115,7 +115,7 @@ func TestEvictDeadOutput_RemovesFromMaps_AndDemotesSwitch(t *testing.T) {
 	dead := newDeadOutputForTest(t, ctx, mux, deadID)
 
 	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
 
@@ -129,7 +129,7 @@ func TestEvictDeadOutput_RemovesFromMaps_AndDemotesSwitch(t *testing.T) {
 	// GOOD-side: dead output is gone from both maps.
 	_, okOutputs := mux.Outputs.Load(deadID)
 	require.False(t, okOutputs, "dead output must be removed from Outputs (OutputID-keyed)")
-	_, okOutputsMap := mux.OutputsMap.Load(dead.GetKey())
+	_, okOutputsMap := mux.OutputsMap.Load(dead.StorageKey())
 	require.False(t, okOutputsMap, "dead output must be removed from OutputsMap (SenderKey-keyed)")
 
 	// GOOD-side: the video switches that pointed at the dead output are
@@ -255,17 +255,17 @@ func TestEvictDeadOutput_PreservesNewerEntryUnderSameKey(t *testing.T) {
 
 	old := newDeadOutputForTest(t, ctx, mux, oldID)
 	fresh := newDeadOutputForTest(t, ctx, mux, newID)
-	require.Equal(t, old.GetKey(), fresh.GetKey(), "test setup expects same SenderKey")
+	require.Equal(t, old.StorageKey(), fresh.StorageKey(), "test setup expects same SenderKey")
 
 	// Race scenario: rawErrCh handler is about to evict `old`, but
 	// GetOrCreateOutput already replaced the SenderKey entry with `fresh`.
 	mux.Outputs.Store(oldID, old)
-	mux.OutputsMap.Store(fresh.GetKey(), fresh) // fresh wins the SenderKey slot
+	mux.OutputsMap.Store(fresh.StorageKey(), fresh) // fresh wins the SenderKey slot
 
 	mux.evictDeadOutput(ctx, old)
 
 	// CompareAndDelete keyed on `old` must not remove `fresh`.
-	got, ok := mux.OutputsMap.Load(fresh.GetKey())
+	got, ok := mux.OutputsMap.Load(fresh.StorageKey())
 	require.True(t, ok, "fresh output under the same SenderKey must survive eviction of old output")
 	require.Same(t, fresh, got)
 
@@ -303,7 +303,7 @@ func TestHandleOutputNodeError_ActiveOutput_EvictsAndForwards(t *testing.T) {
 	dead := newDeadOutputForTest(t, ctx, mux, deadID)
 
 	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	// Commit the video input's switch to the dead output so the handler
 	// classifies it as active-on-some-input.
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
@@ -324,7 +324,7 @@ func TestHandleOutputNodeError_ActiveOutput_EvictsAndForwards(t *testing.T) {
 	// GOOD-side: dead output is gone from both lookup tables.
 	_, okOutputs := mux.Outputs.Load(deadID)
 	require.False(t, okOutputs, "active-branch eviction must remove the dead output from Outputs")
-	_, okOutputsMap := mux.OutputsMap.Load(dead.GetKey())
+	_, okOutputsMap := mux.OutputsMap.Load(dead.StorageKey())
 	require.False(t, okOutputsMap, "active-branch eviction must remove the dead output from OutputsMap")
 
 	// GOOD-side: switches that pointed at the dead output are demoted —
@@ -357,7 +357,7 @@ func TestHandleOutputNodeError_InactiveOutput_EvictsAndSwallows(t *testing.T) {
 	dead := newDeadOutputForTest(t, ctx, mux, deadID)
 
 	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	// No input commits to deadID — both switch to a different live ID.
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(liveID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(liveID))
@@ -378,7 +378,7 @@ func TestHandleOutputNodeError_InactiveOutput_EvictsAndSwallows(t *testing.T) {
 	// Eviction still ran.
 	_, okOutputs := mux.Outputs.Load(deadID)
 	require.False(t, okOutputs, "inactive-branch must also evict from Outputs")
-	_, okOutputsMap := mux.OutputsMap.Load(dead.GetKey())
+	_, okOutputsMap := mux.OutputsMap.Load(dead.StorageKey())
 	require.False(t, okOutputsMap, "inactive-branch must also evict from OutputsMap")
 
 	// Live switches must survive.
@@ -416,12 +416,12 @@ func TestEvictDeadOutput_RecommitsToSurvivingSibling(t *testing.T) {
 		VideoCodec:      "av1",
 		VideoResolution: codectypes.Resolution{Width: 1280, Height: 720},
 	})
-	require.NotEqual(t, dead.GetKey(), sibling.GetKey(), "test setup must use distinct SenderKeys")
+	require.NotEqual(t, dead.StorageKey(), sibling.StorageKey(), "test setup must use distinct SenderKeys")
 
 	mux.Outputs.Store(deadID, dead)
 	mux.Outputs.Store(siblingID, sibling)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
-	mux.OutputsMap.Store(sibling.GetKey(), sibling)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.OutputsMap.Store(sibling.StorageKey(), sibling)
 
 	// The video input is committed to the dead output. The recommit path
 	// is gated on demotedSwitch||demotedSyncer firing for this input.
@@ -452,7 +452,7 @@ func TestEvictDeadOutput_RecommitsToSurvivingSibling(t *testing.T) {
 	got, ok := mux.Outputs.Load(siblingID)
 	require.True(t, ok, "sibling must remain in Outputs after recommit")
 	require.Same(t, sibling, got)
-	gotByKey, okByKey := mux.OutputsMap.Load(sibling.GetKey())
+	gotByKey, okByKey := mux.OutputsMap.Load(sibling.StorageKey())
 	require.True(t, okByKey, "sibling must remain in OutputsMap after recommit")
 	require.Same(t, sibling, gotByKey)
 }
@@ -479,7 +479,7 @@ func TestEvictDeadOutput_NoSibling_RecreateFailureLeavesDemoted(t *testing.T) {
 	dead := newDeadOutputForTest(t, ctx, mux, deadID)
 
 	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
 
@@ -517,7 +517,7 @@ func TestEvictDeadOutput_NoSibling_RecreatesOutput(t *testing.T) {
 	dead := newDeadOutputForTest(t, ctx, mux, deadID)
 
 	mux.Outputs.Store(deadID, dead)
-	mux.OutputsMap.Store(dead.GetKey(), dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
 	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
 	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
 
@@ -539,12 +539,12 @@ func TestEvictDeadOutput_NoSibling_RecreatesOutput(t *testing.T) {
 	// video input under the dead output's SenderKey.
 	require.Len(t, calls, 1, "no-sibling eviction must invoke recreate hook exactly once")
 	require.Same(t, mux.InputVideoOnly, calls[0].input, "recreate must be called for the orphaned video input")
-	require.Equal(t, dead.GetKey(), calls[0].key, "recreate must be called with the dead output's SenderKey")
+	require.Equal(t, dead.StorageKey(), calls[0].key, "recreate must be called with the dead output's SenderKey")
 
 	// BAD-side: lastEvictedKey must be recorded for the orphaned input
 	// so the 1 Hz retry tick can pick up where this synchronous attempt
 	// leaves off if the recreate fails.
 	gotKey, hasKey := mux.lastEvictedKeyFor(mux.InputVideoOnly)
 	require.True(t, hasKey, "lastEvictedKey must be recorded for the orphaned input so the retry tick can recover it")
-	require.Equal(t, dead.GetKey(), gotKey, "lastEvictedKey must hold the dead output's SenderKey")
+	require.Equal(t, dead.StorageKey(), gotKey, "lastEvictedKey must hold the dead output's SenderKey")
 }

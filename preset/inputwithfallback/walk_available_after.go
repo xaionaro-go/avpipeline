@@ -8,6 +8,8 @@ package inputwithfallback
 
 import (
 	"context"
+
+	"github.com/xaionaro-go/avpipeline/preset/selector/availability"
 )
 
 // InputChainAvailability is the abstract view of an input chain that
@@ -64,30 +66,38 @@ func WalkAvailableAfter[T InputChainAvailability](
 	chains []T,
 	id int,
 ) int {
-	for candidate := id + 1; candidate < len(chains); candidate++ {
-		chain := chains[candidate]
-		// Nil-chain guard: AvailabilityFactory has a nil-receiver guard
-		// (see (*InputChain).AvailabilityFactory in input_chain.go) that
-		// returns nil when the receiver pointer is nil. The factory==nil
-		// check below covers nil chains for all pointer-typed T
-		// instantiations.
-		//
-		// Note: any(chain)==nil cannot be used here as a nil-pointer
-		// sentinel — boxing a typed-nil pointer into an interface
-		// produces an interface value with a non-nil type descriptor,
-		// so the comparison is always false for the production
-		// pointer-typed T. Relying on it would be a silent dead check
-		// that masks the load-bearing factory-nil guard.
-		factory := chain.AvailabilityFactory()
-		if factory == nil {
-			continue
-		}
-		if avail, ok := factory.(InputFactoryWithAvailability); ok {
-			if !avail.HasResources(ctx) {
-				continue
-			}
-		}
-		return candidate
+	candidates := make([]availability.Candidate, len(chains))
+	for idx, chain := range chains {
+		candidates[idx] = availabilityCandidate(chain)
 	}
-	return -1
+	candidate, ok := availability.FirstAvailableAfter(ctx, candidates, id)
+	if !ok {
+		return -1
+	}
+	return candidate
+}
+
+func availabilityCandidate[T InputChainAvailability](
+	chain T,
+) availability.Candidate {
+	// Nil-chain guard: AvailabilityFactory has a nil-receiver guard
+	// (see (*InputChain).AvailabilityFactory in input_chain.go) that
+	// returns nil when the receiver pointer is nil. The factory==nil
+	// check below covers nil chains for all pointer-typed T
+	// instantiations.
+	//
+	// Note: any(chain)==nil cannot be used here as a nil-pointer
+	// sentinel — boxing a typed-nil pointer into an interface
+	// produces an interface value with a non-nil type descriptor,
+	// so the comparison is always false for the production
+	// pointer-typed T. Relying on it would be a silent dead check
+	// that masks the load-bearing factory-nil guard.
+	factory := chain.AvailabilityFactory()
+	if factory == nil {
+		return availability.Absent()
+	}
+	if source, ok := factory.(InputFactoryWithAvailability); ok {
+		return availability.Present(source)
+	}
+	return availability.Present(nil)
 }

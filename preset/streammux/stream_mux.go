@@ -31,6 +31,13 @@ import (
 	nodetypes "github.com/xaionaro-go/avpipeline/node/types"
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 	packetorframecondition "github.com/xaionaro-go/avpipeline/packetorframe/condition"
+	"github.com/xaionaro-go/avpipeline/preset/selector/attachment"
+	"github.com/xaionaro-go/avpipeline/preset/selector/fanout"
+	"github.com/xaionaro-go/avpipeline/preset/selector/id"
+	"github.com/xaionaro-go/avpipeline/preset/selector/member"
+	"github.com/xaionaro-go/avpipeline/preset/selector/orphanretry"
+	"github.com/xaionaro-go/avpipeline/preset/selector/route"
+	"github.com/xaionaro-go/avpipeline/preset/selector/safekey"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	processortypes "github.com/xaionaro-go/avpipeline/processor/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
@@ -41,6 +48,10 @@ import (
 
 const (
 	switchTimeout = time.Hour
+
+	streamMuxRouteAll       id.RouteID = "all"
+	streamMuxRouteAudioOnly id.RouteID = "audio-only"
+	streamMuxRouteVideoOnly id.RouteID = "video-only"
 )
 
 var EnableDraining = false // TODO: enable this (currently it causes bugs with mediacodec)
@@ -114,6 +125,11 @@ type StreamMux[C any] struct {
 	// RETRY_SEMANTICS.md for the design rationale.
 	lastEvictedKey xsync.Map[*Input[C], SenderKey]
 
+	// retryTracker owns the selector-level orphan retry state. lastEvictedKey
+	// remains as the streammux compatibility mirror used by existing tests
+	// and diagnostics.
+	retryTracker *orphanretry.Tracker[SenderKey]
+
 	// recreateEvictedOutputFunc is the test seam for the no-sibling
 	// recreate path. Production wires it to recreateEvictedOutputDefault
 	// in NewWithCustomData; tests inject a stub to assert call timing
@@ -165,10 +181,29 @@ func NewWithCustomData[C any](
 	// Transcoder/Encoder factory chain — the recreator is the only side-
 	// effect the no-sibling branch exposes.
 	s.recreateEvictedOutputFunc = s.recreateEvictedOutputDefault
-	s.InputAll = *newInput(ctx, s, InputTypeAll)
+	retryTracker, err := orphanretry.NewTracker[SenderKey](
+		orphanretry.StreamMuxCompatibilityPolicy[SenderKey](),
+		time.Now,
+		s.recreateEvictedOutputForRoute,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize eviction retry tracker: %w", err)
+	}
+	s.retryTracker = retryTracker
+	inputAll, err := newInput(ctx, s, InputTypeAll)
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize all input: %w", err)
+	}
+	s.InputAll = *inputAll
 	if muxMode == types.MuxModeDifferentOutputsSameTracksSplitAV {
-		s.InputAudioOnly = newInput(ctx, s, InputTypeAudioOnly)
-		s.InputVideoOnly = newInput(ctx, s, InputTypeVideoOnly)
+		s.InputAudioOnly, err = newInput(ctx, s, InputTypeAudioOnly)
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize audio-only input: %w", err)
+		}
+		s.InputVideoOnly, err = newInput(ctx, s, InputTypeVideoOnly)
+		if err != nil {
+			return nil, fmt.Errorf("unable to initialize video-only input: %w", err)
+		}
 		s.InputAll.Node.AddPushTo(ctx, s.InputAudioOnly.Node, packetorframefiltercondition.Or{
 			packetorframefiltercondition.MediaType(astiav.MediaTypeAudio),
 			packetorframefiltercondition.MediaType(astiav.MediaTypeSubtitle),
@@ -537,6 +572,292 @@ func (s *StreamMux[C]) getAudioInput() *Input[C] {
 	return &s.InputAll
 }
 
+func fanOutModeForMuxMode(
+	muxMode types.MuxMode,
+) (fanout.Mode, error) {
+	switch muxMode {
+	case types.MuxModeForbid:
+		return fanout.ModeForbid, nil
+	case types.MuxModeSameOutputSameTracks:
+		return fanout.ModeSameOutputSameTracks, nil
+	case types.MuxModeSameOutputDifferentTracks:
+		return fanout.ModeSameOutputDifferentTracks, nil
+	case types.MuxModeDifferentOutputsSameTracks:
+		return fanout.ModeDifferentOutputsSameTracks, nil
+	case types.MuxModeDifferentOutputsSameTracksSplitAV:
+		return fanout.ModeDifferentOutputsSameTracksSplitAV, nil
+	case types.UndefinedMuxMode:
+		return 0, fmt.Errorf("mux mode is not defined")
+	default:
+		return 0, fmt.Errorf("unknown mux mode: %s", muxMode)
+	}
+}
+
+func routeIDForInputType(
+	inputType InputType,
+) (id.RouteID, error) {
+	switch inputType {
+	case InputTypeAll:
+		return streamMuxRouteAll, nil
+	case InputTypeAudioOnly:
+		return streamMuxRouteAudioOnly, nil
+	case InputTypeVideoOnly:
+		return streamMuxRouteVideoOnly, nil
+	default:
+		return "", fmt.Errorf("unknown input type: %s", inputType)
+	}
+}
+
+func inputTypeForRouteID(
+	routeID id.RouteID,
+) (InputType, bool) {
+	switch routeID {
+	case streamMuxRouteAll:
+		return InputTypeAll, true
+	case streamMuxRouteAudioOnly:
+		return InputTypeAudioOnly, true
+	case streamMuxRouteVideoOnly:
+		return InputTypeVideoOnly, true
+	default:
+		return UndefinedInputType, false
+	}
+}
+
+func (s *StreamMux[C]) fanOutMode() (fanout.Mode, error) {
+	return fanOutModeForMuxMode(s.MuxMode)
+}
+
+func (s *StreamMux[C]) inputForRouteID(
+	routeID id.RouteID,
+) (*Input[C], bool) {
+	inputType, ok := inputTypeForRouteID(routeID)
+	if !ok {
+		return nil, false
+	}
+
+	switch inputType {
+	case InputTypeAll:
+		return &s.InputAll, true
+	case InputTypeAudioOnly:
+		return s.InputAudioOnly, s.InputAudioOnly != nil
+	case InputTypeVideoOnly:
+		return s.InputVideoOnly, s.InputVideoOnly != nil
+	default:
+		return nil, false
+	}
+}
+
+func (s *StreamMux[C]) routeIDForInput(
+	input *Input[C],
+) (id.RouteID, error) {
+	if input == nil {
+		return "", fmt.Errorf("input is nil")
+	}
+	return routeIDForInputType(input.GetType())
+}
+
+func (s *StreamMux[C]) routeIDForOutput(
+	output *Output[C],
+) (id.RouteID, bool) {
+	if output == nil {
+		return "", false
+	}
+	switch output.InputFrom {
+	case s.InputAll.Node:
+		return streamMuxRouteAll, true
+	case nil:
+		return "", false
+	default:
+	}
+	if s.InputAudioOnly != nil && output.InputFrom == s.InputAudioOnly.Node {
+		return streamMuxRouteAudioOnly, true
+	}
+	if s.InputVideoOnly != nil && output.InputFrom == s.InputVideoOnly.Node {
+		return streamMuxRouteVideoOnly, true
+	}
+	return "", false
+}
+
+func (s *StreamMux[C]) preferredRoutePlans(
+	ctx context.Context,
+	senderKey SenderKey,
+) ([]fanout.RoutePlan[SenderKey], error) {
+	if s.MuxMode == types.MuxModeDifferentOutputsSameTracksSplitAV &&
+		senderKey.VideoCodec == "" &&
+		senderKey.AudioCodec == "" {
+		return nil, nil
+	}
+
+	mode, err := s.fanOutMode()
+	if err != nil {
+		return nil, err
+	}
+	planner := fanout.NewRoutePlanner[SenderKey](
+		mode,
+		streamMuxRouteAll,
+		fanout.PreferredRoutePlannerFunc[SenderKey](func(
+			_ context.Context,
+			requested SenderKey,
+		) ([]fanout.RoutePlan[SenderKey], error) {
+			return splitAVPreferredRoutePlans(requested), nil
+		}),
+	)
+	return planner.PlanPreferred(ctx, senderKey)
+}
+
+func splitAVPreferredRoutePlans(
+	senderKey SenderKey,
+) []fanout.RoutePlan[SenderKey] {
+	var plans []fanout.RoutePlan[SenderKey]
+	if senderKey.VideoCodec != "" {
+		plans = append(plans, fanout.RoutePlan[SenderKey]{
+			RouteID: streamMuxRouteVideoOnly,
+			StorageKey: SenderKey{
+				VideoCodec:      senderKey.VideoCodec,
+				VideoResolution: senderKey.VideoResolution,
+			},
+		})
+	}
+	if senderKey.AudioCodec != "" {
+		plans = append(plans, fanout.RoutePlan[SenderKey]{
+			RouteID: streamMuxRouteAudioOnly,
+			StorageKey: SenderKey{
+				AudioCodec:      senderKey.AudioCodec,
+				AudioSampleRate: senderKey.AudioSampleRate,
+			},
+		})
+	}
+	return plans
+}
+
+func senderKeySafeFormatter() safekey.Formatter[SenderKey] {
+	return safekey.FormatterFunc[SenderKey](func(_ context.Context, key SenderKey) string {
+		return key.String()
+	})
+}
+
+func (s *StreamMux[C]) preferredFanOutState(
+	ctx context.Context,
+) (
+	*route.Registry,
+	*member.Registry[SenderKey, *Output[C]],
+	*attachment.Index,
+	error,
+) {
+	routes := route.NewRegistry()
+	if err := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+		routeID, err := s.routeIDForInput(input)
+		if err != nil {
+			return err
+		}
+		return routes.Add(ctx, route.State{
+			ID:   routeID,
+			Pair: input.outputPair,
+		})
+	}); err != nil {
+		return nil, nil, nil, err
+	}
+
+	attachments := attachment.NewIndex(func(ctx context.Context, routeID id.RouteID) bool {
+		_, ok := routes.Load(ctx, routeID)
+		return ok
+	})
+	members := member.NewRegistry[SenderKey, *Output[C]]()
+	var errs []error
+	s.OutputsMap.Range(func(_ SenderKey, output *Output[C]) bool {
+		if output == nil || output.IsClosed() {
+			return true
+		}
+		routeID, ok := s.routeIDForOutput(output)
+		if !ok {
+			errs = append(errs, fmt.Errorf("unable to resolve route for output %d", output.ID))
+			return true
+		}
+		entry, err := members.Put(ctx, id.MemberID(output.ID), output.StorageKey(), output)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("put output %d in fanout member registry: %w", output.ID, err))
+			return true
+		}
+		if err := attachments.Attach(ctx, routeID, entry.ID); err != nil {
+			errs = append(errs, fmt.Errorf("attach output %d to route %q: %w", output.ID, routeID, err))
+		}
+		return true
+	})
+	if err := errors.Join(errs...); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return routes, members, attachments, nil
+}
+
+func (s *StreamMux[C]) switchPreferredPlans(
+	ctx context.Context,
+	plans []fanout.RoutePlan[SenderKey],
+) error {
+	if len(plans) == 0 {
+		return nil
+	}
+	for _, plan := range plans {
+		output, _ := s.OutputsMap.Load(plan.StorageKey)
+		if output == nil {
+			return fmt.Errorf("output with key %s not found", plan.StorageKey)
+		}
+	}
+
+	routes, members, attachments, err := s.preferredFanOutState(ctx)
+	if err != nil {
+		return err
+	}
+	switcher := fanout.NewPreferenceSwitcher[SenderKey, *Output[C]](senderKeySafeFormatter())
+	err = switcher.SwitchPreferred(ctx, plans, routes, members, attachments)
+	return s.translatePreferredSwitchError(ctx, plans, err)
+}
+
+func (s *StreamMux[C]) translatePreferredSwitchError(
+	ctx context.Context,
+	plans []fanout.RoutePlan[SenderKey],
+	err error,
+) error {
+	if err == nil {
+		return nil
+	}
+
+	var inProgress fanout.ErrSwitchAlreadyInProgress
+	if errors.As(err, &inProgress) {
+		return ErrSwitchAlreadyInProgress{
+			OutputIDCurrent: OutputID(inProgress.SwitchMemberID),
+			OutputIDNext:    OutputID(inProgress.SyncerMemberID),
+		}
+	}
+
+	var alreadyPreferred fanout.ErrAllAlreadyPreferred
+	if errors.As(err, &alreadyPreferred) {
+		outputIDs := s.outputIDsForPlans(ctx, plans)
+		if len(outputIDs) == 1 {
+			return ErrOutputAlreadyPreferred{OutputID: outputIDs[0]}
+		}
+		return ErrOutputsAlreadyPreferred{OutputIDs: outputIDs}
+	}
+
+	return err
+}
+
+func (s *StreamMux[C]) outputIDsForPlans(
+	_ context.Context,
+	plans []fanout.RoutePlan[SenderKey],
+) []OutputID {
+	outputIDs := make([]OutputID, 0, len(plans))
+	for _, plan := range plans {
+		output, _ := s.OutputsMap.Load(plan.StorageKey)
+		if output == nil {
+			outputIDs = append(outputIDs, 0)
+			continue
+		}
+		outputIDs = append(outputIDs, output.ID)
+	}
+	return outputIDs
+}
+
 func (s *StreamMux[C]) setPreferredOutputs(
 	ctx context.Context,
 	senderKey SenderKey,
@@ -544,59 +865,18 @@ func (s *StreamMux[C]) setPreferredOutputs(
 	logger.Debugf(ctx, "setPreferredOutputs(ctx, %s)", senderKey)
 	defer func() { logger.Debugf(ctx, "/setPreferredOutputs(ctx, %s): %v", senderKey, _err) }()
 
-	switch s.MuxMode {
-	case types.MuxModeDifferentOutputsSameTracks:
-		err := s.setPreferredOutputForInput(ctx, &s.InputAll, senderKey)
-		if err != nil {
-			return fmt.Errorf("unable to set preferred output for all input with key %s: %w", senderKey, err)
-		}
-		return nil
-	case types.MuxModeDifferentOutputsSameTracksSplitAV:
-		var alreadyPreferredErr0, alreadyPreferredErr1 ErrOutputAlreadyPreferred
-		alreadyPreferredCount := 0
-		outputsToChange := 0
-		if senderKey.VideoCodec != "" {
-			outputsToChange++
-			senderKeyVideo := SenderKey{
-				VideoCodec:      senderKey.VideoCodec,
-				VideoResolution: senderKey.VideoResolution,
-			}
-			err := s.setPreferredOutputForInput(ctx, s.getVideoInput(), senderKeyVideo)
-			switch {
-			case err == nil:
-			case errors.As(err, &alreadyPreferredErr0):
-				alreadyPreferredCount++
-			default:
-				return fmt.Errorf("unable to set preferred output for video input with key %s: %w", senderKeyVideo, err)
-			}
-		}
-		if senderKey.AudioCodec != "" {
-			outputsToChange++
-			senderKeyAudio := SenderKey{
-				AudioCodec:      senderKey.AudioCodec,
-				AudioSampleRate: senderKey.AudioSampleRate,
-			}
-			err := s.setPreferredOutputForInput(ctx, s.getAudioInput(), senderKeyAudio)
-			switch {
-			case err == nil:
-			case errors.As(err, &alreadyPreferredErr1):
-				alreadyPreferredCount++
-			default:
-				return fmt.Errorf("unable to set preferred output for audio input with key %v: %w", senderKeyAudio, err)
-			}
-		}
-		if outputsToChange == 0 {
-			return nil
-		}
-		if alreadyPreferredCount >= outputsToChange {
-			return ErrOutputsAlreadyPreferred{
-				OutputIDs: []OutputID{alreadyPreferredErr0.OutputID, alreadyPreferredErr1.OutputID},
-			}
-		}
-		return nil
-	default:
+	if !s.IsAllowedDifferentOutputs() {
 		return fmt.Errorf("unable to set preferred output in mux mode %s", s.MuxMode)
 	}
+
+	plans, err := s.preferredRoutePlans(ctx, senderKey)
+	if err != nil {
+		return fmt.Errorf("unable to plan preferred outputs for key %s: %w", senderKey, err)
+	}
+	if err := s.switchPreferredPlans(ctx, plans); err != nil {
+		return fmt.Errorf("unable to set preferred outputs for key %s: %w", senderKey, err)
+	}
+	return nil
 }
 
 func (s *StreamMux[C]) setPreferredOutputForInput(
@@ -612,26 +892,16 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 		return fmt.Errorf("setting preferred output is not allowed in mux mode %s", s.MuxMode)
 	}
 
-	output, _ := s.OutputsMap.Load(outputKey)
-	if output == nil {
-		return fmt.Errorf("output with key %s not found", outputKey)
-	}
-
-	// the order is important to avoid race conditions:
-	id1 := OutputID(input.OutputSyncer.GetValue(ctx))
-	id0 := OutputID(input.OutputSwitch.GetValue(ctx))
-	logger.Debugf(ctx, "setPreferredOutputForInput: id0=%d, id1=%d, output.ID=%d", id0, id1, output.ID)
-
-	switch {
-	case output.ID == id0:
-		return ErrOutputAlreadyPreferred{OutputID: output.ID}
-	case id0 != id1:
-		return ErrSwitchAlreadyInProgress{OutputIDCurrent: id0, OutputIDNext: id1}
-	}
-
-	err := input.OutputSwitch.SetValue(ctx, int32(output.ID))
+	routeID, err := s.routeIDForInput(input)
 	if err != nil {
-		return fmt.Errorf("unable to switch to the preferred output %d:%s: %w", output.ID, outputKey, err)
+		return err
+	}
+	plans := []fanout.RoutePlan[SenderKey]{{
+		RouteID:    routeID,
+		StorageKey: outputKey,
+	}}
+	if err := s.switchPreferredPlans(ctx, plans); err != nil {
+		return fmt.Errorf("unable to switch to the preferred output %s: %w", outputKey, err)
 	}
 
 	return nil
@@ -739,6 +1009,81 @@ func (s *StreamMux[C]) countOutputs() int {
 	return count
 }
 
+func (s *StreamMux[C]) existingFanOutMembers(
+	_ context.Context,
+) []fanout.ExistingMember[SenderKey] {
+	var existing []fanout.ExistingMember[SenderKey]
+	s.Outputs.Range(func(_ OutputID, output *Output[C]) bool {
+		if output == nil || output.IsClosed() {
+			return true
+		}
+		existing = append(existing, fanout.ExistingMember[SenderKey]{
+			ID:         id.MemberID(output.ID),
+			StorageKey: output.StorageKey(),
+		})
+		return true
+	})
+	slices.SortFunc(existing, func(
+		left fanout.ExistingMember[SenderKey],
+		right fanout.ExistingMember[SenderKey],
+	) int {
+		switch {
+		case left.ID < right.ID:
+			return -1
+		case left.ID > right.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return existing
+}
+
+func (s *StreamMux[C]) planOutputCreation(
+	ctx context.Context,
+	outputKey SenderKey,
+) (fanout.CreationDecision[SenderKey], error) {
+	switch s.MuxMode {
+	case types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
+		if count := s.countOutputs(); count > 1 {
+			return fanout.CreationDecision[SenderKey]{}, fmt.Errorf("mux mode %s allows only one output, but already have %d outputs", s.MuxMode, count)
+		}
+	default:
+	}
+	mode, err := s.fanOutMode()
+	if err != nil {
+		return fanout.CreationDecision[SenderKey]{}, err
+	}
+	planner := fanout.NewCreationPlanner[SenderKey](mode, streamMuxRouteAll)
+	return planner.PlanCreate(ctx, outputKey, s.existingFanOutMembers(ctx))
+}
+
+func (s *StreamMux[C]) inputForNewOutputKey(
+	_ context.Context,
+	outputKey SenderKey,
+) (*Input[C], error) {
+	switch s.MuxMode {
+	case types.MuxModeForbid,
+		types.MuxModeSameOutputSameTracks,
+		types.MuxModeSameOutputDifferentTracks,
+		types.MuxModeDifferentOutputsSameTracks:
+		return &s.InputAll, nil
+	case types.MuxModeDifferentOutputsSameTracksSplitAV:
+		switch {
+		case outputKey.AudioCodec != "" && outputKey.VideoCodec != "":
+			return nil, fmt.Errorf("in mux mode '%s', you can get video xor audio output, not both (acodec:%s, vcodec:%s)", s.MuxMode, outputKey.AudioCodec, outputKey.VideoCodec)
+		case outputKey.AudioCodec != "":
+			return s.InputAudioOnly, nil
+		case outputKey.VideoCodec != "":
+			return s.InputVideoOnly, nil
+		default:
+			return nil, fmt.Errorf("in mux mode '%s', you must specify either audio or video codec in output key", s.MuxMode)
+		}
+	default:
+		return nil, fmt.Errorf("unknown mux mode: %s", s.MuxMode)
+	}
+}
+
 func (s *StreamMux[C]) getOrCreateOutputLocked(
 	ctx context.Context,
 	outputKey types.SenderKey,
@@ -758,49 +1103,30 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 
 	outputID := OutputID(s.nextOutputID.Add(1))
 
-	if output, ok := s.OutputsMap.Load(outputKey); ok && !output.IsClosed() {
+	decision, err := s.planOutputCreation(ctx, outputKey)
+	if err != nil {
+		return nil, false, err
+	}
+	switch decision.Action {
+	case fanout.CreationActionReuse:
+		output, ok := s.Outputs.Load(OutputID(decision.ReuseMemberID))
+		if !ok || output == nil || output.IsClosed() {
+			return nil, false, fmt.Errorf("planned reuse of missing output %d for key %s", decision.ReuseMemberID, outputKey)
+		}
 		return output, false, nil
+	case fanout.CreationActionReject:
+		if s.MuxMode == types.MuxModeForbid {
+			return nil, false, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, s.countOutputs())
+		}
+		return nil, false, fmt.Errorf("mux mode %s rejected adding output %s", s.MuxMode, outputKey)
+	case fanout.CreationActionCreate:
+	default:
+		return nil, false, fmt.Errorf("unknown output creation action %d", decision.Action)
 	}
 
-	var input *Input[C]
-	switch s.MuxMode {
-	case types.UndefinedMuxMode:
-		return nil, false, fmt.Errorf("mux mode is not defined")
-	case types.MuxModeForbid:
-		if c := s.countOutputs(); c > 0 {
-			return nil, false, fmt.Errorf("mux mode %s forbids adding new outputs, but already have %d outputs", s.MuxMode, c)
-		}
-		input = &s.InputAll
-	case types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
-		count := 0
-		var output *Output[C]
-		s.Outputs.Range(func(_ OutputID, _output *Output[C]) bool {
-			count++
-			output = _output
-			return true
-		})
-		if count > 1 {
-			return nil, false, fmt.Errorf("mux mode %s allows only one output, but already have %d outputs", s.MuxMode, count)
-		}
-		if count == 1 {
-			return output, false, nil
-		}
-		input = &s.InputAll
-	case types.MuxModeDifferentOutputsSameTracks:
-		input = &s.InputAll
-	case types.MuxModeDifferentOutputsSameTracksSplitAV:
-		switch {
-		case outputKey.AudioCodec != "" && outputKey.VideoCodec != "":
-			return nil, false, fmt.Errorf("in mux mode '%s', you can get video xor audio output, not both (acodec:%s, vcodec:%s)", s.MuxMode, outputKey.AudioCodec, outputKey.VideoCodec)
-		case outputKey.AudioCodec != "":
-			input = s.InputAudioOnly
-		case outputKey.VideoCodec != "":
-			input = s.InputVideoOnly
-		default:
-			return nil, false, fmt.Errorf("in mux mode '%s', you must specify either audio or video codec in output key", s.MuxMode)
-		}
-	default:
-		return nil, false, fmt.Errorf("unknown mux mode: %s", s.MuxMode)
+	input, err := s.inputForNewOutputKey(ctx, outputKey)
+	if err != nil {
+		return nil, false, err
 	}
 
 	// Inherit StreamMux-level RawFrameSource as a default. Caller-supplied
@@ -996,7 +1322,7 @@ type inputAndKey[C any] struct {
 }
 
 func (s *StreamMux[C]) getInputsForSenderKey(
-	_ context.Context,
+	ctx context.Context,
 	senderKey SenderKey,
 ) (_ret []inputAndKey[C], _err error) {
 	if senderKey.VideoResolution == (codec.Resolution{}) && senderKey.VideoCodec != "" && senderKey.VideoCodec != codectypes.Name(codec.NameCopy) {
@@ -1006,40 +1332,22 @@ func (s *StreamMux[C]) getInputsForSenderKey(
 		return nil, fmt.Errorf("output audio sample rate is not set (codec: %s)", senderKey.AudioCodec)
 	}
 
-	var inputsAndKeys []inputAndKey[C]
-	switch s.MuxMode {
-	case types.MuxModeForbid,
-		types.MuxModeSameOutputSameTracks,
-		types.MuxModeSameOutputDifferentTracks,
-		types.MuxModeDifferentOutputsSameTracks:
-		inputsAndKeys = []inputAndKey[C]{{
-			Input: &s.InputAll,
-			Key:   senderKey,
-		}}
-	case types.MuxModeDifferentOutputsSameTracksSplitAV:
-		inputsAndKeys = []inputAndKey[C]{}
-		if senderKey.VideoCodec != "" {
-			inputsAndKeys = append(inputsAndKeys, inputAndKey[C]{
-				Input: s.InputVideoOnly,
-				Key: SenderKey{
-					VideoCodec:      senderKey.VideoCodec,
-					VideoResolution: senderKey.VideoResolution,
-				},
-			})
-		}
-		if senderKey.AudioCodec != "" {
-			inputsAndKeys = append(inputsAndKeys, inputAndKey[C]{
-				Input: s.InputAudioOnly,
-				Key: SenderKey{
-					AudioCodec:      senderKey.AudioCodec,
-					AudioSampleRate: senderKey.AudioSampleRate,
-				},
-			})
-		}
-	default:
-		return nil, fmt.Errorf("unable to create and configure outputs in mux mode %s", s.MuxMode)
+	plans, err := s.preferredRoutePlans(ctx, senderKey)
+	if err != nil {
+		return nil, fmt.Errorf("unable to plan outputs in mux mode %s: %w", s.MuxMode, err)
 	}
 
+	inputsAndKeys := make([]inputAndKey[C], 0, len(plans))
+	for _, plan := range plans {
+		input, ok := s.inputForRouteID(plan.RouteID)
+		if !ok {
+			return nil, fmt.Errorf("unable to resolve input for route %q", plan.RouteID)
+		}
+		inputsAndKeys = append(inputsAndKeys, inputAndKey[C]{
+			Input: input,
+			Key:   plan.StorageKey,
+		})
+	}
 	return inputsAndKeys, nil
 }
 
@@ -1917,15 +2225,11 @@ func (s *StreamMux[C]) GetLatencies(
 }
 
 func (s *StreamMux[C]) IsAllowedDifferentOutputs() bool {
-	switch s.MuxMode {
-	case types.MuxModeForbid, types.MuxModeSameOutputSameTracks, types.MuxModeSameOutputDifferentTracks:
-		return false
-	case types.MuxModeDifferentOutputsSameTracks, types.MuxModeDifferentOutputsSameTracksSplitAV:
-		return true
-	default:
-		// Unknown MuxMode — deny different outputs as the safe default.
+	mode, err := s.fanOutMode()
+	if err != nil {
 		return false
 	}
+	return fanout.NewDifferentOutputPolicy(mode).AllowsDifferentOutputs(context.Background())
 }
 
 type TrackMeasurements struct {

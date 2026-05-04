@@ -18,6 +18,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/node"
 	"github.com/xaionaro-go/avpipeline/packet"
 	"github.com/xaionaro-go/avpipeline/preset/autoheaders"
+	selectorresetter "github.com/xaionaro-go/avpipeline/preset/selector/resetter"
 	"github.com/xaionaro-go/avpipeline/processor"
 	"github.com/xaionaro-go/observability"
 )
@@ -425,23 +426,12 @@ func runResetters(
 	timeout time.Duration,
 	resetters []namedResetter,
 ) error {
-	var errs []error
+	selectorResetters := make([]selectorresetter.Named, 0, len(resetters))
 	for _, nr := range resetters {
-		if nr.r == nil {
-			continue
-		}
-		resetCtx, cancel := context.WithTimeout(ctx, timeout)
-		err := nr.r.Reset(resetCtx)
-		timedOut := errors.Is(resetCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded)
-		cancel()
-		switch {
-		case timedOut:
-			logger.Warnf(ctx,
-				"resetDownstreamKernels[%d]: %s reset timed out after %s; skipping (stale state may persist on this processor — preferred to indefinite pipeline wedge)",
-				inputID, nr.name, timeout)
-		case err != nil:
-			errs = append(errs, fmt.Errorf("unable to reset %s: %w", nr.name, err))
-		}
+		selectorResetters = append(selectorResetters, selectorresetter.Named{
+			Name:     nr.name,
+			Resetter: nr.r,
+		})
 	}
-	return errors.Join(errs...)
+	return selectorresetter.Run(ctx, fmt.Sprintf("input %d", inputID), timeout, selectorResetters)
 }

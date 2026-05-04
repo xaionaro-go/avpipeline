@@ -16,11 +16,11 @@ func (e ErrCannotPauseSoleActiveChain) Error() string {
 }
 
 // ErrSwitchInProgress is returned by InputSwitch's OnSwitchRequest gate
-// when another switch is already in flight (switchingProcN > 0). It is
-// used by callers (notably onInputChainError) to distinguish the
-// by-design startup-walk contention across consecutive empty fallback
-// slots from genuine concurrent-switch contention; QuietOnOpenFailure
-// gates downgrading the former to Debug.
+// when selector switch-progress work is already in flight. It is used
+// by callers (notably onInputChainError) to distinguish the by-design
+// startup-walk contention across consecutive empty fallback slots from
+// genuine concurrent-switch contention; QuietOnOpenFailure gates
+// downgrading the former to Debug.
 type ErrSwitchInProgress struct {
 	ProcN int64
 	To    int32

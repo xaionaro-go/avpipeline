@@ -38,7 +38,8 @@ func (dummyOutputFactory) NewSender(
 
 func TestOutputNodes(t *testing.T) {
 	ctx := context.Background()
-	input := newInput[struct{}](ctx, nil, InputTypeAll)
+	input, err := newInput[struct{}](ctx, nil, InputTypeAll)
+	require.NoError(t, err)
 	output, err := newOutput[struct{}](
 		ctx,
 		1,
@@ -168,7 +169,9 @@ func TestOutputReconfigureTranscoderCodecNamesOverrideScalarCopy(t *testing.T) {
 	decoderFactory := codec.NewNaiveDecoderFactory(ctx, nil)
 	encoderFactory := codec.NewNaiveEncoderFactory(ctx, nil)
 	output := newOutputWithFactories(ctx, decoderFactory, encoderFactory)
-	output.InputFrom = newInput[struct{}](ctx, nil, InputTypeAll).Node
+	input, err := newInput[struct{}](ctx, nil, InputTypeAll)
+	require.NoError(t, err)
+	output.InputFrom = input.Node
 	cfg := types.TranscoderConfig{
 		Input: &types.TranscoderInputConfig{
 			VideoTrackConfigs: []types.InputVideoTrackConfig{
@@ -189,7 +192,7 @@ func TestOutputReconfigureTranscoderCodecNamesOverrideScalarCopy(t *testing.T) {
 		},
 	}
 
-	err := output.reconfigureTranscoder(ctx, cfg)
+	err = output.reconfigureTranscoder(ctx, cfg)
 	require.NoError(t, err)
 
 	require.Equal(t, codec.Name("h264"), encoderFactory.VideoCodec)
