@@ -119,6 +119,13 @@ type StreamMux[C any] struct {
 	// in NewWithCustomData; tests inject a stub to assert call timing
 	// without spinning up a real Transcoder/Encoder factory chain.
 	recreateEvictedOutputFunc func(ctx context.Context, input *Input[C], deadOutputKey SenderKey) error
+
+	// evictDemoteTestHook is a test-only seam fired inside evictDeadOutput
+	// IMMEDIATELY AFTER OutputSwitch.CurrentValue is demoted to MinInt32
+	// for an input. nil in production. Used to deterministically observe
+	// the post-demote intermediate state for the Store-before-demote
+	// ordering invariant — see TestEvictionRecreate_StoreBeforeDemote.
+	evictDemoteTestHook func(input *Input[C])
 }
 
 func New(

@@ -313,6 +313,24 @@ func (s *StreamMux[C]) evictDeadOutput(
 		logger.Debugf(ctx, "output %d removed from Outputs", output.ID)
 	}
 	if foreachErr := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+		// Record lastEvictedKey BEFORE the OutputSwitch demote. A 1 Hz
+		// retry tick running concurrently between the demote and a
+		// later Store would read MinInt32, find no key, and skip,
+		// costing one tick (~1 s) of recovery latency. Storing first
+		// closes the race: any tick observing MinInt32 is guaranteed
+		// to find the key.
+		//
+		// Stored unconditionally (not gated on the no-sibling branch):
+		// when a sibling-failover succeeds, OutputSwitch advances back
+		// off MinInt32 immediately, so the retry tick won't fire on
+		// this input — the stale entry is harmless and is cleaned up
+		// the next time the tick observes the recovered state (Delete
+		// path in evictionRecreateRetryTick).
+		willDemoteSwitch := input.OutputSwitch.CurrentValue.Load() == int32(output.ID)
+		willDemoteSyncer := input.OutputSyncer.CurrentValue.Load() == int32(output.ID)
+		if willDemoteSwitch || willDemoteSyncer {
+			s.lastEvictedKey.Store(input, output.StorageKey())
+		}
 		demotedSwitch := input.OutputSwitch.CurrentValue.CompareAndSwap(int32(output.ID), math.MinInt32)
 		if demotedSwitch {
 			logger.Debugf(ctx, "demoted OutputSwitch.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
@@ -322,6 +340,9 @@ func (s *StreamMux[C]) evictDeadOutput(
 			logger.Debugf(ctx, "demoted OutputSyncer.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
 		}
 		if demotedSwitch || demotedSyncer {
+			if hook := s.evictDemoteTestHook; hook != nil {
+				hook(input)
+			}
 			s.recommitDemotedInputToSibling(ctx, input, output)
 		}
 		return nil
@@ -379,9 +400,11 @@ func (s *StreamMux[C]) recommitDemotedInputToSibling(
 }
 
 // handleNoSiblingEviction is the no-sibling branch of
-// recommitDemotedInputToSibling. It records the dead output's
-// SenderKey under the orphaned input (so the 1 Hz retry tick can
-// recover it later) and fires the recreate hook synchronously once.
+// recommitDemotedInputToSibling. It fires the recreate hook
+// synchronously once for the orphaned input. lastEvictedKey is recorded
+// upstream in evictDeadOutput BEFORE the OutputSwitch demote so the
+// post-demote race window between demote and Store is closed (see the
+// Store comment in evictDeadOutput).
 //
 // If the recreate fails, the input stays at OutputSwitch.CurrentValue
 // == math.MinInt32 and the 1 Hz retry tick keeps trying indefinitely
@@ -399,11 +422,6 @@ func (s *StreamMux[C]) handleNoSiblingEviction(
 			input.GetType(), deadOutput.ID, deadOutputKey, s.MuxMode)
 		return
 	}
-
-	// Record BEFORE the recreate so the 1 Hz tick can pick up where
-	// this synchronous attempt leaves off if the input remains
-	// orphaned.
-	s.lastEvictedKey.Store(input, deadOutputKey)
 
 	logger.Warnf(ctx,
 		"input %s is orphaned post-eviction of output %d (%s); recreating fresh Output under same SenderKey",

@@ -261,3 +261,157 @@ func TestEvictionRecreate_RetryTickInterval_Is1Hz(t *testing.T) {
 	require.Equal(t, time.Second, retryTickInterval,
 		"retry tick must fire at 1 Hz — see RETRY_SEMANTICS.md")
 }
+
+// TestEvictionRecreate_StoreBeforeDemote pins the C1 ordering invariant:
+// any moment at which OutputSwitch.CurrentValue equals MinInt32 (because
+// evictDeadOutput just demoted it) must coincide with lastEvictedKey
+// already being recorded for that input. Otherwise a 1 Hz retry tick
+// running concurrently between the demote and a later Store can read
+// MinInt32, find no key, and skip — costing one tick (~1 s) of recovery
+// latency.
+//
+//   - GOOD-side: at the post-demote test seam, lastEvictedKey is set
+//     for the demoted input.
+//   - BAD-side: any input that was NOT demoted (e.g. audio input pointed
+//     at a different live output) must NOT have a lastEvictedKey entry
+//     — the fix only stores for inputs that are about to be demoted.
+//
+// Falsification protocol: revert the Store-hoist in evictDeadOutput
+// (move the Store back to handleNoSiblingEviction post-demote) — this
+// test MUST fail because the seam fires AFTER demote but BEFORE the
+// later Store, observing the buggy intermediate state.
+func TestEvictionRecreate_StoreBeforeDemote(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	const deadID OutputID = 42
+	const liveID OutputID = 7
+	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
+		VideoCodec:      codectypes.Name("av1"),
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
+	})
+
+	// Audio input committed to a live output — it must NOT receive a
+	// lastEvictedKey entry, since it isn't demoted.
+	mux.InputAudioOnly.OutputSwitch.CurrentValue.Store(int32(liveID))
+	mux.InputAudioOnly.OutputSyncer.CurrentValue.Store(int32(liveID))
+
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+
+	// Capture the lastEvictedKey state at the moment the post-demote
+	// seam fires for the video input. Pre-fix: Store hasn't happened
+	// yet → not set. Post-fix: Store happens before demote → set.
+	type snapshot struct {
+		input   *Input[struct{}]
+		switch_ int32
+		key     SenderKey
+		hasKey  bool
+	}
+	var snaps []snapshot
+	mux.evictDemoteTestHook = func(input *Input[struct{}]) {
+		k, ok := mux.lastEvictedKey.Load(input)
+		snaps = append(snaps, snapshot{
+			input:   input,
+			switch_: input.OutputSwitch.CurrentValue.Load(),
+			key:     k,
+			hasKey:  ok,
+		})
+	}
+	t.Cleanup(func() { mux.evictDemoteTestHook = nil })
+
+	// Suppress the recreate side-effect; this test is purely about
+	// ordering between Store and demote.
+	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
+		return errors.New("suppressed for ordering test")
+	}
+
+	mux.evictDeadOutput(ctx, dead)
+
+	// GOOD-side: the seam observed the video input at MinInt32 with
+	// lastEvictedKey already set to the dead output's StorageKey.
+	var videoSnap *snapshot
+	for i := range snaps {
+		if snaps[i].input == mux.InputVideoOnly {
+			videoSnap = &snaps[i]
+			break
+		}
+	}
+	require.NotNil(t, videoSnap, "post-demote seam must fire for the video input")
+	require.Equal(t, int32(math.MinInt32), videoSnap.switch_,
+		"seam fires after the demote: OutputSwitch must be MinInt32")
+	require.True(t, videoSnap.hasKey,
+		"lastEvictedKey must be Stored BEFORE the demote so a concurrent tick observing MinInt32 can find the key")
+	require.Equal(t, dead.StorageKey(), videoSnap.key,
+		"lastEvictedKey must hold the dead output's StorageKey")
+
+	// BAD-side: the audio input was not demoted (it pointed at liveID,
+	// not deadID) so it must NOT have a lastEvictedKey entry.
+	_, hasAudio := mux.lastEvictedKey.Load(mux.InputAudioOnly)
+	require.False(t, hasAudio,
+		"non-demoted inputs must not be recorded in lastEvictedKey")
+}
+
+// TestEvictionRecreate_RetryTick_DeletesStaleKeyOnRecovery pins the C3
+// Store/Delete-asymmetry fix: when the retry tick observes that an
+// input has recovered (OutputSwitch advanced off MinInt32) but a stale
+// lastEvictedKey entry is still present for it, the tick must Delete
+// the entry.
+//
+//   - GOOD-side: after the recovery tick, lastEvictedKey.Load(input)
+//     returns ok=false.
+//   - BAD-side: a still-orphaned input (left at MinInt32) must NOT have
+//     its entry deleted — the tick must keep the recorded key so it can
+//     keep retrying.
+//
+// Falsification protocol: remove the Delete call from
+// evictionRecreateRetryTick — this test MUST fail because the post-
+// recovery Load would still return ok=true.
+func TestEvictionRecreate_RetryTick_DeletesStaleKeyOnRecovery(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	const deadID OutputID = 42
+	const recoveredID OutputID = 99
+	dead := newOutputForInputForTest(t, ctx, mux.InputVideoOnly, deadID, SenderKey{
+		VideoCodec:      codectypes.Name("av1"),
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
+	})
+	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
+		return errors.New("suppressed; this test exercises the recovery-Delete path only")
+	}
+
+	// Set up the orphaned-input state: video input demoted, key recorded.
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	mux.evictDeadOutput(ctx, dead)
+
+	// Pre-recovery sanity: orphaned input has the key recorded.
+	_, hasKey := mux.lastEvictedKey.Load(mux.InputVideoOnly)
+	require.True(t, hasKey, "test setup: orphaned input must have lastEvictedKey recorded")
+
+	// Simulate recovery (any path: sibling, recreate, external).
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(recoveredID))
+
+	// Run a tick — the recovery-side Delete path must clean up the
+	// stale entry so map size correlates with currently-orphaned set,
+	// not lifetime-orphaned set.
+	mux.evictionRecreateRetryTick(ctx)
+
+	// GOOD-side: stale entry deleted.
+	_, hasKeyPost := mux.lastEvictedKey.Load(mux.InputVideoOnly)
+	require.False(t, hasKeyPost,
+		"recovery tick must Delete the stale lastEvictedKey entry")
+
+	// BAD-side: an input that is still at MinInt32 with a recorded key
+	// must NOT have its entry deleted. Re-arm the orphaned state and
+	// verify the tick keeps the key.
+	mux.lastEvictedKey.Store(mux.InputVideoOnly, dead.StorageKey())
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(math.MinInt32))
+	mux.evictionRecreateRetryTick(ctx)
+	_, hasKeyAfterReorphan := mux.lastEvictedKey.Load(mux.InputVideoOnly)
+	require.True(t, hasKeyAfterReorphan,
+		"still-orphaned input must keep its lastEvictedKey for the next retry")
+}

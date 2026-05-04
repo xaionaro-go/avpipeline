@@ -78,7 +78,13 @@ func (s *StreamMux[C]) evictionRecreateRetryTick(
 	if foreachErr := s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
 		if input.OutputSwitch.CurrentValue.Load() != math.MinInt32 {
 			// Input has recovered (sibling recommit, prior recreate,
-			// or external action) — nothing to do this tick.
+			// or external action) — nothing to do this tick. If a
+			// lastEvictedKey was Stored at eviction time (sibling-
+			// failover success path leaves a stale entry; same for
+			// retry-tick recreate-success), Delete it now so map size
+			// correlates with currently-orphaned set, not lifetime-
+			// orphaned set.
+			s.lastEvictedKey.Delete(input)
 			return nil
 		}
 		deadOutputKey, ok := s.lastEvictedKeyFor(input)
@@ -96,11 +102,11 @@ func (s *StreamMux[C]) evictionRecreateRetryTick(
 	}
 }
 
-// fireRetryRecreate runs the recreate hook for one orphaned input on
-// the retry path. Logs at Warn on the first retry attempt for an
-// orphan era (so the user-visible diagnostic surfaces once); Debug on
-// subsequent attempts (so the 1 Hz cadence does not flood the log
-// while the destination is hard-down).
+// fireRetryRecreate invokes recreateEvictedOutputFunc once for an
+// orphaned input on the retry path, logging at Debug on every attempt.
+// The once-per-orphan-era Warn is emitted upstream in
+// handleNoSiblingEviction; per-tick Debug avoids flooding the log at
+// ~86k Warn lines/day while a destination is hard-down.
 func (s *StreamMux[C]) fireRetryRecreate(
 	ctx context.Context,
 	input *Input[C],
