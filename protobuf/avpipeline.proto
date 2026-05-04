@@ -11,15 +11,15 @@ message Node {
   NodeCounters  counters              = 5;
   repeated Node todo_publishing_nodes = 6; // is not currently reported
   repeated Node consuming_nodes       = 7;
-  // first_frame_unix_ns is the unix-nanosecond timestamp at which
-  // this node's processor emitted its first output packet/frame.
+  // first_output_unix_ns is the unix-nanosecond timestamp at which
+  // this node's processor emitted its first output packet OR frame.
   // Absent (proto3-optional unset) means "this processor type does
   // not record this fact" (e.g. Dummy, StreamMux, NoServe wrappers).
   // Present-with-value-0 means "tracked but no output observed yet".
   // Used by ffstreamctl stats first-frame to walk the pipeline graph
   // and identify the exact node where flow stalled — per-layer
-  // first-frame timing pinpoints cascade-EOF wedges.
-  optional int64 first_frame_unix_ns  = 8;
+  // first-output timing pinpoints cascade-EOF wedges.
+  optional int64 first_output_unix_ns = 8;
 }
 
 message NodeCounters {

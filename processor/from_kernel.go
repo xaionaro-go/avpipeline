@@ -312,19 +312,20 @@ func (p *FromKernel[T]) String() string {
 	return p.Kernel.String()
 }
 
-// FirstFrameUnixNano returns the unix-nanosecond timestamp at which
-// the first output packet/frame was observed by the forwarder, or 0
-// if the processor has not yet emitted any output. The timestamp is
-// recorded BEFORE the send to OutputCh — if the forwarder takes the
-// Omitted branch on shutdown the value is still set, reflecting
-// "produced by the kernel" rather than "delivered downstream".
+// FirstOutputUnixNano returns the unix-nanosecond timestamp at which
+// the first output packet OR frame was observed by the forwarder,
+// or 0 if the processor has not yet emitted any output. The
+// timestamp is recorded BEFORE the send to OutputCh — if the
+// forwarder takes the Omitted branch on shutdown the value is still
+// set, reflecting "produced by the kernel" rather than "delivered
+// downstream".
 //
 // Used by the pipeline-stats RPC path (NodeToGRPC) to surface
-// per-node first-frame timing for cascade-EOF root-cause
+// per-node first-output timing for cascade-EOF root-cause
 // localization. Recording happens inside firstSeen.logFirst* — see
 // firstObservationTracker.recordFirstOutputTimestamp.
-func (p *FromKernel[T]) FirstFrameUnixNano() int64 {
-	return p.firstSeen.FirstOutputUnixNano()
+func (p *FromKernel[T]) FirstOutputUnixNano() int64 {
+	return p.firstSeen.loadFirstOutputUnixNano()
 }
 
 func (p *FromKernel[T]) GetPacketSource() packet.Source {

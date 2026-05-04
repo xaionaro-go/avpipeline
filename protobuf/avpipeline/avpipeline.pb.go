@@ -83,17 +83,17 @@ type Node struct {
 	Counters            *NodeCounters          `protobuf:"bytes,5,opt,name=counters,proto3" json:"counters,omitempty"`
 	TodoPublishingNodes []*Node                `protobuf:"bytes,6,rep,name=todo_publishing_nodes,json=todoPublishingNodes,proto3" json:"todo_publishing_nodes,omitempty"` // is not currently reported
 	ConsumingNodes      []*Node                `protobuf:"bytes,7,rep,name=consuming_nodes,json=consumingNodes,proto3" json:"consuming_nodes,omitempty"`
-	// first_frame_unix_ns is the unix-nanosecond timestamp at which
-	// this node's processor emitted its first output packet/frame.
+	// first_output_unix_ns is the unix-nanosecond timestamp at which
+	// this node's processor emitted its first output packet OR frame.
 	// Absent (proto3-optional unset) means "this processor type does
 	// not record this fact" (e.g. Dummy, StreamMux, NoServe wrappers).
 	// Present-with-value-0 means "tracked but no output observed yet".
 	// Used by ffstreamctl stats first-frame to walk the pipeline graph
 	// and identify the exact node where flow stalled — per-layer
-	// first-frame timing pinpoints cascade-EOF wedges.
-	FirstFrameUnixNs *int64 `protobuf:"varint,8,opt,name=first_frame_unix_ns,json=firstFrameUnixNs,proto3,oneof" json:"first_frame_unix_ns,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// first-output timing pinpoints cascade-EOF wedges.
+	FirstOutputUnixNs *int64 `protobuf:"varint,8,opt,name=first_output_unix_ns,json=firstOutputUnixNs,proto3,oneof" json:"first_output_unix_ns,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Node) Reset() {
@@ -175,9 +175,9 @@ func (x *Node) GetConsumingNodes() []*Node {
 	return nil
 }
 
-func (x *Node) GetFirstFrameUnixNs() int64 {
-	if x != nil && x.FirstFrameUnixNs != nil {
-		return *x.FirstFrameUnixNs
+func (x *Node) GetFirstOutputUnixNs() int64 {
+	if x != nil && x.FirstOutputUnixNs != nil {
+		return *x.FirstOutputUnixNs
 	}
 	return 0
 }
@@ -1867,7 +1867,7 @@ var File_avpipeline_proto protoreflect.FileDescriptor
 const file_avpipeline_proto_rawDesc = "" +
 	"\n" +
 	"\x10avpipeline.proto\x12\n" +
-	"avpipeline\x1a\vlibav.proto\"\xee\x02\n" +
+	"avpipeline\x1a\vlibav.proto\"\xf1\x02\n" +
 	"\x04Node\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12 \n" +
@@ -1876,9 +1876,9 @@ const file_avpipeline_proto_rawDesc = "" +
 	"is_serving\x18\x04 \x01(\bR\tisServing\x124\n" +
 	"\bcounters\x18\x05 \x01(\v2\x18.avpipeline.NodeCountersR\bcounters\x12D\n" +
 	"\x15todo_publishing_nodes\x18\x06 \x03(\v2\x10.avpipeline.NodeR\x13todoPublishingNodes\x129\n" +
-	"\x0fconsuming_nodes\x18\a \x03(\v2\x10.avpipeline.NodeR\x0econsumingNodes\x122\n" +
-	"\x13first_frame_unix_ns\x18\b \x01(\x03H\x00R\x10firstFrameUnixNs\x88\x01\x01B\x16\n" +
-	"\x14_first_frame_unix_ns\"\xf2\x02\n" +
+	"\x0fconsuming_nodes\x18\a \x03(\v2\x10.avpipeline.NodeR\x0econsumingNodes\x124\n" +
+	"\x14first_output_unix_ns\x18\b \x01(\x03H\x00R\x11firstOutputUnixNs\x88\x01\x01B\x17\n" +
+	"\x15_first_output_unix_ns\"\xf2\x02\n" +
 	"\fNodeCounters\x12;\n" +
 	"\breceived\x18\x01 \x01(\v2\x1f.avpipeline.NodeCountersSectionR\breceived\x12=\n" +
 	"\tprocessed\x18\x02 \x01(\v2\x1f.avpipeline.NodeCountersSectionR\tprocessed\x127\n" +

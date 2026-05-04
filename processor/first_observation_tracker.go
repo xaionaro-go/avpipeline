@@ -53,10 +53,15 @@ func (t *firstObservationTracker) recordFirstOutputTimestamp() {
 	t.firstOutputUnixNano.CompareAndSwap(0, time.Now().UnixNano())
 }
 
-// FirstOutputUnixNano returns the unix-nanosecond timestamp at which
-// the first output packet/frame was observed, or 0 if no output has
-// been seen yet.
-func (t *firstObservationTracker) FirstOutputUnixNano() int64 {
+// loadFirstOutputUnixNano returns the unix-nanosecond timestamp at
+// which the first output packet/frame was observed, or 0 if no
+// output has been seen yet.
+//
+// The "load" prefix avoids a Go method-vs-field collision with the
+// firstOutputUnixNano atomic field (Go disallows a method and a
+// field on the same type sharing a name) AND mirrors the
+// atomic.Int64.Load operation it wraps.
+func (t *firstObservationTracker) loadFirstOutputUnixNano() int64 {
 	return t.firstOutputUnixNano.Load()
 }
 

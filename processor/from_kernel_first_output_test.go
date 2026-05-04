@@ -1,9 +1,9 @@
-// from_kernel_first_frame_test.go pins down the per-node first-frame
-// timestamp contract on FromKernel.
+// from_kernel_first_output_test.go pins down the per-node
+// first-output timestamp contract on FromKernel.
 //
 // Why this matters: a class of cascade-EOF wedges presents identically
 // at the input layer (counters at zero, ffprobe EOF on the merged
-// output). Per-layer first-frame timing surfaced via the pipeline-
+// output). Per-layer first-output timing surfaced via the pipeline-
 // stats RPC walks the chain to the exact node where flow stalled —
 // the atomic-int64 firstOutputUnixNano on FromKernel is the data
 // point.
@@ -11,8 +11,8 @@
 // Falsifier intent: removing the recordFirstOutputTimestamp() call
 // from firstObservationTracker.logFirstOutputPacket /
 // logFirstOutputFrame must make
-// TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket fail
-// (FirstFrameUnixNano stays at 0 even after a packet flowed).
+// TestFromKernel_FirstOutputUnixNano_SetOnFirstPacket fail
+// (FirstOutputUnixNano stays at 0 even after a packet flowed).
 
 package processor
 
@@ -26,10 +26,10 @@ import (
 	"github.com/xaionaro-go/avpipeline/packetorframe"
 )
 
-// TestFromKernel_FirstFrameUnixNano_ZeroBeforeAnyOutput verifies the
-// "no output yet" sentinel — FirstFrameUnixNano returns 0 when no
+// TestFromKernel_FirstOutputUnixNano_ZeroBeforeAnyOutput verifies the
+// "no output yet" sentinel — FirstOutputUnixNano returns 0 when no
 // packet/frame has been emitted.
-func TestFromKernel_FirstFrameUnixNano_ZeroBeforeAnyOutput(t *testing.T) {
+func TestFromKernel_FirstOutputUnixNano_ZeroBeforeAnyOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -38,19 +38,19 @@ func TestFromKernel_FirstFrameUnixNano_ZeroBeforeAnyOutput(t *testing.T) {
 	require.NotNil(t, p)
 	t.Cleanup(func() { _ = p.Close(context.Background()) })
 
-	tassert.Equal(t, int64(0), p.FirstFrameUnixNano(),
-		"FirstFrameUnixNano must be 0 before any output is emitted")
+	tassert.Equal(t, int64(0), p.FirstOutputUnixNano(),
+		"FirstOutputUnixNano must be 0 before any output is emitted")
 }
 
-// TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket verifies the
+// TestFromKernel_FirstOutputUnixNano_SetOnFirstPacket verifies the
 // positive case: a packet flowing through preOutputCh records a
 // non-zero timestamp within a sanity window of time.Now().
 //
 // Falsifier: remove the `t.recordFirstOutputTimestamp()` call from
 // firstObservationTracker.logFirstOutputPacket — this assertion must
-// fail (FirstFrameUnixNano stays at 0 even after the packet was
+// fail (FirstOutputUnixNano stays at 0 even after the packet was
 // forwarded).
-func TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket(t *testing.T) {
+func TestFromKernel_FirstOutputUnixNano_SetOnFirstPacket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -87,19 +87,19 @@ func TestFromKernel_FirstFrameUnixNano_SetOnFirstPacket(t *testing.T) {
 	}
 	afterTs := time.Now().UnixNano()
 
-	got := p.FirstFrameUnixNano()
+	got := p.FirstOutputUnixNano()
 	require.NotEqual(t, int64(0), got,
-		"FirstFrameUnixNano must be non-zero after first packet — recordFirstOutputTimestamp() is missing or broken")
+		"FirstOutputUnixNano must be non-zero after first packet — recordFirstOutputTimestamp() is missing or broken")
 	tassert.GreaterOrEqual(t, got, beforeTs,
-		"FirstFrameUnixNano must be >= timestamp captured before NewFromKernel; got=%d before=%d", got, beforeTs)
+		"FirstOutputUnixNano must be >= timestamp captured before NewFromKernel; got=%d before=%d", got, beforeTs)
 	tassert.LessOrEqual(t, got, afterTs,
-		"FirstFrameUnixNano must be <= timestamp after first output drain; got=%d after=%d", got, afterTs)
+		"FirstOutputUnixNano must be <= timestamp after first output drain; got=%d after=%d", got, afterTs)
 }
 
-// TestFromKernel_FirstFrameUnixNano_NotOverwrittenOnSecondPacket
+// TestFromKernel_FirstOutputUnixNano_NotOverwrittenOnSecondPacket
 // guards the write-once contract: the timestamp is set ONCE, on the
 // first packet, and never updated on subsequent packets.
-func TestFromKernel_FirstFrameUnixNano_NotOverwrittenOnSecondPacket(t *testing.T) {
+func TestFromKernel_FirstOutputUnixNano_NotOverwrittenOnSecondPacket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -132,7 +132,7 @@ func TestFromKernel_FirstFrameUnixNano_NotOverwrittenOnSecondPacket(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for first output packet")
 	}
-	first := p.FirstFrameUnixNano()
+	first := p.FirstOutputUnixNano()
 	require.NotEqual(t, int64(0), first)
 
 	// Single fixed delay (not polling) to guarantee monotonic-clock
@@ -144,7 +144,7 @@ func TestFromKernel_FirstFrameUnixNano_NotOverwrittenOnSecondPacket(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for second output packet")
 	}
-	second := p.FirstFrameUnixNano()
+	second := p.FirstOutputUnixNano()
 	tassert.Equal(t, first, second,
-		"FirstFrameUnixNano must NOT be overwritten on the second packet — write-once CAS contract violated")
+		"FirstOutputUnixNano must NOT be overwritten on the second packet — write-once CAS contract violated")
 }

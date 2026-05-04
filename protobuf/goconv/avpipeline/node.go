@@ -12,21 +12,22 @@ import (
 	avpipelinegrpc "github.com/xaionaro-go/avpipeline/protobuf/avpipeline"
 )
 
-// firstFrameUnixNanoer is implemented by processor types that record
-// the timestamp of their first emitted output packet/frame
-// (currently *processor.FromKernel via firstSeen.FirstOutputUnixNano).
-// We type-assert via this interface here to avoid an import cycle:
-// processor depends on protobuf for some converters, so this package
-// can't import processor directly.
+// firstOutputUnixNanoer is implemented by processor types that
+// record the timestamp of their first emitted output packet OR
+// frame (currently *processor.FromKernel via
+// firstSeen.loadFirstOutputUnixNano). We type-assert via this
+// interface here to avoid an import cycle: processor depends on
+// protobuf for some converters, so this package can't import
+// processor directly.
 //
 // Processors that do not implement this interface (Dummy, StreamMux,
-// NoServe wrappers, etc.) leave Node.FirstFrameUnixNs absent in the
-// proto message — distinguished from "implements but no output yet"
-// (which is presence-with-value-0). Operator tooling can therefore
-// tell "type does not track this fact" from "tracked, still
-// stalled".
-type firstFrameUnixNanoer interface {
-	FirstFrameUnixNano() int64
+// NoServe wrappers, etc.) leave Node.FirstOutputUnixNs absent in
+// the proto message — distinguished from "implements but no output
+// yet" (which is presence-with-value-0). Operator tooling can
+// therefore tell "type does not track this fact" from "tracked,
+// still stalled".
+type firstOutputUnixNanoer interface {
+	FirstOutputUnixNano() int64
 }
 
 func NodeToGRPC(
@@ -44,9 +45,9 @@ func NodeToGRPC(
 		IsServing:   n.IsServing(ctx),
 		Counters:    NodeCountersToGRPC(n.GetCountersPtr(), proc.CountersPtr()),
 	}
-	if ffter, ok := proc.(firstFrameUnixNanoer); ok {
-		ts := ffter.FirstFrameUnixNano()
-		result.FirstFrameUnixNs = &ts
+	if foer, ok := proc.(firstOutputUnixNanoer); ok {
+		ts := foer.FirstOutputUnixNano()
+		result.FirstOutputUnixNs = &ts
 	}
 
 	for {
