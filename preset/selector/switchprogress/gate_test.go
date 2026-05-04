@@ -37,6 +37,17 @@ func TestStartRequestRejectsConcurrentSwitchAndReleaseIsOneShot(t *testing.T) {
 	assert.Equal(t, int64(0), gate.InFlight())
 }
 
+func TestErrSwitchInProgressErrorIncludesProcAndTarget(t *testing.T) {
+	err := switchprogress.ErrSwitchInProgress{
+		ProcN: 12,
+		To:    id.MemberID(34),
+	}
+
+	assert.Equal(t, "another switch is in progress (procN: 12), cannot switch to 34", err.Error())
+	assert.NotContains(t, err.Error(), "procN: 13)")
+	assert.NotContains(t, err.Error(), "cannot switch to 35")
+}
+
 func TestRequestWorkAsyncReservationsConvergeAndZeroValueNoOps(t *testing.T) {
 	var gate switchprogress.Gate
 	var zero switchprogress.RequestWork

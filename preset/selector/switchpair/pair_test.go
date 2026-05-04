@@ -96,6 +96,34 @@ func TestSetValueForwardsBarrierHooksAndAllowsRouteHookToAdvanceSyncer(t *testin
 	assert.Equal(t, []string{"request", "before", "after"}, events)
 }
 
+func TestSetValueForwardsInterruptedSwitchHookOnCurrentValue(t *testing.T) {
+	ctx := context.Background()
+	var interrupted bool
+	var afterCalled bool
+
+	pair, err := switchpair.New(ctx, switchpair.Config{
+		InitialValue: id.MemberID(3),
+		Hooks: switchpair.Hooks{
+			OnInterruptedSwitch: func(ctx context.Context, in packetorframe.InputUnion, from id.MemberID, to id.MemberID) {
+				interrupted = true
+				assert.Nil(t, in.Get())
+				assert.Equal(t, id.MemberID(3), from)
+				assert.Equal(t, id.MemberID(3), to)
+			},
+			OnAfterSwitch: func(ctx context.Context, in packetorframe.InputUnion, from id.MemberID, to id.MemberID) {
+				afterCalled = true
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, pair.SetValue(ctx, id.MemberID(3)))
+	assert.True(t, interrupted)
+	assert.False(t, afterCalled)
+	assert.Equal(t, id.MemberID(3), pair.Current(ctx))
+	assert.Equal(t, id.NoMemberID, pair.Next(ctx))
+}
+
 func TestSetValueReturnsSwitchRequestError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("blocked")
