@@ -221,6 +221,16 @@ type AutoBitRateHandler[C any] struct {
 	currentResolutionChangeRequest *resolutionChangeRequest
 	lastBitRateDecreaseTS          time.Time
 
+	// calculatorLocker serializes a runtime Calculator swap (SwapCalculator)
+	// against the autobitrate ticker's read of h.Calculator and against
+	// the ticker's mutations of the transient slowdown state
+	// (lastBitRateDecreaseTS, currentResolutionChangeRequest,
+	// temporaryFPSReductionMultiplier) that SwapCalculator clears.
+	// Without this, swapping a Calculator from a downward driver to an
+	// upward driver leaves the ticker still gated by the prior driver's
+	// stale slowdown state — the upward-recovery wedge.
+	calculatorLocker sync.Mutex
+
 	currentDesiredResolutionAvg atomic.Uint64
 
 	temporaryFPSReductionMultiplier xatomic.Value[fpsReductionMultiplier]
@@ -289,6 +299,14 @@ func (h *AutoBitRateHandler[C]) checkOnce(
 	defer func() {
 		errmon.ObserveRecoverCtx(ctx, recover())
 	}()
+
+	// Serialize with SwapCalculator. Without this, a SwapCalculator
+	// fired mid-tick can race the prior calculator's transient slowdown
+	// state mutations (lastBitRateDecreaseTS, currentResolutionChangeRequest)
+	// inside trySetVideoBitrate, leaving the new calculator gated by stale
+	// state — the upward-recovery wedge.
+	h.calculatorLocker.Lock()
+	defer h.calculatorLocker.Unlock()
 
 	activeVideoOutput, getRawConners, getQueueSizers, err := h.getOutputsInfo(ctx)
 	if err != nil {
@@ -576,6 +594,47 @@ func (h *AutoBitRateHandler[C]) enableBypass(
 	)
 }
 
+// isBitRateIncreaseSlowedDown reports whether an upward request must be
+// dampened because a recent decrease already fired within
+// BitRateIncreaseSlowdown. Critical (operator-driven) requests bypass the
+// gate: a Static-target raise (or any IsCritical=true increase) is an
+// explicit operator decision, not an oscillation, so dampening it would
+// cause an upward-recovery wedge after a downward driver.
+func (h *AutoBitRateHandler[C]) isBitRateIncreaseSlowedDown(
+	oldBitRate types.Ubps,
+	req BitRateChangeRequest,
+	now time.Time,
+) bool {
+	if req.BitRate <= oldBitRate {
+		return false
+	}
+	if req.IsCritical {
+		return false
+	}
+	return now.Sub(h.lastBitRateDecreaseTS) < h.BitRateIncreaseSlowdown
+}
+
+// SwapCalculator atomically replaces the autobitrate calculator and
+// resets transient slowdown state (lastBitRateDecreaseTS,
+// currentResolutionChangeRequest, temporaryFPSReductionMultiplier) so
+// the new calculator's first decision is not dampened by stale state
+// carried over from the prior calculator. Used to recover from an
+// AutoBitrateCalculatorStatic(low) → Static(high) operator drive that
+// would otherwise wedge inside BitRateIncreaseSlowdown.
+func (h *AutoBitRateHandler[C]) SwapCalculator(
+	ctx context.Context,
+	newCalc AutoBitRateCalculator,
+) {
+	logger.Debugf(ctx, "SwapCalculator(ctx, %T)", newCalc)
+	defer func() { logger.Debugf(ctx, "/SwapCalculator(ctx, %T)", newCalc) }()
+	h.calculatorLocker.Lock()
+	defer h.calculatorLocker.Unlock()
+	h.AutoBitRateVideoConfig.Calculator = newCalc
+	h.lastBitRateDecreaseTS = time.Time{}
+	h.currentResolutionChangeRequest = nil
+	h.setTemporaryFPSReductionMultiplier(ctx, globaltypes.Rational{Num: 1, Den: 1}, time.Time{})
+}
+
 func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	ctx context.Context,
 	oldBitRate types.Ubps,
@@ -588,7 +647,7 @@ func (h *AutoBitRateHandler[C]) trySetVideoBitrate(
 	}()
 
 	now := time.Now()
-	if req.BitRate > types.Ubps(oldBitRate) && now.Sub(h.lastBitRateDecreaseTS) < h.BitRateIncreaseSlowdown {
+	if h.isBitRateIncreaseSlowedDown(oldBitRate, req, now) {
 		logger.Tracef(ctx, "bitrate increase is slowed down since the last bitrate decrease was at %v (now: %v); skipping the increase", h.lastBitRateDecreaseTS, now)
 		return nil
 	}

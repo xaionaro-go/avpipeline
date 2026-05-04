@@ -36,5 +36,12 @@ func (e *EncoderFullLocked) setQualityMediacodecConstantBitrate(
 	}
 
 	e.codecContext.SetBitRate(int64(q))
+	// Mirror setQualityGeneric: keep e.Quality SSOT and InitParams
+	// in sync so reinitEncoder (invoked by SetResolution and the
+	// no-flush-cap Flush path) rebuilds the codec context at the
+	// most recent requested bitrate instead of inheriting the
+	// open-time bitrate from InitParams.CodecParameters.
+	e.InitParams.CodecParameters.SetBitRate(int64(q))
+	e.Quality = q
 	return nil
 }
