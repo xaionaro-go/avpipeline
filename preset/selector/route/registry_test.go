@@ -25,6 +25,15 @@ func TestRegistryRejectsDuplicateRouteID(t *testing.T) {
 	require.Equal(t, state.ID, loaded.ID)
 }
 
+func TestRegistryLoadReportsMissingRoute(t *testing.T) {
+	ctx := context.Background()
+	registry := route.NewRegistry()
+
+	loaded, ok := registry.Load(ctx, id.RouteID("missing"))
+	require.False(t, ok)
+	require.Zero(t, loaded)
+}
+
 func TestRegistryRangeUsesSnapshotAndAllowsRegistryCallsInCallback(t *testing.T) {
 	ctx := context.Background()
 	registry := route.NewRegistry()
@@ -48,4 +57,24 @@ func TestRegistryRangeUsesSnapshotAndAllowsRegistryCallsInCallback(t *testing.T)
 
 	_, ok := registry.Load(ctx, id.RouteID("metadata"))
 	require.True(t, ok)
+}
+
+func TestRegistryRangeStopsEarlyInRouteIDOrder(t *testing.T) {
+	ctx := context.Background()
+	registry := route.NewRegistry()
+
+	require.NoError(t, registry.Add(ctx, route.State{ID: id.RouteID("video")}))
+	require.NoError(t, registry.Add(ctx, route.State{ID: id.RouteID("metadata")}))
+	require.NoError(t, registry.Add(ctx, route.State{ID: id.RouteID("audio")}))
+
+	var seen []id.RouteID
+	registry.Range(ctx, func(state route.State) bool {
+		seen = append(seen, state.ID)
+		return state.ID != id.RouteID("metadata")
+	})
+
+	require.Equal(t, []id.RouteID{
+		id.RouteID("audio"),
+		id.RouteID("metadata"),
+	}, seen)
 }

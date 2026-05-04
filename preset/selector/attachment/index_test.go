@@ -37,6 +37,18 @@ func TestIndexRejectsUnknownRouteWhenRouteExistenceIsProvided(t *testing.T) {
 	require.Equal(t, []id.MemberID{id.MemberID(1)}, index.MembersForRoute(ctx, id.RouteID("all")))
 }
 
+func TestIndexEmptyLookupsReturnNil(t *testing.T) {
+	ctx := context.Background()
+	index := attachment.NewIndex()
+
+	require.Nil(t, index.MembersForRoute(ctx, id.RouteID("missing")))
+	require.Nil(t, index.RoutesForMember(ctx, id.MemberID(1)))
+
+	sibling, ok := index.FirstSibling(ctx, id.RouteID("missing"), id.MemberID(1), nil)
+	require.False(t, ok)
+	require.Zero(t, sibling)
+}
+
 func TestIndexAttachesAndDetachesRouteMemberPairs(t *testing.T) {
 	ctx := context.Background()
 	routes := route.NewRegistry()
@@ -65,6 +77,41 @@ func TestIndexAttachesAndDetachesRouteMemberPairs(t *testing.T) {
 	require.Equal(t, []id.RouteID{id.RouteID("video")}, index.RoutesForMember(ctx, id.MemberID(1)))
 }
 
+func TestIndexDetachLastPairCleansRouteAndMemberLookups(t *testing.T) {
+	ctx := context.Background()
+	index := attachment.NewIndex()
+
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(1)))
+
+	index.Detach(ctx, id.RouteID("all"), id.MemberID(1))
+
+	require.Nil(t, index.MembersForRoute(ctx, id.RouteID("all")))
+	require.Nil(t, index.RoutesForMember(ctx, id.MemberID(1)))
+}
+
+func TestIndexReturnsDeterministicRouteAndMemberOrder(t *testing.T) {
+	ctx := context.Background()
+	index := attachment.NewIndex()
+
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(3)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(1)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(2)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("video"), id.MemberID(9)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("audio"), id.MemberID(9)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("metadata"), id.MemberID(9)))
+
+	require.Equal(t, []id.MemberID{
+		id.MemberID(1),
+		id.MemberID(2),
+		id.MemberID(3),
+	}, index.MembersForRoute(ctx, id.RouteID("all")))
+	require.Equal(t, []id.RouteID{
+		id.RouteID("audio"),
+		id.RouteID("metadata"),
+		id.RouteID("video"),
+	}, index.RoutesForMember(ctx, id.MemberID(9)))
+}
+
 func TestFirstSiblingIsScopedToSameRoute(t *testing.T) {
 	ctx := context.Background()
 	index := attachment.NewIndex()
@@ -84,6 +131,28 @@ func TestFirstSiblingIsScopedToSameRoute(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Equal(t, id.MemberID(3), sibling)
+}
+
+func TestFirstSiblingSkipsCandidatesRejectedByAlive(t *testing.T) {
+	ctx := context.Background()
+	index := attachment.NewIndex()
+
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(3)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(1)))
+	require.NoError(t, index.Attach(ctx, id.RouteID("all"), id.MemberID(2)))
+
+	var checked []id.MemberID
+	sibling, ok := index.FirstSibling(ctx, id.RouteID("all"), id.MemberID(1), func(candidate id.MemberID) bool {
+		checked = append(checked, candidate)
+		return candidate == id.MemberID(3)
+	})
+
+	require.True(t, ok)
+	require.Equal(t, id.MemberID(3), sibling)
+	require.Equal(t, []id.MemberID{
+		id.MemberID(2),
+		id.MemberID(3),
+	}, checked)
 }
 
 func TestFirstSiblingUsesSnapshotAndAllowsIndexCallsInAliveCallback(t *testing.T) {
