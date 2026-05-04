@@ -2,6 +2,7 @@ package availability
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -72,6 +73,15 @@ func TestFirstAvailableAfter(t *testing.T) {
 				Present(fakeSource{available: true}),
 			},
 			after:      4,
+			expected:   0,
+			expectedOK: false,
+		},
+		{
+			name: "maximum positive after returns no candidate",
+			members: []Candidate{
+				Present(fakeSource{available: true}),
+			},
+			after:      math.MaxInt,
 			expected:   0,
 			expectedOK: false,
 		},

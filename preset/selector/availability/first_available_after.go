@@ -8,9 +8,14 @@ func FirstAvailableAfter(
 	members []Candidate,
 	after int,
 ) (int, bool) {
-	start := after + 1
-	if start < 0 {
+	var start int
+	if after < 0 {
 		start = 0
+	} else {
+		if after >= len(members)-1 {
+			return 0, false
+		}
+		start = after + 1
 	}
 
 	for idx := start; idx < len(members); idx++ {
