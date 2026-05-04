@@ -1364,7 +1364,10 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		return ErrNotImplemented{Err: fmt.Errorf("when scaling from 1080p to let's say 480p, we get a distorted image when using mediacodec, to be investigated; until then this is forbidden")}
 	}*/
 
-	if videoCfg.Resolution == res && videoCfg.CodecName == videoCodec && audioCfg.CodecName == audioCodec {
+	configuredVideoCodec := codectypes.Name(configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName))
+	configuredAudioCodec := codectypes.Name(configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName))
+
+	if videoCfg.Resolution == res && configuredVideoCodec == videoCodec && configuredAudioCodec == audioCodec {
 		logger.Tracef(ctx, "the config is already set to %v '%s' '%s'", res, videoCodec, audioCodec)
 		encoderV, _ := s.getVideoEncoderLocked(ctx)
 		if videoCodec == codectypes.Name(codec.NameCopy) != codec.IsEncoderCopy(encoderV) {
@@ -1385,12 +1388,18 @@ func (s *StreamMux[C]) setResolutionBitRateCodecLocked(
 		}
 	}
 
-	audioCfg.CodecName = audioCodec
+	if configuredAudioCodec != audioCodec {
+		audioCfg.CodecName = audioCodec
+		audioCfg.CodecNames = nil
+	}
 	cfg.Output.AudioTrackConfigs[0] = audioCfg
 
 	videoCfg.Resolution = res
 	videoCfg.AverageBitRate = uint64(bitRate)
-	videoCfg.CodecName = videoCodec
+	if configuredVideoCodec != videoCodec {
+		videoCfg.CodecName = videoCodec
+		videoCfg.CodecNames = nil
+	}
 	cfg.Output.VideoTrackConfigs[0] = videoCfg
 
 	err := s.switchToOutputByProps(ctx, types.SenderProps{

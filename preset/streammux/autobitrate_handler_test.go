@@ -13,6 +13,7 @@ import (
 	testassert "github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/xaionaro-go/avpipeline/codec"
+	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/indicator"
 	"github.com/xaionaro-go/avpipeline/kernel"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
@@ -585,6 +586,57 @@ func TestAutoBitrateHandlerChangeResolutionIfNeeded_StaysWhenWithinAllowed(t *te
 	testassert.NoError(t, err)
 }
 
+func TestAutoBitrateHandlerPrepareVideoOutputKeyUsesCodecNames(t *testing.T) {
+	ctx := context.Background()
+	res := codec.Resolution{Width: 1920, Height: 1080}
+	encoderFactory := codec.NewNaiveEncoderFactory(ctx, &codec.NaiveEncoderFactoryParams{
+		VideoCodec:      "fallback-video",
+		AudioCodec:      "fallback-audio",
+		VideoResolution: &res,
+		AudioSampleRate: 44100,
+	})
+	output := newOutputWithEncoderFactory(ctx, encoderFactory)
+	mux := &StreamMux[struct{}]{
+		CurrentOutputProps: types.SenderProps{
+			TranscoderConfig: types.TranscoderConfig{
+				Output: types.TranscoderOutputConfig{
+					AudioTrackConfigs: []types.OutputAudioTrackConfig{
+						{
+							CodecName:  "aac",
+							CodecNames: []codectypes.Name{"libopus", "aac"},
+							SampleRate: 48000,
+						},
+					},
+					VideoTrackConfigs: []types.OutputVideoTrackConfig{
+						{
+							CodecName:  "mpeg4",
+							CodecNames: []codectypes.Name{"h264", "libx264"},
+							Resolution: res,
+						},
+					},
+				},
+			},
+		},
+	}
+	mux.OutputsMap.Store(SenderKey{
+		VideoCodec:      "fallback-video",
+		VideoResolution: res,
+	}, output)
+	h := &AutoBitRateHandler[struct{}]{
+		StreamMux: mux,
+	}
+
+	key := h.prepareVideoOutputKey(ctx, nil, codec.Resolution{}, "cur-video", "cur-audio", 32000)
+	require.NotNil(t, key)
+
+	require.Equal(t, codectypes.Name("libopus"), key.AudioCodec)
+	require.NotEqual(t, codectypes.Name("aac"), key.AudioCodec)
+	require.Equal(t, codectypes.Name("h264"), key.VideoCodec)
+	require.NotEqual(t, codectypes.Name("mpeg4"), key.VideoCodec)
+	require.Equal(t, res, key.VideoResolution)
+	require.Equal(t, uint32(48000), uint32(key.AudioSampleRate))
+}
+
 type mockEncoder struct {
 	codec.EncoderCopy
 	res codec.Resolution
@@ -604,9 +656,9 @@ type recordingEncoder struct {
 	codec.EncoderCopy
 	res codec.Resolution
 
-	mu          sync.Mutex
-	quality     quality.Quality
-	setQualityN atomic.Uint32
+	mu               sync.Mutex
+	quality          quality.Quality
+	setQualityN      atomic.Uint32
 	setQualityRecord []quality.Quality
 }
 

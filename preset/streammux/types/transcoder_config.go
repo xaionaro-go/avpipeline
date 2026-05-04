@@ -11,35 +11,42 @@ import (
 )
 
 type InputAudioTrackConfig struct {
-	TrackID    *int            `yaml:"track_id,omitempty"`
-	CodecName  codectypes.Name `yaml:"codec_name"`
-	SampleRate uint32          `yaml:"sample_rate"`
+	TrackID       *int              `yaml:"track_id,omitempty"`
+	CodecName     codectypes.Name   `yaml:"codec_name"`
+	CodecNames    []codectypes.Name `yaml:"codec_names"`
+	CustomOptions DictionaryItems   `yaml:"custom_options"`
+	SampleRate    uint32            `yaml:"sample_rate"`
 }
 
 type InputVideoTrackConfig struct {
-	TrackID    *int                  `yaml:"track_id,omitempty"`
-	CodecName  codectypes.Name       `yaml:"codec_name"`
-	Resolution codectypes.Resolution `yaml:"resolution"`
+	TrackID            *int                  `yaml:"track_id,omitempty"`
+	CodecName          codectypes.Name       `yaml:"codec_name"`
+	CodecNames         []codectypes.Name     `yaml:"codec_names"`
+	CustomOptions      DictionaryItems       `yaml:"custom_options"`
+	HardwareDeviceType HardwareDeviceType    `yaml:"hardware_device_type"`
+	HardwareDeviceName HardwareDeviceName    `yaml:"hardware_device_name"`
+	Resolution         codectypes.Resolution `yaml:"resolution"`
 }
 
 type OutputAudioTrackConfig struct {
-	InputTrackIDs   []int            `yaml:"input_track_ids"`
-	OutputTrackIDs  []int            `yaml:"output_track_ids"`
-	Filters         []string         `yaml:"filters"`
-	CodecName       codectypes.Name  `yaml:"codec_name"`
-	AveragingPeriod time.Duration    `yaml:"averaging_period"`
-	AverageBitRate  uint64           `yaml:"average_bit_rate"`
-	CustomOptions   DictionaryItems  `yaml:"custom_options"`
-	SampleRate      audio.SampleRate `yaml:"sample_rate"`
-	Channels        audio.Channel    `yaml:"channels"`
+	InputTrackIDs   []int             `yaml:"input_track_ids"`
+	OutputTrackIDs  []int             `yaml:"output_track_ids"`
+	Filters         []string          `yaml:"filters"`
+	CodecName       codectypes.Name   `yaml:"codec_name"`
+	CodecNames      []codectypes.Name `yaml:"codec_names"`
+	AveragingPeriod time.Duration     `yaml:"averaging_period"`
+	AverageBitRate  uint64            `yaml:"average_bit_rate"`
+	CustomOptions   DictionaryItems   `yaml:"custom_options"`
+	SampleRate      audio.SampleRate  `yaml:"sample_rate"`
+	Channels        audio.Channel     `yaml:"channels"`
 }
 
-// TODO: allow for separate HardwareDeviceType/HardwareDeviceName for decoding and encoding (and for each track)
 type OutputVideoTrackConfig struct {
 	InputTrackIDs      []int                 `yaml:"input_track_ids"`
 	OutputTrackIDs     []int                 `yaml:"output_track_ids"`
 	Filters            []string              `yaml:"filters"`
 	CodecName          codectypes.Name       `yaml:"codec_name"`
+	CodecNames         []codectypes.Name     `yaml:"codec_names"`
 	AveragingPeriod    time.Duration         `yaml:"averaging_period"`
 	AverageFrameRate   float64               `yaml:"average_frame_rate"`
 	AverageBitRate     uint64                `yaml:"average_bit_rate"`

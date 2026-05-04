@@ -35,16 +35,25 @@ func preferredHWDecoderName(
 	id astiav.CodecID,
 	hwType HardwareDeviceType,
 ) Name {
+	name, _ := preferredHWDecoderNameAndHardwareDeviceType(ctx, id, hwType)
+	return name
+}
+
+func preferredHWDecoderNameAndHardwareDeviceType(
+	ctx context.Context,
+	id astiav.CodecID,
+	hwType HardwareDeviceType,
+) (Name, HardwareDeviceType) {
 	if hwType == globaltypes.HardwareDeviceTypeNone {
 		hwType = globaltypes.HardwareDeviceTypeCUDA
 	}
 	base := Name(id.Name())
 	if base == "" {
-		return ""
+		return "", globaltypes.HardwareDeviceTypeNone
 	}
 	candidate := base.hwName(ctx, false, hwType)
 	if astiav.FindDecoderByName(string(candidate)) == nil {
-		return ""
+		return "", globaltypes.HardwareDeviceTypeNone
 	}
-	return candidate
+	return candidate, hwType
 }

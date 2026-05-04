@@ -96,24 +96,21 @@ func selectScaledFramePixelFormat(
 //
 // Bypass arms, in priority order:
 //
-//   (b) HW->HW passthrough: the encoder reports a hwaccel pixfmt and
-//       the input frame is already in the SAME hwaccel pixfmt (e.g.
-//       mediacodec decoder feeding a mediacodec encoder). SendFrame
-//       forwards the frame without going through libswscale (which
-//       cannot scale a hwaccel source) and without
-//       av_hwframe_transfer_data (which returns ENOSYS on the
-//       mediacodec hwctx — hwcontext_mediacodec.c does not implement
-//       frames_get_buffer). Dim mismatch is TOLERATED on this arm
-//       because the Android Surface composer absorbs producer/consumer
-//       dim mismatch via the shared dev_ctx->native_window — the prod
-//       DJI scenario is decoder=1920x1072 / encoder=1920x1080, which
-//       must still bypass.
+//	(b) HW->HW passthrough: the encoder reports a hwaccel pixfmt and
+//	    the input frame is already in the SAME hwaccel pixfmt (e.g.
+//	    mediacodec decoder feeding a mediacodec encoder). SendFrame
+//	    forwards the frame without going through libswscale (which
+//	    cannot scale a hwaccel source). Dim mismatch is tolerated only
+//	    for MediaCodec because the Android Surface composer absorbs
+//	    producer/consumer dim mismatch via the shared
+//	    dev_ctx->native_window — the prod DJI scenario is
+//	    decoder=1920x1072 / encoder=1920x1080, which must still bypass.
 //
-//   (a) SW->{HW or SW} same-resolution: the input pixfmt matches the
-//       SW upload format selected by selectScaledFramePixelFormat, so
-//       the encoder uploads SW->HW via av_hwframe_transfer_data in
-//       SendFrame (or consumes the SW frame directly). Dim match IS
-//       required on this arm: a SW->HW upload path cannot rescale.
+//	(a) SW->{HW or SW} same-resolution: the input pixfmt matches the
+//	    SW upload format selected by selectScaledFramePixelFormat, so
+//	    the encoder uploads SW->HW via av_hwframe_transfer_data in
+//	    SendFrame (or consumes the SW frame directly). Dim match IS
+//	    required on this arm: a SW->HW upload path cannot rescale.
 //
 // Arm (b) MUST be checked BEFORE the dim-equality early-return so the
 // Surface-composer dim absorption is preserved.
@@ -124,15 +121,11 @@ func shouldBypassScaler(
 	encoderW, encoderH int,
 	hwFramesCtx *astiav.HardwareFramesContext,
 ) bool {
-	// HW->HW passthrough first: input already in the encoder's native
-	// hwaccel pixfmt — forward unchanged. Dim mismatch is tolerated
-	// here because hwaccel pixfmts (notably MEDIACODEC) cannot be
-	// consumed by libswscale, and av_hwframe_transfer_data against an
-	// HFC-less mediacodec frame returns ENOSYS. The Android Surface
-	// composer absorbs the dim mismatch when the decoder->encoder
-	// Surface is shared via dev_ctx->native_window.
 	if isHardwarePixelFormat(encoderPixFmt) && inputPixFmt == encoderPixFmt {
-		return true
+		if inputW == encoderW && inputH == encoderH {
+			return true
+		}
+		return encoderPixFmt == astiav.PixelFormatMediacodec
 	}
 	if inputW != encoderW || inputH != encoderH {
 		return false

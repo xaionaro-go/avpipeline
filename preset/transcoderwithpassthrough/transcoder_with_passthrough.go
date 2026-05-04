@@ -146,6 +146,7 @@ func (s *TranscoderWithPassthrough[C, P]) getTranscoderConfigLocked(
 	cpy := s.TranscodingConfig
 	cpy.Output.VideoTrackConfigs = slices.Clone(cpy.Output.VideoTrackConfigs)
 	cpy.Output.VideoTrackConfigs[0].CodecName = codectypes.Name(codec.NameCopy)
+	cpy.Output.VideoTrackConfigs[0].CodecNames = []codectypes.Name{codectypes.Name(codec.NameCopy)}
 	return cpy
 }
 
@@ -189,10 +190,10 @@ func (s *TranscoderWithPassthrough[C, P]) configureTranscoder(
 		}
 		return nil
 	}
-	if codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName) != codec.NameCopy {
-		return fmt.Errorf("we currently do not support reconfiguring audio transcoding with codec '%s' (!= 'copy')", cfg.Output.AudioTrackConfigs[0].CodecName)
+	if outputAudioCodecName(cfg) != codec.NameCopy {
+		return fmt.Errorf("we currently do not support reconfiguring audio transcoding with codec '%s' (!= 'copy')", outputAudioCodecName(cfg))
 	}
-	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) == codec.NameCopy {
+	if outputVideoCodecName(cfg) == codec.NameCopy {
 		if err := s.reconfigureTranscoderCopy(ctx, cfg); err != nil {
 			return fmt.Errorf("unable to reconfigure to copying: %w", err)
 		}
@@ -228,15 +229,24 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 		videoResolution = &res
 	}
 
+	decoderVideoCfg := inputVideoTrackConfig(cfg)
+	decoderAudioCfg := inputAudioTrackConfig(cfg)
+	encoderVideoCfg := cfg.Output.VideoTrackConfigs[0]
+	encoderAudioCfg := cfg.Output.AudioTrackConfigs[0]
+
 	var err error
 	s.Transcoder, err = kernel.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx,
 			&codec.NaiveDecoderFactoryParams{
-				VideoCodec:         decoderVideoCodecName(cfg),
-				AudioCodec:         decoderAudioCodecName(cfg),
-				HardwareDeviceType: globaltypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName: globaltypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
+				VideoCodec:         codec.Name(decoderVideoCfg.CodecName),
+				VideoCodecs:        codecNames(decoderVideoCfg.CodecNames),
+				AudioCodec:         codec.Name(decoderAudioCfg.CodecName),
+				AudioCodecs:        codecNames(decoderAudioCfg.CodecNames),
+				HardwareDeviceType: globaltypes.HardwareDeviceType(decoderVideoCfg.HardwareDeviceType),
+				HardwareDeviceName: globaltypes.HardwareDeviceName(decoderVideoCfg.HardwareDeviceName),
+				VideoOptions:       xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(decoderVideoCfg.CustomOptions)),
+				AudioOptions:       xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(decoderAudioCfg.CustomOptions)),
 				PostInitFunc: func(ctx context.Context, d *codec.Decoder) {
 					err := d.SetLowLatency(ctx, true)
 					if err != nil {
@@ -251,16 +261,18 @@ func (s *TranscoderWithPassthrough[C, P]) initTranscoder(
 		),
 		codec.NewNaiveEncoderFactory(ctx,
 			&codec.NaiveEncoderFactoryParams{
-				VideoCodec:            codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName),
-				AudioCodec:            codec.Name(cfg.Output.AudioTrackConfigs[0].CodecName),
-				HardwareDeviceType:    globaltypes.HardwareDeviceType(cfg.Output.VideoTrackConfigs[0].HardwareDeviceType),
-				HardwareDeviceName:    globaltypes.HardwareDeviceName(cfg.Output.VideoTrackConfigs[0].HardwareDeviceName),
-				VideoOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.VideoTrackConfigs[0].CustomOptions)),
-				AudioOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(cfg.Output.AudioTrackConfigs[0].CustomOptions)),
+				VideoCodec:            codec.Name(encoderVideoCfg.CodecName),
+				VideoCodecs:           codecNames(encoderVideoCfg.CodecNames),
+				AudioCodec:            codec.Name(encoderAudioCfg.CodecName),
+				AudioCodecs:           codecNames(encoderAudioCfg.CodecNames),
+				HardwareDeviceType:    globaltypes.HardwareDeviceType(encoderVideoCfg.HardwareDeviceType),
+				HardwareDeviceName:    globaltypes.HardwareDeviceName(encoderVideoCfg.HardwareDeviceName),
+				VideoOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(encoderVideoCfg.CustomOptions)),
+				AudioOptions:          xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(encoderAudioCfg.CustomOptions)),
 				VideoQuality:          videoQuality,
 				VideoResolution:       videoResolution,
-				VideoAverageFrameRate: astiav.NewRational(int(cfg.Output.VideoTrackConfigs[0].AverageFrameRate*1000), 1000),
-				AudioSampleRate:       audio.SampleRate(cfg.Output.AudioTrackConfigs[0].SampleRate),
+				VideoAverageFrameRate: astiav.NewRational(int(encoderVideoCfg.AverageFrameRate*1000), 1000),
+				AudioSampleRate:       audio.SampleRate(encoderAudioCfg.SampleRate),
 			},
 		),
 		nil,
@@ -282,8 +294,8 @@ func (s *TranscoderWithPassthrough[C, P]) reconfigureTranscoder(
 	defer func() { logger.Tracef(ctx, "/reconfigureTranscoder(ctx, %#+v): %v", cfg, _err) }()
 
 	encoderFactory := s.Transcoder.EncoderFactory
-	if codec.Name(cfg.Output.VideoTrackConfigs[0].CodecName) != encoderFactory.VideoCodec {
-		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", cfg.Output.VideoTrackConfigs[0].CodecName, encoderFactory.VideoCodec)
+	if !slices.Equal(outputVideoCodecNames(cfg), encoderFactoryVideoCodecNames(encoderFactory)) {
+		return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%v' != '%v'", outputVideoCodecNames(cfg), encoderFactoryVideoCodecNames(encoderFactory))
 	}
 
 	err := xsync.DoR1(ctx, &s.Transcoder.EncoderFactory.Locker, func() error {
@@ -719,16 +731,80 @@ func (s *TranscoderWithPassthrough[C, P]) Wait(
 	return nil
 }
 
-func decoderVideoCodecName(cfg types.TranscoderConfig) codec.Name {
+func inputVideoTrackConfig(cfg types.TranscoderConfig) types.InputVideoTrackConfig {
 	if cfg.Input == nil || len(cfg.Input.VideoTrackConfigs) == 0 {
-		return ""
+		return types.InputVideoTrackConfig{}
 	}
-	return codec.Name(cfg.Input.VideoTrackConfigs[0].CodecName)
+	return cfg.Input.VideoTrackConfigs[0]
 }
 
-func decoderAudioCodecName(cfg types.TranscoderConfig) codec.Name {
+func inputAudioTrackConfig(cfg types.TranscoderConfig) types.InputAudioTrackConfig {
 	if cfg.Input == nil || len(cfg.Input.AudioTrackConfigs) == 0 {
-		return ""
+		return types.InputAudioTrackConfig{}
 	}
-	return codec.Name(cfg.Input.AudioTrackConfigs[0].CodecName)
+	return cfg.Input.AudioTrackConfigs[0]
+}
+
+func codecNames(names []codectypes.Name) []codec.Name {
+	if len(names) == 0 {
+		return nil
+	}
+	result := make([]codec.Name, 0, len(names))
+	for _, name := range names {
+		result = append(result, codec.Name(name))
+	}
+	return result
+}
+
+func configuredCodecNames(
+	names []codectypes.Name,
+	codecName codectypes.Name,
+) []codec.Name {
+	if len(names) > 0 {
+		return codecNames(names)
+	}
+	if codecName == "" {
+		return nil
+	}
+	return []codec.Name{codec.Name(codecName)}
+}
+
+func outputVideoCodecNames(cfg types.TranscoderConfig) []codec.Name {
+	if len(cfg.Output.VideoTrackConfigs) == 0 {
+		return nil
+	}
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
+	return configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName)
+}
+
+func outputAudioCodecNames(cfg types.TranscoderConfig) []codec.Name {
+	if len(cfg.Output.AudioTrackConfigs) == 0 {
+		return nil
+	}
+	audioCfg := cfg.Output.AudioTrackConfigs[0]
+	return configuredCodecNames(audioCfg.CodecNames, audioCfg.CodecName)
+}
+
+func outputVideoCodecName(cfg types.TranscoderConfig) codec.Name {
+	if names := outputVideoCodecNames(cfg); len(names) > 0 {
+		return names[0]
+	}
+	return ""
+}
+
+func outputAudioCodecName(cfg types.TranscoderConfig) codec.Name {
+	if names := outputAudioCodecNames(cfg); len(names) > 0 {
+		return names[0]
+	}
+	return ""
+}
+
+func encoderFactoryVideoCodecNames(f *codec.NaiveEncoderFactory) []codec.Name {
+	if len(f.VideoCodecs) > 0 {
+		return slices.Clone(f.VideoCodecs)
+	}
+	if f.VideoCodec == "" {
+		return nil
+	}
+	return []codec.Name{f.VideoCodec}
 }

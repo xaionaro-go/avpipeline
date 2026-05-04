@@ -273,11 +273,14 @@ func (s *StreamMux[C]) handleOutputNodeError(
 
 // evictDeadOutput removes a dead/closing output from every routing
 // structure that could otherwise resolve back to it: the SenderKey-keyed
-// OutputsMap, the OutputID-keyed Outputs map, and any OutputSwitch /
-// OutputSyncer whose CurrentValue had committed to this output. Without
-// this, getActiveVideoOutputLocked still returns the orphaned chain and
+// OutputsMap, the OutputID-keyed Outputs map, the input node push edge
+// into this output's Input(), and any OutputSwitch / OutputSyncer whose
+// CurrentValue had committed to this output. Without this,
+// getActiveVideoOutputLocked still returns the orphaned chain and
 // AutoBitRateHandler.withActiveVideoOutput livelocks waiting for an
-// "active" output whose serving goroutines have already exited.
+// "active" output whose serving goroutines have already exited; the
+// stale push edge can also keep routing frames into the dead output
+// instead of a recreated one.
 //
 // After the demotion to math.MinInt32, attempts to recommit each
 // affected input to a surviving sibling output: without a recommit,
@@ -290,13 +293,17 @@ func (s *StreamMux[C]) handleOutputNodeError(
 // path (kernel/barrier/stategetter/switch.go) drops in that case rather
 // than blocking.
 //
-// The caller still owns CloseNoDrain on the output; this method only
-// detaches it from the lookup tables so a follow-up GetOrCreateOutput
-// can stand up a fresh chain.
+// The push edge is removed before sibling selection or no-sibling
+// recreate so a fresh output can attach its own Input() without
+// competing with the dead edge. The caller still owns CloseNoDrain on
+// the output; this method only detaches routing state so a follow-up
+// GetOrCreateOutput can stand up a fresh chain.
 func (s *StreamMux[C]) evictDeadOutput(
 	ctx context.Context,
 	output *Output[C],
 ) {
+	s.detachOutputInputFromPushGraph(ctx, output)
+
 	// StorageKey() (not GetKey()) is the authoritative OutputsMap key
 	// here: GetKey() derives from the EncoderFactory state, which in
 	// SplitAV mode picks up an extra Audio*/Video* axis once
@@ -349,6 +356,41 @@ func (s *StreamMux[C]) evictDeadOutput(
 	}); foreachErr != nil {
 		logger.Errorf(ctx, "unable to demote OutputSwitch/OutputSyncer for output %d: %v", output.ID, foreachErr)
 	}
+}
+
+func (s *StreamMux[C]) detachOutputInputFromPushGraph(
+	ctx context.Context,
+	output *Output[C],
+) {
+	if output.InputFrom == nil {
+		logger.Errorf(ctx, "output %d has no input source to detach from", output.ID)
+		return
+	}
+
+	dst := output.Input()
+	if dst == nil {
+		logger.Errorf(ctx, "output %d has no input node to detach", output.ID)
+		return
+	}
+
+	removed := 0
+	output.InputFrom.WithPushTos(ctx, func(ctx context.Context, pushTos *node.PushTos) {
+		kept := (*pushTos)[:0]
+		for _, pushTo := range *pushTos {
+			if pushTo.Node == dst {
+				removed++
+				continue
+			}
+			kept = append(kept, pushTo)
+		}
+		*pushTos = kept
+	})
+
+	if removed == 0 {
+		logger.Debugf(ctx, "output %d was already detached from input push graph", output.ID)
+		return
+	}
+	logger.Debugf(ctx, "removed %d input push edge(s) for dead output %d", removed, output.ID)
 }
 
 // recommitDemotedInputToSibling tries to point an input whose

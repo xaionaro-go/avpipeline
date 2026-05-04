@@ -968,12 +968,12 @@ func (h *AutoBitRateHandler[C]) prepareVideoOutputKey(
 		logger.Tracef(ctx, "original transcoder config: %+v", origConfig)
 		if len(origConfig.Output.VideoTrackConfigs) > 0 {
 			videoCfg := origConfig.Output.VideoTrackConfigs[0]
-			videoOutputKey.VideoCodec = codectypes.Name(videoCfg.CodecName)
+			videoOutputKey.VideoCodec = codectypes.Name(configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName))
 			videoOutputKey.VideoResolution = videoCfg.Resolution
 		}
 		if len(origConfig.Output.AudioTrackConfigs) > 0 {
 			audioCfg := origConfig.Output.AudioTrackConfigs[0]
-			videoOutputKey.AudioCodec = codectypes.Name(audioCfg.CodecName)
+			videoOutputKey.AudioCodec = codectypes.Name(configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName))
 			videoOutputKey.AudioSampleRate = audioCfg.SampleRate
 		}
 	} else {

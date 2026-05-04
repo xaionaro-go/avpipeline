@@ -9,6 +9,8 @@ import (
 )
 
 type (
+	InputAudioTrackConfig  = streammuxtypes.InputAudioTrackConfig
+	InputVideoTrackConfig  = streammuxtypes.InputVideoTrackConfig
 	AudioTrackConfig       = streammuxtypes.OutputAudioTrackConfig
 	VideoTrackConfig       = streammuxtypes.OutputVideoTrackConfig
 	TranscoderConfig       = streammuxtypes.TranscoderConfig

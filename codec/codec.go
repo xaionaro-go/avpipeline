@@ -14,8 +14,8 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strconv"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
@@ -35,7 +35,7 @@ import (
 const (
 	doFullCopyOfParameters   = false
 	setRateControlParameters = false
-	setEncoderExtraData = false // <- this is wrong, don't use it unless you are temporary debugging something
+	setEncoderExtraData      = false // <- this is wrong, don't use it unless you are temporary debugging something
 	setPipelinishFlags       = true
 )
 
@@ -55,13 +55,13 @@ const (
 )
 
 type codecInternals struct {
-	InitParams             CodecParams
-	codec                  *astiav.Codec
-	codecContext           *astiav.CodecContext
-	hardwareDeviceContext  *astiav.HardwareDeviceContext
-	hardwareFramesContext  *astiav.HardwareFramesContext
-	hardwarePixelFormat    astiav.PixelFormat
-	hardwareContextType    hardwareContextType
+	InitParams            CodecParams
+	codec                 *astiav.Codec
+	codecContext          *astiav.CodecContext
+	hardwareDeviceContext *astiav.HardwareDeviceContext
+	hardwareFramesContext *astiav.HardwareFramesContext
+	hardwarePixelFormat   astiav.PixelFormat
+	hardwareContextType   hardwareContextType
 	// lazyHardwareFramesContext is the lock-free lazy-allocated companion to
 	// hardwareFramesContext. Populated by EnsureLazyHardwareFramesContext for
 	// HW decoders (notably mediacodec Surface mode) that never attach an
@@ -74,9 +74,9 @@ type codecInternals struct {
 	// the encoder/decoder deadlock cycle. Freed by the closer registered in
 	// newCodec.
 	lazyHardwareFramesContext atomic.Pointer[astiav.HardwareFramesContext]
-	closer                 *astikit.Closer
-	quirks                 Quirks
-	isDirty                atomic.Bool
+	closer                    *astikit.Closer
+	quirks                    Quirks
+	isDirty                   atomic.Bool
 }
 
 type Codec struct {
@@ -561,9 +561,17 @@ func newCodec(
 	}
 	if c.codec == nil {
 		if codecParameters.CodecID() == astiav.CodecIDNone {
-			return nil, fmt.Errorf("unable to find a codec using name '%s'", codecName)
+			return nil, ErrCodecNotFound{
+				IsEncoder: isEncoder,
+				CodecName: codecName,
+				CodecID:   codecParameters.CodecID(),
+			}
 		}
-		return nil, fmt.Errorf("unable to find a codec using name '%s' or codec ID %v", codecName, codecParameters.CodecID())
+		return nil, ErrCodecNotFound{
+			IsEncoder: isEncoder,
+			CodecName: codecName,
+			CodecID:   codecParameters.CodecID(),
+		}
 	}
 
 	// Determine hardware nature from the resolved codec's name. This handles
@@ -759,7 +767,13 @@ func newCodec(
 			case "rawvideo":
 				logger.Debugf(ctx, "unable to init hardware device context for 'rawvideo' codec, ignoring the error: %v", err)
 			default:
-				return nil, fmt.Errorf("unable to init hardware device context: %w", err)
+				return nil, ErrHardwareUnavailable{
+					IsEncoder:          isEncoder,
+					CodecName:          Name(c.codec.Name()),
+					HardwareDeviceType: hardwareDeviceType,
+					HardwareDeviceName: hardwareDeviceName,
+					Err:                fmt.Errorf("unable to init hardware device context: %w", err),
+				}
 			}
 		}
 	}
@@ -925,7 +939,8 @@ func newCodec(
 	// HwFramesCtx encoders need an explicit hw_frames_ctx allocated and set on the
 	// codec context before avcodec_open2. HwDeviceCtx encoders skip this — they
 	// accept software frames and upload internally (see initHardwarePixelFormat).
-	if isEncoder && c.hardwareContextType == hardwareContextTypeFrames && c.hardwareDeviceContext != nil {
+	willInitHWFramesCtx := isEncoder && c.hardwareContextType == hardwareContextTypeFrames && c.hardwareDeviceContext != nil
+	if willInitHWFramesCtx {
 		err := c.initHardwareFramesContext(ctx, reusableResources)
 		if err != nil {
 			return nil, fmt.Errorf("unable to init hardware frames context: %w", err)
@@ -954,7 +969,12 @@ func newCodec(
 			// there were known cases where MediaCodec returned ErrExternal due to
 			// "ERROR_INSUFFICIENT_RESOURCE" (https://developer.android.com/reference/android/media/MediaCodec.CodecException#ERROR_INSUFFICIENT_RESOURCE)
 			if input.Params.ResourceManager == nil {
-				return nil, fmt.Errorf("MediaCodec returned ErrExternal: %w", err)
+				return nil, ErrCodecOpen{
+					IsEncoder: isEncoder,
+					CodecName: Name(c.codec.Name()),
+					Case:      "mediacodec_external",
+					Err:       err,
+				}
 			}
 			logger.Warnf(ctx, "MediaCodec returned ErrExternal, which could be due to ERROR_INSUFFICIENT_RESOURCE (1100); calling FreeUnneeded() and retrying")
 			resourceType := resource.TypeDecoder
@@ -965,11 +985,21 @@ func newCodec(
 			logger.Infof(ctx, "FreeUnneeded() freed %d %ss; retrying to open the codec context", cnt, resourceType)
 			newErr := c.codecContext.Open(c.codec, customOptions)
 			if newErr != nil {
-				return nil, fmt.Errorf("unable to open codec context (case #1): %w (before an attempt to remediate: %w)", newErr, err)
+				return nil, ErrCodecOpen{
+					IsEncoder: isEncoder,
+					CodecName: Name(c.codec.Name()),
+					Case:      "case #1",
+					Err:       fmt.Errorf("%w (before an attempt to remediate: %w)", newErr, err),
+				}
 			}
 		}
 	default:
-		return nil, fmt.Errorf("unable to open codec context (case #0): %w", err)
+		return nil, ErrCodecOpen{
+			IsEncoder: isEncoder,
+			CodecName: Name(c.codec.Name()),
+			Case:      "case #0",
+			Err:       err,
+		}
 	}
 
 	setFinalizer(ctx, c.codecInternals, func(c *codecInternals) { c.closeLocked(ctx) })
@@ -1088,11 +1118,11 @@ func (c *codecInternals) setupPixelFormat(
 			// chosen pixfmt, and reusable-state shape so prod logs let
 			// us reconstruct the F7 gate vote without a debugger.
 			var (
-				resHWDevSet   bool
-				resHWDevType  globaltypes.HardwareDeviceType
-				resHWFCSet    bool
-				resRecordedW  int
-				resRecordedH  int
+				resHWDevSet  bool
+				resHWDevType globaltypes.HardwareDeviceType
+				resHWFCSet   bool
+				resRecordedW int
+				resRecordedH int
 			)
 			if reusableResources != nil {
 				resHWDevSet = reusableResources.HWDeviceContext != nil
@@ -1199,7 +1229,9 @@ func (c *Codec) initHardwarePixelFormat(
 	reusableResources *Resources,
 ) (_err error) {
 	logger.Tracef(ctx, "initHardwarePixelFormat")
-	defer func() { logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v %v", c.hardwareContextType, c.hardwarePixelFormat, _err) }()
+	defer func() {
+		logger.Tracef(ctx, "/initHardwarePixelFormat: %v %v %v", c.hardwareContextType, c.hardwarePixelFormat, _err)
+	}()
 
 	// Prefer HwDeviceCtx over HwFramesCtx because HwDeviceCtx lets the encoder
 	// accept software frames (e.g. nv12) and handle GPU upload internally.

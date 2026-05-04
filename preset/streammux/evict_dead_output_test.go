@@ -76,6 +76,24 @@ func newOutputForInputForTest(
 	return out
 }
 
+func requireOutputInputPushCount(
+	t *testing.T,
+	ctx context.Context,
+	input *Input[struct{}],
+	output *Output[struct{}],
+	expected int,
+) {
+	t.Helper()
+
+	actual := 0
+	for _, pushTo := range input.Node.GetPushTos(ctx) {
+		if pushTo.Node == output.Input() {
+			actual++
+		}
+	}
+	require.Equal(t, expected, actual)
+}
+
 // TestEvictDeadOutput_RemovesFromMaps_AndDemotesSwitch is the dual-sided
 // proof for the eviction fix:
 //
@@ -144,6 +162,85 @@ func TestEvictDeadOutput_RemovesFromMaps_AndDemotesSwitch(t *testing.T) {
 		mux.InputAudioOnly.OutputSyncer.CurrentValue.Load(),
 		"OutputSyncer.CurrentValue on the audio input must not be demoted (it pointed at a different live output)",
 	)
+}
+
+func TestEvictDeadOutput_RemovesDeadInputFromInputPushGraph(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	const deadID OutputID = 42
+
+	dead := newDeadOutputForTest(t, ctx, mux, deadID)
+
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.Node.AddPushTo(ctx, dead.Input())
+	mux.recreateEvictedOutputFunc = func(_ context.Context, _ *Input[struct{}], _ SenderKey) error {
+		return nil
+	}
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 1)
+
+	mux.evictDeadOutput(ctx, dead)
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 0)
+}
+
+func TestEvictDeadOutput_SameKeyFreshInputRemainsInInputPushGraph(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	const deadID OutputID = 1
+	const freshID OutputID = 2
+
+	dead := newDeadOutputForTest(t, ctx, mux, deadID)
+	fresh := newDeadOutputForTest(t, ctx, mux, freshID)
+	require.Equal(t, dead.StorageKey(), fresh.StorageKey(), "test setup expects same SenderKey")
+
+	mux.Outputs.Store(deadID, dead)
+	mux.Outputs.Store(freshID, fresh)
+	mux.OutputsMap.Store(fresh.StorageKey(), fresh)
+	mux.InputVideoOnly.Node.AddPushTo(ctx, dead.Input())
+	mux.InputVideoOnly.Node.AddPushTo(ctx, fresh.Input())
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 1)
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, fresh, 1)
+
+	mux.evictDeadOutput(ctx, dead)
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 0)
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, fresh, 1)
+}
+
+func TestEvictDeadOutput_NoSiblingRecreateLeavesFreshInputOnlyInInputPushGraph(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	const deadID OutputID = 42
+	const freshID OutputID = 43
+
+	dead := newDeadOutputForTest(t, ctx, mux, deadID)
+	var fresh *Output[struct{}]
+
+	mux.Outputs.Store(deadID, dead)
+	mux.OutputsMap.Store(dead.StorageKey(), dead)
+	mux.InputVideoOnly.OutputSwitch.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.OutputSyncer.CurrentValue.Store(int32(deadID))
+	mux.InputVideoOnly.Node.AddPushTo(ctx, dead.Input())
+	mux.recreateEvictedOutputFunc = func(ctx context.Context, input *Input[struct{}], key SenderKey) error {
+		fresh = newOutputForInputForTest(t, ctx, input, freshID, key)
+		mux.Outputs.Store(freshID, fresh)
+		mux.OutputsMap.Store(fresh.StorageKey(), fresh)
+		input.Node.AddPushTo(ctx, fresh.Input())
+		return nil
+	}
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 1)
+
+	mux.evictDeadOutput(ctx, dead)
+
+	require.NotNil(t, fresh, "test recreate hook must materialize a fresh output")
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, dead, 0)
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, fresh, 1)
 }
 
 // TestEvictDeadOutput_PreservesNewerEntryUnderSameKey verifies the

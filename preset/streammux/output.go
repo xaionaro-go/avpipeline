@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -734,14 +735,16 @@ func PartialSenderKeyFromTranscoderConfig(
 	var audioCodec codec.Name
 	var audioSampleRate audio.SampleRate
 	if len(c.Output.AudioTrackConfigs) > 0 {
-		audioCodec = codec.Name(c.Output.AudioTrackConfigs[0].CodecName).Canonicalize(ctx, true)
+		audioCfg := c.Output.AudioTrackConfigs[0]
+		audioCodec = configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName).Canonicalize(ctx, true)
 		audioSampleRate = c.Output.AudioTrackConfigs[0].SampleRate
 	}
 	var videoCodec codec.Name
 	var resolution codec.Resolution
 	if len(c.Output.VideoTrackConfigs) > 0 {
-		videoCodec = codec.Name(c.Output.VideoTrackConfigs[0].CodecName).Canonicalize(ctx, true)
-		resolution = c.Output.VideoTrackConfigs[0].Resolution
+		videoCfg := c.Output.VideoTrackConfigs[0]
+		videoCodec = configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName).Canonicalize(ctx, true)
+		resolution = videoCfg.Resolution
 	}
 	return SenderKey{
 		AudioCodec:      codectypes.Name(audioCodec),
@@ -765,7 +768,8 @@ func (o *Output[C]) reconfigureTranscoder(
 	if len(cfg.Output.VideoTrackConfigs) == 0 {
 		return fmt.Errorf("no video track configs")
 	}
-	if cfg.Output.VideoTrackConfigs[0].CodecName == codectypes.Name(codec.NameCopy) && !isCopyEncoder {
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
+	if configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName) == codec.NameCopy && !isCopyEncoder {
 		logger.Errorf(ctx, "the encoder is not a copy encoder despite it should be")
 		isCopyEncoder = true
 	}
@@ -892,10 +896,19 @@ func (o *Output[C]) reconfigureDecoder(
 	if len(cfg.Output.VideoTrackConfigs) != 1 {
 		return fmt.Errorf("currently we support only exactly one output video track config (received a request for %d track configs)", len(cfg.Output.VideoTrackConfigs))
 	}
-	videoCfg := cfg.Output.VideoTrackConfigs[0] // TODO: it should use cfg.Input!
+	videoCfg := cfg.Output.VideoTrackConfigs[0]
+	decoderVideoCfg := inputVideoTrackConfig(cfg)
+	decoderHardwareDeviceType := types.HardwareDeviceType(decoderVideoCfg.HardwareDeviceType)
+	decoderHardwareDeviceName := types.HardwareDeviceName(decoderVideoCfg.HardwareDeviceName)
+	decoderCustomOptions := decoderVideoCfg.CustomOptions
+	if cfg.Input == nil || len(cfg.Input.VideoTrackConfigs) == 0 {
+		decoderHardwareDeviceType = videoCfg.GetDecoderHardwareDeviceType()
+		decoderHardwareDeviceName = videoCfg.GetDecoderHardwareDeviceName()
+		decoderCustomOptions = videoCfg.CustomOptions
+	}
 
 	var videoOptions globaltypes.DictionaryItems
-	for _, opt := range convertCustomOptions(videoCfg.CustomOptions) {
+	for _, opt := range convertCustomOptions(decoderCustomOptions) {
 		switch opt.Key {
 		case "create_window":
 			videoOptions = append(videoOptions, opt)
@@ -910,16 +923,18 @@ func (o *Output[C]) reconfigureDecoder(
 	err := xsync.DoR1(ctx, &decoder.Locker, func() error {
 		if len(decoder.Decoders) == 0 {
 			logger.Debugf(ctx, "the decoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
-			decoderFactory.HardwareDeviceType = videoCfg.GetDecoderHardwareDeviceType()
-			decoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.GetDecoderHardwareDeviceName())
+			decoderFactory.VideoCodec = configuredCodecName(decoderVideoCfg.CodecNames, decoderVideoCfg.CodecName)
+			decoderFactory.VideoCodecs = codecNames(decoderVideoCfg.CodecNames)
+			decoderFactory.HardwareDeviceType = decoderHardwareDeviceType
+			decoderFactory.HardwareDeviceName = codec.HardwareDeviceName(decoderHardwareDeviceName)
 			decoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
 			return nil
 		}
-		if videoCfg.GetDecoderHardwareDeviceType() != types.HardwareDeviceType(decoderFactory.HardwareDeviceType) {
-			return fmt.Errorf("unable to change the decoding hardware device type on the fly, yet: '%s' != '%s'", videoCfg.GetDecoderHardwareDeviceType(), decoderFactory.HardwareDeviceType)
+		if decoderHardwareDeviceType != types.HardwareDeviceType(decoderFactory.HardwareDeviceType) {
+			return fmt.Errorf("unable to change the decoding hardware device type on the fly, yet: '%s' != '%s'", decoderHardwareDeviceType, decoderFactory.HardwareDeviceType)
 		}
-		if videoCfg.GetDecoderHardwareDeviceName() != types.HardwareDeviceName(decoderFactory.HardwareDeviceName) {
-			return fmt.Errorf("unable to change the decoding hardware device name on the fly, yet: '%s' != '%s'", videoCfg.GetDecoderHardwareDeviceName(), decoderFactory.HardwareDeviceName)
+		if decoderHardwareDeviceName != types.HardwareDeviceName(decoderFactory.HardwareDeviceName) {
+			return fmt.Errorf("unable to change the decoding hardware device name on the fly, yet: '%s' != '%s'", decoderHardwareDeviceName, decoderFactory.HardwareDeviceName)
 		}
 		return nil
 	})
@@ -972,9 +987,11 @@ func (o *Output[C]) reconfigureEncoder(
 		if len(encoderFactory.VideoEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
-			encoderFactory.VideoCodec = codec.Name(videoCfg.CodecName)
+			encoderFactory.VideoCodec = configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName)
+			encoderFactory.VideoCodecs = codecNames(videoCfg.CodecNames)
 			_isCopyEncoder = encoderFactory.VideoCodec == codec.NameCopy
-			encoderFactory.AudioCodec = codec.Name(audioCfg.CodecName)
+			encoderFactory.AudioCodec = configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName)
+			encoderFactory.AudioCodecs = codecNames(audioCfg.CodecNames)
 			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
 			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
 			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
@@ -998,8 +1015,8 @@ func (o *Output[C]) reconfigureEncoder(
 			return nil
 		}
 
-		if codec.Name(videoCfg.CodecName) != encoderFactory.VideoCodec {
-			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%s' != '%s'", videoCfg.CodecName, encoderFactory.VideoCodec)
+		if !codecNamesEqual(configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName), encoderFactoryCodecNames(encoderFactory.VideoCodecs, encoderFactory.VideoCodec)) {
+			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%v' != '%v'", configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName), encoderFactoryCodecNames(encoderFactory.VideoCodecs, encoderFactory.VideoCodec))
 		}
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
@@ -1078,6 +1095,76 @@ func canonicalizeCodecName(ctx context.Context, name codec.Name) codectypes.Name
 	return codectypes.Name(name.Canonicalize(ctx, true))
 }
 
+func inputVideoTrackConfig(cfg types.TranscoderConfig) types.InputVideoTrackConfig {
+	if cfg.Input == nil || len(cfg.Input.VideoTrackConfigs) == 0 {
+		return types.InputVideoTrackConfig{}
+	}
+	return cfg.Input.VideoTrackConfigs[0]
+}
+
+func codecNames(names []codectypes.Name) []codec.Name {
+	if len(names) == 0 {
+		return nil
+	}
+	result := make([]codec.Name, 0, len(names))
+	for _, name := range names {
+		result = append(result, codec.Name(name))
+	}
+	return result
+}
+
+func configuredCodecNames(
+	names []codectypes.Name,
+	codecName codectypes.Name,
+) []codec.Name {
+	if len(names) > 0 {
+		return codecNames(names)
+	}
+	if codecName == "" {
+		return nil
+	}
+	return []codec.Name{codec.Name(codecName)}
+}
+
+func configuredCodecName(
+	names []codectypes.Name,
+	codecName codectypes.Name,
+) codec.Name {
+	configuredNames := configuredCodecNames(names, codecName)
+	if len(configuredNames) == 0 {
+		return ""
+	}
+	return configuredNames[0]
+}
+
+func encoderFactoryCodecNames(
+	names []codec.Name,
+	codecName codec.Name,
+) []codec.Name {
+	if len(names) > 0 {
+		return slices.Clone(names)
+	}
+	if codecName == "" {
+		return nil
+	}
+	return []codec.Name{codecName}
+}
+
+func encoderFactoryPrimaryCodec(
+	names []codec.Name,
+	codecName codec.Name,
+) codec.Name {
+	configuredNames := encoderFactoryCodecNames(names, codecName)
+	if len(configuredNames) == 0 {
+		return ""
+	}
+	return configuredNames[0]
+}
+
+func codecNamesEqual(a, b []codec.Name) bool {
+	return slices.Equal(a, b)
+}
+
 func (o *Output[C]) GetKey() SenderKey {
 	var videoResolution codec.Resolution
 	if o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution != nil {
@@ -1085,9 +1172,9 @@ func (o *Output[C]) GetKey() SenderKey {
 	}
 	ctx := context.Background()
 	return SenderKey{
-		AudioCodec:      canonicalizeCodecName(ctx, o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioCodec),
+		AudioCodec:      canonicalizeCodecName(ctx, encoderFactoryPrimaryCodec(o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioCodecs, o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioCodec)),
 		AudioSampleRate: o.TranscoderNode.Processor.Kernel.EncoderFactory.AudioSampleRate,
-		VideoCodec:      canonicalizeCodecName(ctx, o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoCodec),
+		VideoCodec:      canonicalizeCodecName(ctx, encoderFactoryPrimaryCodec(o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoCodecs, o.TranscoderNode.Processor.Kernel.EncoderFactory.VideoCodec)),
 		VideoResolution: videoResolution,
 	}
 }

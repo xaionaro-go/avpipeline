@@ -210,8 +210,8 @@ func TestShouldBypassScaler_HWInputHWEncoder_SameResolution_BypassesScaler(t *te
 	t.Parallel()
 
 	cases := []struct {
-		name        string
-		hwPixFmt    astiav.PixelFormat
+		name     string
+		hwPixFmt astiav.PixelFormat
 	}{
 		{"mediacodec", astiav.PixelFormatMediacodec},
 		{"cuda", astiav.PixelFormatCuda},
@@ -332,6 +332,18 @@ func TestShouldBypassScaler_HWInputHWEncoder_DimMismatch_BypassesScaler(t *testi
 			"(input=MEDIACODEC/1920x1072, encoder=MEDIACODEC/1920x1080); "+
 			"Surface composer absorbs the mismatch — bypass=false leads to "+
 			"libswscale ENOSYS or transfer_data ENOSYS")
+}
+
+func TestShouldBypassScaler_HWInputHWEncoder_CUDADimMismatch_RunsScaler(t *testing.T) {
+	t.Parallel()
+
+	got := shouldBypassScaler(
+		astiav.PixelFormatCuda, 1920, 1072,
+		astiav.PixelFormatCuda, 1920, 1080,
+		nil,
+	)
+	testifyassert.False(t, got,
+		"CUDA HW->HW passthrough must not bypass scaler on dim mismatch without a backend-specific proof")
 }
 
 // TestShouldBypassScaler_SWInputHWEncoder_DimMismatch_RunsScaler is the

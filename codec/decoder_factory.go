@@ -39,7 +39,9 @@ var _ DecoderFactory = (*NaiveDecoderFactory)(nil)
 
 type NaiveDecoderFactoryParams struct {
 	VideoCodec            Name
+	VideoCodecs           []Name
 	AudioCodec            Name
+	AudioCodecs           []Name
 	HardwareDeviceType    HardwareDeviceType
 	HardwareDeviceName    HardwareDeviceName
 	VideoOptions          *astiav.Dictionary
@@ -125,40 +127,18 @@ func (f *NaiveDecoderFactory) newDecoder(
 	optsCombined = append(optsCombined, f.Options...)
 	optsCombined = append(optsCombined, opts...)
 
-	var decInput DecoderInput
+	var candidates []codecCandidate
+	var err error
 	switch codecParameters.MediaType() {
 	case astiav.MediaTypeAudio:
-		decInput = DecoderInput{
-			CodecName:             f.AudioCodec,
-			CodecParameters:       codecParameters,
-			HardwareDeviceType:    0,
-			HardwareDeviceName:    "",
-			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
-			CustomOptions:         f.AudioOptions,
-			Flags:                 0,
-			ResourceManager:       f.ResourceManager,
-			Options:               optsCombined,
+		candidates, err = f.audioDecoderCandidates(ctx)
+		if err != nil {
+			return nil, err
 		}
 	case astiav.MediaTypeVideo:
-		videoCodec := f.VideoCodec
-		if videoCodec == "" && f.AutoSelectHardwareDecoder {
-			// Empty + opt-in → probe codec_id for a registered hwaccel
-			// decoder under f.HardwareDeviceType. preferredHWDecoderName
-			// returns "" if the variant is missing, so libav's default
-			// selection still applies as fallback. HardwareDeviceTypeNone
-			// is treated as CUDA inside the helper for backward-compat.
-			videoCodec = preferredHWDecoderName(ctx, codecParameters.CodecID(), f.HardwareDeviceType)
-		}
-		decInput = DecoderInput{
-			CodecName:             videoCodec,
-			CodecParameters:       codecParameters,
-			HardwareDeviceType:    f.HardwareDeviceType,
-			HardwareDeviceName:    f.HardwareDeviceName,
-			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
-			CustomOptions:         f.VideoOptions,
-			Flags:                 0,
-			ResourceManager:       f.ResourceManager,
-			Options:               optsCombined,
+		candidates, err = f.videoDecoderCandidates(ctx, codecParameters.CodecID())
+		if err != nil {
+			return nil, err
 		}
 	default:
 		// Return nil for unsupported media types (e.g. subtitles, data streams
@@ -167,13 +147,112 @@ func (f *NaiveDecoderFactory) newDecoder(
 		return nil, nil
 
 	}
-	if fn := f.PreInitFunc; fn != nil {
-		fn(ctx, stream, &decInput)
+
+	var errs []error
+	for _, candidate := range candidates {
+		if err := validateCodecCandidate(ctx, false, candidate, codecParameters.CodecID()); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		decInput := DecoderInput{
+			CodecName:             candidate.CodecName,
+			CodecParameters:       codecParameters,
+			HardwareDeviceType:    candidate.HardwareDeviceType,
+			HardwareDeviceName:    candidate.HardwareDeviceName,
+			ErrorRecognitionFlags: f.ErrorRecognitionFlags,
+			CustomOptions:         candidate.CustomOptions,
+			Flags:                 0,
+			ResourceManager:       f.ResourceManager,
+			Options:               optsCombined,
+		}
+		if fn := f.PreInitFunc; fn != nil {
+			fn(ctx, stream, &decInput)
+		}
+		dec, err := NewDecoder(
+			ctx,
+			decInput,
+		)
+		if err == nil {
+			return dec, nil
+		}
+		if !isRetryableCodecCandidateError(err) {
+			return nil, err
+		}
+		errs = append(errs, err)
 	}
-	return NewDecoder(
-		ctx,
-		decInput,
-	)
+	return nil, errors.Join(errs...)
+}
+
+func (f *NaiveDecoderFactory) audioDecoderCandidates(
+	ctx context.Context,
+) ([]codecCandidate, error) {
+	if len(f.AudioCodecs) == 0 {
+		candidate, err := newCodecCandidate(ctx, f.AudioCodec, 0, "", f.AudioOptions, false)
+		if err != nil {
+			return nil, err
+		}
+		return []codecCandidate{candidate}, nil
+	}
+	result := make([]codecCandidate, 0, len(f.AudioCodecs))
+	for _, codecName := range f.AudioCodecs {
+		candidate, err := newCodecCandidate(ctx, codecName, 0, "", f.AudioOptions, true)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, candidate)
+	}
+	return result, nil
+}
+
+func (f *NaiveDecoderFactory) videoDecoderCandidates(
+	ctx context.Context,
+	codecID astiav.CodecID,
+) ([]codecCandidate, error) {
+	if len(f.VideoCodecs) > 0 {
+		result := make([]codecCandidate, 0, len(f.VideoCodecs))
+		for _, codecName := range f.VideoCodecs {
+			hardwareDeviceType := explicitCodecCandidateHardwareDeviceType(codecName)
+			hardwareDeviceName := HardwareDeviceName("")
+			if hardwareDeviceType != globaltypes.HardwareDeviceTypeNone {
+				hardwareDeviceName = f.HardwareDeviceName
+			}
+			candidate, err := newCodecCandidate(ctx, codecName, hardwareDeviceType, hardwareDeviceName, f.VideoOptions, true)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, candidate)
+		}
+		return result, nil
+	}
+	if f.VideoCodec != "" {
+		candidate, err := newCodecCandidate(ctx, f.VideoCodec, f.HardwareDeviceType, f.HardwareDeviceName, f.VideoOptions, false)
+		if err != nil {
+			return nil, err
+		}
+		return []codecCandidate{candidate}, nil
+	}
+	if f.AutoSelectHardwareDecoder {
+		var result []codecCandidate
+		if codecName, hardwareDeviceType := preferredHWDecoderNameAndHardwareDeviceType(ctx, codecID, f.HardwareDeviceType); codecName != "" {
+			candidate, err := newCodecCandidate(ctx, codecName, hardwareDeviceType, f.HardwareDeviceName, f.VideoOptions, true)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, candidate)
+		}
+		candidate, err := newCodecCandidate(ctx, "", globaltypes.HardwareDeviceTypeNone, "", f.VideoOptions, false)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, candidate)
+		return result, nil
+	}
+	candidate, err := newCodecCandidate(ctx, "", f.HardwareDeviceType, f.HardwareDeviceName, f.VideoOptions, false)
+	if err != nil {
+		return nil, err
+	}
+	return []codecCandidate{candidate}, nil
 }
 
 func (f *NaiveDecoderFactory) Reset(ctx context.Context) error {
@@ -190,7 +269,10 @@ func (f *NaiveDecoderFactory) reset(
 }
 
 func (f *NaiveDecoderFactory) String() string {
-	return fmt.Sprintf("NaiveDecoderFactory(%s/%s)", f.VideoCodec, f.AudioCodec)
+	if len(f.VideoCodecs) == 0 && len(f.AudioCodecs) == 0 {
+		return fmt.Sprintf("NaiveDecoderFactory(%s/%s)", f.VideoCodec, f.AudioCodec)
+	}
+	return fmt.Sprintf("NaiveDecoderFactory(%v:%s/%v:%s)", f.VideoCodecs, f.VideoCodec, f.AudioCodecs, f.AudioCodec)
 }
 
 var _ ResourcesGetter = (*NaiveDecoderFactory)(nil)

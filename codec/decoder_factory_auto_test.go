@@ -51,8 +51,10 @@ func resolveVideoCodecName(
 		if userPreInit != nil {
 			userPreInit(c, s, in)
 		}
-		captured = in.CodecName
-		capturedSet = true
+		if !capturedSet {
+			captured = in.CodecName
+			capturedSet = true
+		}
 		// Sabotage CodecParameters so findDecoderCodec returns nil for
 		// both the explicit-name and id-fallback paths: codec_id=NONE
 		// + bogus name → newCodec errors out before any hardware probe.

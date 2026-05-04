@@ -10,6 +10,7 @@ import (
 	audio "github.com/xaionaro-go/audio/pkg/audio/types"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
+	"gopkg.in/yaml.v3"
 )
 
 // --- MuxMode ---
@@ -347,7 +348,7 @@ func TestFPSReducerConfig_GetFraction_InRange(t *testing.T) {
 
 func TestFPSReducerConfig_GetFraction_OutOfRange(t *testing.T) {
 	cfg := DefaultFPSReducerConfig()
-	f := cfg.GetFraction(1_000_000) // above 500k
+	f := cfg.GetFraction(1_000_000)                          // above 500k
 	assert.Equal(t, globaltypes.Rational{Num: 1, Den: 1}, f) // no reduction
 }
 
@@ -672,6 +673,55 @@ func TestOutputVideoTrackConfig_GetDecoderHardwareDeviceName(t *testing.T) {
 		HardwareDeviceName: HardwareDeviceName("gpu0"),
 	}
 	assert.Equal(t, HardwareDeviceName("gpu0"), cfg.GetDecoderHardwareDeviceName())
+}
+
+func TestTranscoderConfigYAML_CodecNameScalarAndCodecNamesList(t *testing.T) {
+	var cfg TranscoderConfig
+
+	err := yaml.Unmarshal([]byte(`
+input:
+  audio_track_configs:
+    - codec_name: aac
+      codec_names: [aac, mp3]
+  video_track_configs:
+    - codec_name: av1
+      codec_names: [av1_cuvid, libdav1d, av1]
+      hardware_device_type: 2
+      custom_options:
+        - key: strict
+          value: experimental
+output:
+  audio_track_configs:
+    - codec_name: aac
+      codec_names: [aac, libopus]
+  video_track_configs:
+    - codec_name: h264_nvenc
+      codec_names: [h264_nvenc, libx264]
+      hardware_device_type: 2
+`), &cfg)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Input)
+	require.Len(t, cfg.Input.VideoTrackConfigs, 1)
+	require.Len(t, cfg.Output.VideoTrackConfigs, 1)
+
+	inputVideo := cfg.Input.VideoTrackConfigs[0]
+	assert.Equal(t, codectypes.Name("av1"), inputVideo.CodecName)
+	assert.Equal(t, []codectypes.Name{"av1_cuvid", "libdav1d", "av1"}, inputVideo.CodecNames)
+	assert.Equal(t, globaltypes.HardwareDeviceTypeCUDA, globaltypes.HardwareDeviceType(inputVideo.HardwareDeviceType))
+	require.Len(t, inputVideo.CustomOptions, 1)
+	assert.Equal(t, "strict", inputVideo.CustomOptions[0].Key)
+
+	outputVideo := cfg.Output.VideoTrackConfigs[0]
+	assert.Equal(t, codectypes.Name("h264_nvenc"), outputVideo.CodecName)
+	assert.Equal(t, []codectypes.Name{"h264_nvenc", "libx264"}, outputVideo.CodecNames)
+
+	inputAudio := cfg.Input.AudioTrackConfigs[0]
+	assert.Equal(t, codectypes.Name("aac"), inputAudio.CodecName)
+	assert.Equal(t, []codectypes.Name{"aac", "mp3"}, inputAudio.CodecNames)
+
+	outputAudio := cfg.Output.AudioTrackConfigs[0]
+	assert.Equal(t, codectypes.Name("aac"), outputAudio.CodecName)
+	assert.Equal(t, []codectypes.Name{"aac", "libopus"}, outputAudio.CodecNames)
 }
 
 // --- Latencies ---
