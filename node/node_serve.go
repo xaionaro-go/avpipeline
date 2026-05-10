@@ -223,7 +223,7 @@ func pushFurther[
 
 	if len(pushTos) == 0 {
 		var zeroValue O
-		logger.Debugf(ctx, "nowhere to push to a %T", zeroValue)
+		logger.Tracef(ctx, "nowhere to push to a %T", zeroValue)
 		return
 	}
 

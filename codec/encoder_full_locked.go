@@ -207,7 +207,7 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 ) {
 	dur := f.Duration()
 	if dur <= 0 {
-		logger.Debugf(ctx, "cannot set framerate from frame duration: frame has no duration")
+		logger.Tracef(ctx, "cannot set framerate from frame duration: frame has no duration")
 		return
 	}
 	timeBase := e.codecContext.TimeBase()
@@ -225,7 +225,7 @@ func (e *EncoderFullLocked) setFrameRateFromDuration(
 		return
 	}
 	if !e.AverageFPS.Valid() {
-		logger.Debugf(ctx, "waiting for more samples to stabilize framerate: curFPS:%v avgFPS:%f", curFPS, avgFPS)
+		logger.Tracef(ctx, "waiting for more samples to stabilize framerate: curFPS:%v avgFPS:%f", curFPS, avgFPS)
 		return
 	}
 

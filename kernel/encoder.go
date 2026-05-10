@@ -1585,7 +1585,7 @@ func (e *streamEncoderLocked) prepareScaler(
 		// hw_frames_ctx is attached on the encoder side. All four
 		// are necessary to decide whether the bug is upstream
 		// (camera/decoder produced a degenerate frame) or local
-		// (encoder pixfmt did not get the late nv12 injection in
+		// (encoder pixfmt did not get the late yuv420p injection in
 		// time, leaving CodecContext.PixelFormat() at MEDIACODEC
 		// and ScaledFrame.PixelFormat() ditto).
 		hwFCAttached := e.Encoder.HardwareFramesContext(ctx) != nil
@@ -1637,7 +1637,7 @@ func (e *Encoder[EF]) send(
 		}
 	}
 
-	logger.Debugf(ctx, "encode-emit %s pts=%d key=%t",
+	logger.Tracef(ctx, "encode-emit %s pts=%d key=%t",
 		outPktWrapped.GetCodecParameters().MediaType(),
 		outPktWrapped.GetPTS(),
 		outPktWrapped.IsKey())

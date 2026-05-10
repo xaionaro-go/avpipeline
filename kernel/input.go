@@ -1020,6 +1020,14 @@ func (i *Input) Generate(
 		streamIndex := pkt.StreamIndex()
 		stream := avconv.FindStreamByIndex(ctx, i.FormatContext, streamIndex)
 		codecParams := stream.CodecParameters()
+		dumpAV1Packet(ctx, av1PacketDumpInput{
+			Stage:           av1PacketDumpStagePostDemux,
+			Packet:          pkt,
+			CodecParameters: codecParams,
+			MediaType:       codecParams.MediaType(),
+			StreamIndex:     streamIndex,
+			TimeBase:        stream.TimeBase(),
+		})
 		logger.Tracef(
 			ctx,
 			"received a %s packet (stream:%d, pos:%d, pts:%d, dts:%d, dur:%d, time_base:%v, isKey:%t), dataLen:%d, extraData:%s",

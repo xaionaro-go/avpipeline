@@ -382,8 +382,10 @@ func (d *Decoder[DF]) sendPacket(
 		return fmt.Errorf("internal error: TimeBase is not set")
 	}
 
+	packetTimeBase := input.GetTimeBase()
 	if !encoderForceCopyTime {
-		input.RescaleTs(input.GetTimeBase(), streamDecoder.TimeBase(ctx))
+		packetTimeBase = streamDecoder.TimeBase(ctx)
+		input.RescaleTs(input.GetTimeBase(), packetTimeBase)
 	}
 
 	streamIndex := input.GetStreamIndex()
@@ -450,6 +452,16 @@ func (d *Decoder[DF]) sendPacket(
 
 		for tryCount := 0; ; tryCount++ {
 			logger.Tracef(ctx, "decoder.SendPacket(): sending a packet (pts=%d, dts=%d, dur=%d)", input.Packet.Pts(), input.Packet.Dts(), input.Packet.Duration())
+			if tryCount == 0 {
+				dumpAV1Packet(ctx, av1PacketDumpInput{
+					Stage:           av1PacketDumpStagePreDecoder,
+					Packet:          input.Packet,
+					CodecParameters: input.GetCodecParameters(),
+					MediaType:       input.GetMediaType(),
+					StreamIndex:     streamIndex,
+					TimeBase:        packetTimeBase,
+				})
+			}
 			err := decoder.SendPacket(ctx, input.Packet)
 			logger.Tracef(ctx, "/decoder.SendPacket(): %v", err)
 			shouldRetry := false

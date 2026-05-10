@@ -1419,10 +1419,10 @@ func (o *Output) send(
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
-	logger.Debugf(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d, expectedStreamsSubtitleCount:%d, expectedStreamsDataCount:%d, videoBeforeAudio:%t", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount, expectedStreamsSubtitleCount, expectedStreamsDataCount, *o.Config.WaitForOutputStreams.VideoBeforeAudio)
+	logger.Tracef(ctx, "isKeyFrame:%t, expectedStreamsCount:%d, expectedStreamsVideoCount:%d, expectedStreamsAudioCount:%d, expectedStreamsSubtitleCount:%d, expectedStreamsDataCount:%d, videoBeforeAudio:%t", keyFrame, expectedStreamsCount, expectedStreamsVideoCount, expectedStreamsAudioCount, expectedStreamsSubtitleCount, expectedStreamsDataCount, *o.Config.WaitForOutputStreams.VideoBeforeAudio)
 	if !keyFrame && (revert0c55f85 || len(o.waitingKeyFrames) > 0) {
 		if outputAcceptOnlyKeyFramesUntilStart {
-			logger.Debugf(ctx, "not a key frame; skipping")
+			logger.Tracef(ctx, "not a key frame; skipping")
 			return nil
 		}
 	}
@@ -1433,7 +1433,7 @@ func (o *Output) send(
 		if mediaType == astiav.MediaTypeVideo {
 			o.firstVideoPacketSeen = true
 		} else if !o.firstVideoPacketSeen {
-			logger.Debugf(ctx, "skipping a non-video (%s) packet to avoid MediaMTX from losing the video track", mediaType)
+			logger.Tracef(ctx, "skipping a non-video (%s) packet to avoid MediaMTX from losing the video track", mediaType)
 			return nil
 		}
 	}

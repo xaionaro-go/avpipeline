@@ -1,4 +1,4 @@
-// raw_frame_source_pixfmt.go injects pix_fmt=nv12 into MediaCodec encoder
+// raw_frame_source_pixfmt.go injects pix_fmt=yuv420p into MediaCodec encoder
 // open-time options when the upstream pipeline supplies decoded frames
 // directly (no upstream decoder).
 //
@@ -10,11 +10,14 @@
 // attached as frame->data[3]; mediacodec_send then returns 0 silently
 // (mediacodecenc.c:802-810) and frames are silently consumed without
 // producing packets — the visible silent-consume bug. Forcing
-// pix_fmt=nv12 short-circuits the default and steers mediacodecenc onto
+// pix_fmt=yuv420p short-circuits the default and steers mediacodecenc onto
 // the SW-upload encode path (copy_frame_to_buffer at line 827), which
-// works without a Surface.
+// works without a Surface. yuv420p is deliberately planar: Android camera
+// rawvideo can be YUV420P, NV12, or NV21, and choosing NV12 as the encoder
+// upload format makes NV21 input vulnerable to U/V-plane interpretation
+// mistakes if it reaches the upload copy path without conversion.
 //
-// nv12 is verified supported by all *_mediacodec encoders in
+// yuv420p is verified supported by all *_mediacodec encoders in
 // libavcodec/mediacodecenc.c via the shared avc_pix_fmts[] = {MEDIACODEC,
 // YUV420P, NV12} array referenced by every DECLARE_MEDIACODEC_ENCODER.
 
@@ -22,6 +25,7 @@ package streammux
 
 import (
 	"context"
+	"strings"
 
 	"github.com/xaionaro-go/avpipeline/codec"
 	"github.com/xaionaro-go/avpipeline/logger"
@@ -30,13 +34,13 @@ import (
 )
 
 const (
-	rawFrameSourceMediaCodecPixFmt = "nv12"
+	rawFrameSourceMediaCodecPixFmt = "yuv420p"
 )
 
 // SetRawFrameSource flips the StreamMux-level RawFrameSource flag on. If
 // the flag transitions from false to true, every existing Output's
 // encoder factory is retroactively patched in place to inject
-// pix_fmt=nv12 (when MediaCodec). This is the integration point for
+// pix_fmt=yuv420p (when MediaCodec). This is the integration point for
 // callers (ffstream) that learn about a raw-frame upstream AFTER the
 // first SwitchOutputByProps has already created an Output and
 // reconfigured its encoder factory — wingout's gRPC AddInput hot-add of
@@ -54,27 +58,27 @@ const (
 // frames. If the rtmp era of the same Output is still holding decoded
 // mediacodec frames in the queues between InputFilter / InputFixer /
 // TranscoderNode at the moment SetRawFrameSource(true) is called, those
-// frames would reach the freshly-reopened nv12 encoder. Two outcomes
+// frames would reach the freshly-reopened yuv420p encoder. Two outcomes
 // were observed against the pinned FFmpeg's `ff_hwcontext_type_mediacodec`
 // (which exposes only device-level callbacks — no frames_init /
 // frames_get_buffer / transfer_data hooks for the hw_frames_ctx pool):
 //
-//   (a) ENOSYS from av_hwframe_ctx_init(hw=mediacodec, sw=nv12),
-//       causing the encoder to error and the Output to evict —
-//       triggering the recommitDemotedInputToSibling recreate path
-//       in stream_mux_node.go (which then opens a fresh Output[N]
-//       with pix_fmt=nv12 from the start). This was the originally-
-//       documented behaviour leading to the no-sibling recreate
-//       contract.
+//	(a) ENOSYS from av_hwframe_ctx_init(hw=mediacodec, sw=yuv420p),
+//	    causing the encoder to error and the Output to evict —
+//	    triggering the recommitDemotedInputToSibling recreate path
+//	    in stream_mux_node.go (which then opens a fresh Output[N]
+//	    with pix_fmt=yuv420p from the start). This was the originally-
+//	    documented behaviour leading to the no-sibling recreate
+//	    contract.
 //
-//   (b) Silent absorption: the MediaCodec Surface buffer pool can
-//       retain in-flux frames during the pix_fmt transition rather
-//       than dispatching them synchronously through hwframe_init,
-//       so the first stale frame is consumed without producing a
-//       packet AND without erroring. Without an error, no eviction
-//       fires, the recreate path never runs, and the encoder stays
-//       in a silent-stall: video received counter grows with camera
-//       frames but processed stays at the pre-tap value.
+//	(b) Silent absorption: the MediaCodec Surface buffer pool can
+//	    retain in-flux frames during the pix_fmt transition rather
+//	    than dispatching them synchronously through hwframe_init,
+//	    so the first stale frame is consumed without producing a
+//	    packet AND without erroring. Without an error, no eviction
+//	    fires, the recreate path never runs, and the encoder stays
+//	    in a silent-stall: video received counter grows with camera
+//	    frames but processed stays at the pre-tap value.
 //
 // To eliminate both outcomes Option A drains the upstream feeder
 // chain (InputFilter / InputFixer.AutoHeaders / InputFixer.MapStream
@@ -88,8 +92,9 @@ const (
 // SetRawFrameSource returns either:
 //
 //   - originate from the new raw-frame upstream (camera) and arrive
-//     as NV12 — which the freshly-reopened pix_fmt=nv12 encoder
-//     accepts cleanly, OR
+//     as software rawvideo using the demuxer-reported format, which the
+//     freshly-reopened pix_fmt=yuv420p encoder accepts after conversion
+//     when needed, OR
 //   - originate from the still-active rtmp era and hit the new
 //     encoder one frame at a time, where outcome (a) above re-applies
 //     and the eviction-recovery recreate path covers them.
@@ -142,7 +147,7 @@ func (s *StreamMux[C]) SetRawFrameSource(ctx context.Context, value bool) {
 		// against the now-updated f.VideoOptions. ResetHard does that
 		// — it closes every running encoder and Reset()s the factory's
 		// VideoEncoders slice. The next SendInput triggers fresh
-		// NewEncoder, which now sees pix_fmt=nv12 in f.VideoOptions and
+		// NewEncoder, which now sees pix_fmt=yuv420p in f.VideoOptions and
 		// opens the codec context on the SW-upload path.
 		//
 		// The previous reentrant-lock deadlock in
@@ -263,7 +268,7 @@ type resetter interface {
 	Reset(ctx context.Context) error
 }
 
-// forceRawFrameSourceMediaCodecPixFmt appends pix_fmt=nv12 to videoOptions
+// forceRawFrameSourceMediaCodecPixFmt appends pix_fmt=yuv420p to videoOptions
 // when rawFrameSource is true, the encoder is a MediaCodec encoder, and no
 // explicit pix_fmt is already set. It is a no-op otherwise. Returns the
 // (possibly extended) options slice.
@@ -272,11 +277,12 @@ func forceRawFrameSourceMediaCodecPixFmt(
 	videoOptions globaltypes.DictionaryItems,
 	rawFrameSource bool,
 	hwDeviceType types.HardwareDeviceType,
+	codecName codec.Name,
 ) globaltypes.DictionaryItems {
 	if !rawFrameSource {
 		return videoOptions
 	}
-	if hwDeviceType != globaltypes.HardwareDeviceTypeMediaCodec {
+	if !isMediaCodecEncoderRequest(hwDeviceType, codecName) {
 		return videoOptions
 	}
 	if videoOptions.GetFirst("pix_fmt") != nil {
@@ -291,6 +297,20 @@ func forceRawFrameSourceMediaCodecPixFmt(
 		Key:   "pix_fmt",
 		Value: rawFrameSourceMediaCodecPixFmt,
 	})
+}
+
+func isMediaCodecEncoderRequest(
+	hwDeviceType types.HardwareDeviceType,
+	codecName codec.Name,
+) bool {
+	switch {
+	case hwDeviceType == globaltypes.HardwareDeviceTypeMediaCodec:
+		return true
+	case strings.HasSuffix(string(codecName), "_mediacodec"):
+		return true
+	default:
+		return false
+	}
 }
 
 // applyRawFrameSourceMediaCodecPixFmtToFactory injects
@@ -320,7 +340,7 @@ func applyRawFrameSourceMediaCodecPixFmtToFactory(
 	if encoderFactory == nil {
 		return false
 	}
-	if encoderFactory.HardwareDeviceType != globaltypes.HardwareDeviceTypeMediaCodec {
+	if !isMediaCodecEncoderRequest(encoderFactory.HardwareDeviceType, encoderFactory.VideoCodec) {
 		return false
 	}
 	wrote, err := encoderFactory.SetVideoOptionIfAbsent(ctx, "pix_fmt", rawFrameSourceMediaCodecPixFmt)

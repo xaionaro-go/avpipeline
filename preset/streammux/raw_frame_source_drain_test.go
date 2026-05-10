@@ -4,10 +4,10 @@
 // feeder chain (InputFilter → InputFixer.AutoHeaders →
 // InputFixer.MapStreamIndices → TranscoderNode) MUST also be drained
 // so any rtmp-era decoded frames sitting in the queues are discarded
-// before the freshly-reopened nv12 encoder sees its first frame.
+// before the freshly-reopened yuv420p encoder sees its first frame.
 //
 // Without the drain, the first stale mediacodec-Surface frame either
-// silent-consumes against the new nv12 encoder (no error → no
+// silent-consumes against the new yuv420p encoder (no error → no
 // eviction → no recreate, the silent-stall path) OR errors with
 // ENOSYS and triggers the no-sibling recreate path. The drain
 // eliminates both transitions; the recreate path stays as
@@ -84,7 +84,7 @@ func TestSetRawFrameSource_DrainsAutoHeadersStateOnExistingOutput(t *testing.T) 
 
 	// Pre-condition: simulate the rtmp-era state where AutoHeaders has
 	// already run sendInputLocked once and latched IsSet=true. The
-	// drain MUST clear this — otherwise the freshly-opened nv12
+	// drain MUST clear this — otherwise the freshly-opened yuv420p
 	// encoder branch downstream would inherit detection state observed
 	// against the prior connection.
 	autoHeaders := getAutoHeadersHandler(t, out)

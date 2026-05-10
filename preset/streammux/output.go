@@ -120,7 +120,7 @@ type Output[C any] struct {
 	// ANativeWindow Surface and the get_format -> AV_PIX_FMT_MEDIACODEC
 	// branch in mediacodecenc.c silently consumes frames (it expects
 	// Surface buffers attached as frame->data[3]). reconfigureEncoder
-	// reads this flag to inject pix_fmt=nv12 into the encoder's open-time
+	// reads this flag to inject pix_fmt=yuv420p into the encoder's open-time
 	// options, which forces the SW-upload encode path.
 	//
 	// OneWayBool pins the sticky-true contract at the type level: once
@@ -1124,6 +1124,7 @@ func (o *Output[C]) reconfigureEncoder(
 	hasAudioCfg := len(cfg.Output.AudioTrackConfigs) > 0
 
 	encoderFactory := o.TranscoderNode.Processor.Kernel.EncoderFactory
+	configuredVideoCodecName := configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName)
 
 	var videoOptions globaltypes.DictionaryItems
 	videoOptions = append(videoOptions, globaltypes.DictionaryItems{
@@ -1136,6 +1137,7 @@ func (o *Output[C]) reconfigureEncoder(
 		videoOptions,
 		o.RawFrameSource.Load(),
 		types.HardwareDeviceType(videoCfg.HardwareDeviceType),
+		configuredVideoCodecName,
 	)
 
 	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
@@ -1143,7 +1145,7 @@ func (o *Output[C]) reconfigureEncoder(
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
 			if hasVideoCfg {
-				encoderFactory.VideoCodec = configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName)
+				encoderFactory.VideoCodec = configuredVideoCodecName
 				encoderFactory.VideoCodecs = codecNames(videoCfg.CodecNames)
 				_isCopyEncoder = encoderFactory.VideoCodec == codec.NameCopy
 				encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)

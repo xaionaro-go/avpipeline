@@ -1107,11 +1107,11 @@ func (c *codecInternals) setupPixelFormat(
 		pixelFormatOptionName = "pix_fmt"
 	}
 
-	var forcePixelFormat astiav.PixelFormat
+	forcePixelFormat := astiav.PixelFormatNone
 	if v := customOptions.Get(pixelFormatOptionName, nil, 0); v != nil {
 		logger.Debugf(ctx, "%q option is set to '%s'", pixelFormatOptionName, v.Value())
 		pixFmt := astiav.FindPixelFormatByName(v.Value())
-		if pixFmt != 0 {
+		if pixFmt != astiav.PixelFormatNone {
 			forcePixelFormat = pixFmt
 		}
 	} else {
@@ -1158,7 +1158,7 @@ func (c *codecInternals) setupPixelFormat(
 		}
 	}
 
-	if forcePixelFormat != 0 {
+	if forcePixelFormat != astiav.PixelFormatNone {
 		logger.Tracef(ctx, "forcing pixel format to %s", forcePixelFormat)
 		c.codecContext.SetPixelFormat(forcePixelFormat)
 	}

@@ -1,7 +1,8 @@
 // raw_frame_source_pixfmt_test.go pins the contract of
-// forceRawFrameSourceMediaCodecPixFmt: pix_fmt=nv12 is appended only when
-// (RawFrameSource && hwDeviceType == MediaCodec && no explicit pix_fmt
-// already present), and otherwise the input slice is returned unchanged.
+// forceRawFrameSourceMediaCodecPixFmt: pix_fmt=yuv420p is appended only when
+// RawFrameSource is enabled, the encoder request targets MediaCodec, and no
+// explicit pix_fmt is already present. Otherwise the input slice is returned
+// unchanged.
 // This is the unit-level proof of the silent-consume fix.
 
 package streammux
@@ -12,37 +13,48 @@ import (
 
 	testifyassert "github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xaionaro-go/avpipeline/codec"
 	codectypes "github.com/xaionaro-go/avpipeline/codec/types"
 	"github.com/xaionaro-go/avpipeline/preset/streammux/types"
 	globaltypes "github.com/xaionaro-go/avpipeline/types"
 )
 
-// hasPixFmtNv12 reports whether opts contains a {pix_fmt: nv12} entry.
-func hasPixFmtNv12(opts globaltypes.DictionaryItems) bool {
+// hasPixFmt reports whether opts contains a pix_fmt entry with the given value.
+func hasPixFmtValue(opts globaltypes.DictionaryItems, value string) bool {
 	v := opts.GetFirst("pix_fmt")
 	if v == nil {
 		return false
 	}
-	return *v == "nv12"
+	return *v == value
 }
 
-// hasPixFmt reports whether opts contains any pix_fmt entry.
-func hasPixFmt(opts globaltypes.DictionaryItems) bool {
+// hasAnyPixFmt reports whether opts contains any pix_fmt entry.
+func hasAnyPixFmt(opts globaltypes.DictionaryItems) bool {
 	return opts.GetFirst("pix_fmt") != nil
 }
 
-// TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsNv12
-// is the GOOD-side: the camera+MediaCodec combination must inject pix_fmt=nv12.
-func TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsNv12(t *testing.T) {
+func TestRawFrameSourceMediaCodecPixFmt_AvoidsAndroidCameraChromaSwap(t *testing.T) {
+	testifyassert.Equal(t, "yuv420p", rawFrameSourceMediaCodecPixFmt,
+		"raw android_camera frames may be NV21; default MediaCodec upload pix_fmt must use the planar format instead of NV12")
+	testifyassert.NotEqual(t, "nv12", rawFrameSourceMediaCodecPixFmt,
+		"NV12 is unsafe as the raw-frame default because MediaCodec upload copies chroma according to avctx pix_fmt")
+	testifyassert.NotEqual(t, "nv21", rawFrameSourceMediaCodecPixFmt,
+		"MediaCodec encoders in the pinned FFmpeg source do not advertise NV21")
+}
+
+// TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsYUV420P
+// is the GOOD-side: the camera+MediaCodec combination must inject pix_fmt=yuv420p.
+func TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsYUV420P(t *testing.T) {
 	ctx := context.Background()
 	in := globaltypes.DictionaryItems{
 		{Key: "forced-idr", Value: "1"},
 	}
 	out := forceRawFrameSourceMediaCodecPixFmt(
 		ctx, in, true, types.HardwareDeviceType(globaltypes.HardwareDeviceTypeMediaCodec),
+		codec.Name("av1_mediacodec"),
 	)
-	testifyassert.True(t, hasPixFmtNv12(out),
-		"raw-frame source + MediaCodec must inject pix_fmt=nv12; got %#v", out)
+	testifyassert.True(t, hasPixFmtValue(out, rawFrameSourceMediaCodecPixFmt),
+		"raw-frame source + MediaCodec must inject pix_fmt=%s; got %#v", rawFrameSourceMediaCodecPixFmt, out)
 	// existing options must be preserved
 	testifyassert.Equal(t, "1", *out.GetFirst("forced-idr"),
 		"original options must be preserved; got %#v", out)
@@ -59,8 +71,9 @@ func TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_False_NoOp(t *testin
 	}
 	out := forceRawFrameSourceMediaCodecPixFmt(
 		ctx, in, false, types.HardwareDeviceType(globaltypes.HardwareDeviceTypeMediaCodec),
+		codec.Name("av1_mediacodec"),
 	)
-	testifyassert.False(t, hasPixFmt(out),
+	testifyassert.False(t, hasAnyPixFmt(out),
 		"RawFrameSource=false must NOT inject pix_fmt; got %#v", out)
 	testifyassert.Equal(t, in, out, "slice must be returned unchanged")
 }
@@ -79,16 +92,16 @@ func TestForceRawFrameSourceMediaCodecPixFmt_NonMediaCodec_NoOp(t *testing.T) {
 		types.HardwareDeviceType(globaltypes.HardwareDeviceTypeCUDA),
 		types.HardwareDeviceType(globaltypes.HardwareDeviceTypeVAAPI),
 	} {
-		out := forceRawFrameSourceMediaCodecPixFmt(ctx, in, true, hwType)
-		testifyassert.False(t, hasPixFmt(out),
+		out := forceRawFrameSourceMediaCodecPixFmt(ctx, in, true, hwType, codec.Name("h264"))
+		testifyassert.False(t, hasAnyPixFmt(out),
 			"non-MediaCodec hwType=%s must NOT inject pix_fmt; got %#v", hwType, out)
 	}
 }
 
 // TestForceRawFrameSourceMediaCodecPixFmt_ExplicitPixFmt_Preserved pins the
 // caller-override contract: if the caller already provided a pix_fmt, the
-// helper must not overwrite it. This lets operators force yuv420p (or any
-// other supported format) on devices where nv12 is rejected.
+// helper must not overwrite it. This lets operators pin any known-good
+// supported format for a specific device.
 func TestForceRawFrameSourceMediaCodecPixFmt_ExplicitPixFmt_Preserved(t *testing.T) {
 	ctx := context.Background()
 	in := globaltypes.DictionaryItems{
@@ -96,6 +109,7 @@ func TestForceRawFrameSourceMediaCodecPixFmt_ExplicitPixFmt_Preserved(t *testing
 	}
 	out := forceRawFrameSourceMediaCodecPixFmt(
 		ctx, in, true, types.HardwareDeviceType(globaltypes.HardwareDeviceTypeMediaCodec),
+		codec.Name("av1_mediacodec"),
 	)
 	testifyassert.Equal(t, "yuv420p", *out.GetFirst("pix_fmt"),
 		"explicit pix_fmt must NOT be overridden; got %#v", out)
@@ -164,14 +178,70 @@ func TestStreamMux_SetRawFrameSource_LateInjectsExistingFactory(t *testing.T) {
 		"VideoOptions Dictionary must be allocated by late injection")
 	v := enc.VideoOptions.Get("pix_fmt", nil, 0)
 	require.NotNil(t, v, "pix_fmt must be set by late injection")
-	testifyassert.Equal(t, "nv12", v.Value(), "late-injected pix_fmt must be nv12")
+	testifyassert.Equal(t, rawFrameSourceMediaCodecPixFmt, v.Value(),
+		"late-injected pix_fmt must be the raw-frame MediaCodec default")
+}
+
+func TestStreamMux_SetRawFrameSource_LateInjectsExistingFactoryByMediaCodecName(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+	require.False(t, mux.RawFrameSource.Load(), "sanity")
+
+	out, _, err := mux.GetOrCreateOutput(ctx, SenderKey{
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
+		VideoCodec:      "av1_mediacodec",
+	})
+	require.NoError(t, err)
+	require.False(t, out.RawFrameSource.Load(), "sanity: created with flag off")
+
+	enc := out.TranscoderNode.Processor.Kernel.EncoderFactory
+	enc.HardwareDeviceType = globaltypes.HardwareDeviceTypeNone
+	require.Equal(t, codec.Name("av1_mediacodec"), enc.VideoCodec)
+
+	mux.SetRawFrameSource(ctx, true)
+
+	require.NotNil(t, enc.VideoOptions,
+		"MediaCodec-name encoder must allocate VideoOptions even when HardwareDeviceType is unset")
+	v := enc.VideoOptions.Get("pix_fmt", nil, 0)
+	require.NotNil(t, v,
+		"MediaCodec-name encoder must receive late pix_fmt injection even when HardwareDeviceType is unset")
+	testifyassert.Equal(t, rawFrameSourceMediaCodecPixFmt, v.Value(),
+		"late-injected MediaCodec-name pix_fmt must be the raw-frame MediaCodec default")
+}
+
+func TestOutputReconfigureEncoder_RawFrameSourceMediaCodecNameInjectsYUV420P(t *testing.T) {
+	ctx := context.Background()
+	encoderFactory := codec.NewNaiveEncoderFactory(ctx, nil)
+	output := newOutputWithEncoderFactory(ctx, encoderFactory)
+	output.RawFrameSource.Set()
+	cfg := types.TranscoderConfig{
+		Output: types.TranscoderOutputConfig{
+			VideoTrackConfigs: []types.OutputVideoTrackConfig{{
+				CodecName: "av1_mediacodec",
+				Resolution: codectypes.Resolution{
+					Width:  1920,
+					Height: 1920,
+				},
+			}},
+		},
+	}
+
+	_, err := output.reconfigureEncoder(ctx, cfg)
+	require.NoError(t, err)
+
+	require.NotNil(t, encoderFactory.VideoOptions,
+		"raw-frame MediaCodec-name encoder must allocate VideoOptions")
+	v := encoderFactory.VideoOptions.Get("pix_fmt", nil, 0)
+	require.NotNil(t, v,
+		"raw-frame MediaCodec-name encoder must inject pix_fmt even when HardwareDeviceType is unset")
+	testifyassert.Equal(t, rawFrameSourceMediaCodecPixFmt, v.Value(),
+		"raw-frame MediaCodec-name encoder must use the chroma-safe default")
 }
 
 // TestStreamMux_SetRawFrameSource_NonMediaCodecOutput is the BAD-side
 // of the late-injection path: an existing Output whose encoder is NOT
 // MediaCodec must NOT have pix_fmt mutated when the flag flips on.
 // Other HW encoders (NVENC, VAAPI) negotiate pix_fmt via different
-// mechanisms and a stray pix_fmt=nv12 would break them.
+// mechanisms and a stray raw-frame MediaCodec pix_fmt would break them.
 func TestStreamMux_SetRawFrameSource_NonMediaCodecOutput(t *testing.T) {
 	mux, ctx := newStreamMuxForEvictTest(t)
 
