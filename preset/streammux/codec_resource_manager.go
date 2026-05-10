@@ -94,7 +94,32 @@ func (rm *outputAsResourceManager[C]) canReuse(
 	logger.Debugf(ctx, "canReuse")
 	defer func() { logger.Debugf(ctx, "/canReuse: %v", _ret) }()
 
+	// nil-guard params: cascade init can fire reuse queries before the
+	// upstream stream parameters are bound — same timing class as the
+	// existing decoder/CodecContext nil cases handled below. Without codec
+	// parameters we cannot determine width/height/pixel-format compatibility,
+	// so conservatively decline reuse and let the caller fall through to
+	// creating a fresh resource pool.
+	if params == nil {
+		logger.Debugf(ctx, "params is nil; cannot determine compatibility, skipping reuse")
+		return false
+	}
+
 	encRes := rm.asOutput().TranscoderNode.Processor.Kernel.EncoderFactory.VideoResolution
+	// nil-guard encRes: encoder factory cascade init can fire reuse
+	// queries before VideoResolution is bound. The field is *Resolution
+	// (codec/encoder_factory.go: NaiveEncoderFactoryParams.VideoResolution),
+	// and Resolution.Width is at offset 0
+	// (codec/types/resolution.go: type Resolution struct { Width uint32; Height uint32 }),
+	// so a nil VideoResolution dereference at the width comparison below
+	// faults at addr=0x0. Same conservative-decline policy as the params
+	// nil-guard above: we cannot determine compatibility without the
+	// target resolution, so let the caller fall through to creating a
+	// fresh resource pool.
+	if encRes == nil {
+		logger.Debugf(ctx, "encoder factory VideoResolution is nil; cannot determine compatibility, skipping reuse")
+		return false
+	}
 
 	getDecoderer, ok := codec.EncoderFactoryOptionLatest[codec.EncoderFactoryOptionGetDecoderer](opts)
 	if !ok {
@@ -131,7 +156,11 @@ func (rm *outputAsResourceManager[C]) canReuse(
 		return false
 	}
 	if params.PixelFormat() != astiav.PixelFormatNone {
-		decCC := decoder.CodecContext(ctx)
+		decCC, ok := decoder.CodecContextIfAvailable(ctx)
+		if !ok {
+			logger.Debugf(ctx, "decoder CodecContext is busy; cannot determine pixel format compatibility, skipping reuse")
+			return false
+		}
 		if decCC == nil {
 			logger.Debugf(ctx, "decoder CodecContext is nil; cannot determine pixel format compatibility, skipping reuse")
 			return false

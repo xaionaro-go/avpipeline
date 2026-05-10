@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/xaionaro-go/avpipeline/codec"
@@ -45,6 +47,17 @@ const (
 	// writer (cc.ToCodecParameters) does not re-acquire any encoder lock.
 	enableStreamCodecParametersUpdates = true
 	transcoderWaitForStreamsStart      = true
+
+	// periodicReportInterval bounds how long an encoderError-suppressed
+	// drop window can stay silent: if a dispatch cycle stays in the
+	// "frames being dropped" state continuously, the goroutine emits a
+	// periodic Warnf at this interval so operators see the cycle is
+	// still in trouble. Without this, a sustained drop window emits
+	// the first Warnf and then stays silent until the cycle ends —
+	// which for a stuck cascade can be effectively forever. Sized for
+	// the operator-attention window (60s feels recent in human-scale
+	// log scanning) and large enough not to flood at full audio rate.
+	periodicReportInterval = 60 * time.Second
 )
 
 // Transcoder is a kernel that decodes and then encodes packets/frames.
@@ -285,19 +298,43 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 
 	resultCh := make(chan packetorframe.OutputUnion, 2)
 	wg.Add(1)
-	var encoderError error
-	var encoderErrorLocker sync.Mutex
-	setEncoderError := func(err error) {
-		encoderErrorLocker.Lock()
-		defer encoderErrorLocker.Unlock()
-		if encoderError == nil {
-			encoderError = err
+	// Vector A: encoderError state partitioned by astiav.MediaType so an
+	// audio-lane encoder error does not drop video frames at the
+	// dispatch gates (and vice-versa). The shared `var encoderError
+	// error` ancestor was a single monotonic-latch across mediaTypes —
+	// the architectural defect that motivated this task. Phase 2 design
+	// §3 mechanism + §3.5 invariants:
+	//
+	//   INV-1 (first-wins per lane): once a mediaType lane records an
+	//         error, subsequent setEncoderError calls for that lane are
+	//         no-ops. Encoded by the `if _, ok := encoderErrors[mt]; !ok`
+	//         guard inside setEncoderError below.
+	//   INV-2 (bounded size): map size bounded by distinct mediaType
+	//         enum values in the cascade (≤7 per astiav). No unbounded
+	//         growth.
+	//   INV-3 (errors.Is chain preserved): cycle-return aggregates all
+	//         per-mediaType errors via errors.Join, which preserves
+	//         errors.Is/errors.As traversal across each lane's wrapped
+	//         error. Cycle-return contract change is documented in
+	//         Phase 2 design §3.5.
+	//
+	// Thread safety: single mutex preserved (mirrors the prior
+	// encoderErrorLocker discipline; map ops are O(1) under the lock;
+	// G1 outer dispatch loop + G2 inner filterOutputCh goroutine both
+	// serialize through encoderErrorsLocker).
+	encoderErrors := map[astiav.MediaType]error{}
+	var encoderErrorsLocker sync.Mutex
+	setEncoderError := func(mt astiav.MediaType, err error) {
+		encoderErrorsLocker.Lock()
+		defer encoderErrorsLocker.Unlock()
+		if _, ok := encoderErrors[mt]; !ok {
+			encoderErrors[mt] = err
 		}
 	}
-	getEncoderError := func() error {
-		encoderErrorLocker.Lock()
-		defer encoderErrorLocker.Unlock()
-		return encoderError
+	getEncoderError := func(mt astiav.MediaType) error {
+		encoderErrorsLocker.Lock()
+		defer encoderErrorsLocker.Unlock()
+		return encoderErrors[mt]
 	}
 
 	observability.Go(ctx, func(ctx context.Context) {
@@ -317,23 +354,106 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 			wg.Add(1)
 			observability.Go(ctx, func(ctx context.Context) {
 				defer wg.Done()
-				for out := range filterOutputCh {
-					if err := getEncoderError(); err != nil {
-						continue
+				// errAlreadyLogged + droppedCount surface the
+				// "filterOutputCh frames silently dropped because an
+				// encoderError was already latched" condition that
+				// would otherwise be invisible. The rate-limiter has
+				// two reset triggers (first-wins between them):
+				//   (a) cycle ends — emits a summary with the total
+				//       count via the deferred function below.
+				//   (b) periodicReportInterval elapses since the last
+				//       Warnf — emits a "still suppressing" Warnf with
+				//       the cumulative count and clears errAlreadyLogged
+				//       so the next drop re-emits an initial Warnf.
+				// The deferred summary is registered before the loop so
+				// a panic mid-loop still surfaces the count to operator
+				// logs (panic-safety symmetry with the outer dispatch
+				// cycle below).
+				var errAlreadyLogged bool
+				var droppedCount int
+				defer func() {
+					if droppedCount > 0 {
+						logger.Warnf(ctx, "filterOutputCh cycle ended: %d frame(s) dropped due to latched encoderError", droppedCount)
 					}
-					err := r.Encoder.SendInput(ctx, out.ToInput(), outputCh)
-					if err != nil {
-						setEncoderError(err)
+				}()
+				ticker := time.NewTicker(periodicReportInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case out, ok := <-filterOutputCh:
+						if !ok {
+							return
+						}
+						// C1 LOAD-BEARING nil-deref guard. OutputUnion.Get()
+						// returns a nil interface when both Frame and
+						// Packet are nil (see packetorframe/packet_or_frame.go
+						// L109-118); calling out.GetMediaType() in that
+						// state panics on method-against-nil-interface.
+						// The outer dispatch loop already guards against
+						// nil-Frame at L458-466; we mirror that here for
+						// the filterOutputCh case, adapted for the union's
+						// Frame+Packet duality (filter kernels can emit
+						// either; an empty union is degenerate but never
+						// unreachable from the type system).
+						if out.Frame == nil && out.Packet == nil {
+							continue
+						}
+						mt := out.GetMediaType()
+						if err := getEncoderError(mt); err != nil {
+							droppedCount++
+							if !errAlreadyLogged {
+								logger.Warnf(ctx, "filterOutputCh frames being dropped (mediaType=%s): encoderError already latched: %v; suppressing further drop logs until cycle end or %s elapsed", mt, err, periodicReportInterval)
+								errAlreadyLogged = true
+							}
+							continue
+						}
+						err := r.Encoder.SendInput(ctx, out.ToInput(), outputCh)
+						if err != nil {
+							setEncoderError(mt, err)
+						}
+					case <-ticker.C:
+						if errAlreadyLogged && droppedCount > 0 {
+							logger.Warnf(ctx, "filterOutputCh still suppressing further drops; current count %d", droppedCount)
+							errAlreadyLogged = false
+						}
 					}
 				}
 			})
 			defer close(filterOutputCh)
 		}
 
+		// resultErrAlreadyLogged + resultDroppedCount mirror the
+		// filterOutputCh observability pattern above: surface the
+		// "decoded frames silently skipped because an encoderError was
+		// already latched" condition. Two reset triggers (first-wins):
+		//   (a) cycle ends — deferred summary below emits the total.
+		//   (b) periodicReportInterval elapses since the last Warnf —
+		//       emits a "still suppressing" Warnf with the cumulative
+		//       count and clears resultErrAlreadyLogged so the next
+		//       skip re-emits an initial Warnf.
+		var resultErrAlreadyLogged bool
+		var resultDroppedCount int
+		defer func() {
+			if resultDroppedCount > 0 {
+				logger.Warnf(ctx, "decoder→encoder dispatch cycle ended: %d frame(s) skipped due to latched encoderError", resultDroppedCount)
+			}
+		}()
+		resultTicker := time.NewTicker(periodicReportInterval)
+		defer resultTicker.Stop()
 		for {
-			out, ok := <-resultCh
-			if !ok {
-				return
+			var out packetorframe.OutputUnion
+			var ok bool
+			select {
+			case out, ok = <-resultCh:
+				if !ok {
+					return
+				}
+			case <-resultTicker.C:
+				if resultErrAlreadyLogged && resultDroppedCount > 0 {
+					logger.Warnf(ctx, "decoder→encoder dispatch still suppressing further skips; current count %d", resultDroppedCount)
+					resultErrAlreadyLogged = false
+				}
+				continue
 			}
 			if out.Frame == nil {
 				logger.Tracef(ctx, "got a non-frame output from the decoder; passing it through")
@@ -345,11 +465,16 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 				continue
 			}
 			f := *out.Frame
-			logger.Tracef(ctx, "got a decoded %s frame from the decoder", f.GetMediaType())
+			mt := f.GetMediaType()
+			logger.Tracef(ctx, "got a decoded %s frame from the decoder", mt)
 			func() {
 				defer frame.Pool.Put(f.Frame)
-				if err := getEncoderError(); err != nil {
-					logger.Tracef(ctx, "skipping encoding because there is already an encoder error: %v", err)
+				if err := getEncoderError(mt); err != nil {
+					resultDroppedCount++
+					if !resultErrAlreadyLogged {
+						logger.Warnf(ctx, "decoder→encoder dispatch skipping frames (mediaType=%s): encoderError already latched: %v; suppressing further skip logs until cycle end or %s elapsed", mt, err, periodicReportInterval)
+						resultErrAlreadyLogged = true
+					}
 					return
 				}
 
@@ -363,7 +488,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 					err := r.Encoder.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, outputCh)
 					if err != nil {
 						logger.Tracef(ctx, "encoder returned an error: %v", err)
-						setEncoderError(err)
+						setEncoderError(mt, err)
 					}
 					return
 				}
@@ -371,7 +496,7 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 				err := r.FilterKernel.SendInput(ctx, packetorframe.InputUnion{Frame: &inputFrame}, filterOutputCh)
 				if err != nil {
 					logger.Tracef(ctx, "filter kernel returned an error: %v", err)
-					setEncoderError(err)
+					setEncoderError(mt, err)
 				}
 			}()
 		}
@@ -383,8 +508,28 @@ func (r *Transcoder[DF, EF]) decoderToEncoder(
 		err = decodeFn(ctx, resultCh)
 	}()
 	wg.Wait()
-	if encoderError != nil {
-		return fmt.Errorf("got an error from the encoder: %w", encoderError)
+	// Vector A cycle-return aggregation: if any per-mediaType lane
+	// recorded an error, wrap them all via errors.Join. Sort by the
+	// astiav.MediaType integer value before joining for deterministic
+	// ordering — Phase 2 design §10 critique #1 (map iteration is
+	// nondeterministic; tests + log readers expect stable order). The
+	// errors.Join pattern is project-canonical: 42 existing call sites
+	// in kernel/*.go top-level (post-Vector-A this becomes 43; verified
+	// per-file via `grep -cE "errors\.Join" kernel/*.go` at canonical
+	// f49380c1 this session).
+	encoderErrorsLocker.Lock()
+	mediaTypes := make([]astiav.MediaType, 0, len(encoderErrors))
+	for mt := range encoderErrors {
+		mediaTypes = append(mediaTypes, mt)
+	}
+	encoderErrorsLocker.Unlock()
+	slices.Sort(mediaTypes)
+	if len(mediaTypes) > 0 {
+		encErrs := make([]error, 0, len(mediaTypes))
+		for _, mt := range mediaTypes {
+			encErrs = append(encErrs, fmt.Errorf("mediaType=%s: %w", mt, encoderErrors[mt]))
+		}
+		return fmt.Errorf("got error(s) from the encoder: %w", errors.Join(encErrs...))
 	}
 	if err != nil {
 		return fmt.Errorf("decoder returned an error: %w", err)

@@ -26,6 +26,25 @@ import (
 	"github.com/xaionaro-go/avpipeline/logger"
 )
 
+// mediaTypeStringForLog returns a string suitable for the stall-class
+// log mediaType= field. EncoderRaw.MediaType panics by design
+// (codec/codec_test.go:TestEncoderRaw_MediaType_Panics) since raw
+// encoders carry no codec context to derive a media type from. The
+// no-Reiniter sites in handleEncoderStall and handleSilentConsumeStall
+// are exactly where EncoderRaw lands (raw encoders never implement
+// EncoderReiniter), so the inline guard via codec.IsEncoderRaw mirrors
+// the established pattern at kernel/encoder.go:418 + :673.
+//
+// "raw" placeholder preserves the Phase 2 spec uniform log-grep
+// operator workflow (every encoder_stall.go Warnf carries
+// mediaType=...) without crashing the stall-class log surface.
+func mediaTypeStringForLog(ctx context.Context, enc codec.Encoder) string {
+	if codec.IsEncoderRaw(enc) {
+		return "raw"
+	}
+	return enc.MediaType(ctx).String()
+}
+
 // handleEncoderStall implements the av1_mediacodec stall watchdog:
 // when sendFrameWithDrainRetry has bailed with errEncoderStalled,
 // decide whether to drop the frame quietly or escalate to a full
@@ -56,13 +75,20 @@ func (e *Encoder[EF]) handleEncoderStall(
 	stalls := streamEncoder.consecutiveStalls.Load()
 	if stalls < encoderStallReinitThreshold {
 		// Below threshold: just drop the frame, no Reinit yet.
+		// Logged at Warnf so each stall-class drop is visible in
+		// operator logs; without this, a stuck-just-below-threshold
+		// encoder silently sheds frames until the watchdog escalates.
+		// mediaType lets operators disambiguate audio vs video
+		// stalls when scanning logs (load-bearing for cascade
+		// audio-only ESDS-class debugging).
+		logger.Warnf(ctx, "encoder stall under-threshold drop (mediaType=%s) %d/%d; will reinit at threshold", streamEncoder.Encoder.MediaType(ctx), stalls, encoderStallReinitThreshold)
 		return nil
 	}
 	r, ok := streamEncoder.Encoder.(codec.EncoderReiniter)
 	if !ok {
 		// Encoder cannot Reinit (e.g. dummy copy/raw). Nothing more
 		// we can do; surface the stall by dropping the frame.
-		logger.Warnf(ctx, "encoder stalled %d times but encoder does not implement EncoderReiniter; dropping frame", stalls)
+		logger.Warnf(ctx, "encoder stalled (mediaType=%s) %d times but encoder does not implement EncoderReiniter; dropping frame", mediaTypeStringForLog(ctx, streamEncoder.Encoder), stalls)
 		return nil
 	}
 	return escalateStallReinit(
@@ -93,6 +119,23 @@ func (e *Encoder[EF]) handleSilentConsumeStall(
 ) error {
 	frames := streamEncoder.framesInSinceLastPacket.Load()
 	if frames < encoderSilentConsumeThreshold {
+		// Below threshold: bookkeeping no-op. Per-frame logging here
+		// would flood at full input frame rate during the normal
+		// startup window (codec accepts frames but emits no packet
+		// yet, e.g. B-frame look-ahead).
+		//
+		// To surface the "approaching reinit" condition without
+		// flooding, emit a single Warnf at the half-threshold
+		// boundary: this gives operators ~half the silent-consume
+		// window of advance notice before escalateStallReinit fires
+		// at threshold, while logging exactly once per silent-consume
+		// cycle (frames is reset to 0 by drain when a packet is
+		// emitted, see encoder.go:framesInSinceLastPacket.Store(0)).
+		if frames == encoderSilentConsumeThreshold/2 {
+			logger.Warnf(ctx, "encoder silent-consume watchdog (mediaType=%s) approaching reinit threshold: %d/%d frames since last packet", streamEncoder.Encoder.MediaType(ctx), frames, encoderSilentConsumeThreshold)
+		} else {
+			logger.Tracef(ctx, "silent-consume watchdog tick (mediaType=%s): %d/%d frames since last packet", streamEncoder.Encoder.MediaType(ctx), frames, encoderSilentConsumeThreshold)
+		}
 		return nil
 	}
 	r, ok := streamEncoder.Encoder.(codec.EncoderReiniter)
@@ -100,7 +143,7 @@ func (e *Encoder[EF]) handleSilentConsumeStall(
 		// No Reinit capability: log once-per-threshold and reset the
 		// counter so we don't spam. Without the reset every subsequent
 		// SendFrame would re-trigger the same warning.
-		logger.Warnf(ctx, "encoder silent-consume stall (%d frames in, 0 packets out) but encoder does not implement EncoderReiniter; dropping watchdog signal", frames)
+		logger.Warnf(ctx, "encoder silent-consume stall (mediaType=%s, %d frames in, 0 packets out) but encoder does not implement EncoderReiniter; dropping watchdog signal", mediaTypeStringForLog(ctx, streamEncoder.Encoder), frames)
 		streamEncoder.framesInSinceLastPacket.Store(0)
 		return nil
 	}

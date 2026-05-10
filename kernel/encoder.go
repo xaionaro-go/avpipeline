@@ -99,6 +99,7 @@ type Encoder[EF codec.EncoderFactory] struct {
 	outputFormatContext       *astiav.FormatContext
 	headerIsWritten           bool
 	isDirtyCache              atomic.Bool
+	forceNextKeyFrame         atomic.Bool
 }
 
 var (
@@ -466,6 +467,15 @@ func (e *Encoder[EF]) initEncoderFor(
 
 	encoder := &streamEncoder{Encoder: encoderInstance, EncoderConfig: &e.EncoderConfig}
 	e.encoders[streamIndex] = encoder
+	if e.forceNextKeyFrame.Load() && params.MediaType() == astiav.MediaTypeVideo {
+		if codec.IsEncoderCopy(encoderInstance) {
+			logger.Debugf(ctx, "not applying pending force-next-key-frame to a copy encoder")
+			return nil
+		}
+		if err := encoderInstance.SetForceNextKeyFrame(ctx, true); err != nil {
+			return fmt.Errorf("unable to apply pending force-next-key-frame to encoder for stream %d: %w", streamIndex, err)
+		}
+	}
 	return nil
 }
 
@@ -582,6 +592,7 @@ func (e *Encoder[EF]) SetForceNextKeyFrame(
 	v bool,
 ) error {
 	logger.Debugf(ctx, "SetForceNextKeyFrame: %v", v)
+	e.forceNextKeyFrame.Store(v)
 	var errs []error
 	e.Locker.Do(xsync.WithNoLogging(ctx, true), func() {
 		for _, encoder := range e.encoders {
@@ -730,7 +741,15 @@ func (e *Encoder[EF]) sendFrame(
 		}
 
 		if len(fittedFrames) == 0 {
-			logger.Tracef(ctx, "the frame was dropped by the fitter")
+			// fitFrameForEncoding can return zero frames during
+			// resampler warmup or PCM format mismatch resolution.
+			// Logged at Warnf (not Tracef) so cascade-internal audio
+			// drops are visible at production log levels. The file
+			// qualifier "kernel/encoder.go:fitFrameForEncoding" lets
+			// operators grep across multi-package log streams to find
+			// the exact origin of the drop. mediaType disambiguates
+			// the audio-vs-video stream that dropped the frame.
+			logger.Warnf(ctx, "kernel/encoder.go:fitFrameForEncoding: frame dropped (mediaType=%s; resampler warmup or PCM format mismatch)", streamEncoder.Encoder.MediaType(ctx))
 			return nil
 		}
 
@@ -1618,6 +1637,10 @@ func (e *Encoder[EF]) send(
 		}
 	}
 
+	logger.Debugf(ctx, "encode-emit %s pts=%d key=%t",
+		outPktWrapped.GetCodecParameters().MediaType(),
+		outPktWrapped.GetPTS(),
+		outPktWrapped.IsKey())
 	logger.Tracef(ctx, "sending out %s: dts:%d; pts:%d", outPktWrapped.GetCodecParameters().MediaType(), outPktWrapped.GetDTS(), outPktWrapped.GetPTS())
 	defer func() {
 		logger.Tracef(ctx, "/send: %v %v", outPktWrapped.GetCodecParameters().MediaType(), _err)

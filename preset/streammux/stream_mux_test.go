@@ -124,3 +124,174 @@ func TestSetPreferredOutputsSplitAVRejectsIncompletePlanWithoutPartialSwitch(t *
 	require.Equal(t, int32(math.MinInt32), mux.InputVideoOnly.OutputSwitch.NextValue.Load(),
 		"invalid SplitAV route plans must not leave a pending partial switch")
 }
+
+func TestCreateAndConfigureOutputDoesNotExposeUnconfiguredSplitAVOutput(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	videoKey := SenderKey{
+		VideoCodec:      codectypes.Name("av1"),
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+	}
+
+	err := mux.createAndConfigureOutput(ctx, mux.InputVideoOnly, videoKey, types.TranscoderConfig{
+		Output: types.TranscoderOutputConfig{
+			AudioTrackConfigs: []types.OutputAudioTrackConfig{{
+				CodecName:  codectypes.Name("aac"),
+				SampleRate: 48000,
+			}},
+		},
+	})
+
+	require.Error(t, err)
+	_, ok := mux.OutputsMap.Load(videoKey)
+	require.False(t, ok, "failed output configuration must not leave a stale split video output")
+	requireInputPushCount(t, ctx, mux.InputVideoOnly, 0)
+	require.Empty(t, mux.existingFanOutMembers(ctx))
+}
+
+func TestSwitchToOutputByPropsMaterializesSplitAVOutputsFromIdleMux(t *testing.T) {
+	mux, ctx := newStreamMuxForEvictTest(t)
+
+	err := mux.SwitchToOutputByProps(ctx, types.SenderProps{
+		TranscoderConfig: squareAV1AACTranscoderConfigForTest(),
+	})
+	require.NoError(t, err)
+
+	videoKey := SenderKey{
+		VideoCodec:      codectypes.Name("av1"),
+		VideoResolution: codectypes.Resolution{Width: 1920, Height: 1920},
+	}
+	audioKey := SenderKey{
+		AudioCodec:      codectypes.Name("aac"),
+		AudioSampleRate: 48000,
+	}
+	videoOutput, ok := mux.OutputsMap.Load(videoKey)
+	require.True(t, ok, "idle SplitAV switch must create the requested video output")
+	audioOutput, ok := mux.OutputsMap.Load(audioKey)
+	require.True(t, ok, "idle SplitAV switch must create the requested audio output")
+
+	requireOutputInputPushCount(t, ctx, mux.InputVideoOnly, videoOutput, 1)
+	requireOutputInputPushCount(t, ctx, mux.InputAudioOnly, audioOutput, 1)
+	requireInputPrefersOutput(t, mux.InputVideoOnly, videoOutput)
+	requireInputPrefersOutput(t, mux.InputAudioOnly, audioOutput)
+	requireSplitAVOutputTracks(t, videoOutput, audioOutput)
+}
+
+func TestSwitchToOutputByPropsExposesRequestedPropsDuringOutputCreation(t *testing.T) {
+	ctx := context.Background()
+	factory := &currentOutputPropsRecordingFactory{}
+	mux, err := NewWithCustomData[struct{}](
+		ctx,
+		types.MuxModeDifferentOutputsSameTracksSplitAV,
+		factory,
+	)
+	require.NoError(t, err)
+	factory.mux = mux
+
+	mux.CurrentOutputProps = types.SenderProps{
+		TranscoderConfig: types.TranscoderConfig{
+			Output: types.TranscoderOutputConfig{
+				VideoTrackConfigs: []types.OutputVideoTrackConfig{{
+					CodecName:  codectypes.Name("h264"),
+					Resolution: codectypes.Resolution{Width: 1280, Height: 720},
+				}},
+				AudioTrackConfigs: []types.OutputAudioTrackConfig{{
+					CodecName:  codectypes.Name("aac"),
+					SampleRate: 44100,
+				}},
+			},
+		},
+	}
+	requestedProps := types.SenderProps{
+		TranscoderConfig: squareAV1AACTranscoderConfigForTest(),
+	}
+
+	err = mux.SwitchToOutputByProps(ctx, requestedProps)
+	require.NoError(t, err)
+	require.NotEmpty(t, factory.seenProps)
+	for _, seenProps := range factory.seenProps {
+		require.Equal(t, requestedProps, seenProps)
+	}
+}
+
+type currentOutputPropsRecordingFactory struct {
+	mux       *StreamMux[struct{}]
+	seenProps []types.SenderProps
+}
+
+func (f *currentOutputPropsRecordingFactory) NewSender(
+	ctx context.Context,
+	outputKey SenderKey,
+) (SendingNode[struct{}], types.SenderConfig, error) {
+	if f.mux != nil {
+		f.seenProps = append(f.seenProps, f.mux.CurrentOutputProps)
+	}
+	return dummyOutputFactory{}.NewSender(ctx, outputKey)
+}
+
+func squareAV1AACTranscoderConfigForTest() types.TranscoderConfig {
+	return types.TranscoderConfig{
+		Output: types.TranscoderOutputConfig{
+			VideoTrackConfigs: []types.OutputVideoTrackConfig{{
+				CodecName:  codectypes.Name("av1"),
+				Resolution: codectypes.Resolution{Width: 1920, Height: 1920},
+			}},
+			AudioTrackConfigs: []types.OutputAudioTrackConfig{{
+				CodecName:  codectypes.Name("aac"),
+				SampleRate: 48000,
+			}},
+		},
+	}
+}
+
+func requireSplitAVOutputTracks(
+	t *testing.T,
+	videoOutput *Output[struct{}],
+	audioOutput *Output[struct{}],
+) {
+	t.Helper()
+
+	videoEncoderFactory := videoOutput.TranscoderNode.Processor.Kernel.EncoderFactory
+	audioEncoderFactory := audioOutput.TranscoderNode.Processor.Kernel.EncoderFactory
+
+	require.Equal(t, codec.Name("av1"), videoEncoderFactory.VideoCodec)
+	require.Empty(t, videoEncoderFactory.AudioCodec)
+	require.Equal(t, codectypes.Resolution{Width: 1920, Height: 1920}, *videoEncoderFactory.VideoResolution)
+
+	require.Equal(t, codec.Name("aac"), audioEncoderFactory.AudioCodec)
+	require.Empty(t, audioEncoderFactory.VideoCodec)
+	require.Nil(t, audioEncoderFactory.VideoResolution)
+	require.Equal(t, audio.SampleRate(48000), audioEncoderFactory.AudioSampleRate)
+}
+
+func requireInputPrefersOutput(
+	t *testing.T,
+	input *Input[struct{}],
+	output *Output[struct{}],
+) {
+	t.Helper()
+	outputID := int32(output.ID)
+	current := input.OutputSwitch.CurrentValue.Load()
+	next := input.OutputSwitch.NextValue.Load()
+	if current == outputID || next == outputID {
+		return
+	}
+	require.Failf(
+		t,
+		"input does not prefer output",
+		"current=%d next=%d output=%d",
+		current,
+		next,
+		output.ID,
+	)
+}
+
+func requireInputPushCount(
+	t *testing.T,
+	ctx context.Context,
+	input *Input[struct{}],
+	expected int,
+) {
+	t.Helper()
+	require.Len(t, input.Node.GetPushTos(ctx), expected)
+}

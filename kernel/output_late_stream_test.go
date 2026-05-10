@@ -181,6 +181,70 @@ func buildVideoPacket(t *testing.T, src *mockMutablePacketSource, stream *astiav
 	})
 }
 
+func TestOutput_PreallocatedVideoStreamIsConfiguredOnFirstPacket(t *testing.T) {
+	ctx := context.Background()
+
+	output, err := NewOutputFromURL(ctx, "", secret.New(""), OutputConfig{
+		CustomOptions: types.DictionaryItems{{
+			Key:   "f",
+			Value: "null",
+		}},
+		WaitForOutputStreams: &OutputConfigWaitForOutputStreams{
+			MinStreamsVideo: 1,
+			Timeout:         time.Second,
+		},
+	})
+	require.NoError(t, err)
+	defer output.Close(ctx)
+
+	src := newMockMutablePacketSource()
+	defer src.fmtCtx.Free()
+
+	videoStream := src.addStream(astiav.CodecIDH264)
+	configureSampleH264Stream(videoStream)
+
+	require.NoError(t, output.NotifyAboutPacketSource(ctx, src))
+	require.Contains(t, output.OutputStreams, videoStream.Index())
+	require.Nil(t, output.OutputStreams[videoStream.Index()])
+
+	videoPkt := buildVideoPacket(t, src, videoStream, true)
+	require.NoError(t, output.SendInput(ctx, packetorframe.InputUnion{Packet: &videoPkt}, nil))
+	require.NotNil(t, output.OutputStreams[videoStream.Index()])
+	require.True(t, output.headerSent)
+}
+
+func TestOutput_PreallocatedAudioStreamDoesNotWaitForKeyFrame(t *testing.T) {
+	ctx := context.Background()
+
+	output, err := NewOutputFromURL(ctx, "", secret.New(""), OutputConfig{
+		CustomOptions: types.DictionaryItems{{
+			Key:   "f",
+			Value: "null",
+		}},
+		WaitForOutputStreams: &OutputConfigWaitForOutputStreams{
+			MinStreamsAudio: 1,
+			Timeout:         time.Second,
+		},
+	})
+	require.NoError(t, err)
+	defer output.Close(ctx)
+
+	src := newMockMutablePacketSource()
+	defer src.fmtCtx.Free()
+
+	audioStream := src.addStream(astiav.CodecIDAac)
+	configureSampleAACStream(audioStream)
+
+	require.NoError(t, output.NotifyAboutPacketSource(ctx, src))
+	require.Contains(t, output.OutputStreams, audioStream.Index())
+	require.Nil(t, output.OutputStreams[audioStream.Index()])
+
+	audioPkt := buildAudioPacket(t, src, audioStream)
+	require.NoError(t, output.SendInput(ctx, packetorframe.InputUnion{Packet: &audioPkt}, nil))
+	require.NotNil(t, output.OutputStreams[audioStream.Index()])
+	require.True(t, output.headerSent)
+}
+
 // TestOutput_BoundedGating_TimeoutFires verifies that when the
 // configured Min* stream counts have not been satisfied within
 // WaitForOutputStreams.Timeout, send() commits to writing the header

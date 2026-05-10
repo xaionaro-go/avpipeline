@@ -95,7 +95,10 @@ func (rm *transcoderAsResourceManager[C, P]) canReuse(
 		return false
 	}
 	if params.PixelFormat() != astiav.PixelFormatNone {
-		cc := decoder.CodecContext(ctx)
+		cc, ok := decoder.CodecContextIfAvailable(ctx)
+		if !ok {
+			return false
+		}
 		if cc == nil {
 			return false
 		}

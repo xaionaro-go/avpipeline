@@ -22,6 +22,7 @@ import (
 	"github.com/xaionaro-go/avpipeline/kernel"
 	"github.com/xaionaro-go/avpipeline/kernel/avfilter"
 	barrierstategetter "github.com/xaionaro-go/avpipeline/kernel/barrier/stategetter"
+	kerneltypes "github.com/xaionaro-go/avpipeline/kernel/types"
 	"github.com/xaionaro-go/avpipeline/logger"
 	mathcondition "github.com/xaionaro-go/avpipeline/math/condition"
 	"github.com/xaionaro-go/avpipeline/node"
@@ -141,6 +142,21 @@ type Output[C any] struct {
 	// GetKey()'s autobitrate semantics intact while eliminating the
 	// silent miss in evictDeadOutput / removeOutputByIDLocked.
 	storageKey SenderKey
+
+	// senderURLAtCreation records the URL the SenderFactory generated
+	// for this Output at construction time, when the factory implements
+	// the optional SenderURLPreviewer capability. Empty when the factory
+	// does not expose URL preview (drift detection is disabled in that
+	// case and the regular Reuse path is taken).
+	//
+	// The Reuse path in StreamMux.getOrCreateOutputLocked compares this
+	// against the URL the factory would now generate for the same
+	// senderKey: a mismatch means SetOutputURL changed the template
+	// since this Output was constructed, and the existing sender is
+	// publishing to the stale URL. Reuse detects the drift, tears the
+	// old Output down, and falls through to the Create path so the new
+	// sender picks up the new URL via NewSender.
+	senderURLAtCreation string
 }
 
 // StorageKey returns the SenderKey under which this Output was indexed
@@ -271,6 +287,18 @@ func newOutput[C any](
 		return nil, fmt.Errorf("unable to connect sending node: %w", err)
 	}
 
+	// Record the URL the factory would generate for this senderKey, for
+	// SetOutputURL drift detection on the Reuse path (Task #174). Empty
+	// string when the factory does not expose URL preview — drift
+	// detection becomes a no-op in that case.
+	var senderURLAtCreation string
+	if previewer, ok := senderFactory.(SenderURLPreviewer); ok {
+		previewedURL, urlErr := previewer.URLForKey(ctx, senderKey)
+		if urlErr == nil {
+			senderURLAtCreation = previewedURL
+		}
+	}
+
 	transcoderKernel, err := kernel.NewTranscoder(
 		ctx,
 		codec.NewNaiveDecoderFactory(ctx, nil),
@@ -293,9 +321,10 @@ func newOutput[C any](
 	}
 
 	o := &Output[C]{
-		ID:         outputID,
-		storageKey: senderKey,
-		InputFrom:  inputNode,
+		ID:                  outputID,
+		storageKey:          senderKey,
+		senderURLAtCreation: senderURLAtCreation,
+		InputFrom:           inputNode,
 		InputFilter: node.NewWithCustomDataFromKernel[OutputCustomData[C]](ctx, kernel.NewBarrier(
 			belt.WithField(ctx, "output_chain_step", "InputFilter"),
 			outputSwitch,
@@ -364,6 +393,12 @@ func newOutput[C any](
 	o.SendingFixer.SetCustomData(customData)
 	o.SendingSyncer.CustomData = customData
 	o.SendingNode.SetCustomData(customData)
+	err = configureVideoSenderReconnectPacketFlow(ctx, o.SendingNode, senderKey, o.resetSendingPathForReconnect, func(ctx context.Context) error {
+		return o.SetForceNextFrameKey(ctx, true)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to configure video sender reconnect packet flow: %w", err)
+	}
 
 	if outputReuseDecoderResources {
 		o.initReuseDecoderResources(ctx)
@@ -448,6 +483,117 @@ func newOutput[C any](
 	logger.Tracef(ctx, "o.OutputSyncer.Processor.Kernel.Handler.Condition: %p", o.SendingSyncer.Processor.Kernel.Handler.Condition)
 
 	return o, nil
+}
+
+func configureVideoSenderReconnectKeyFrameRequest[C any](
+	ctx context.Context,
+	sendingNode SendingNode[C],
+	senderKey SenderKey,
+	requestKeyFrame func(context.Context) error,
+) error {
+	return configureVideoSenderReconnectPacketFlow(ctx, sendingNode, senderKey, nil, requestKeyFrame)
+}
+
+func configureVideoSenderReconnectPacketFlow[C any](
+	ctx context.Context,
+	sendingNode SendingNode[C],
+	senderKey SenderKey,
+	resetPacketFlow func(context.Context) error,
+	requestKeyFrame func(context.Context) error,
+) error {
+	if senderKey.VideoCodec == "" {
+		return nil
+	}
+	if requestKeyFrame == nil {
+		return errors.New("key frame request callback is nil")
+	}
+
+	kerneler, ok := sendingNode.GetProcessor().(processor.GetKerneler)
+	if !ok {
+		return nil
+	}
+	retryableOutput, ok := kerneler.GetKernel().(*kernel.Retryable[*kernel.Output])
+	if !ok {
+		return nil
+	}
+
+	if !retryableOutput.KernelLocker.ManualLock(ctx) {
+		return ctx.Err()
+	}
+	defer retryableOutput.KernelLocker.ManualUnlock(ctx)
+
+	previousOnKernelOpen := retryableOutput.Config.OnKernelOpen
+	var outputCount atomic.Uint64
+	retryableOutput.Config.OnKernelOpen = func(
+		ctx context.Context,
+		output *kernel.Output,
+	) error {
+		if previousOnKernelOpen != nil {
+			if err := previousOnKernelOpen(ctx, output); err != nil {
+				return err
+			}
+		}
+		if output == nil {
+			return nil
+		}
+
+		shouldResetPacketFlow := outputCount.Add(1) > 1
+		previousOnReady := output.Config.OnReady
+		output.Config.OnReady = func(
+			ctx context.Context,
+			output *kernel.Output,
+		) error {
+			if previousOnReady != nil {
+				if err := previousOnReady(ctx, output); err != nil {
+					return err
+				}
+			}
+			if shouldResetPacketFlow && resetPacketFlow != nil {
+				if err := resetPacketFlow(ctx); err != nil {
+					return fmt.Errorf("unable to reset video sender packet flow: %w", err)
+				}
+			}
+			if err := requestKeyFrame(ctx); err != nil {
+				return fmt.Errorf("unable to request video key frame: %w", err)
+			}
+			return nil
+		}
+		if err := requestKeyFrame(ctx); err != nil {
+			return fmt.Errorf("unable to request video key frame after output open: %w", err)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (o *Output[C]) resetSendingPathForReconnect(
+	ctx context.Context,
+) error {
+	resetters := []struct {
+		name string
+		node node.Abstract
+	}{
+		{"MapIndices", o.MapIndices},
+		{"SendingFixerInput", o.SendingFixer.Input()},
+		{"SendingFixerOutput", o.SendingFixer.Output()},
+		{"SendingSyncer", o.SendingSyncer},
+		{"SendingNode", o.SendingNode},
+	}
+
+	var errs []error
+	for _, item := range resetters {
+		if item.node == nil || item.node.GetProcessor() == nil {
+			continue
+		}
+		resetter, ok := item.node.GetProcessor().(kerneltypes.Resetter)
+		if !ok {
+			continue
+		}
+		if err := resetter.Reset(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to reset %s: %w", item.name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func logIfError(ctx context.Context, err error) {
@@ -766,7 +912,14 @@ func (o *Output[C]) reconfigureTranscoder(
 		return fmt.Errorf("unable to reconfigure the encoder: %w", err)
 	}
 	if len(cfg.Output.VideoTrackConfigs) == 0 {
-		return fmt.Errorf("no video track configs")
+		if err := o.reconfigureFilters(ctx, cfg); err != nil {
+			return fmt.Errorf("unable to reconfigure filters: %w", err)
+		}
+		if err := o.reconfigureMapping(ctx, cfg); err != nil {
+			return fmt.Errorf("unable to reconfigure mapping: %w", err)
+		}
+		o.TranscoderNode.SetInputFilter(ctx, nil)
+		return nil
 	}
 	videoCfg := cfg.Output.VideoTrackConfigs[0]
 	if configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName) == codec.NameCopy && !isCopyEncoder {
@@ -959,6 +1112,7 @@ func (o *Output[C]) reconfigureEncoder(
 	if len(cfg.Output.VideoTrackConfigs) > 0 {
 		videoCfg = cfg.Output.VideoTrackConfigs[0]
 	}
+	hasVideoCfg := len(cfg.Output.VideoTrackConfigs) > 0
 
 	var audioCfg types.OutputAudioTrackConfig
 	if len(cfg.Output.AudioTrackConfigs) > 1 {
@@ -967,6 +1121,7 @@ func (o *Output[C]) reconfigureEncoder(
 	if len(cfg.Output.AudioTrackConfigs) > 0 {
 		audioCfg = cfg.Output.AudioTrackConfigs[0]
 	}
+	hasAudioCfg := len(cfg.Output.AudioTrackConfigs) > 0
 
 	encoderFactory := o.TranscoderNode.Processor.Kernel.EncoderFactory
 
@@ -984,59 +1139,101 @@ func (o *Output[C]) reconfigureEncoder(
 	)
 
 	err := xsync.DoR1(ctx, &encoderFactory.Locker, func() error {
-		if len(encoderFactory.VideoEncoders) == 0 {
+		if len(encoderFactory.VideoEncoders) == 0 && len(encoderFactory.AudioEncoders) == 0 {
 			logger.Debugf(ctx, "the encoder is not yet initialized, so asking it to have the correct settings when it will be being initialized")
 
-			encoderFactory.VideoCodec = configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName)
-			encoderFactory.VideoCodecs = codecNames(videoCfg.CodecNames)
-			_isCopyEncoder = encoderFactory.VideoCodec == codec.NameCopy
-			encoderFactory.AudioCodec = configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName)
-			encoderFactory.AudioCodecs = codecNames(audioCfg.CodecNames)
-			encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
-			encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
-			encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
-			encoderFactory.HardwareDeviceType = types.HardwareDeviceType(videoCfg.HardwareDeviceType)
-			if videoCfg.AverageBitRate != 0 {
-				encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
+			if hasVideoCfg {
+				encoderFactory.VideoCodec = configuredCodecName(videoCfg.CodecNames, videoCfg.CodecName)
+				encoderFactory.VideoCodecs = codecNames(videoCfg.CodecNames)
+				_isCopyEncoder = encoderFactory.VideoCodec == codec.NameCopy
+				encoderFactory.VideoOptions = xastiav.DictionaryItemsToAstiav(ctx, videoOptions)
+				encoderFactory.HardwareDeviceName = codec.HardwareDeviceName(videoCfg.HardwareDeviceName)
+				encoderFactory.HardwareDeviceType = types.HardwareDeviceType(videoCfg.HardwareDeviceType)
+				if videoCfg.AverageBitRate != 0 {
+					encoderFactory.VideoQuality = quality.ConstantBitrate(videoCfg.AverageBitRate)
+				}
+				if videoCfg.Resolution != (codectypes.Resolution{}) {
+					encoderFactory.VideoResolution = &videoCfg.Resolution
+				}
+				fps := globaltypes.RationalFromApproxFloat64(videoCfg.AverageFrameRate)
+				// Rescale to millisecond-precision denominator to avoid rounding artifacts
+				// (e.g. 30/1 becomes 30000/1000).
+				newNum := fps.Num * 1000 / fps.Den
+				encoderFactory.VideoAverageFrameRate = astiav.NewRational(newNum, 1000)
+			} else {
+				encoderFactory.VideoCodec = ""
+				encoderFactory.VideoCodecs = nil
+				encoderFactory.VideoOptions = nil
+				encoderFactory.VideoQuality = nil
+				encoderFactory.VideoResolution = nil
+				encoderFactory.VideoAverageFrameRate = astiav.Rational{}
+				encoderFactory.HardwareDeviceName = ""
+				encoderFactory.HardwareDeviceType = globaltypes.HardwareDeviceTypeNone
 			}
-			if videoCfg.Resolution != (codectypes.Resolution{}) {
-				encoderFactory.VideoResolution = &videoCfg.Resolution
+
+			if hasAudioCfg {
+				encoderFactory.AudioCodec = configuredCodecName(audioCfg.CodecNames, audioCfg.CodecName)
+				encoderFactory.AudioCodecs = codecNames(audioCfg.CodecNames)
+				encoderFactory.AudioOptions = xastiav.DictionaryItemsToAstiav(ctx, convertCustomOptions(audioCfg.CustomOptions))
+				if audioCfg.AverageBitRate != 0 {
+					encoderFactory.AudioQuality = quality.ConstantBitrate(audioCfg.AverageBitRate)
+				}
+				encoderFactory.AudioSampleRate = audioCfg.SampleRate
+				encoderFactory.AudioChannels = audioCfg.Channels
+			} else {
+				encoderFactory.AudioCodec = ""
+				encoderFactory.AudioCodecs = nil
+				encoderFactory.AudioOptions = nil
+				encoderFactory.AudioQuality = nil
+				encoderFactory.AudioSampleRate = 0
+				encoderFactory.AudioChannels = 0
 			}
-			fps := globaltypes.RationalFromApproxFloat64(videoCfg.AverageFrameRate)
-			// Rescale to millisecond-precision denominator to avoid rounding artifacts
-			// (e.g. 30/1 becomes 30000/1000).
-			newNum := fps.Num * 1000 / fps.Den
-			encoderFactory.VideoAverageFrameRate = astiav.NewRational(newNum, 1000)
-			if audioCfg.AverageBitRate != 0 {
-				encoderFactory.AudioQuality = quality.ConstantBitrate(audioCfg.AverageBitRate)
-			}
-			encoderFactory.AudioSampleRate = audioCfg.SampleRate
-			encoderFactory.AudioChannels = audioCfg.Channels
 			return nil
 		}
 
-		if !codecNamesEqual(configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName), encoderFactoryCodecNames(encoderFactory.VideoCodecs, encoderFactory.VideoCodec)) {
+		if !hasVideoCfg {
+			if len(encoderFactory.VideoEncoders) > 0 {
+				return fmt.Errorf("unable to remove active video encoder on the fly")
+			}
+		}
+		if hasVideoCfg && !codecNamesEqual(configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName), encoderFactoryCodecNames(encoderFactory.VideoCodecs, encoderFactory.VideoCodec)) {
 			return fmt.Errorf("unable to change the encoding codec on the fly, yet: '%v' != '%v'", configuredCodecNames(videoCfg.CodecNames, videoCfg.CodecName), encoderFactoryCodecNames(encoderFactory.VideoCodecs, encoderFactory.VideoCodec))
 		}
 
 		logger.Debugf(ctx, "the encoder is already initialized, so modifying it if needed")
-		encoder := encoderFactory.VideoEncoders[0]
-		_isCopyEncoder = codec.IsEncoderCopy(encoder)
+		if hasVideoCfg && len(encoderFactory.VideoEncoders) == 0 {
+			return fmt.Errorf("unable to configure video track without an active video encoder")
+		}
+		var encoder codec.Encoder
+		if hasVideoCfg {
+			encoder = encoderFactory.VideoEncoders[0]
+			_isCopyEncoder = codec.IsEncoderCopy(encoder)
+		}
 
-		if videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
+		if hasVideoCfg && videoCfg.HardwareDeviceType != types.HardwareDeviceType(encoderFactory.HardwareDeviceType) {
 			return fmt.Errorf("unable to change the hardware device type on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceType, encoderFactory.HardwareDeviceType)
 		}
 
-		if videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
+		if hasVideoCfg && videoCfg.HardwareDeviceName != types.HardwareDeviceName(encoderFactory.HardwareDeviceName) {
 			return fmt.Errorf("unable to change the hardware device name on the fly, yet: '%s' != '%s'", videoCfg.HardwareDeviceName, encoderFactory.HardwareDeviceName)
 		}
 
-		if audioCfg.SampleRate != encoderFactory.AudioSampleRate {
+		if !hasAudioCfg {
+			if len(encoderFactory.AudioEncoders) > 0 {
+				return fmt.Errorf("unable to remove active audio encoder on the fly")
+			}
+		}
+
+		if hasAudioCfg && audioCfg.SampleRate != encoderFactory.AudioSampleRate {
 			return fmt.Errorf("unable to change the audio sample rate on the fly, yet: '%d' != '%d'", audioCfg.SampleRate, encoderFactory.AudioSampleRate)
 		}
 
-		if audioCfg.Channels != encoderFactory.AudioChannels {
+		if hasAudioCfg && audioCfg.Channels != encoderFactory.AudioChannels {
 			return fmt.Errorf("unable to change the audio channels on the fly, yet: '%d' != '%d'", audioCfg.Channels, encoderFactory.AudioChannels)
+		}
+
+		if !hasVideoCfg {
+			return nil
 		}
 
 		{

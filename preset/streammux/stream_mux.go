@@ -377,9 +377,9 @@ func (s *StreamMux[C]) initSwitches(
 					// EncoderFactory.VideoEncoders slice stays empty, and
 					// AutoBitRateHandler's checkOnce loops forever logging
 					// "unable to get encoder". The codec list itself is the
-					// SSOT in codec/intra_only.go — mirrored here through
-					// packetorframecondition.IsIntraOnlyCodec rather than
-					// duplicated case-by-case so the streammux,
+					// single source of truth in codec/intra_only.go. Mirror it
+					// here through packetorframecondition.IsIntraOnlyCodec
+					// rather than duplicated case-by-case so the streammux,
 					// inputwithfallback InputSwitch, and inputwithfallback
 					// Syncer keep-unless lists cannot silently diverge.
 					packetorframecondition.IsIntraOnlyCodec{},
@@ -523,6 +523,103 @@ func (s *StreamMux[C]) removeOutputLocked(
 }
 
 var _ = (*StreamMux[struct{}])(nil).removeOutputLocked
+
+// ResetOutputs removes every currently configured output and demotes
+// input routing state so a subsequent switch creates fresh output chains.
+func (s *StreamMux[C]) ResetOutputs(
+	ctx context.Context,
+) error {
+	return xsync.DoA1R1(ctx, &s.Locker, s.ResetOutputsLocked, ctx)
+}
+
+// ResetOutputsLocked is ResetOutputs for callers already holding
+// StreamMux.Locker while coordinating output configuration changes.
+func (s *StreamMux[C]) ResetOutputsLocked(
+	ctx context.Context,
+) (_err error) {
+	logger.Debugf(ctx, "ResetOutputsLocked")
+	defer func() { logger.Debugf(ctx, "/ResetOutputsLocked: %v", _err) }()
+
+	var outputs []*Output[C]
+	seenOutputs := map[*Output[C]]struct{}{}
+	s.OutputsLocker.Do(ctx, func() {
+		s.OutputsMap.Range(func(outputKey SenderKey, output *Output[C]) bool {
+			s.OutputsMap.Delete(outputKey)
+			if output == nil {
+				return true
+			}
+			s.Outputs.Delete(output.ID)
+			if _, ok := seenOutputs[output]; ok {
+				return true
+			}
+			seenOutputs[output] = struct{}{}
+			outputs = append(outputs, output)
+			return true
+		})
+		s.Outputs.Range(func(outputID OutputID, output *Output[C]) bool {
+			s.Outputs.Delete(outputID)
+			if output == nil {
+				return true
+			}
+			if _, ok := seenOutputs[output]; ok {
+				return true
+			}
+			seenOutputs[output] = struct{}{}
+			outputs = append(outputs, output)
+			return true
+		})
+	})
+
+	var errs []error
+	for _, output := range outputs {
+		s.detachOutputInputFromPushGraph(ctx, output)
+		if err := s.demoteOutputReferences(ctx, output); err != nil {
+			errs = append(errs, fmt.Errorf("unable to demote output %d references: %w", output.ID, err))
+		}
+		if err := output.CloseNoDrain(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("unable to close output %d: %w", output.ID, err))
+		}
+	}
+	if err := s.clearOutputRecoveryState(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("unable to clear output recovery state: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (s *StreamMux[C]) demoteOutputReferences(
+	ctx context.Context,
+	output *Output[C],
+) error {
+	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+		demotion := input.outputPair.DemoteIfCurrent(ctx, id.MemberID(output.ID))
+		if demotion.SwitchDemoted {
+			logger.Debugf(ctx, "demoted OutputSwitch.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
+		}
+		if demotion.SyncerDemoted {
+			logger.Debugf(ctx, "demoted OutputSyncer.CurrentValue from %d to MinInt32 on input %s", output.ID, input.GetType())
+		}
+		input.OutputSwitch.NextValue.CompareAndSwap(int32(output.ID), math.MinInt32)
+		input.OutputSyncer.NextValue.CompareAndSwap(int32(output.ID), math.MinInt32)
+		return nil
+	})
+}
+
+func (s *StreamMux[C]) clearOutputRecoveryState(
+	ctx context.Context,
+) error {
+	return s.ForEachInput(ctx, func(ctx context.Context, input *Input[C]) error {
+		s.lastEvictedKey.Delete(input)
+		if s.retryTracker == nil {
+			return nil
+		}
+		routeID, err := s.routeIDForInput(input)
+		if err != nil {
+			return err
+		}
+		s.retryTracker.MarkRecovered(ctx, routeID)
+		return nil
+	})
+}
 
 func (s *StreamMux[C]) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "StreamMux.Close()")
@@ -908,12 +1005,10 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 }
 
 // recreateEvictedOutputDefault is the production implementation behind
-// recreateEvictedOutputFunc. It materialises a fresh Output[N] under
-// the dead output's SenderKey and switches the orphaned input to point
-// at it, so the transient eviction caused by the rtmp-era encoder
-// burning down on its first camera-direct mediacodec frame self-heals
-// into a working camera-direct chain instead of wedging at MinInt32 +
-// StateDrop.
+// recreateEvictedOutputFunc. It materialises a fresh Output under the
+// dead output's SenderKey and switches the orphaned input to it so a
+// recoverable sender/encoder failure does not leave the input wedged at
+// MinInt32 + StateDrop.
 //
 // Caller (recommitDemotedInputToSibling no-sibling branch) MUST hold no
 // lock — this method takes s.Locker for the createAndConfigureOutputs +
@@ -923,12 +1018,9 @@ func (s *StreamMux[C]) setPreferredOutputForInput(
 // otherwise observe the freshly-created Output mid-recreate and race
 // it onto the input.
 //
-// The new Output's encoder will inherit the StreamMux-level
-// RawFrameSource flag (set at the time the camera AddInput latched it),
-// so its open-time pix_fmt is nv12 from the start and the camera-direct
-// path no longer needs the in-flight rtmp-era mediacodec frame to
-// transfer to software (which is the failure that triggered the
-// eviction in the first place).
+// The new Output's encoder inherits the StreamMux-level RawFrameSource
+// flag, so raw-frame inputs keep the same encoder pixel-format policy
+// after recovery as they had before the eviction.
 func (s *StreamMux[C]) recreateEvictedOutputDefault(
 	ctx context.Context,
 	input *Input[C],
@@ -1084,6 +1176,42 @@ func (s *StreamMux[C]) inputForNewOutputKey(
 	}
 }
 
+// outputURLMatchesFactoryPreview implements Task #174 SetOutputURL
+// drift detection on the Reuse path. Returns true when:
+//   - the SenderFactory does NOT implement SenderURLPreviewer (the
+//     factory cannot tell us what URL it would generate, so drift
+//     detection is opt-in; absent the capability, the regular Reuse
+//     semantics are preserved); OR
+//   - the existing Output was constructed by a factory that did not
+//     expose URL preview at the time (senderURLAtCreation is empty
+//     and there is no captured URL to compare against); OR
+//   - the factory's preview lookup errors out OR returns empty (treat
+//     as "preview not currently available", preserve Reuse); OR
+//   - the previewed URL matches the URL the existing Output recorded
+//     at its construction.
+//
+// Returns false ONLY when both sides have a non-empty URL and they
+// differ — that is the unambiguous "URL drift" signal that triggers
+// teardown-and-recreate in getOrCreateOutputLocked.
+func (s *StreamMux[C]) outputURLMatchesFactoryPreview(
+	ctx context.Context,
+	output *Output[C],
+	outputKey types.SenderKey,
+) bool {
+	if output == nil || output.senderURLAtCreation == "" {
+		return true
+	}
+	previewer, ok := s.SenderFactory.(SenderURLPreviewer)
+	if !ok {
+		return true
+	}
+	wantURL, err := previewer.URLForKey(ctx, outputKey)
+	if err != nil || wantURL == "" {
+		return true
+	}
+	return wantURL == output.senderURLAtCreation
+}
+
 func (s *StreamMux[C]) getOrCreateOutputLocked(
 	ctx context.Context,
 	outputKey types.SenderKey,
@@ -1112,6 +1240,36 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 		output, ok := s.Outputs.Load(OutputID(decision.ReuseMemberID))
 		if !ok || output == nil || output.IsClosed() {
 			return nil, false, fmt.Errorf("planned reuse of missing output %d for key %s", decision.ReuseMemberID, outputKey)
+		}
+		// Task #174 SetOutputURL drift detection. When the SenderFactory
+		// exposes URL preview AND the URL it would now generate for this
+		// senderKey differs from the URL captured at this Output's
+		// construction, the factory's underlying URL template changed
+		// since the existing sender was built (typically because of
+		// SetOutputURL between the prior switch and this one). The
+		// existing sender is publishing to the stale URL; reusing it
+		// silently drops the operator's URL change. Tear down the
+		// stale Output and fall through to the Create path below so
+		// NewSender picks up the new URL.
+		if !s.outputURLMatchesFactoryPreview(ctx, output, outputKey) {
+			logger.Debugf(ctx, "Output %d:%s URL drift detected; tearing down before recreate", output.ID, outputKey)
+			if removeErr := s.removeOutputLocked(ctx, output.StorageKey()); removeErr != nil {
+				logger.Errorf(ctx, "unable to remove drift-stale output %d:%s: %v", output.ID, outputKey, removeErr)
+			}
+			// CloseNoDrain matches the replacing/discarding-outputs
+			// precedent at L459 (Switch[inputType] outputPrev) and
+			// L579 (ResetOutputsLocked): the drift-stale output
+			// is being replaced, NOT gracefully shut down. The L644
+			// graceful-shutdown Close is the exception, not the
+			// precedent. Drain on a wedged-stale-URL output is futile
+			// (the publish destination doesn't match any AVD consumer
+			// — frames have nowhere to drain to) and would hold
+			// StreamMux.locker unnecessarily during the bounded-but-
+			// non-zero drain wait.
+			if closeErr := output.CloseNoDrain(ctx); closeErr != nil {
+				logger.Errorf(ctx, "unable to close drift-stale output %d:%s: %v", output.ID, outputKey, closeErr)
+			}
+			break
 		}
 		return output, false, nil
 	case fanout.CreationActionReject:
@@ -1161,7 +1319,6 @@ func (s *StreamMux[C]) getOrCreateOutputLocked(
 	s.Outputs.Store(outputID, output)
 	s.OutputsMap.Store(outputKey, output)
 
-	input.Node.AddPushTo(ctx, output.Input())
 	logger.Debugf(ctx, "initialized new output %d:%s", output.ID, outputKey)
 	return output, true, nil
 }
@@ -1281,6 +1438,17 @@ func (s *StreamMux[C]) switchToOutputByProps(
 		logger.Tracef(ctx, "/switchToOutputByProps: %#+v, %v: %v", props, persistent, _err)
 	}()
 	senderKey := PartialSenderKeyFromTranscoderConfig(ctx, &props.TranscoderConfig)
+	previousOutputProps := s.CurrentOutputProps
+	// Output recovery can run while this switch is still constructing
+	// replacement outputs, so make the requested props visible for the
+	// whole transition and roll them back only when the transition does
+	// not become the mux's persistent configuration.
+	s.CurrentOutputProps = props
+	defer func() {
+		if _err != nil || !persistent {
+			s.CurrentOutputProps = previousOutputProps
+		}
+	}()
 
 	if !s.IsAllowedDifferentOutputs() {
 		if s.countOutputs() != 0 {
@@ -1310,9 +1478,6 @@ func (s *StreamMux[C]) switchToOutputByProps(
 		return fmt.Errorf("unable to set the preferred outputs %s: %w", senderKey, err)
 	}
 
-	if persistent {
-		s.CurrentOutputProps = props
-	}
 	return nil
 }
 
@@ -1394,9 +1559,22 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 	}
 
 	logger.Debugf(ctx, "reconfiguring the output %d:%s (isNew: %v)", output.ID, senderKey, isNew)
-	err = output.reconfigureTranscoder(ctx, transcoderConfig)
+	inputTranscoderConfig := transcoderConfigForInputType(input.GetType(), transcoderConfig)
+	if !transcoderConfigHasOutputTracks(inputTranscoderConfig) {
+		if isNew {
+			s.removeUnconfiguredOutput(ctx, output)
+		}
+		return fmt.Errorf("no output tracks remain for input %s after split route selection", input.GetType())
+	}
+	err = output.reconfigureTranscoder(ctx, inputTranscoderConfig)
 	if err != nil {
+		if isNew {
+			s.removeUnconfiguredOutput(ctx, output)
+		}
 		return fmt.Errorf("unable to reconfigure the output %d:%s: %w", output.ID, senderKey, err)
+	}
+	if isNew {
+		input.Node.AddPushTo(ctx, output.Input())
 	}
 
 	output.InputFilter.Locker.ManualLock(ctx)
@@ -1412,6 +1590,65 @@ func (s *StreamMux[C]) createAndConfigureOutput(
 		}
 	})
 	return nil
+}
+
+func transcoderConfigForInputType(
+	inputType InputType,
+	transcoderConfig types.TranscoderConfig,
+) types.TranscoderConfig {
+	cfg := transcoderConfig
+	if transcoderConfig.Input != nil {
+		inputCfg := *transcoderConfig.Input
+		cfg.Input = &inputCfg
+	}
+
+	switch inputType {
+	case InputTypeAudioOnly:
+		cfg.Output.VideoTrackConfigs = nil
+		if cfg.Input != nil {
+			cfg.Input.VideoTrackConfigs = nil
+		}
+	case InputTypeVideoOnly:
+		cfg.Output.AudioTrackConfigs = nil
+		if cfg.Input != nil {
+			cfg.Input.AudioTrackConfigs = nil
+		}
+	}
+
+	return cfg
+}
+
+func transcoderConfigHasOutputTracks(
+	transcoderConfig types.TranscoderConfig,
+) bool {
+	if len(transcoderConfig.Output.VideoTrackConfigs) > 0 {
+		return true
+	}
+	return len(transcoderConfig.Output.AudioTrackConfigs) > 0
+}
+
+func (s *StreamMux[C]) removeUnconfiguredOutput(
+	ctx context.Context,
+	output *Output[C],
+) {
+	if output == nil {
+		return
+	}
+
+	var removeErr error
+	s.OutputsLocker.Do(ctx, func() {
+		stored, ok := s.OutputsMap.Load(output.StorageKey())
+		if !ok || stored != output {
+			return
+		}
+		removeErr = s.removeOutputLocked(ctx, output.StorageKey())
+	})
+	if removeErr != nil {
+		logger.Errorf(ctx, "unable to remove unconfigured output %d:%s: %v", output.ID, output.StorageKey(), removeErr)
+	}
+	if err := output.Close(ctx); err != nil {
+		logger.Errorf(ctx, "unable to close unconfigured output %d:%s: %v", output.ID, output.StorageKey(), err)
+	}
 }
 
 func (s *StreamMux[C]) GetAllStats(

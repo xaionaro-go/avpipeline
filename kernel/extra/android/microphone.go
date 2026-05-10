@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 	"unsafe"
 
 	"github.com/asticode/go-astiav"
@@ -26,6 +27,16 @@ import (
 	aaudiocapi "github.com/AndroidGoLab/ndk/capi/aaudio"
 	"github.com/xaionaro-go/xsync"
 )
+
+// microphoneTeardownWait bounds the AAudio teardown wait between
+// requestStop and close. AAudio's stop is asynchronous; close while a
+// stop callback is still in flight on a binder thread races with the
+// framework's internal teardown, producing use-after-free at
+// aaudio::AudioStream::systemStopFromApp (Task #194 W265 1/5
+// wingout-UI Activate→Deactivate reproduction). 500ms covers typical
+// driver drain latency (Oboe production default range) without
+// stalling teardown indefinitely on a stuck driver.
+const microphoneTeardownWait = 500 * time.Millisecond
 
 // AAudio natively supports S16 (and Float). We hardcode S16 as the
 // capture and output format.
@@ -167,12 +178,78 @@ func (k *Microphone) Close(ctx context.Context) (_err error) {
 }
 
 func (k *Microphone) closeLocked(ctx context.Context) error {
-	if k.stream != nil {
-		_ = k.stream.Stop()
-		_ = k.stream.Close()
-		k.stream = nil
+	if k.stream == nil {
+		return nil
 	}
+	stream := k.stream
+	k.stream = nil
+	safeStreamClose(ctx, stream)
 	return nil
+}
+
+// safeStreamClose performs an ordered AAudio teardown:
+//
+//	requestStop → wait-for-state-transition loop → close
+//
+// The naive Stop+immediate-Close races with the framework's stop
+// callback firing on a binder thread, producing use-after-free at
+// aaudio::AudioStream::systemStopFromApp (Task #194 W265 1/5
+// wingout-UI Activate→Deactivate reproduction). Per AAudio docs +
+// AndroidGoLab/ndk examples/audio/state-machine/main.go comment:
+// requestStop is asynchronous (STARTED → STOPPING transition);
+// close on a stream still in STOPPING is unsafe.
+//
+// The polling loop pattern (current state + waitForStateChange,
+// repeat until terminal state OR deadline) handles three cases:
+//   - typical: STARTED → STOPPING → STOPPED in <50ms
+//   - already-past-target (concurrent disconnect / framework stop):
+//     state already STOPPED / DISCONNECTED, no wait needed
+//   - stuck driver: deadline expires, close anyway with logged warn
+//
+// Modeled on the Oboe library's AudioStream::stop() teardown pattern
+// (Apache-2.0; google/oboe at src/aaudio/AudioStreamAAudio.cpp).
+func safeStreamClose(ctx context.Context, stream *audio.Stream) {
+	if err := stream.Stop(); err != nil {
+		logger.Warnf(ctx, "AAudio requestStop returned: %v; proceeding to wait+close", err)
+	}
+	deadline := time.Now().Add(microphoneTeardownWait)
+	currentState := stream.State()
+	for !isTerminalAAudioState(currentState) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			logger.Warnf(ctx, "AAudio teardown wait timed out at state %s; closing anyway", currentState)
+			break
+		}
+		var nextState audio.StreamState
+		rc := aaudiocapi.AAudioStream_waitForStateChange(
+			(*aaudiocapi.AAudioStream)(stream.Pointer()),
+			(aaudiocapi.Aaudio_stream_state_t)(currentState),
+			(*aaudiocapi.Aaudio_stream_state_t)(unsafe.Pointer(&nextState)),
+			remaining.Nanoseconds(),
+		)
+		if rc < 0 {
+			logger.Warnf(ctx, "AAudio waitForStateChange returned %d at state %s; closing anyway", rc, currentState)
+			break
+		}
+		currentState = nextState
+	}
+	if err := stream.Close(); err != nil {
+		logger.Warnf(ctx, "AAudio close returned: %v", err)
+	}
+}
+
+// isTerminalAAudioState reports whether the AAudio stream state
+// indicates teardown is complete (or impossible to make progress
+// from): Stopped / Closed / Disconnected / Unknown.
+func isTerminalAAudioState(s audio.StreamState) bool {
+	switch s {
+	case audio.Stopped,
+		audio.Closed,
+		audio.Disconnected,
+		audio.Unknown:
+		return true
+	}
+	return false
 }
 
 func (k *Microphone) SendInput(
@@ -227,9 +304,20 @@ func (k *Microphone) Generate(
 		return fmt.Errorf("unable to start audio stream: %w", err)
 	}
 	defer func() {
-		if k.stream != nil {
-			k.stream.Stop()
-		}
+		// S-G fix per Task #194: serialize this defer-Stop with
+		// closeLocked under the Locker. The original unguarded
+		// defer raced with closeLocked's Stop+Close+nil sequence —
+		// closeLocked's nil-assign was non-atomic vs this defer's
+		// stream-pointer read, and two concurrent Stops on a stream
+		// the framework was already tearing down compounded the
+		// primary use-after-free vector at safeStreamClose. After
+		// closeLocked runs, k.stream is nil here and the defer is a
+		// no-op.
+		k.Locker.Do(ctx, func() {
+			if k.stream != nil {
+				_ = k.stream.Stop()
+			}
+		})
 	}()
 	logger.Infof(ctx,
 		"AAudio capture started: state=%s xruns=%d",
@@ -305,9 +393,9 @@ func (k *Microphone) readFromStream(
 	// AAudio stream disconnected (e.g. sensor privacy toggled,
 	// audio routing changed). Reopen and restart.
 	logger.Warnf(ctx, "AAudio stream disconnected, reopening capture device")
-	_ = k.stream.Stop()
-	_ = k.stream.Close()
+	stream := k.stream
 	k.stream = nil
+	safeStreamClose(ctx, stream)
 
 	if err := k.openCaptureDevice(ctx); err != nil {
 		return 0, fmt.Errorf("unable to reopen capture device after disconnect: %w", err)

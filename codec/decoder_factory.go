@@ -375,11 +375,29 @@ func resourcesFromDecoder(
 	ctx context.Context,
 	d *Decoder,
 ) *Resources {
+	res, ok := resourcesFromDecoderIfAvailable(ctx, d)
+	if !ok {
+		logger.Debugf(ctx, "decoder resource snapshot is busy; skipping resource reuse")
+		return nil
+	}
+	return res
+}
+
+func resourcesFromDecoderIfAvailable(
+	ctx context.Context,
+	d *Decoder,
+) (*Resources, bool) {
+	ctx = xsync.WithNoLogging(ctx, true)
+	if !d.locker.ManualTryRLock(ctx) {
+		return nil, false
+	}
+	defer d.locker.ManualRUnlock(ctx)
+
 	res := &Resources{
-		HWDeviceContext:    d.HardwareDeviceContext(ctx),
+		HWDeviceContext:    d.hardwareDeviceContext,
 		HardwareDeviceType: d.InitParams.HardwareDeviceType,
 	}
-	cc := d.CodecContext(ctx)
+	cc := d.codecContext
 	if cc != nil && res.HWDeviceContext != nil {
 		// Record decoder dims unconditionally; cuvid path (initHardwarePixelFormat
 		// + initHardwareFramesContext) still gates hfc-reuse on HWFramesContext != nil
@@ -388,7 +406,11 @@ func resourcesFromDecoder(
 		res.HWFramesContextWidth = cc.Width()
 		res.HWFramesContextHeight = cc.Height()
 	}
-	if hfc := d.HardwareFramesContext(ctx); hfc != nil {
+	hfc := d.hardwareFramesContext
+	if hfc == nil && cc != nil {
+		hfc = cc.HardwareFramesContext()
+	}
+	if hfc != nil {
 		// The decoder's CodecContext.PixelFormat() returns the HW pixfmt
 		// (e.g. cuda) selected via the get_format callback — that matches the
 		// encoder's hardwarePixelFormat for nvenc, so it's the right field to
@@ -396,12 +418,12 @@ func resourcesFromDecoder(
 		// HardwareFramesContext), so the encoder side does not validate it.
 		if cc != nil {
 			res.HWFramesContext = hfc
-			res.HWFramesContextHWPixFmt = d.HardwarePixelFormat(ctx)
+			res.HWFramesContextHWPixFmt = d.hardwarePixelFormat
 			logger.Debugf(ctx, "captured upstream hw_frames_ctx: %p %dx%d hw=%s",
 				hfc, res.HWFramesContextWidth, res.HWFramesContextHeight,
 				res.HWFramesContextHWPixFmt,
 			)
 		}
 	}
-	return res
+	return res, true
 }

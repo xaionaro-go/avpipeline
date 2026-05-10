@@ -105,9 +105,16 @@ type OutputConfigWaitForOutputStreams struct {
 const defaultWaitForOutputStreamsTimeout = 3 * time.Second
 
 type OutputConfig struct {
-	CustomOptions  globaltypes.DictionaryItems
-	AsyncOpen      bool
+	CustomOptions globaltypes.DictionaryItems
+	AsyncOpen     bool
+	// OpenTimeout bounds one output IO open attempt. Zero leaves the attempt
+	// bounded by ctx cancellation or Output.Close.
+	OpenTimeout time.Duration
+	// WriteTimeout bounds one packet write to a live output. Zero leaves the
+	// write bounded by ctx cancellation or Output.Close.
+	WriteTimeout   time.Duration
 	OnOpened       func(context.Context, *Output) error
+	OnReady        func(context.Context, *Output) error
 	SendBufferSize uint
 
 	WaitForOutputStreams *OutputConfigWaitForOutputStreams
@@ -211,6 +218,7 @@ type Output struct {
 
 	*closuresignaler.ClosureSignaler
 	*astiav.FormatContext
+	*astiav.IOInterrupter
 	*astiav.Dictionary
 }
 
@@ -348,6 +356,8 @@ func NewOutputFromURL(
 		waitingKeyFrames:    make(map[int]struct{}),
 		outTSs:              ringbuffer.New[outTS](10000),
 	}
+	o.IOInterrupter = astiav.NewIOInterrupter()
+	setFinalizerFree(ctx, o.IOInterrupter)
 
 	rtmpAppName := strings.Trim(url.Path, "/")
 	if streamKey.Get() != "" {
@@ -492,6 +502,7 @@ func (o *Output) doOpen(
 		return fmt.Errorf("unable to allocate the output format context")
 	}
 	o.FormatContext = formatContext
+	o.FormatContext.SetIOInterrupter(o.IOInterrupter)
 	setFinalizerFree(ctx, o.FormatContext)
 
 	defer func() {
@@ -541,15 +552,60 @@ func (o *Output) doOpen(
 	o.outputFormatName = formatName
 
 	if url.String() != "" && !o.FormatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
+		if o.IsClosed() {
+			return fmt.Errorf("output closed before opening IO context")
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled before opening output: %w", err)
+		}
+
+		openCtx := ctx
+		var cancelOpen context.CancelFunc
+		if cfg.OpenTimeout > 0 {
+			openCtx, cancelOpen = context.WithTimeout(ctx, cfg.OpenTimeout)
+		}
+		if cancelOpen != nil {
+			defer cancelOpen()
+		}
+
+		openIODone := make(chan struct{})
+		contextInterruptDone := make(chan struct{})
+		observability.Go(openCtx, func(ctx context.Context) {
+			defer close(contextInterruptDone)
+			select {
+			case <-ctx.Done():
+				select {
+				case <-openIODone:
+					return
+				default:
+				}
+				logger.Debugf(ctx, "context cancelled during OpenIOContext, interrupting IO")
+				o.Interrupt()
+			case <-openIODone:
+			}
+		})
+		openStartedAt := time.Now()
+		logger.Debugf(ctx, "opening output IO context: url=%q format=%q timeout=%s", url.String(), o.outputFormatName, cfg.OpenTimeout)
 		ioContext, err := astiav.OpenIOContext(
 			url.String(),
 			astiav.NewIOContextFlags(astiav.IOContextFlagWrite),
-			nil,
+			o.IOInterrupter,
 			o.Dictionary,
 		)
+		openDuration := time.Since(openStartedAt)
+		close(openIODone)
+		<-contextInterruptDone
+		openErr := openCtx.Err()
 		if err != nil {
-			return fmt.Errorf("unable to open IO context (URL: '%s'): %w", url, err)
+			if openErr != nil {
+				return fmt.Errorf("unable to open IO context (URL: '%s', elapsed: %s): %w: %w", url, openDuration, openErr, err)
+			}
+			return fmt.Errorf("unable to open IO context (URL: '%s', elapsed: %s): %w", url, openDuration, err)
 		}
+		if openErr != nil {
+			return fmt.Errorf("unable to open IO context (URL: '%s', elapsed: %s): %w", url, openDuration, openErr)
+		}
+		logger.Debugf(ctx, "opened output IO context: url=%q elapsed=%s", url.String(), openDuration)
 		o.ioContext = ioContext
 		o.FormatContext.SetPb(ioContext)
 	}
@@ -724,6 +780,13 @@ func (o *Output) Close(
 	logger.Debugf(ctx, "Close")
 	defer func() { logger.Debugf(ctx, "/Close: %v", _err) }()
 	o.ClosureSignaler.Close(ctx)
+	select {
+	case <-o.openFinished:
+		logger.Debugf(ctx, "doOpen completed (%v), proceeding with close", o.openError)
+	default:
+		logger.Debugf(ctx, "doOpen not completed yet; interrupting IO before close")
+		o.Interrupt()
+	}
 
 	var result []error
 	o.formatContextLocker.Do(ctx, func() {
@@ -796,7 +859,7 @@ func (o *Output) updateOutputFormat(
 	defer func() { logger.Debugf(ctx, "/updateOutputFormat: %v", _err) }()
 	for _, inputStream := range inputFmt.Streams() {
 		inputStreamIndex := inputStream.Index()
-		if _, ok := o.OutputStreams[inputStreamIndex]; ok {
+		if outputStream, ok := o.OutputStreams[inputStreamIndex]; ok && outputStream != nil {
 			logger.Tracef(ctx, "stream #%d already exists, not initializing", inputStreamIndex)
 			continue
 		}
@@ -810,13 +873,10 @@ func (o *Output) updateOutputFormat(
 					return fmt.Errorf("too many streams: requested stream index is %d, while FLV supports only 0 for video and 1 for audio", inputStreamIndex)
 				}
 			}
-			if len(o.OutputStreams) >= 2 {
-				var haveIndexes []int
-				for haveIndex := range o.OutputStreams {
-					haveIndexes = append(haveIndexes, haveIndex)
-				}
-				sort.Ints(haveIndexes)
-				return fmt.Errorf("too many streams: FLV supports only 1 video and 1 audio stream maximum; but I already have %d streams and yet I was requested to initialize at least one more; have indexes: %v, but requested %d", len(o.OutputStreams), haveIndexes, inputStreamIndex)
+			configuredStreamCount := o.configuredOutputStreamCount()
+			if configuredStreamCount >= 2 {
+				haveIndexes := o.configuredOutputStreamIndexes()
+				return fmt.Errorf("too many streams: FLV supports only 1 video and 1 audio stream maximum; but I already have %d streams and yet I was requested to initialize at least one more; have indexes: %v, but requested %d", configuredStreamCount, haveIndexes, inputStreamIndex)
 			}
 		}
 
@@ -831,6 +891,49 @@ func (o *Output) updateOutputFormat(
 		}
 	}
 	return nil
+}
+
+func (o *Output) configuredOutputStreamCount() uint {
+	total, _, _, _, _ := o.configuredOutputStreamCounts()
+	return total
+}
+
+func (o *Output) configuredOutputStreamCounts() (
+	total uint,
+	video uint,
+	audio uint,
+	subtitle uint,
+	data uint,
+) {
+	for _, stream := range o.OutputStreams {
+		if stream == nil {
+			continue
+		}
+		total++
+		switch stream.CodecParameters().MediaType() {
+		case astiav.MediaTypeVideo:
+			video++
+		case astiav.MediaTypeAudio:
+			audio++
+		case astiav.MediaTypeSubtitle:
+			subtitle++
+		case astiav.MediaTypeData:
+			data++
+		}
+	}
+	return total, video, audio, subtitle, data
+}
+
+func (o *Output) configuredOutputStreamIndexes() []int {
+	indexes := make([]int, 0, len(o.OutputStreams))
+	for index, stream := range o.OutputStreams {
+		if stream == nil {
+			continue
+		}
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	return indexes
 }
 
 func (o *Output) initOutputStreamFor(
@@ -992,9 +1095,6 @@ func (o *Output) preallocateOutputStream(
 			LastDTS: math.MinInt64,
 		}
 		o.PreallocatedAudioStreams = append(o.PreallocatedAudioStreams, outputStream)
-
-		o.waitingKeyFrames[outputStream.Index()] = struct{}{}
-		logger.Debugf(ctx, "waiting for key frames from %d streams", len(o.waitingKeyFrames))
 		o.OutputStreams[inputStreamIndex] = nil
 	case astiav.MediaTypeVideo:
 		outputStream := &OutputStream{
@@ -1111,6 +1211,10 @@ func (o *Output) SendInput(
 	input packetorframe.InputUnion,
 	_ chan<- packetorframe.OutputUnion,
 ) (_err error) {
+	if err := o.waitOpen(ctx); err != nil {
+		return err
+	}
+
 	pkt, frame := input.Unwrap()
 	switch {
 	case pkt != nil:
@@ -1120,6 +1224,32 @@ func (o *Output) SendInput(
 	default:
 		return types.ErrUnexpectedInputType{}
 	}
+}
+
+func (o *Output) WaitOpened(ctx context.Context) error {
+	select {
+	case <-o.openFinished:
+		if o.openError != nil {
+			return fmt.Errorf("unable to open output: %w", o.openError)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("output open is still pending: %w", ctx.Err())
+	}
+}
+
+func (o *Output) waitOpen(ctx context.Context) error {
+	return o.WaitOpened(ctx)
+}
+
+func (o *Output) StartOpening(context.Context) {
+}
+
+func (o *Output) markReady(ctx context.Context) error {
+	if o.Config.OnReady == nil {
+		return nil
+	}
+	return o.Config.OnReady(ctx, o)
 }
 
 func (o *Output) sendPacket(
@@ -1278,8 +1408,14 @@ func (o *Output) send(
 		expectedStreamsDataCount = max(expectedStreamsDataCount, o.Config.WaitForOutputStreams.MinStreamsData)
 	}
 
-	activeStreamCount := xsync.DoR1(ctx, &o.formatContextLocker, func() uint {
-		return uint(len(o.OutputStreams))
+	var activeStreamCount uint
+	var activeVideoStreamCount uint
+	var activeAudioStreamCount uint
+	var activeSubtitleStreamCount uint
+	var activeDataStreamCount uint
+	o.formatContextLocker.Do(ctx, func() {
+		activeStreamCount, activeVideoStreamCount, activeAudioStreamCount, activeSubtitleStreamCount, activeDataStreamCount =
+			o.configuredOutputStreamCounts()
 	})
 
 	keyFrame := pkt.Flags().Has(astiav.PacketFlagKey)
@@ -1329,25 +1465,6 @@ func (o *Output) send(
 			o.pendingPacketsDeadline = time.Now().Add(o.Config.WaitForOutputStreams.Timeout)
 			logger.Debugf(ctx, "armed WaitForOutputStreams deadline: %s (timeout %s)",
 				o.pendingPacketsDeadline, o.Config.WaitForOutputStreams.Timeout)
-		}
-	}
-	var activeVideoStreamCount uint
-	var activeAudioStreamCount uint
-	var activeSubtitleStreamCount uint
-	var activeDataStreamCount uint
-	for _, stream := range o.OutputStreams {
-		if stream == nil {
-			continue
-		}
-		switch stream.CodecParameters().MediaType() {
-		case astiav.MediaTypeVideo:
-			activeVideoStreamCount++
-		case astiav.MediaTypeAudio:
-			activeAudioStreamCount++
-		case astiav.MediaTypeSubtitle:
-			activeSubtitleStreamCount++
-		case astiav.MediaTypeData:
-			activeDataStreamCount++
 		}
 	}
 	// timeoutExpired tells us the bounded WriteHeader-deferral window
@@ -1430,6 +1547,11 @@ func (o *Output) send(
 	}
 	if err != nil {
 		return fmt.Errorf("unable to write the header: %w", err)
+	}
+	if outputWriteHeaders && o.headerSent {
+		if err := o.markReady(ctx); err != nil {
+			return fmt.Errorf("unable to mark output ready: %w", err)
+		}
 	}
 
 	logger.Debugf(ctx, "started sending packets (have %d streams for %d expected streams); len(pendingPackets): %d; current_packet:%s %X", activeStreamCount, expectedStreamsCount, len(o.pendingPackets), mediaType, pkt.Flags())

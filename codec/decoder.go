@@ -108,6 +108,10 @@ func (d *Decoder) LockDo(
 	})
 }
 
+func (d *Decoder) CodecContextIfAvailable(ctx context.Context) (*astiav.CodecContext, bool) {
+	return d.locked().Codec.CodecContextIfAvailable(ctx)
+}
+
 func (d *Decoder) IsDirty(
 	ctx context.Context,
 ) bool {

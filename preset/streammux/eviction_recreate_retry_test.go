@@ -174,11 +174,10 @@ func TestEvictionRecreate_RetryTick_NeverGivesUp(t *testing.T) {
 		"every retry tick on a persistent fault must fire the hook — no give-up point")
 }
 
-// TestEvictionRecreate_RecoveryWithin1Sec pins the production
-// scenario binding the user's directive: when the destination becomes
-// reachable, the next retry tick (which fires within at most one tick
-// interval = 1 s) must successfully recover the orphaned input. This
-// is the unit-level analogue of the mission witness on the phone.
+// TestEvictionRecreate_RecoveryWithin1Sec pins the live recovery
+// scenario: when the destination becomes reachable, the next retry tick
+// (which fires within at most one tick interval = 1 s) must
+// successfully recover the orphaned input.
 //
 //   - GOOD-side: simulate the destination coming back at tick N
 //     (recreate hook returns nil and switches the input). The very

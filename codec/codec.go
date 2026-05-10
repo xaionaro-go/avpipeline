@@ -96,6 +96,15 @@ func (c *Codec) CodecContext(ctx context.Context) *astiav.CodecContext {
 	})
 }
 
+func (c *Codec) CodecContextIfAvailable(ctx context.Context) (*astiav.CodecContext, bool) {
+	ctx = xsync.WithNoLogging(ctx, true)
+	if !c.locker.ManualTryRLock(ctx) {
+		return nil, false
+	}
+	defer c.locker.ManualRUnlock(ctx)
+	return c.codecContext, true
+}
+
 func (c *Codec) MediaType(ctx context.Context) astiav.MediaType {
 	return xsync.DoR1(ctx, &c.locker, func() astiav.MediaType {
 		return c.mediaTypeLocked(ctx)

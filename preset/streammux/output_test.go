@@ -36,6 +36,145 @@ func (dummyOutputFactory) NewSender(
 	), types.SenderConfig{}, nil
 }
 
+func TestConfigureVideoSenderReconnectRequestsKeyFrameOnKernelOpenAndReady(t *testing.T) {
+	ctx := context.Background()
+	retryableKernel := kernel.NewRetryable[*kernel.Output](
+		ctx,
+		func(ctx context.Context) (*kernel.Output, error) {
+			return nil, nil
+		},
+		nil,
+		kernel.RetryableOptionStartOnInit[*kernel.Output](false),
+	)
+	sendingNode := node.NewWithCustomDataFromKernel[OutputCustomData[struct{}]](ctx, retryableKernel)
+
+	previousOpenCalled := false
+	retryableKernel.Config.OnKernelOpen = func(
+		ctx context.Context,
+		k *kernel.Output,
+	) error {
+		previousOpenCalled = true
+		return nil
+	}
+
+	keyFrameRequests := 0
+	err := configureVideoSenderReconnectKeyFrameRequest(
+		ctx,
+		sendingNode,
+		SenderKey{
+			VideoCodec:      codectypes.Name("libx264"),
+			VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
+		},
+		func(ctx context.Context) error {
+			keyFrameRequests++
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, retryableKernel.Config.OnKernelOpen)
+
+	outputKernel := &kernel.Output{}
+	err = retryableKernel.Config.OnKernelOpen(
+		ctx,
+		outputKernel,
+	)
+	require.NoError(t, err)
+	require.True(t, previousOpenCalled)
+	require.Equal(t, 1, keyFrameRequests)
+	require.NotNil(t, outputKernel.Config.OnReady)
+
+	err = outputKernel.Config.OnReady(ctx, outputKernel)
+	require.NoError(t, err)
+	require.Equal(t, 2, keyFrameRequests)
+}
+
+func TestConfigureVideoSenderReconnectDoesNotRequestKeyFrameForAudioOnlySender(t *testing.T) {
+	ctx := context.Background()
+	retryableKernel := kernel.NewRetryable[*kernel.Output](
+		ctx,
+		func(ctx context.Context) (*kernel.Output, error) {
+			return nil, nil
+		},
+		nil,
+		kernel.RetryableOptionStartOnInit[*kernel.Output](false),
+	)
+	sendingNode := node.NewWithCustomDataFromKernel[OutputCustomData[struct{}]](ctx, retryableKernel)
+
+	keyFrameRequests := 0
+	err := configureVideoSenderReconnectKeyFrameRequest(
+		ctx,
+		sendingNode,
+		SenderKey{
+			AudioCodec: "aac",
+		},
+		func(ctx context.Context) error {
+			keyFrameRequests++
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Nil(t, retryableKernel.Config.OnKernelOpen)
+	require.Zero(t, keyFrameRequests)
+}
+
+func TestConfigureVideoSenderReconnectResetsPacketFlowAfterFirstReady(t *testing.T) {
+	ctx := context.Background()
+	retryableKernel := kernel.NewRetryable[*kernel.Output](
+		ctx,
+		func(ctx context.Context) (*kernel.Output, error) {
+			return nil, nil
+		},
+		nil,
+		kernel.RetryableOptionStartOnInit[*kernel.Output](false),
+	)
+	sendingNode := node.NewWithCustomDataFromKernel[OutputCustomData[struct{}]](ctx, retryableKernel)
+
+	resetRequests := 0
+	keyFrameRequests := 0
+	err := configureVideoSenderReconnectPacketFlow(
+		ctx,
+		sendingNode,
+		SenderKey{
+			VideoCodec:      codectypes.Name("libx264"),
+			VideoResolution: codectypes.Resolution{Width: 1920, Height: 1080},
+		},
+		func(ctx context.Context) error {
+			resetRequests++
+			return nil
+		},
+		func(ctx context.Context) error {
+			keyFrameRequests++
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, retryableKernel.Config.OnKernelOpen)
+
+	firstOutput := &kernel.Output{}
+	err = retryableKernel.Config.OnKernelOpen(ctx, firstOutput)
+	require.NoError(t, err)
+	require.Zero(t, resetRequests)
+	require.Equal(t, 1, keyFrameRequests)
+
+	require.NotNil(t, firstOutput.Config.OnReady)
+	err = firstOutput.Config.OnReady(ctx, firstOutput)
+	require.NoError(t, err)
+	require.Zero(t, resetRequests)
+	require.Equal(t, 2, keyFrameRequests)
+
+	secondOutput := &kernel.Output{}
+	err = retryableKernel.Config.OnKernelOpen(ctx, secondOutput)
+	require.NoError(t, err)
+	require.Zero(t, resetRequests)
+	require.Equal(t, 3, keyFrameRequests)
+
+	require.NotNil(t, secondOutput.Config.OnReady)
+	err = secondOutput.Config.OnReady(ctx, secondOutput)
+	require.NoError(t, err)
+	require.Equal(t, 1, resetRequests)
+	require.Equal(t, 4, keyFrameRequests)
+}
+
 func TestOutputNodes(t *testing.T) {
 	ctx := context.Background()
 	input, err := newInput[struct{}](ctx, nil, InputTypeAll)
