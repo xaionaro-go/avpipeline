@@ -49,11 +49,22 @@ internal-indocker-streamforward-android-arm64: builddir $(GOPATH)/bin/pkg-config
 
 ANDROID_AVD?=test_avd
 ANDROID_SDK_ROOT?=$(HOME)/Android/Sdk
+ANDROID_NDK_HOME?=$(ANDROID_SDK_ROOT)/ndk/28.0.13004108
 TERMUX_APK?=
 TERMUX_API_APK?=
 TERMUX_API_E2E?=1
+CAMERA2NDK_E2E_SERIAL?=
+CAMERA2NDK_E2E_STRICT?=0
+CAMERA2NDK_E2E_GOARCH?=amd64
+CAMERA2NDK_E2E_REMOTE?=/data/local/tmp/camera2ndk-e2e.test
+CAMERA2NDK_E2E_BINARY?=$(HOME)/tmp/camera2ndk-e2e-android-$(CAMERA2NDK_E2E_GOARCH).test
+CAMERA2NDK_E2E_TMPDIR?=$(HOME)/tmp/camera2ndk-e2e-tmp
+CAMERA2NDK_E2E_GOTMPDIR?=$(HOME)/tmp/camera2ndk-e2e-gotmp
+CAMERA2NDK_E2E_PKG_CONFIG_PATH?=/home/streaming/go/src/github.com/xaionaro-go/ffstream/3rdparty/x86_64/sysroot/lib/pkgconfig
+CAMERA2NDK_E2E_CC?=$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android35-clang
+CAMERA2NDK_E2E_LDFLAGS?=-L$(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/35 -lcamera2ndk -lmediandk -landroid -llog
 
-.PHONY: android-emulator-start android-emulator-wait android-emulator-stop android-termux-install android-termux-api-install android-termux-setup android-test-termux-microphone-e2e android-test-microphone-e2e
+.PHONY: android-emulator-start android-emulator-wait android-emulator-stop android-termux-install android-termux-api-install android-termux-setup android-test-termux-microphone-e2e android-test-microphone-e2e android-test-camera2ndk-e2e android-test-camera2ndk-e2e-strict
 
 android-emulator-start:
 	$(ANDROID_SDK_ROOT)/emulator/emulator -avd $(ANDROID_AVD) -no-window -no-audio -no-boot-anim -netfast -gpu swiftshader_indirect
@@ -90,6 +101,39 @@ android-test-termux-microphone-e2e:
 
 android-test-microphone-e2e:
 	go test ./tests/e2e -tags test_e2e -run AndroidMicrophoneRecordE2E -v
+
+android-test-camera2ndk-e2e:
+	@set -eu; \
+	mkdir -p "$(CAMERA2NDK_E2E_TMPDIR)" "$(CAMERA2NDK_E2E_GOTMPDIR)" "$$(dirname "$(CAMERA2NDK_E2E_BINARY)")"; \
+	TMPDIR="$(CAMERA2NDK_E2E_TMPDIR)" \
+	GOTMPDIR="$(CAMERA2NDK_E2E_GOTMPDIR)" \
+	ANDROID_NDK_HOME="$(ANDROID_NDK_HOME)" \
+	GOOS=android \
+	GOARCH="$(CAMERA2NDK_E2E_GOARCH)" \
+	CGO_ENABLED=1 \
+	CC="$(CAMERA2NDK_E2E_CC)" \
+	PKG_CONFIG_PATH="$(CAMERA2NDK_E2E_PKG_CONFIG_PATH)" \
+	CGO_LDFLAGS="$(CAMERA2NDK_E2E_LDFLAGS)" \
+	go test -c -o "$(CAMERA2NDK_E2E_BINARY)" ./kernel/extra/android; \
+	serial="$(CAMERA2NDK_E2E_SERIAL)"; \
+	if [ -z "$$serial" ]; then \
+		serial="$$(adb devices | awk '/^emulator-[0-9]+[[:space:]]+device$$/ {print $$1; exit}')"; \
+	fi; \
+	if [ -z "$$serial" ]; then \
+		echo "CAMERA2NDK_E2E_SERIAL is required when no emulator is attached" >&2; \
+		exit 2; \
+	fi; \
+	strict_env=""; \
+	if [ "$(CAMERA2NDK_E2E_STRICT)" = "1" ]; then \
+		strict_env="AVPIPELINE_CAMERA2NDK_STRICT_E2E=1"; \
+	fi; \
+	adb -s "$$serial" push "$(CAMERA2NDK_E2E_BINARY)" "$(CAMERA2NDK_E2E_REMOTE)"; \
+	adb -s "$$serial" shell chmod 755 "$(CAMERA2NDK_E2E_REMOTE)"; \
+	trap 'adb -s "$$serial" shell rm -f "$(CAMERA2NDK_E2E_REMOTE)" >/dev/null 2>&1 || true' EXIT; \
+	adb -s "$$serial" shell "cd /data/local/tmp && $$strict_env $(CAMERA2NDK_E2E_REMOTE) -test.run '^TestCamera2NDKGenerateCapturesFrame$$' -test.v"
+
+android-test-camera2ndk-e2e-strict:
+	$(MAKE) android-test-camera2ndk-e2e CAMERA2NDK_E2E_STRICT=1
 
 $(GOPATH)/bin/pkg-config-wrapper:
 	go install github.com/xaionaro-go/pkg-config-wrapper@5dd443e6c18336416c49047e2ba0002e26a85278

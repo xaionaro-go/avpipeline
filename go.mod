@@ -5,7 +5,7 @@ go 1.25.5
 replace github.com/asticode/go-astiav v0.36.0 => github.com/xaionaro-go/astiav v0.0.0-20260502054852-98ee06b0d07d
 
 require (
-	github.com/AndroidGoLab/ndk v0.0.3-0.20260316000240-e7dc81e12371
+	github.com/AndroidGoLab/ndk v0.0.6-0.20260511000352-09f9c4990de9
 	github.com/asticode/go-astiav v0.36.0
 	github.com/asticode/go-astikit v0.55.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
