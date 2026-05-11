@@ -1,5 +1,5 @@
 // raw_frame_source_pixfmt_test.go pins the contract of
-// forceRawFrameSourceMediaCodecPixFmt: pix_fmt=yuv420p is appended only when
+// forceRawFrameSourceMediaCodecPixFmt: pix_fmt=nv12 is appended only when
 // RawFrameSource is enabled, the encoder request targets MediaCodec, and no
 // explicit pix_fmt is already present. Otherwise the input slice is returned
 // unchanged.
@@ -33,18 +33,18 @@ func hasAnyPixFmt(opts globaltypes.DictionaryItems) bool {
 	return opts.GetFirst("pix_fmt") != nil
 }
 
-func TestRawFrameSourceMediaCodecPixFmt_AvoidsAndroidCameraChromaSwap(t *testing.T) {
-	testifyassert.Equal(t, "yuv420p", rawFrameSourceMediaCodecPixFmt,
-		"raw android_camera frames may be NV21; default MediaCodec upload pix_fmt must use the planar format instead of NV12")
-	testifyassert.NotEqual(t, "nv12", rawFrameSourceMediaCodecPixFmt,
-		"NV12 is unsafe as the raw-frame default because MediaCodec upload copies chroma according to avctx pix_fmt")
+func TestRawFrameSourceMediaCodecPixFmt_UsesNV12UploadForAndroidCamera(t *testing.T) {
+	testifyassert.Equal(t, "nv12", rawFrameSourceMediaCodecPixFmt,
+		"raw android_camera frames may be NV21; MediaCodec upload pix_fmt must use NV12 so the scaler swaps VU to UV")
+	testifyassert.NotEqual(t, "yuv420p", rawFrameSourceMediaCodecPixFmt,
+		"planar yuv420p upload produced green/magenta vertical striping on Pixel 8a AV1 MediaCodec")
 	testifyassert.NotEqual(t, "nv21", rawFrameSourceMediaCodecPixFmt,
 		"MediaCodec encoders in the pinned FFmpeg source do not advertise NV21")
 }
 
-// TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsYUV420P
-// is the GOOD-side: the camera+MediaCodec combination must inject pix_fmt=yuv420p.
-func TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsYUV420P(t *testing.T) {
+// TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsNV12
+// is the GOOD-side: the camera+MediaCodec combination must inject pix_fmt=nv12.
+func TestForceRawFrameSourceMediaCodecPixFmt_RawFrameSource_MediaCodec_InjectsNV12(t *testing.T) {
 	ctx := context.Background()
 	in := globaltypes.DictionaryItems{
 		{Key: "forced-idr", Value: "1"},
@@ -208,7 +208,7 @@ func TestStreamMux_SetRawFrameSource_LateInjectsExistingFactoryByMediaCodecName(
 		"late-injected MediaCodec-name pix_fmt must be the raw-frame MediaCodec default")
 }
 
-func TestOutputReconfigureEncoder_RawFrameSourceMediaCodecNameInjectsYUV420P(t *testing.T) {
+func TestOutputReconfigureEncoder_RawFrameSourceMediaCodecNameInjectsNV12(t *testing.T) {
 	ctx := context.Background()
 	encoderFactory := codec.NewNaiveEncoderFactory(ctx, nil)
 	output := newOutputWithEncoderFactory(ctx, encoderFactory)
@@ -234,7 +234,7 @@ func TestOutputReconfigureEncoder_RawFrameSourceMediaCodecNameInjectsYUV420P(t *
 	require.NotNil(t, v,
 		"raw-frame MediaCodec-name encoder must inject pix_fmt even when HardwareDeviceType is unset")
 	testifyassert.Equal(t, rawFrameSourceMediaCodecPixFmt, v.Value(),
-		"raw-frame MediaCodec-name encoder must use the chroma-safe default")
+		"raw-frame MediaCodec-name encoder must use NV12 upload")
 }
 
 // TestStreamMux_SetRawFrameSource_NonMediaCodecOutput is the BAD-side

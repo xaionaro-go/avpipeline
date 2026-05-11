@@ -303,6 +303,76 @@ func TestShouldBypassScaler_PixelFormatMismatch_RunsScaler(t *testing.T) {
 		"YUV444P != NV12 upload format and != MEDIACODEC -> scaler must run")
 }
 
+func TestShouldBypassScaler_NV21InputNV12Encoder_RunsScaler(t *testing.T) {
+	t.Parallel()
+
+	got := shouldBypassScaler(
+		astiav.PixelFormatNv21, 1920, 1920,
+		astiav.PixelFormatNv12, 1920, 1920,
+		nil,
+	)
+	testifyassert.False(t, got,
+		"NV21 camera frames must run scaler before NV12 MediaCodec upload so VU chroma becomes UV")
+}
+
+func TestSoftwareScale_NV21ToNV12SwapsVUToUVWithoutPlanarSplit(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 4
+		height = 4
+		align  = 1
+	)
+
+	src := astiav.AllocFrame()
+	testifyrequire.NotNil(t, src)
+	defer src.Free()
+	src.SetWidth(width)
+	src.SetHeight(height)
+	src.SetPixelFormat(astiav.PixelFormatNv21)
+	testifyrequire.NoError(t, src.AllocBuffer(align))
+
+	yPlane := []byte{
+		0x10, 0x11, 0x12, 0x13,
+		0x14, 0x15, 0x16, 0x17,
+		0x18, 0x19, 0x1a, 0x1b,
+		0x1c, 0x1d, 0x1e, 0x1f,
+	}
+	nv21Chroma := []byte{
+		0xc8, 0x20, 0xc9, 0x21,
+		0xca, 0x22, 0xcb, 0x23,
+	}
+	testifyrequire.NoError(t, src.Data().SetBytes(append(yPlane, nv21Chroma...), align))
+
+	dst := astiav.AllocFrame()
+	testifyrequire.NotNil(t, dst)
+	defer dst.Free()
+	dst.SetWidth(width)
+	dst.SetHeight(height)
+	dst.SetPixelFormat(astiav.PixelFormatNv12)
+	testifyrequire.NoError(t, dst.AllocBuffer(align))
+
+	sws, err := astiav.CreateSoftwareScaleContext(
+		width, height, astiav.PixelFormatNv21,
+		width, height, astiav.PixelFormatNv12,
+		astiav.NewSoftwareScaleContextFlags(astiav.SoftwareScaleContextFlagPoint),
+	)
+	testifyrequire.NoError(t, err)
+	defer sws.Free()
+
+	testifyrequire.NoError(t, sws.ScaleFrame(src, dst))
+	got, err := dst.Data().Bytes(align)
+	testifyrequire.NoError(t, err)
+
+	expected := append([]byte{}, yPlane...)
+	expected = append(expected,
+		0x20, 0xc8, 0x21, 0xc9,
+		0x22, 0xca, 0x23, 0xcb,
+	)
+	testifyassert.Equal(t, expected, got,
+		"NV21 VU bytes must become NV12 UV bytes before MediaCodec upload")
+}
+
 // TestShouldBypassScaler_HWInputHWEncoder_DimMismatch_BypassesScaler
 // pins the prod DJI scenario: decoder post-crop dims (1920x1072)
 // differ from the encoder's launcher-configured target (1920x1080),

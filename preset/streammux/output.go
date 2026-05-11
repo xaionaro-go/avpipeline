@@ -120,7 +120,7 @@ type Output[C any] struct {
 	// ANativeWindow Surface and the get_format -> AV_PIX_FMT_MEDIACODEC
 	// branch in mediacodecenc.c silently consumes frames (it expects
 	// Surface buffers attached as frame->data[3]). reconfigureEncoder
-	// reads this flag to inject pix_fmt=yuv420p into the encoder's open-time
+	// reads this flag to inject pix_fmt=nv12 into the encoder's open-time
 	// options, which forces the SW-upload encode path.
 	//
 	// OneWayBool pins the sticky-true contract at the type level: once

@@ -632,7 +632,7 @@ func newCodec(
 		}
 	})
 
-	if doFullCopyOfParameters {
+	if doFullCopyOfParameters || shouldCopyRawvideoDecoderParameters(isEncoder, codecParameters) {
 		err := codecParameters.ToCodecContext(c.codecContext)
 		if err != nil {
 			return nil, fmt.Errorf("codecParameters.ToCodecContext(...) returned error: %w", err)
@@ -1027,6 +1027,19 @@ func (c *Codec) logHints(ctx context.Context) {
 	}
 }
 
+func shouldCopyRawvideoDecoderParameters(
+	isEncoder bool,
+	codecParameters *astiav.CodecParameters,
+) bool {
+	if isEncoder {
+		return false
+	}
+	if codecParameters == nil {
+		return false
+	}
+	return codecParameters.CodecID() == astiav.CodecIDRawvideo
+}
+
 type ErrNotImplemented struct {
 	Err error
 }
@@ -1112,7 +1125,17 @@ func (c *codecInternals) setupPixelFormat(
 		logger.Debugf(ctx, "%q option is set to '%s'", pixelFormatOptionName, v.Value())
 		pixFmt := astiav.FindPixelFormatByName(v.Value())
 		if pixFmt != astiav.PixelFormatNone {
-			forcePixelFormat = pixFmt
+			if demuxerPixFmt, ok := authoritativeRawvideoDecoderPixelFormat(isEncoder, codecParameters); ok {
+				if pixFmt != demuxerPixFmt {
+					logger.Warnf(ctx,
+						"rawvideo decoder: ignoring %q=%s because demuxer reported pixel format %s",
+						pixelFormatOptionName, pixFmt, demuxerPixFmt,
+					)
+				}
+				forcePixelFormat = demuxerPixFmt
+			} else {
+				forcePixelFormat = pixFmt
+			}
 		}
 	} else {
 		logger.Debugf(ctx, "%q option is not set", pixelFormatOptionName)
@@ -1228,6 +1251,26 @@ func (c *codecInternals) setupPixelFormat(
 
 	logger.Tracef(ctx, "selected pixel format: %s", c.codecContext.PixelFormat())
 	return nil
+}
+
+func authoritativeRawvideoDecoderPixelFormat(
+	isEncoder bool,
+	codecParameters *astiav.CodecParameters,
+) (astiav.PixelFormat, bool) {
+	if isEncoder {
+		return astiav.PixelFormatNone, false
+	}
+	if codecParameters == nil {
+		return astiav.PixelFormatNone, false
+	}
+	if codecParameters.CodecID() != astiav.CodecIDRawvideo {
+		return astiav.PixelFormatNone, false
+	}
+	pixFmt := codecParameters.PixelFormat()
+	if pixFmt == astiav.PixelFormatNone {
+		return astiav.PixelFormatNone, false
+	}
+	return pixFmt, true
 }
 
 func (c *Codec) initHardwarePixelFormat(

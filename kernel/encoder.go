@@ -1585,7 +1585,7 @@ func (e *streamEncoderLocked) prepareScaler(
 		// hw_frames_ctx is attached on the encoder side. All four
 		// are necessary to decide whether the bug is upstream
 		// (camera/decoder produced a degenerate frame) or local
-		// (encoder pixfmt did not get the late yuv420p injection in
+		// (encoder pixfmt did not get the late raw-frame pix_fmt injection in
 		// time, leaving CodecContext.PixelFormat() at MEDIACODEC
 		// and ScaledFrame.PixelFormat() ditto).
 		hwFCAttached := e.Encoder.HardwareFramesContext(ctx) != nil
@@ -1598,6 +1598,13 @@ func (e *streamEncoderLocked) prepareScaler(
 		)
 		return fmt.Errorf("unable to create a scaler: %w", err)
 	}
+
+	logger.Debugf(ctx,
+		"encoder scaler configured: source=%dx%d/%s linesize=%v -> dest=%dx%d/%s linesize=%v encoder_pix_fmt=%s",
+		input.Frame.Width(), input.Frame.Height(), srcPixFmt, input.Frame.Linesize(),
+		e.ScaledFrame.Width(), e.ScaledFrame.Height(), dstPixFmt, e.ScaledFrame.Linesize(),
+		e.CodecContext(ctx).PixelFormat(),
+	)
 
 	s, err := scaler.NewSoftware(
 		ctx,
