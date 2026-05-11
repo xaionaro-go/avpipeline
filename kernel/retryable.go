@@ -36,6 +36,8 @@ type Retryable[K Abstract] struct {
 	KernelLocker      xsync.CtxLocker
 	KernelError       error
 	KernelOpenBarrier xatomic.Pointer[chan struct{}]
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
 }
 
 func NewRetryable[K Abstract](
@@ -44,12 +46,15 @@ func NewRetryable[K Abstract](
 	onErrorFunc RetryableFuncOnError[K],
 	opts ...RetryableOption[K],
 ) *Retryable[K] {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(xcontext.DetachDone(ctx))
 	r := &Retryable[K]{
 		ClosureSignaler: closuresignaler.New(),
 		Factory:         factory,
 		OnError:         onErrorFunc,
 		Config:          RetryableOptions[K](opts).Config(),
 		KernelLocker:    make(xsync.CtxLocker, 1),
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
 	}
 	r.KernelOpenBarrier.Pointer = ptr(make(chan struct{}))
 	if r.Config.StartOnInit {
@@ -69,8 +74,7 @@ func NewRetryable[K Abstract](
 		// StreamMux.SwitchToOutputByProps invoked off the gRPC
 		// SwitchOutputByProps RPC ctx — would have their freshly-
 		// created Retryable wedged the moment the RPC returns.
-		detachedCtx := xcontext.DetachDone(ctx)
-		observability.Go(detachedCtx, func(ctx context.Context) {
+		observability.Go(r.lifecycleCtx, func(ctx context.Context) {
 			r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
 				r.openKernelIfNeeded(ctx)
 			})
@@ -213,7 +217,24 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			return
 		}
 
-		k, err := r.Factory(ctx)
+		openCtx, cancelOpen := r.openAttemptContext(ctx)
+		k, err := r.Factory(openCtx)
+		if err == nil {
+			if stopErr := r.openAttemptStopped(openCtx); stopErr != nil {
+				cancelOpen()
+				r.discardOpenedKernel(ctx, k, stopErr)
+				return
+			}
+		}
+		if err != nil {
+			if stopErr := r.openAttemptStopped(openCtx); stopErr != nil {
+				cancelOpen()
+				if r.KernelError == nil {
+					r.KernelError = stopErr
+				}
+				return
+			}
+		}
 		logger.Debugf(ctx, "factory results: %p %v", k, err)
 		if err == nil {
 			if r.Config.OnKernelOpen != nil {
@@ -251,16 +272,21 @@ func (r *Retryable[K]) openKernelIfNeeded(
 				// rather than us silently overwriting it.
 				var onOpenErr error
 				r.withKernelLockerReleased(ctx, func() {
-					onOpenErr = r.Config.OnKernelOpen(ctx, k)
+					onOpenErr = r.Config.OnKernelOpen(openCtx, k)
 				})
+				if stopErr := r.openAttemptStopped(openCtx); stopErr != nil {
+					cancelOpen()
+					r.discardOpenedKernel(ctx, k, stopErr)
+					return
+				}
 				if r.KernelIsSet || r.KernelError != nil {
+					cancelOpen()
 					logger.Debugf(ctx, "concurrent open/close won the race during OnKernelOpen; closing orphan kernel")
-					if closeErr := k.Close(ctx); closeErr != nil {
-						logger.Errorf(ctx, "unable to close orphan kernel after concurrent open/close: %v", closeErr)
-					}
+					r.closeOpenedKernel(ctx, k, "orphan kernel after concurrent open/close")
 					return
 				}
 				if onOpenErr != nil {
+					cancelOpen()
 					r.KernelError = onOpenErr
 					r.Close(ctx)
 					return
@@ -269,6 +295,7 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			logger.Debugf(ctx, "set kernel")
 			r.Kernel = k
 			r.KernelIsSet = true
+			cancelOpen()
 			// If Pause was called while the kernel was being opened,
 			// honour that pause intent now. Otherwise the caller's pause
 			// would silently be lost. We detect this by checking the
@@ -280,10 +307,7 @@ func (r *Retryable[K]) openKernelIfNeeded(
 			default:
 				logger.Debugf(ctx, "pause was requested during kernel open; closing kernel")
 				var zeroValue K
-				closeErr := r.Kernel.Close(ctx)
-				if closeErr != nil {
-					logger.Errorf(ctx, "unable to close kernel while applying deferred pause: %v", closeErr)
-				}
+				r.closeOpenedKernel(ctx, r.Kernel, "kernel while applying deferred pause")
 				r.Kernel = zeroValue
 				r.KernelIsSet = false
 			}
@@ -291,6 +315,7 @@ func (r *Retryable[K]) openKernelIfNeeded(
 		}
 
 		if r.OnError == nil {
+			cancelOpen()
 			r.KernelError = err
 			r.Close(ctx)
 			return
@@ -308,8 +333,9 @@ func (r *Retryable[K]) openKernelIfNeeded(
 		// across it is safe. See withKernelLockerReleased's doc for
 		// the relock-with-bg rationale.
 		r.withKernelLockerReleased(ctx, func() {
-			err = r.OnError(ctx, k, err)
+			err = r.OnError(openCtx, k, err)
 		})
+		cancelOpen()
 		switch {
 		case err == nil:
 		case errors.As(err, &ErrRetry{}):
@@ -529,6 +555,11 @@ func (r *Retryable[K]) String() string {
 }
 
 func (r *Retryable[K]) Unpause(ctx context.Context) (_err error) {
+	select {
+	case <-r.lifecycleCtx.Done():
+		return nil
+	default:
+	}
 	r.unpauseKernelOpening(ctx)
 	// Detach the spawned goroutine's ctx from the caller's ctx. Reasoning:
 	// the openKernelIfNeeded goroutine waits on r.KernelOpenBarrier, which is
@@ -553,8 +584,7 @@ func (r *Retryable[K]) Unpause(ctx context.Context) (_err error) {
 	// router/route_forwarding.go:97 ("xcontext.DetachDone or
 	// context.WithoutCancel ... so that disconnect of the originating
 	// request does not cancel the forwarder").
-	detachedCtx := xcontext.DetachDone(ctx)
-	observability.Go(detachedCtx, func(ctx context.Context) {
+	observability.Go(r.lifecycleCtx, func(ctx context.Context) {
 		r.KernelLocker.Do(xsync.WithEnableDeadlock(ctx, false), func() {
 			r.openKernelIfNeeded(ctx)
 		})
@@ -566,7 +596,11 @@ func (r *Retryable[K]) Close(ctx context.Context) (_err error) {
 	logger.Debugf(ctx, "Close()")
 	defer func() { logger.Debugf(ctx, "/Close(): %v", _err) }()
 	r.ClosureSignaler.Close(ctx)
-	observability.Go(ctx, func(ctx context.Context) {
+	if r.lifecycleCancel != nil {
+		r.lifecycleCancel()
+	}
+	r.pauseKernelOpening(xcontext.DetachDone(ctx))
+	observability.Go(xcontext.DetachDone(ctx), func(ctx context.Context) {
 		err := r.Pause(ctx)
 		if err != nil {
 			logger.Errorf(ctx, "unable to stop the retry kernel: %v", err)
@@ -595,10 +629,12 @@ func (r *Retryable[K]) IsPaused(ctx context.Context) bool {
 // is in flight (closing a freshly-opened camera2 NDK session before
 // it has stabilised triggers self-eviction in the camera service).
 func (r *Retryable[K]) IsKernelOpen(ctx context.Context) bool {
-	bgNoDeadlock := xsync.WithEnableDeadlock(context.Background(), false)
-	return xsync.DoR1(bgNoDeadlock, &r.KernelLocker, func() bool {
-		return r.KernelIsSet && r.KernelError == nil
-	})
+	ctx = xsync.WithEnableDeadlock(ctx, false)
+	if !r.KernelLocker.ManualLock(ctx) {
+		return false
+	}
+	defer r.KernelLocker.ManualUnlock(ctx)
+	return r.KernelIsSet && r.KernelError == nil
 }
 
 func (r *Retryable[K]) Pause(ctx context.Context) (_err error) {
@@ -764,6 +800,50 @@ var _ GetInternalQueueSizer = (*Retryable[Abstract])(nil)
 type kernelSnapshot[K Abstract] struct {
 	kernel K
 	isSet  bool
+}
+
+func (r *Retryable[K]) openAttemptContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	openCtx, cancel := context.WithCancel(ctx)
+	if r.lifecycleCtx == nil {
+		return openCtx, cancel
+	}
+	stop := context.AfterFunc(r.lifecycleCtx, cancel)
+	return openCtx, func() {
+		if stop() {
+			cancel()
+			return
+		}
+		cancel()
+	}
+}
+
+func (r *Retryable[K]) openAttemptStopped(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-r.ClosureSignaler.CloseChan():
+		return io.EOF
+	default:
+		return nil
+	}
+}
+
+func (r *Retryable[K]) discardOpenedKernel(ctx context.Context, k K, reason error) {
+	logger.Debugf(ctx, "discarding opened kernel after open attempt stopped: %v", reason)
+	r.closeOpenedKernel(ctx, k, "discarded kernel")
+	if r.KernelError == nil {
+		r.KernelError = reason
+	}
+}
+
+func (r *Retryable[K]) closeOpenedKernel(ctx context.Context, k K, description string) {
+	if any(k) != nil {
+		cleanupCtx := xcontext.DetachDone(ctx)
+		if closeErr := k.Close(cleanupCtx); closeErr != nil {
+			logger.Errorf(ctx, "unable to close %s: %v", description, closeErr)
+		}
+	}
 }
 
 // withKernelLockerReleased runs fn while r.KernelLocker is temporarily
