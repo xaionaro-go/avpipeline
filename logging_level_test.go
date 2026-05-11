@@ -22,6 +22,10 @@ func TestHotPathLogsAreNotDebug(t *testing.T) {
 			message: "encode-emit %s pts=%d key=%t",
 		},
 		{
+			file:    "internal/set_finalizer.go",
+			message: "freeing %T",
+		},
+		{
 			file:    "codec/encoder_full_locked.go",
 			message: "cannot set framerate from frame duration: frame has no duration",
 		},

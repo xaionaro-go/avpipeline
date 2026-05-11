@@ -14,7 +14,7 @@ func SetFinalizerFree[T interface{ Free() }](
 	freer T,
 ) {
 	runtime.SetFinalizer(freer, func(freer T) {
-		logger.Debugf(ctx, "freeing %T", freer)
+		logger.Tracef(ctx, "freeing %T", freer)
 		freer.Free()
 	})
 }
@@ -24,7 +24,7 @@ func SetFinalizerClose[T interface{ Close(context.Context) error }](
 	freer T,
 ) {
 	runtime.SetFinalizer(freer, func(freer T) {
-		logger.Debugf(ctx, "freeing %T", freer)
+		logger.Tracef(ctx, "freeing %T", freer)
 		err := freer.Close(ctx)
 		if err != nil {
 			logger.Errorf(ctx, "failed to close %T: %v", freer, err)
