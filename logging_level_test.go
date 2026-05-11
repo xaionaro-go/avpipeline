@@ -26,6 +26,10 @@ func TestHotPathLogsAreNotDebug(t *testing.T) {
 			message: "freeing %T",
 		},
 		{
+			file:    "preset/transcoderwithpassthrough/set_finalizer.go",
+			message: "freeing %T",
+		},
+		{
 			file:    "codec/encoder_full_locked.go",
 			message: "cannot set framerate from frame duration: frame has no duration",
 		},

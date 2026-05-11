@@ -14,7 +14,7 @@ func setFinalizerFree[T interface{ Free() }](
 	freer T,
 ) {
 	runtime.SetFinalizer(freer, func(freer T) {
-		logger.Debugf(ctx, "freeing %T", freer)
+		logger.Tracef(ctx, "freeing %T", freer)
 		freer.Free()
 	})
 }
